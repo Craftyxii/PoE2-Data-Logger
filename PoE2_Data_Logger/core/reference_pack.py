@@ -84,10 +84,14 @@ def export_pack():
                           "status": row["mapping_status"]})
         tables["scans"] = scans
     manifest = {"format": FORMAT, "version": 2, "data": tables}
+    if len(assets) + 1 > MAX_ENTRIES:
+        raise ValueError("Reference pack has too many images. Export fewer than 2000 unique images.")
+    manifest_raw = json.dumps(manifest, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(manifest_raw) > 5_000_000 or len(manifest_raw) + sum(map(len, assets.values())) > MAX_PACK:
+        raise ValueError("Reference pack exceeds the import size limits. Remove some saved references first.")
     output = io.BytesIO()
     with ZipFile(output, "w", ZIP_DEFLATED, compresslevel=6) as archive:
-        archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False,
-                                                      separators=(",", ":")))
+        archive.writestr("manifest.json", manifest_raw)
         for path, raw in assets.items():
             archive.writestr(path, raw)
     if output.tell() > MAX_PACK:
@@ -139,6 +143,8 @@ def _inspect(path):
             raw = _image(archive.read(entry["file"]))
             if hashlib.sha256(raw).hexdigest() != entry.get("sha256"):
                 raise ValueError("Reference image hash does not match its label.")
+            if entry["file"].startswith("screens/") and Path(entry["file"]).stem != entry["sha256"]:
+                raise ValueError("Reference screenshot filename does not match its hash.")
             assets[entry["file"]] = raw
     return data, assets
 
@@ -310,13 +316,17 @@ def import_pack(path, replace_existing=False):
                 slot = _name(row["slot"], 4)
                 if slot not in [f"P{i}" for i in range(1, sockets + 1)]:
                     raise ValueError("Invalid screenshot seed position.")
-                if db.execute("SELECT 1 FROM scans WHERE image_sha256=?", (sha,)).fetchone():
-                    continue
+                existing = db.execute("SELECT 1 FROM scans WHERE image_sha256=?", (sha,)).fetchone()
                 raw = assets[row["file"]]
                 file_name = Path(_name(row["file_name"], 200).replace("\\", "/")).name
                 image_name = Path(row["file"]).name
                 destination = images / image_name
-                if not destination.exists():
+                rewards = json.loads(row["rewards_json"])
+                if not isinstance(rewards, list) or len(rewards) > 100:
+                    raise ValueError("Invalid screenshot rewards.")
+                rewards = [_name(reward, 200) for reward in rewards]
+                if not destination.exists() or hashlib.sha256(destination.read_bytes()).hexdigest() != sha:
+                    existed = destination.exists()
                     fd, staged = tempfile.mkstemp(dir=images, suffix=".tmp")
                     try:
                         with os.fdopen(fd, "wb") as output:
@@ -324,10 +334,10 @@ def import_pack(path, replace_existing=False):
                         os.replace(staged, destination)
                     finally:
                         Path(staged).unlink(missing_ok=True)
-                    created.append(destination)
-                rewards = json.loads(row["rewards_json"])
-                if not isinstance(rewards, list) or len(rewards) > 100:
-                    raise ValueError("Invalid screenshot rewards.")
+                    if not existed:
+                        created.append(destination)
+                if existing:
+                    continue
                 db.execute("INSERT INTO scans(recorded_at,file_name,image_name,image_sha256,"
                            "sockets,seed_slot,seed_rune,family,rewards_json,mapping_status) "
                            "VALUES(?,?,?,?,?,?,?,?,?,?)",

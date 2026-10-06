@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import sys
 import time
+import threading
 from ctypes import wintypes
 
 
@@ -11,6 +12,7 @@ VK_CONTROL = 0x11
 VK_C = 0x43
 KEYUP = 0x0002
 MAX_BYTES = 60002
+_CLIPBOARD_LOCK = threading.Lock()
 
 
 def _clipboard_text(user32, kernel32):
@@ -54,29 +56,30 @@ def read_hovered_text(timeout=.48):
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     user32.GetClipboardSequenceNumber.restype = wintypes.DWORD
     user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
-    user32.keybd_event.argtypes = (wintypes.BYTE, wintypes.BYTE, wintypes.DWORD,
-                                  ctypes.c_size_t)
-    previous = user32.GetClipboardSequenceNumber()
-    held_ctrl = bool(user32.GetAsyncKeyState(VK_CONTROL) & 0x8000)
-    if not held_ctrl:
-        user32.keybd_event(VK_CONTROL, 0, 0, 0)
-    try:
-        user32.keybd_event(VK_C, 0, 0, 0)
-        user32.keybd_event(VK_C, 0, KEYUP, 0)
-    finally:
+    user32.keybd_event.argtypes = (wintypes.BYTE, wintypes.BYTE, wintypes.DWORD, ctypes.c_size_t)
+    with _CLIPBOARD_LOCK:
+        previous = user32.GetClipboardSequenceNumber()
+        held_ctrl = bool(user32.GetAsyncKeyState(VK_CONTROL) & 0x8000)
         if not held_ctrl:
-            user32.keybd_event(VK_CONTROL, 0, KEYUP, 0)
-    deadline = time.monotonic() + max(0.0, min(float(timeout), .48))
-    while True:
-        if user32.GetClipboardSequenceNumber() != previous:
-            text = _clipboard_text(user32, kernel32)
-            if text.startswith("Item Class:"):
-                return text
-            return None
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        time.sleep(min(.04, remaining))
+            user32.keybd_event(VK_CONTROL, 0, 0, 0)
+        try:
+            user32.keybd_event(VK_C, 0, 0, 0)
+            user32.keybd_event(VK_C, 0, KEYUP, 0)
+        finally:
+            if not held_ctrl:
+                user32.keybd_event(VK_CONTROL, 0, KEYUP, 0)
+        deadline = time.monotonic() + max(0.0, min(float(timeout), .48))
+        while True:
+            if user32.GetClipboardSequenceNumber() != previous:
+                text = _clipboard_text(user32, kernel32)
+                if text.startswith("Item Class:"):
+                    return text
+                if text:
+                    return None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(.02, remaining))
     return None
 
 
@@ -145,6 +148,8 @@ def capture_remnant_context(region=None, grabber=None):
         panel = tooltip
     bounds = (min(panel[0], tooltip[0]), min(panel[1], tooltip[1]),
               max(panel[2], tooltip[2]), max(panel[3], tooltip[3]))
+    if not 0 < (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]) <= 12_000_000:
+        raise ValueError("Combined capture exceeds 12 megapixels. Select the remnant region again.")
     frame = (grabber or ImageGrab.grab)(bbox=bounds, all_screens=True)
     def crop(box):
         return frame.crop((box[0] - bounds[0], box[1] - bounds[1],

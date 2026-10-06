@@ -123,7 +123,10 @@ class HotkeyManager:
         self._thread = None
         self._thread_id = None
         self._lock = threading.RLock()
+        self._configuration_lock = threading.RLock()
+        self._listener_stop = None
         self._capture_lock = threading.Lock()
+        self._capture_revision = 0
         self._latest = None
         self._image = None
         self._sequence = 0
@@ -136,7 +139,7 @@ class HotkeyManager:
         if callback:
             try:
                 callback()
-            except RuntimeError:
+            except Exception:
                 pass
 
     def start(self):
@@ -169,20 +172,22 @@ class HotkeyManager:
             return self.status()
 
     def configure(self, combo, persist=True):
-        canonical, _, _ = parse_combo(combo)
-        return self._replace(canonical, self.combos, persist)
+        with self._configuration_lock:
+            canonical, _, _ = parse_combo(combo)
+            return self._replace(canonical, self.combos, persist)
 
     def configure_for(self, kind, combo, persist=True):
         if kind not in DEDICATED:
             raise ValueError("Choose a supported scan type.")
-        canonical, _, _ = parse_combo(combo)
-        combos = {**self.combos, kind: canonical}
-        return self._replace(self.combo, combos, persist)
+        with self._configuration_lock:
+            canonical, _, _ = parse_combo(combo)
+            combos = {**self.combos, kind: canonical}
+            return self._replace(self.combo, combos, persist)
 
     def _replace(self, combo, combos, persist=True):
         if not self.supported:
             raise ValueError("Screen capture shortcuts are available on Windows.")
-        with self._lock:
+        with self._configuration_lock:
             definitions = {"default": combo, **combos}
             used = [value for value in definitions.values() if value]
             if len(used) != len(set(used)):
@@ -203,11 +208,12 @@ class HotkeyManager:
                     except ValueError:
                         pass
                 raise
-            self.combo = combo
-            self.combos = dict(combos)
-            self.error = ""
-            if persist:
-                self._persist()
+            with self._lock:
+                self.combo = combo
+                self.combos = dict(combos)
+                self.error = ""
+                if persist:
+                    self._persist()
             return self.status()
 
     def _persist(self):
@@ -217,29 +223,60 @@ class HotkeyManager:
 
     def _register(self, shortcuts):
         ready = threading.Event()
+        stop = threading.Event()
         outcome = {}
         thread = threading.Thread(target=self._message_loop,
-                                  args=(shortcuts, ready, outcome), daemon=True)
+                                  args=(shortcuts, ready, outcome, stop), daemon=True)
+        with self._lock:
+            self._thread = thread
+            self._listener_stop = stop
         thread.start()
         if not ready.wait(3):
+            self._thread_id = outcome.get("thread_id")
+            self._unregister()
             raise ValueError("Could not start the shortcut listener.")
         if outcome.get("error"):
+            thread.join(2)
+            self._thread = None
+            self._listener_stop = None
             raise ValueError(outcome["error"])
-        self._thread = thread
-        self._thread_id = outcome["thread_id"]
+        with self._lock:
+            self._thread_id = outcome["thread_id"]
 
     def _unregister(self):
-        if self._thread and self._thread.is_alive():
-            import ctypes
-            ctypes.WinDLL("user32", use_last_error=True).PostThreadMessageW(
-                self._thread_id, WM_QUIT, 0, 0)
-            self._thread.join(2)
-            if self._thread.is_alive():
-                raise ValueError("Could not replace the active shortcut. Restart the logger.")
-        self._thread = None
-        self._thread_id = None
+        with self._configuration_lock:
+            with self._lock:
+                thread, thread_id = self._thread, self._thread_id
+                if self._listener_stop is not None:
+                    self._listener_stop.set()
+            if thread and thread.is_alive():
+                if thread_id is not None:
+                    import ctypes
+                    from ctypes import wintypes
+                    user32 = ctypes.WinDLL("user32", use_last_error=True)
+                    user32.PostThreadMessageW.argtypes = (wintypes.DWORD, wintypes.UINT,
+                                                          wintypes.WPARAM, wintypes.LPARAM)
+                    user32.PostThreadMessageW.restype = wintypes.BOOL
+                    user32.PostThreadMessageW(thread_id, WM_QUIT, 0, 0)
+                thread.join(2)
+                if thread.is_alive():
+                    raise ValueError("Could not replace the active shortcut. Restart the logger.")
+            with self._lock:
+                self._thread = None
+                self._thread_id = None
+                self._listener_stop = None
 
-    def _message_loop(self, shortcuts, ready, outcome):
+    def _message_loop(self, shortcuts, ready, outcome, stop):
+        try:
+            self._listen(shortcuts, ready, outcome, stop)
+        except Exception as error:
+            outcome["error"] = f"Could not run the shortcut listener: {error}"
+            with self._lock:
+                self.error = outcome["error"]
+        finally:
+            ready.set()
+
+    def _listen(self, shortcuts, ready, outcome, stop):
         import ctypes
         from ctypes import wintypes
         user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -262,32 +299,30 @@ class HotkeyManager:
         user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)
         outcome["thread_id"] = kernel32.GetCurrentThreadId()
         registered = {}
-        for offset, (kind, (modifiers, key)) in enumerate(shortcuts.items()):
-            ident = HOTKEY_ID + offset
-            if not user32.RegisterHotKey(None, ident, modifiers, key):
-                outcome["error"] = f"{kind.title()} shortcut is unavailable or already in use. Choose another combination."
-                break
-            registered[ident] = kind
-        definitions = dict(registered)
         timer = 0
-        if not outcome.get("error") and self.focused is not None:
-            timer = user32.SetTimer(None, 0, 100, None)
-            if not timer:
-                outcome["error"] = "Could not watch the active game window."
-            elif not self.focused():
-                for ident, kind in list(registered.items()):
-                    if kind != "overlay":
-                        user32.UnregisterHotKey(None, ident)
-                        del registered[ident]
-        ready.set()
-        if outcome.get("error"):
-            for ident in registered:
-                user32.UnregisterHotKey(None, ident)
-            if timer:
-                user32.KillTimer(None, timer)
-            return
         try:
-            while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            for offset, (kind, (modifiers, key)) in enumerate(shortcuts.items()):
+                ident = HOTKEY_ID + offset
+                if not user32.RegisterHotKey(None, ident, modifiers, key):
+                    outcome["error"] = f"{kind.title()} shortcut is unavailable or already in use. Choose another combination."
+                    break
+                registered[ident] = kind
+            definitions = dict(registered)
+            if not outcome.get("error") and self.focused is not None:
+                timer = user32.SetTimer(None, 0, 100, None)
+                if not timer:
+                    outcome["error"] = "Could not watch the active game window."
+                elif not self.focused():
+                    for ident, kind in list(registered.items()):
+                        if kind != "overlay":
+                            user32.UnregisterHotKey(None, ident)
+                            del registered[ident]
+            ready.set()
+            if outcome.get("error"):
+                return
+            while not stop.is_set() and user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+                if stop.is_set():
+                    break
                 if msg.message == WM_TIMER and msg.wParam == timer:
                     active = self.focused()
                     for ident, kind in definitions.items():
@@ -326,6 +361,8 @@ class HotkeyManager:
             return
         with self._lock:
             mode = self.mode if kind in ("default", "remnant") else kind
+            self._capture_revision += 1
+            revision = self._capture_revision
         try:
             if self.before_capture:
                 self.before_capture()
@@ -340,7 +377,9 @@ class HotkeyManager:
                 remnant_map = logger._map_id(number + int(not number or logger._meta(db, "pending_new_map", False)))
                 capture_map = logger._map_id(number) if number else None
                 generation = logger._meta(db, "session_generation", 0)
+                pending_map = bool(logger._meta(db, "pending_new_map", False))
                 expedition = 1 if not number or logger._meta(db, "pending_new_map", False) else logger._meta(db, "settings")["expedition"]
+                phase = logger._meta(db, "inventory_scan_phase", "start")
             if self.supported and sys.platform == "win32":
                 from PoE2_Data_Logger.platform.hover_copy import _tooltip_bounds
                 from PoE2_Data_Logger.ui.region_select import region_for
@@ -403,7 +442,10 @@ class HotkeyManager:
                                                    selected["y"] + selected["h"] - frozen_bounds[1])
                     except ValueError:
                         continue
-            args = (kind, mode, region, image, tooltip, remnant_map, capture_map, generation, expedition, activity_crops)
+            copied = None
+            if self.hover_reader is not None and self.supported and kind in ("default", "waystone", "tablet"):
+                copied = self.hover_reader()
+            args = (kind, mode, region, image, tooltip, remnant_map, capture_map, generation, expedition, activity_crops, copied, phase, pending_map, revision)
             if background:
                 threading.Thread(target=self._read_capture, args=args,
                                  daemon=True, name="poe2-hotkey-ocr").start()
@@ -411,10 +453,12 @@ class HotkeyManager:
                 self._read_capture(*args)
         except Exception as exc:
             self._finish_capture({"mode": mode, "result": None,
-                                  "error": f"Screen scan failed: {exc}"}, None)
+                                  "error": f"Screen scan failed: {exc}"}, None, revision)
 
     def _grab(self, region):
         if region:
+            from PoE2_Data_Logger.platform.live_watch import validate_region
+            region = validate_region(region)
             box = (region["x"], region["y"], region["x"] + region["w"], region["y"] + region["h"])
             return self.grabber(bbox=box, all_screens=True)
         return self.grabber(all_screens=False)
@@ -424,21 +468,10 @@ class HotkeyManager:
         if image.width * image.height > store.MAX_IMAGE_PIXELS:
             raise ValueError("Screen capture exceeds 12 megapixels. Use a smaller game resolution.")
 
-    def _read_capture(self, kind, mode, region, image, tooltip, remnant_map=None, capture_map=None, generation=None, expedition=None, activity_crops=None):
+    def _read_capture(self, kind, mode, region, image, tooltip, remnant_map=None, capture_map=None, generation=None, expedition=None, activity_crops=None, copied=None, phase="start", pending_map=False, revision=None):
         event = None
         raw = None
         try:
-            native = None
-            if (kind == "default" and mode == "opened" and
-                    self.readers.get("opened") is scan_opened):
-                from PoE2_Data_Logger.core.auto_commit import candidate
-                native = scan_opened(image, allow_fallback=False, verify_header=True)
-                if not candidate(native)["ready"]:
-                    native = None
-            copied = None
-            if self.hover_reader is not None and self.supported and kind in ("default", "waystone", "tablet"):
-                copied = (self.hover_reader(timeout=.08) if native and self.hover_reader is read_hovered_text
-                          else self.hover_reader())
             if copied:
                 with logger._connect() as db:
                     affixes = [row[0] for row in db.execute("SELECT name FROM affixes ORDER BY rowid")]
@@ -447,9 +480,20 @@ class HotkeyManager:
                                           bool(item.get("matches") or item.get("uncertain")))
                 if readable and (kind == "default" or item["kind"] == kind):
                     event = {"mode": "item", "result": item, "error": ""}
+                    if tooltip is not None and not isinstance(tooltip, Exception):
+                        memory = io.BytesIO()
+                        tooltip.convert("RGB").save(memory, format="JPEG", quality=92)
+                        raw = memory.getvalue()
                     return
+            native = None
+            if (kind == "default" and mode == "opened" and not copied and
+                    self.readers.get("opened") is scan_opened):
+                from PoE2_Data_Logger.core.auto_commit import candidate
+                native = scan_opened(image, allow_fallback=False, verify_header=True)
+                if not candidate(native)["ready"]:
+                    native = None
             if native and not copied:
-                native.update(logger.assign_ocr_id(mode, remnant_map, generation, expedition))
+                native["_target_map_id"] = remnant_map
                 memory = io.BytesIO()
                 image.convert("RGB").save(memory, format="JPEG", quality=92)
                 raw = memory.getvalue()
@@ -485,7 +529,7 @@ class HotkeyManager:
                         any("runeshapecombinations" in "".join(c for c in row["text"].lower()
                             if c.isalnum()) for row in rows)):
                     result = scan_opened(tooltip_image, ocr_rows=rows)
-                    result.update(logger.assign_ocr_id(mode, remnant_map, generation, expedition))
+                    result["_target_map_id"] = remnant_map
                     memory = io.BytesIO()
                     tooltip_image.convert("RGB").save(memory, format="JPEG", quality=92)
                     raw = memory.getvalue()
@@ -532,19 +576,30 @@ class HotkeyManager:
                 mode = result["mode"]
             result["mode"] = mode
             if mode != "seed" or result.get("remnants") or result.get("sockets"):
-                result.update(logger.assign_ocr_id(mode, remnant_map, generation, expedition))
+                result["_target_map_id"] = remnant_map
             event = {"mode": mode, "result": result, "error": ""}
         except Exception as exc:
             raw = None
             event = {"mode": mode, "result": None, "error": f"Screen scan failed: {exc}"}
         finally:
             if event and event.get("result") is not None and generation is not None:
-                event["result"].update({"_scan_generation": generation, "_capture_map_id": capture_map, "_capture_expedition": expedition})
-            self._finish_capture(event, raw)
+                event["result"].update({"_scan_generation": generation, "_capture_map_id": capture_map,
+                                        "_capture_expedition": expedition, "_capture_map_pending": pending_map})
+                if event["mode"] == "currency":
+                    event["result"]["phase"] = phase
+                    event["result"]["map_id"] = remnant_map if phase == "start" else capture_map
+            self._finish_capture(event, raw, revision)
 
-    def _finish_capture(self, event, raw):
-        if event is not None:
-            with self._lock:
+    def cancel_capture(self):
+        with self._lock:
+            self._capture_revision += 1
+            self._latest = self._image = None
+
+    def _finish_capture(self, event, raw, revision=None):
+        with self._lock:
+            if revision is not None and revision != self._capture_revision:
+                event = None
+            if event is not None:
                 self._sequence += 1
                 event["id"] = self._sequence
                 self._latest = event

@@ -806,6 +806,8 @@ def _add_new(db, row):
 
 
 def _record_commit(db, kind, map_id="", expedition_id="", reference="", *, context=None, details=None):
+    if not db.in_transaction:
+        db.execute("BEGIN IMMEDIATE")
     number = _meta(db, "scan_commit_count", 0) + 1
     if context is None:
         context = _snapshot(_meta(db, "settings"))
@@ -825,6 +827,7 @@ def record_commit(kind, reference=""):
     if kind not in ("Map settings", "Tablet config", "Atlas Master", "Master perks"):
         raise ValueError("Unknown configuration commit.")
     with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
         number = _meta(db, "current_map_number", 0)
         pending = not number or _meta(db, "pending_new_map", False)
         if pending:
@@ -845,6 +848,7 @@ def scan_context():
         number = _meta(db, "current_map_number", 0)
         return {"_scan_generation": _meta(db, "session_generation", 0),
                 "_capture_map_id": _map_id(number) if number else None,
+                "_capture_map_pending": bool(_meta(db, "pending_new_map", False)),
                 "_capture_expedition": 1 if not number or _meta(db, "pending_new_map", False)
                                        else _meta(db, "settings")["expedition"]}
 
@@ -857,6 +861,8 @@ def validate_scan_context(result):
         raise ValueError("This scan belongs to the previous session. Scan again.")
     if result.get("_capture_map_id") != current["_capture_map_id"]:
         raise ValueError("The map changed during the scan. Scan the current map again.")
+    if "_capture_map_pending" in result and result["_capture_map_pending"] != current["_capture_map_pending"]:
+        raise ValueError("The map ended during the scan. Scan again.")
     if "_capture_expedition" in result and result["_capture_expedition"] != current["_capture_expedition"]:
         raise ValueError("The expedition changed during the scan. Scan the current expedition again.")
 
@@ -930,6 +936,8 @@ def _commit_remnant(db, first, next_recipe=None, family=None, scan_id=None, visi
     config = _validate_settings(db, {})
     current = _meta(db, "current_map_number")
     new_map = current == 0 or _meta(db, "pending_new_map")
+    if current and new_map:
+        config.update(WAYSTONE_DEFAULTS)
     number = current + 1 if new_map else current
     mid = _map_id(number)
     expedition = 1 if new_map else config["expedition"]
@@ -989,7 +997,7 @@ def _commit_remnant(db, first, next_recipe=None, family=None, scan_id=None, visi
     if pending:
         _set_meta(db, "ocr_pending", None)
         _set_meta(db, "ocr_pending_mode", None)
-    if new_map and config["expedition"] != 1:
+    if new_map:
         config["expedition"] = 1
         _set_meta(db, "settings", config)
     return {"remnant_id": rid, "map_id": mid, "expedition_id": eid,
@@ -1026,6 +1034,9 @@ def commit_seed_batch(result, selections, automatic=False):
                          _meta(db, "pending_new_map", False) else _meta(db, "settings")["expedition"]}
         if any(result.get(key) != expected for key, expected in context.items()):
             raise ValueError("The map, expedition or session changed. Scan again before committing.")
+        if ("_capture_map_pending" in result and result["_capture_map_pending"] !=
+                bool(_meta(db, "pending_new_map", False))):
+            raise ValueError("The map ended during the scan. Scan again.")
         pending = _meta(db, "ocr_pending")
         if not pending or any(result.get(key) != pending[key] for key in
                               ("remnant_id", "map_id", "expedition_id")):
@@ -1126,6 +1137,8 @@ def commit_chain_steps(steps):
         number = _meta(db, "current_map_number")
         if not number:
             raise ValueError("Start a map before committing a chain.")
+        if _meta(db, "pending_new_map"):
+            raise ValueError("Start the next map before committing a chain.")
         mid = _map_id(number)
         expedition = _meta(db, "settings")["expedition"]
         eid = _exp_id(mid, expedition)

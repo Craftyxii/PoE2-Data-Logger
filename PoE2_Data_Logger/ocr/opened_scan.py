@@ -233,7 +233,7 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
                     detections.append({"text": text.strip(), "score": float(confidence),
                                        "x1": min(xs), "y1": min(ys), "x2": max(xs), "y2": max(ys)})
         title = next((line for line in detections
-                      if "runeshapecombinations" in _key(line["text"])), None)
+                      if "runeshapecombinations" in _key(line["text"]) and line["score"] >= .8), None)
         right = min(image.width, (title["x1"] + title["x2"]) + 20) if title else image.width
     if title is None:
         return {"mode": "opened", "status": "Opened remnant panel not found — review manually.",

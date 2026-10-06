@@ -11,6 +11,8 @@ import hashlib
 import io
 import re
 import weakref
+import threading
+from collections import OrderedDict
 from functools import lru_cache
 from pathlib import Path
 
@@ -20,6 +22,13 @@ import quickjs
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent / "third_party" / "currency_overlay"
+_READERS = threading.local()
+
+
+def get_reader():
+    if not hasattr(_READERS, "reader"):
+        _READERS.reader = CurrencyReader()
+    return _READERS.reader
 
 
 def catalog_version():
@@ -107,6 +116,8 @@ def _calibrated_inventory_assets(path, modified, size, variants_path, variants_m
 
 class CurrencyReader:
     def __init__(self):
+        self._rank_cache = OrderedDict()
+        self._scaled_candidates = {}
         self.context = quickjs.Context()
         self.context.set_memory_limit(128 * 1024 * 1024)
         self.context.eval("var module = {exports:{}};")
@@ -234,6 +245,11 @@ class CurrencyReader:
         else:
             rgb[:13, :13] = [26, 26, 40]
         rgb[27:, 27:] = [26, 26, 40]
+        cache_key = (calibrated, count_width, rgb.tobytes())
+        cached = self._rank_cache.get(cache_key)
+        if cached is not None:
+            self._rank_cache.move_to_end(cache_key)
+            return [dict(row) for row in cached]
         distances = np.square(rgb - [26, 26, 40]).sum(axis=2)
         weights = np.where(distances > 900, 1, np.where(distances > 144, .2, 0)).astype(np.float32)
         if calibrated:
@@ -259,12 +275,18 @@ class CurrencyReader:
         if calibrated:
             shortlist = sorted(best, key=best.get, reverse=True)[:8]
             for family in shortlist:
-                for scale in (.9, 1.12, 1.25):
-                    candidate = _inventory_candidate(self.calibrated_rgba[family], scale)
+                if family not in self._scaled_candidates:
+                    self._scaled_candidates[family] = tuple(
+                        _inventory_candidate(self.calibrated_rgba[family], scale) for scale in (.9, 1.12, 1.25))
+                for candidate in self._scaled_candidates[family]:
                     errors = cv2.matchTemplate(candidate, rgb, cv2.TM_SQDIFF, mask=mask)
                     best[family] = max(best[family], -max(0, float(np.min(errors))) / total)
-        return sorted(({"name": family, "score": score} for family, score in best.items()),
-                      key=lambda row: row["score"], reverse=True)[:3]
+        ranked = sorted(({"name": family, "score": score} for family, score in best.items()),
+                        key=lambda row: row["score"], reverse=True)[:3]
+        self._rank_cache[cache_key] = tuple(dict(row) for row in ranked)
+        if len(self._rank_cache) > 128:
+            self._rank_cache.popitem(last=False)
+        return ranked
 
     def examples(self, image: Image.Image, references):
         def rgb40(source):

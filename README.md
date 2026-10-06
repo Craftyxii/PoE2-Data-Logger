@@ -4,7 +4,7 @@ PoE2 Data Logger records Expedition remnants and rune chains, map and tablet mod
 
 ## Download
 
-Download **PoE2-Data-Logger-Setup-v33.exe** from the [release page](https://github.com/Craftyxii/PoE2-Data-Logger/releases/latest). The installer includes the libraries and resources needed to run the app.
+Download **PoE2-Data-Logger-Setup-v33.1.exe** from the [release page](https://github.com/Craftyxii/PoE2-Data-Logger/releases/latest). The installer includes the libraries and resources needed to run the app.
 
 See the [user guide](docs/USER_GUIDE.md) for map setup, hotkeys, scans, reviews and exporting your data.
 
@@ -43,7 +43,7 @@ py -3.12 -m PoE2_Data_Logger
 
 ## Build on Windows
 
-Install Python 3.12 and NSIS, add `makensis` to PATH, then run **Build.bat** from the repository folder. It installs the build dependencies, packages the app, checks the bundled runtime and OCR models, and creates **PoE2-Data-Logger-Setup-v33.exe**.
+Install Python 3.12 and NSIS, add `makensis` to PATH, then run **Build.bat** from the repository folder. It installs the build dependencies, packages the app, checks the bundled runtime and OCR models, and creates **PoE2-Data-Logger-Setup-v33.1.exe**.
 
 The source groups in [packaging/sources.py](packaging/sources.py) feed the PyInstaller specification. Add a new app module or resource there when changing the build.
 

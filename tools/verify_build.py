@@ -44,10 +44,16 @@ def verify(executable, check_files=True):
     library = cookie[5].rstrip(b'\0').decode('ascii')
     if version != 312 or library != 'python312.dll':
         raise ValueError('Launcher must use the bundled Python 3.12 runtime.')
-    if 'native_desktop' not in archive.toc or 'PYZ.pyz' not in archive.toc:
+    if '__main__' not in archive.toc or 'PYZ.pyz' not in archive.toc:
         raise ValueError('Launcher is missing the application entry point or module archive.')
     module_archive = archive.open_embedded_archive('PYZ.pyz')
-    for name in ('logger_store', 'service', 'hotkey', 'opened_scan', 'item_ocr', 'workbook_export'):
+    for name in ('PoE2_Data_Logger.ui.native_desktop',
+                 'PoE2_Data_Logger.core.logger_store',
+                 'PoE2_Data_Logger.core.service',
+                 'PoE2_Data_Logger.platform.hotkey',
+                 'PoE2_Data_Logger.ocr.opened_scan',
+                 'PoE2_Data_Logger.ocr.item_ocr',
+                 'PoE2_Data_Logger.core.workbook_export'):
         if name not in module_archive.toc:
             raise ValueError(f'Launcher is missing application module: {name}')
         module_archive.extract(name)

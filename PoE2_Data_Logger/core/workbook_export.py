@@ -96,6 +96,7 @@ def _numeric_column(name):
         "Normal Kills (Map)", "Magic Kills (Map)", "Rare Kills (Map)", "Remnants Detonated (Expedition)",
         "Scan Commit #", "Family ID", "Quantity", "Ritual Page", "Tribute", "Tablet Slot Capacity",
         "Start Count", "End Count", "Net Change", "Normal Kills", "Magic Kills", "Rare Kills", "Total Kills",
+        "New Find Quantity", "Ritual Tribute Available", "Ritual Rerolls Remaining", "Visible Seed Sockets",
         "Page", "Currency Commit #", "Ritual Commit #", "Start Scan Commit #", "End Scan Commit #"}
         or re.fullmatch(r"Tablet \d Mod \d (?:%|Value)", name)
         or re.fullmatch(r"Tablet \d Random Modifiers", name)

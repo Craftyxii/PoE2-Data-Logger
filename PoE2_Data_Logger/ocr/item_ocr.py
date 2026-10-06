@@ -309,7 +309,7 @@ def scan_inventory_grid(image, references=(), read=None):
     image = inventory_grid(image)
     labels = _inventory_labels(image) if read is None else None
     read = read or ocr_lines
-    reader = currency_ocr.CurrencyReader()
+    reader = currency_ocr.get_reader()
     examples = []
     for reference in references:
         raw = reference["image"]
@@ -389,10 +389,20 @@ def parse_ritual(lines, omen_names):
         if price_only:
             y = line.get("y") if isinstance(line, dict) else None
             if y is not None:
-                previous = [(y - anchor_y, index) for index, anchor_y in anchors
-                            if 0 < y - anchor_y <= 110 and proposals[index]["tribute"] is None]
+                previous = []
+                for index, anchor in anchors:
+                    gap = y - anchor["y"]
+                    if not 0 < gap <= 110 or proposals[index]["tribute"] is not None:
+                        continue
+                    if all(key in line and key in anchor for key in ("x", "right")):
+                        center = (line["x"] + line["right"]) / 2
+                        if not anchor["x"] - 30 <= center <= anchor["right"] + 30:
+                            continue
+                    previous.append((gap, index))
                 if previous:
-                    proposals[min(previous)[1]]["tribute"] = int(price_only.group(1).replace(",", ""))
+                    item = proposals[min(previous)[1]]
+                    item["tribute"] = int(price_only.group(1).replace(",", ""))
+                    item["score"] = min(item["score"], float(line.get("score", 1)))
                     continue
             unmatched.append(raw)
             continue
@@ -430,8 +440,8 @@ def parse_ritual(lines, omen_names):
                           "tribute": tribute, "source": raw, "score": round(score, 2),
                           "name_match": round(name_match, 3)})
         if isinstance(line, dict) and line.get("y") is not None:
-            anchors.append((len(proposals) - 1, line["y"]))
-    return {"items": proposals[:100], "unmatched": unmatched + [r["text"] for r in lines[100:]],
+            anchors.append((len(proposals) - 1, line))
+    return {"items": proposals[:100], "unmatched": unmatched + [r["text"] if isinstance(r, dict) else str(r) for r in lines[100:]],
             "raw_text": "\n".join(r["text"] if isinstance(r, dict) else str(r) for r in lines),
             "status": "review"}
 
@@ -540,7 +550,7 @@ def scan_ritual_page(image, omen_names, references=()):
     candidates = []
     for reference in list(references)[:128]:
         name = reference.get("name")
-        if name in existing or name not in omen_names:
+        if name not in omen_names or (name in existing and not markers):
             continue
         raw = reference.get("image")
         try:
@@ -567,11 +577,15 @@ def scan_ritual_page(image, omen_names, references=()):
             candidates.append((best, name, location))
     matched_markers = set()
     for score, name, location in sorted(candidates, reverse=True)[:20]:
+        x, y, width, height = location
+        nearby = [index for index, marker in enumerate(markers)
+                  if x - width * .25 <= marker["x"] <= x + width * 1.25 and
+                     y - height * .25 <= marker["y"] <= y + height * 1.25]
+        named = [item for item in omens if item["name"] == name]
+        if len(named) == 1 and nearby:
+            named[0]["deferred"] = True
+            matched_markers.update(nearby)
         if name not in existing:
-            x, y, width, height = location
-            nearby = [index for index, marker in enumerate(markers)
-                      if x - width * .25 <= marker["x"] <= x + width * 1.25 and
-                         y - height * .25 <= marker["y"] <= y + height * 1.25]
             matched_markers.update(nearby)
             result["items"].append({"category": "Omen", "name": name, "quantity": 1,
                                     "tribute": None, "source": f"icon reference {score:.2f}",

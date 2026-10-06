@@ -43,7 +43,12 @@ def region_for(key, bounds):
         legacy = logger._meta(db, key, None)
     if key not in boxes and legacy:
         from PoE2_Data_Logger.platform.live_watch import validate_region
-        return validate_region(legacy)
+        legacy = validate_region(legacy)
+        left, top, right, bottom = bounds
+        if (legacy["x"] < left or legacy["y"] < top or
+                legacy["x"] + legacy["w"] > right or legacy["y"] + legacy["h"] > bottom):
+            raise ValueError("The saved scan region is outside the game. Select the region again.")
+        return legacy
     x, y, w, h = checked_box(boxes.get(key, REGIONS[key][2]))
     left, top, right, bottom = bounds
     width, height = right - left, bottom - top
@@ -255,7 +260,13 @@ class ScanRegionsPage(QWidget):
 class RegionEditor(QDialog):
     def __init__(self, current=None, parent=None, screenshot=None, screen_bounds=None):
         super().__init__(parent)
+        self.capture_bounds = QRect(*screen_bounds) if screen_bounds else None
         bounds = QRect(*screen_bounds) if screen_bounds else QRect()
+        if screen_bounds:
+            screen = QGuiApplication.screenAt(bounds.center()) or QGuiApplication.primaryScreen()
+            ratio = screen.devicePixelRatio() if screen else 1
+            bounds = QRect(round(bounds.x() / ratio), round(bounds.y() / ratio),
+                           round(bounds.width() / ratio), round(bounds.height() / ratio))
         if not screen_bounds:
             for screen in QGuiApplication.screens():
                 bounds = bounds.united(screen.geometry())
@@ -273,8 +284,16 @@ class RegionEditor(QDialog):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.selection = QRect()
         if current:
-            top = QPoint(int(current["x"]), int(current["y"])) - self.origin
-            self.selection = QRect(top.x(), top.y(), int(current["w"]), int(current["h"]))
+            if self.capture_bounds is not None:
+                scale_x = self.width() / self.capture_bounds.width()
+                scale_y = self.height() / self.capture_bounds.height()
+                self.selection = QRect(round((current["x"] - self.capture_bounds.x()) * scale_x),
+                                       round((current["y"] - self.capture_bounds.y()) * scale_y),
+                                       round(current["w"] * scale_x), round(current["h"] * scale_y))
+            else:
+                top = QPoint(int(current["x"]), int(current["y"])) - self.origin
+                self.selection = QRect(top.x(), top.y(), int(current["w"]), int(current["h"]))
+            self.selection = self.selection.intersected(self.rect())
         self.anchor = QPoint()
         self.initial = QRect()
         self.operation = ""
@@ -300,12 +319,27 @@ class RegionEditor(QDialog):
             import ctypes
             from ctypes import wintypes
             user32 = ctypes.WinDLL("user32", use_last_error=True)
+            if self.capture_bounds is not None:
+                user32.SetWindowPos.argtypes = (wintypes.HWND, wintypes.HWND, ctypes.c_int,
+                                               ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT)
+                bounds = self.capture_bounds
+                user32.SetWindowPos(wintypes.HWND(int(self.winId())), wintypes.HWND(-1),
+                                    bounds.x(), bounds.y(), bounds.width(), bounds.height(), 0)
             user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
             user32.SetForegroundWindow(wintypes.HWND(int(self.winId())))
 
     def hideEvent(self, event):
         self.releaseKeyboard()
         super().hideEvent(event)
+
+    def resizeEvent(self, event):
+        previous = event.oldSize()
+        if (self.capture_bounds is not None and hasattr(self, "selection") and
+                previous.width() > 0 and previous.height() > 0):
+            scale_x, scale_y = self.width() / previous.width(), self.height() / previous.height()
+            self.selection = QRect(round(self.selection.x() * scale_x), round(self.selection.y() * scale_y),
+                                   round(self.selection.width() * scale_x), round(self.selection.height() * scale_y))
+        super().resizeEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -318,7 +352,11 @@ class RegionEditor(QDialog):
                 painter.fillRect(self.selection, Qt.GlobalColor.transparent)
                 painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
             else:
-                painter.drawPixmap(self.selection, self.picture, self.selection)
+                source = QRectF(self.selection.x() * self.picture.width() / self.width(),
+                                self.selection.y() * self.picture.height() / self.height(),
+                                self.selection.width() * self.picture.width() / self.width(),
+                                self.selection.height() * self.picture.height() / self.height())
+                painter.drawPixmap(QRectF(self.selection), self.picture, source)
             painter.setPen(QPen(QColor("#E5AA32"), 3))
             painter.drawRect(self.selection)
             handle = QRect(self.selection.right() - 13, self.selection.bottom() - 13, 13, 13)
@@ -333,6 +371,7 @@ class RegionEditor(QDialog):
         if event.button() != Qt.MouseButton.LeftButton:
             return
         pos = event.position().toPoint()
+        pos = QPoint(max(0, min(pos.x(), self.width() - 1)), max(0, min(pos.y(), self.height() - 1)))
         self.anchor = pos
         self.initial = QRect(self.selection)
         handle = QRect(self.selection.right() - 22, self.selection.bottom() - 22, 28, 28)
@@ -349,6 +388,7 @@ class RegionEditor(QDialog):
         if not self.operation:
             return
         pos = event.position().toPoint()
+        pos = QPoint(max(0, min(pos.x(), self.width() - 1)), max(0, min(pos.y(), self.height() - 1)))
         if self.operation == "move":
             moved = self.initial.translated(pos - self.anchor)
             moved.moveLeft(max(0, min(moved.left(), self.width() - moved.width())))
@@ -374,12 +414,21 @@ class RegionEditor(QDialog):
             super().keyPressEvent(event)
 
     def confirm(self):
-        if self.selection.width() >= 200 and self.selection.height() >= 100:
+        self.selection = self.selection.intersected(self.rect())
+        region = self.region()
+        if region["w"] >= 200 and region["h"] >= 100:
             self.accept()
         else:
             self.hint = "Select a region at least 200×100 pixels.\nEnter to save · Esc to cancel"
             self.update()
 
     def region(self):
+        if self.capture_bounds is not None:
+            bounds = self.capture_bounds
+            x1 = round(self.selection.x() * bounds.width() / self.width())
+            y1 = round(self.selection.y() * bounds.height() / self.height())
+            x2 = round((self.selection.x() + self.selection.width()) * bounds.width() / self.width())
+            y2 = round((self.selection.y() + self.selection.height()) * bounds.height() / self.height())
+            return {"x": bounds.x() + x1, "y": bounds.y() + y1, "w": x2 - x1, "h": y2 - y1}
         top = self.selection.topLeft() + self.origin
         return {"x": top.x(), "y": top.y(), "w": self.selection.width(), "h": self.selection.height()}

@@ -1,0 +1,91 @@
+name: Windows installer
+
+on:
+  push:
+    branches:
+      - 'fix/v33.1'
+    tags:
+      - 'v[0-9]*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+      - name: Check release version
+        shell: pwsh
+        run: |
+          $match = Select-String -Path packaging/installer.nsi -Pattern '^!define APP_VERSION "([0-9]+\.[0-9]+)"$'
+          if (-not $match) { throw 'Installer version is missing.' }
+          $version = $match.Matches[0].Groups[1].Value
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw 'Release tag does not match installer version.'
+          }
+          "INSTALLER=PoE2-Data-Logger-Setup-v$version.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Install dependencies
+        run: python -m pip install -r requirements-build.txt
+      - name: Run regression tests
+        run: python -m unittest discover -s tests -v
+      - name: Prepare NSIS
+        shell: pwsh
+        run: |
+          $nsis = Get-Command makensis -ErrorAction SilentlyContinue
+          if (-not $nsis) {
+            $path = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+            if (-not (Test-Path $path)) {
+              choco install nsis --yes --no-progress
+              if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed.' }
+            }
+            if (-not (Test-Path $path)) { throw 'NSIS compiler was not found.' }
+            Split-Path $path | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+      - name: Build and verify installer
+        shell: cmd
+        run: Build.bat
+      - name: Check packaged application startup and recognition
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = 'windows'
+          $process = Start-Process -FilePath 'dist/PoE2-Data-Logger/PoE2-Data-Logger.exe' -ArgumentList '--smoke-test' -PassThru
+          if (-not $process.WaitForExit(60000)) {
+            $process.Kill()
+            throw 'Packaged application startup timed out.'
+          }
+          if ($process.ExitCode -ne 0) { throw "Packaged application check failed: $($process.ExitCode)" }
+      - name: Create checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash $env:INSTALLER -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $env:INSTALLER" | Out-File -FilePath "$env:INSTALLER.sha256" -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            PoE2-Data-Logger-Setup-v*.exe
+            PoE2-Data-Logger-Setup-v*.exe.sha256
+          if-no-files-found: error
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME $env:INSTALLER "$env:INSTALLER.sha256" --verify-tag --title "PoE2 Data Logger $($env:GITHUB_REF_NAME)"
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
