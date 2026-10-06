@@ -1,0 +1,43 @@
+CraftyXII Branding Rights Notice
+
+Copyright © 2026 CraftyXII, solely in the original copyrightable branding artwork legally owned by CraftyXII.
+
+1. Scope
+
+This notice covers the original CraftyXII logo artwork supplied as brand_logo.jpg and any other branding artwork expressly identified as CraftyXII-owned, only to the extent that CraftyXII legally owns the applicable rights.
+
+“CraftyXII” identifies the person or legal entity operating under that name that owns those rights.
+
+This notice does not claim copyright in the CraftyXII name itself. Any applicable trademark rights remain reserved.
+
+2. Permitted use and distribution
+
+You may display the branding during ordinary use of PoE2 Data Logger.
+
+You may redistribute the supplied branding unchanged as part of the application or its corresponding source, including with modified versions. Modified versions may remove or replace the branding.
+
+These permissions do not authorize use of the CraftyXII name or branding to falsely imply sponsorship, affiliation or endorsement.
+
+3. Separate reuse
+
+Separate copying, modification, sale, redistribution or incorporation of the protected branding into another product or asset collection requires CraftyXII’s prior written permission, unless applicable law or an existing license permits that use.
+
+Attribution alone does not grant permission. Keep this notice with authorized distributions containing the protected branding.
+
+4. Software and databases
+
+This notice makes no CraftyXII copyright claim over the software, purely AI-generated material, game-derived databases, remnant families, recipes, rune information, socket information or other in-game facts.
+
+It places no restriction on independently collecting, recreating or using that factual information.
+
+Existing rights in human-authored third-party code and materials remain unaffected. GPL-covered software remains governed by GNU GPLv3. This notice imposes no additional restriction on rights granted by that license.
+
+5. Other rights
+
+Game artwork, icons and underlying game content remain subject to their respective owners’ rights.
+
+Third-party software, fonts, OCR models and reference assets retain their applicable licenses.
+
+Users retain their existing rights in their contributions, logs and exported data.
+
+Fair use, other statutory rights, existing licenses and previously granted permissions remain unaffected.

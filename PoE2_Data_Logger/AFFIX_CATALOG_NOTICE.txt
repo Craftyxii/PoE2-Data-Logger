@@ -1,0 +1,8 @@
+Tablet and Waystone Modifier Catalog
+
+Source: PoE2DB, https://poe2db.tw/us/Tablet and https://poe2db.tw/us/Waystones
+Retrieved: 4 October 2026. Modifier descriptions were normalised to omit rolled numbers, and combined with the existing local names and supplied screenshot evidence.
+
+Game modifier text and game data remain the property of Grinding Gear Games. PoE2DB publishes its wiki content under Creative Commons Attribution-NonCommercial-ShareAlike 3.0 (https://creativecommons.org/licenses/by-nc-sa/3.0/). This source attribution accompanies the catalog. The CraftyXII assets notice does not override third-party rights.
+
+The bundled catalog is an offline starting point. It does not prove that every modifier is active in every league. Newly read names can be saved locally; ambiguous reads require review.
