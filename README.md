@@ -4,7 +4,7 @@ PoE2 Data Logger records Expedition remnants and rune chains, map and tablet mod
 
 ## Download
 
-Download **PoE2-Data-Logger-Setup-v33.exe** from the [release page](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/PoE2DataLogger). The installer includes the libraries and resources needed to run the app.
+Download **PoE2-Data-Logger-Setup-v33.exe** from the [release page](https://github.com/Craftyxii/PoE2-Data-Logger/releases/latest). The installer includes the libraries and resources needed to run the app.
 
 See the [user guide](docs/USER_GUIDE.md) for map setup, hotkeys, scans, reviews and exporting your data.
 
