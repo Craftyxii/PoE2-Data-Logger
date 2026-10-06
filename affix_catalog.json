@@ -1,0 +1,1081 @@
+{
+  "version": 1,
+  "sources": [
+    "https://poe2db.tw/us/Tablet",
+    "https://poe2db.tw/us/Waystones"
+  ],
+  "retrieved": "2026-10-04",
+  "affixes": [
+    {
+      "name": "increased Rarity of Items found in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map contains additional Summoning Circles",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased Quantity of Waystones found in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map is inhabited by additional Rogue Exiles",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map contains additional Azmeri Spirits",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map contains additional Essences",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Monsters have increased Effectiveness",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map contains additional Rare Chests",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased Gold found in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map has increased Monster Rarity",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased Experience gain in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map has increased number of Rare Monsters",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map has increased Magic Monsters",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased Pack Size in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased Quantity of Waystones dropped by Map Bosses",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map contains additional Shrines",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map contains additional Strongboxes",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Ritual Favours in Map have increased chance to be Omens",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Revived Monsters from Ritual Altars in Map have increased chance to be Rare",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Revived Monsters from Ritual Altars in Map have increased chance to be Magic",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Favours Rerolled at Ritual Altars in Map have chance to cost no Tribute",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Ritual Altars in Map allow rerolling Favours additional times",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Delirium Fog in Map spawns increased Fracturing Mirrors",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Favours Deferred at Ritual Altars in Map reappear sooner",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Deferring Favours at Ritual Altars in Map costs reduced Tribute",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Rerolling Favours at Ritual Altars in Map costs reduced Tribute",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Monsters Sacrificed at Ritual Altars in Map grant increased Tribute",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Delirium Fog in Map spawns increased Mirror Shards",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Delirium Encounters in Map are more likely to spawn Unique Bosses",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Slaying Rare Monsters in Map pauses the Delirium Mirror Timer for seconds",
+      "unit": "seconds",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased chance Vaal Beacon Chests are Rare in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Abyss Pits in Map are twice as likely to have Rewards",
+      "unit": "flag",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "chance to add a Vaal Beacon Unique Monster to the Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "chance to gain additional Crystal from Vaal Beacons in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased chance Vaal Beacons summon additional Monsters in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "chance for an extra packs of Monsters around Vaal Beacons in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "extra packs of Monsters around Vaal Beacons in Map",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased Pack Size for Monsters around Vaal Beacons in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased chance for Desecrated Currency from Abysses in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased chance for Abyssal monsters in Map to have Abyssal Modifiers",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map has chance to contain four additional Abysses",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map Bosses grant increased Experience",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map contains additional Abysses",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Abysses in Map have increased chance to lead to an Abyssal Depths",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Abyssal Monsters have increased Effectiveness for each closed Pit, up to",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Abyssal Monsters in Map have increased Difficulty and Reward for each closed Pit",
+      "unit": "flag",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "additional Rare Monsters are spawned from Abysses in Map",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Abysses in Map spawn increased Monsters",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased Quantity of Items dropped by Map Bosses",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased Rarity of Items dropped by Map Bosses",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map has increased chance to contain a Summoning Circle",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Breaches in Map have increased Pack Size",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased Effectiveness of Rare Breach Monsters in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Unstable Breaches in Map spawn additional Rare Monsters when Stabilised",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Unstable Breaches in Map have increased chance to contain Vruun, Marshal of Xesht",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Wombgifts have chance to drop one Level higher in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased Quantity of Wombgifts found in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased Quantity of Hiveblood found in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Unique Monsters have additional Rare Modifiers",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map has additional random Modifiers",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased Expedition Explosive Area of Effect in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map has increased chance to contain Rogue Exiles",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map has increased chance to contain Azmeri Spirits",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map has increased chance to contain Essences",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "reduced Pack Size in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map has increased chance to contain Strongboxes",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map has increased chance to contain Shrines",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Rare Monsters in Map have a Surpassing chance to have additional Modifier",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Expeditions contain Additional Bosses encased in ice in Map",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Delirium Fog in Map applies increased Deliriousness to Players",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Delirium Fog in Map dissipates slower",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Delirium Fog in Map lasts additional seconds before dissipating",
+      "unit": "seconds",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased Stack size of Simulacrum Splinters found in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Verisium Remnants have + chance to add additional Runic Modifier in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Expeditions have + Surpassing chance to Duplicate Runic Monsters in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Expeditions have + Surpassing chance to contain additional Verisium Remnant",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Expeditions contain Vaal Relics in Map",
+      "unit": "flag",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Expeditions contain buried Strongboxes in Map",
+      "unit": "flag",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Delirium Monsters in Map have increased Pack Size",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased Expedition Monster Rarity in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Expeditions contain Additional Verisium Sentries in Map",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "The first unearthed Runic Monsters will be Rare Monsters in Map",
+      "unit": "count",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Monsters from Verisium Remnants drop increased Verisium",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Map contains increased number of Runic Monster Markers",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased number of Rare Expedition Monsters in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased Quantity of Expedition Logbooks dropped by Runic Monsters in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "increased Expedition Explosive Placement Range in Map",
+      "unit": "%",
+      "kinds": [
+        "tablet"
+      ]
+    },
+    {
+      "name": "Rare Monsters have additional Modifiers",
+      "unit": "count",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "increased number of Rare Monsters",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "increased Waystones found in Area",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters deal of Damage as Extra Fire",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters have more Effectiveness",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "more Waystones found in Area",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters deal of Damage as Extra Cold",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "more Rarity of Items found in this Area",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters deal of Damage as Extra Lightning",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "more Pack size",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "increased Monster Damage",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "more Magic and Rare Monsters",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Rare Monsters have more chance of Monster Modifiers",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters have increased Attack , Cast and Movement Speed",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters have increased Critical Hit Chance",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters have + Critical Damage Bonus",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "more Monster Life",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monster Elemental Resistances",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters are Armoured",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters are Evasive",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters gain of maximum Life as Extra maximum Energy Shield",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters have chance to Poison on Hit",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters have chance to inflict Bleeding on Hit",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters have increased Ailment Threshold",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters have increased Stun Threshold",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters Break Armour equal to of Physical Damage dealt",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters have increased Accuracy Rating",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters deal of Damage as Extra Chaos",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters have increased Stun Buildup",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monster have increased Elemental Ailment Application",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters fire additional Projectiles",
+      "unit": "count",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters have increased Area of Effect",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Players are periodically Cursed with Enfeeble",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Players are periodically Cursed with Temporal Chains",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Players are periodically Cursed with Elemental Weakness",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Area has patches of Ignited Ground",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Area has patches of Chilled Ground",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Area has patches of Shocked Ground",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monster Damage Penetrates Elemental Resistances",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "maximum Player Resistances",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Players gain reduced Flask Charges",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Players have less Recovery Rate of Life and Energy Shield",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Players have less Cooldown Recovery Rate",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters take reduced Extra Damage from Critical Hits",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "less effect of Curses on Monsters",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Abyssal Monsters grant increased Experience",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Area contains additional Abysses",
+      "unit": "count",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Abysses spawn increased Monsters",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Area is overrun by the Abyssal",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "additional Rare Monsters are spawned from Abysses",
+      "unit": "count",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Abysses lead to an Abyssal Boss",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Area contains additional Incubator Queens",
+      "unit": "count",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Abyss Pits have chance to spawn all Monsters as at least Magic",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Abyss Cracks have chance to spawn all Monsters as at least Magic",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Abysses lead to an Abyssal Depths",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Abyssal Monsters have increased Difficulty and Reward for each closed Pit",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Abyss Pits in Area always have Rewards",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Natural Rare Monsters in Area have extra Abyssal Modifiers",
+      "unit": "count",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Natural Rare Monsters in Area Eat the Souls of slain Monsters in their Presence",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Players steal the Eaten Souls of Slain Rare Monsters in Area",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Players and their Minions deal no damage for out of every seconds",
+      "unit": "seconds",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Players have less Movement and Skill Speed for each time they've used a Skill Recently",
+      "unit": "%",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Monsters inflict Grasping Vines on Hit",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Players are Marked for Death for seconds",
+      "unit": "seconds",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "after killing a Rare or Unique monster",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    },
+    {
+      "name": "Area has patches of Mana Siphoning Ground",
+      "unit": "flag",
+      "kinds": [
+        "waystone"
+      ]
+    }
+  ]
+}

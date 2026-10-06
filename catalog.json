@@ -1,0 +1,2019 @@
+{
+  "states": [
+    {
+      "family": 3,
+      "sockets": 3,
+      "seed_slot": "P1",
+      "seed_rune": "Adaptive",
+      "rewards": [
+        "Chaos Orb",
+        "Exalted Orb",
+        "Exalted Orb x2",
+        "Orb of Alchemy",
+        "Regal Orb",
+        "Runic Alloy x2"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 64,
+      "sockets": 3,
+      "seed_slot": "P1",
+      "seed_rune": "Arcane",
+      "rewards": [
+        "Artificer's Orb",
+        "Lesser Mind Rune",
+        "Lesser Ward Rune"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 37,
+      "sockets": 3,
+      "seed_slot": "P1",
+      "seed_rune": "Celestial",
+      "rewards": [
+        "Unique Body Armour",
+        "Unique Boots",
+        "Unique Gloves",
+        "Unique Helmet"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 30,
+      "sockets": 3,
+      "seed_slot": "P1",
+      "seed_rune": "Cold",
+      "rewards": [
+        "Armourer's Scrap x2",
+        "Lesser Adept Rune",
+        "Lesser Glacial Rune"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 2,
+      "sockets": 3,
+      "seed_slot": "P1",
+      "seed_rune": "Cyclonic",
+      "rewards": [
+        "Concussive Runes",
+        "Conductive Runes",
+        "Detonate Living",
+        "Eternal March",
+        "Fragments Of The Past",
+        "Frostflame Nova",
+        "Repulsion",
+        "Verisium Pile"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 61,
+      "sockets": 3,
+      "seed_slot": "P1",
+      "seed_rune": "Earth",
+      "rewards": [
+        "Adaptive Alloy",
+        "Regal Orb x3",
+        "Thaumaturgic Flux (Level 18)"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 7,
+      "sockets": 3,
+      "seed_slot": "P1",
+      "seed_rune": "Fire",
+      "rewards": [
+        "2x blacksmiths whetstone",
+        "Lesser Desert Rune",
+        "Lesser Robust Rune"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 29,
+      "sockets": 3,
+      "seed_slot": "P1",
+      "seed_rune": "Lightning",
+      "rewards": [
+        "Arcanist's Etcher x2",
+        "Lesser Resolve Rune",
+        "Lesser Storm Rune"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 73,
+      "sockets": 3,
+      "seed_slot": "P1",
+      "seed_rune": "Momentum",
+      "rewards": [
+        "Greater Orb of Augmentation",
+        "Greater Orb of Transmutation",
+        "Uncut Skill Gem",
+        "Uncut Support Gem"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 63,
+      "sockets": 3,
+      "seed_slot": "P1",
+      "seed_rune": "Moon",
+      "rewards": [
+        "Adept Rune",
+        "Armourer's Scrap x4",
+        "Armourer's Scrap x6",
+        "Glacial Rune",
+        "Greater Adept Rune",
+        "Greater Glacial Rune"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 52,
+      "sockets": 3,
+      "seed_slot": "P1",
+      "seed_rune": "Prismatic",
+      "rewards": [
+        "Gemcutter's Prism x2",
+        "Glassblower's Bauble x2",
+        "Lesser Jeweller's Orb",
+        "Orb of Augmentation x2",
+        "Orb of Transmutation x2",
+        "Uncut Spirit Gem"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 66,
+      "sockets": 3,
+      "seed_slot": "P1",
+      "seed_rune": "Volcanic",
+      "rewards": [
+        "Artificer's Orb x2",
+        "Mind Rune",
+        "Ward Rune"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 51,
+      "sockets": 3,
+      "seed_slot": "P2",
+      "seed_rune": "Adaptive",
+      "rewards": [
+        "Arcanist's Etcher x4",
+        "Arcanist's Etcher x6",
+        "Armourer's Scrap x4",
+        "Armourer's Scrap x6",
+        "Blacksmith's Whetstone x4",
+        "Blacksmith's Whetstone x6"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 49,
+      "sockets": 3,
+      "seed_slot": "P2",
+      "seed_rune": "Arcane",
+      "rewards": [
+        "Exalted Orb x2",
+        "Lesser Jeweller's Orb",
+        "Regal Orb x3"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 24,
+      "sockets": 3,
+      "seed_slot": "P2",
+      "seed_rune": "Cold",
+      "rewards": [
+        "Lesser Inspiration Rune",
+        "Lesser Stone Rune",
+        "Orb of Transmutation"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 26,
+      "sockets": 3,
+      "seed_slot": "P2",
+      "seed_rune": "Fire",
+      "rewards": [
+        "Mind Rune",
+        "Uncut Skill Gem",
+        "Ward Rune"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 68,
+      "sockets": 3,
+      "seed_slot": "P2",
+      "seed_rune": "Moon",
+      "rewards": [
+        "Lesser Rebirth Rune",
+        "Lesser Ward Rune",
+        "Orb of Transmutation x2",
+        "Regal Orb"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 27,
+      "sockets": 3,
+      "seed_slot": "P2",
+      "seed_rune": "Rebirth",
+      "rewards": [
+        "Adaptive Alloy",
+        "Expansive Alloy",
+        "Orb of Alchemy",
+        "Protective Alloy",
+        "Runic Alloy x2"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 38,
+      "sockets": 3,
+      "seed_slot": "P2",
+      "seed_rune": "Sky",
+      "rewards": [
+        "Animus Splinters",
+        "Explosive Transmutation",
+        "Fist Of Kalguur",
+        "Hollow Shell",
+        "Rain of Blades",
+        "Runic Extraction",
+        "Runic Infusion",
+        "Verisium Pile",
+        "Voltaic Barrier",
+        "Wardbound Minions"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 18,
+      "sockets": 3,
+      "seed_slot": "P2",
+      "seed_rune": "Vision",
+      "rewards": [
+        "Adept Rune",
+        "Artificer's Orb x2",
+        "Artificer's Orb x3",
+        "Greater Adept Rune",
+        "Greater Resolve Rune",
+        "Greater Robust Rune",
+        "Resolve Rune",
+        "Robust Rune"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 70,
+      "sockets": 3,
+      "seed_slot": "P2",
+      "seed_rune": "Ward",
+      "rewards": [
+        "Greater Charging Rune",
+        "Greater Ward Rune",
+        "Thaumaturgic Flux (Level 18)",
+        "Warding Rune of Courage",
+        "Warding Rune of Reinforcement"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 71,
+      "sockets": 3,
+      "seed_slot": "P3",
+      "seed_rune": "Bloodletting",
+      "rewards": [
+        "Blacksmith's Whetstone x6",
+        "Chaos Orb",
+        "Protective Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 45,
+      "sockets": 3,
+      "seed_slot": "P3",
+      "seed_rune": "Death",
+      "rewards": [
+        "Chaos Orb",
+        "Exalted Orb",
+        "Exalted Orb x2",
+        "Orb of Alchemy",
+        "Regal Orb",
+        "Runic Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 32,
+      "sockets": 3,
+      "seed_slot": "P3",
+      "seed_rune": "Electrocuting",
+      "rewards": [
+        "Warding Rune of Courage",
+        "Warding Rune of Desperation",
+        "Warding Rune of Disintegration",
+        "Warding Rune of Nourishment",
+        "Warding Rune of Protection",
+        "Warding Rune of Reinforcement"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 31,
+      "sockets": 3,
+      "seed_slot": "P3",
+      "seed_rune": "Prismatic",
+      "rewards": [
+        "Artificer's Orb x3",
+        "Orb of Alchemy",
+        "Runic Alloy x2"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 65,
+      "sockets": 3,
+      "seed_slot": "P3",
+      "seed_rune": "Tidal",
+      "rewards": [
+        "Exalted Orb x2",
+        "Expansive Alloy",
+        "Glassblower's Bauble x2",
+        "Regal Orb x3"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 57,
+      "sockets": 3,
+      "seed_slot": "P3",
+      "seed_rune": "Ward",
+      "rewards": [
+        "Bitter Dead",
+        "Grim Pillars",
+        "Remnants of Kalguur",
+        "Runeforged Blades",
+        "Scouring Flame",
+        "Verisium Manifestations",
+        "Verisium Pile"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 3,
+      "sockets": 4,
+      "seed_slot": "P1",
+      "seed_rune": "Adaptive",
+      "rewards": [
+        "Chaos Orb",
+        "Chaos Orb x2",
+        "Exalted Orb",
+        "Exalted Orb x2",
+        "Exalted Orb x3",
+        "Orb of Alchemy",
+        "Orb of Alchemy x3",
+        "Regal Orb",
+        "Runic Alloy x2",
+        "Swift Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 64,
+      "sockets": 4,
+      "seed_slot": "P1",
+      "seed_rune": "Arcane",
+      "rewards": [
+        "Ancient Rune of Witchcraft",
+        "Artificer's Orb",
+        "Lesser Mind Rune",
+        "Lesser Ward Rune",
+        "Rune of Foundations",
+        "Rune of Reach",
+        "Rune of Renown"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 61,
+      "sockets": 4,
+      "seed_slot": "P1",
+      "seed_rune": "Earth",
+      "rewards": [
+        "Adaptive Alloy",
+        "Ancient Rune of Control",
+        "Regal Orb x3",
+        "Rune of Accumulation",
+        "Rune of Acrobatics",
+        "Rune of the Hunt",
+        "Thaumaturgic Flux (Level 18)"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 63,
+      "sockets": 4,
+      "seed_slot": "P1",
+      "seed_rune": "Moon",
+      "rewards": [
+        "Adept Rune",
+        "Ancient Rune of Splinters",
+        "Armourer's Scrap x4",
+        "Armourer's Scrap x6",
+        "Glacial Rune",
+        "Greater Adept Rune",
+        "Greater Glacial Rune",
+        "Rune of Culmination",
+        "Rune of the Blossom",
+        "Rune of Vitality"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 36,
+      "sockets": 4,
+      "seed_slot": "P1",
+      "seed_rune": "Oath",
+      "rewards": [
+        "Greater Chaos Orb",
+        "Greater Exalted Orb",
+        "Greater Regal Orb"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 52,
+      "sockets": 4,
+      "seed_slot": "P1",
+      "seed_rune": "Prismatic",
+      "rewards": [
+        "Gemcutter's Prism x2",
+        "Gemcutter's Prism x3",
+        "Glassblower's Bauble x2",
+        "Glassblower's Bauble x3",
+        "Greater Jeweller's Orb",
+        "Lesser Jeweller's Orb",
+        "Orb of Augmentation x2",
+        "Orb of Transmutation x2",
+        "Uncut Spirit Gem"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 62,
+      "sockets": 4,
+      "seed_slot": "P1",
+      "seed_rune": "Sky",
+      "rewards": [
+        "Ancient Rune of Prowess",
+        "Rune of Confrontation",
+        "Rune of Consistency",
+        "Rune of the Prism"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 42,
+      "sockets": 4,
+      "seed_slot": "P1",
+      "seed_rune": "Toxic",
+      "rewards": [
+        "Ancient Rune of Decay",
+        "Ancient Rune of Detonation",
+        "Ancient Rune of Discovery",
+        "Ancient Rune of Shattering",
+        "Ancient Rune of the Titan",
+        "Unique Jewellery"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 66,
+      "sockets": 4,
+      "seed_slot": "P1",
+      "seed_rune": "Volcanic",
+      "rewards": [
+        "Ancient Rune of Animosity",
+        "Ancient Rune of Dueling",
+        "Ancient Rune of Retaliation",
+        "Ancient Rune of the Horde",
+        "Artificer's Orb x2",
+        "Mind Rune",
+        "Rune of Vital Flame",
+        "Ward Rune"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 68,
+      "sockets": 4,
+      "seed_slot": "P2",
+      "seed_rune": "Moon",
+      "rewards": [
+        "Exalted Orb x3",
+        "Lesser Rebirth Rune",
+        "Lesser Ward Rune",
+        "Orb of Alchemy x3",
+        "Orb of Transmutation x2",
+        "Regal Orb",
+        "Unique Jewellery"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 59,
+      "sockets": 4,
+      "seed_slot": "P2",
+      "seed_rune": "Rage",
+      "rewards": [
+        "Unique One Hand Mace",
+        "Unique Quarterstaff",
+        "Unique Spear",
+        "Unique Talisman",
+        "Unique Two Hand Mace"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 27,
+      "sockets": 4,
+      "seed_slot": "P2",
+      "seed_rune": "Rebirth",
+      "rewards": [
+        "Adaptive Alloy",
+        "Cyclonic Alloy",
+        "Expansive Alloy",
+        "Orb of Alchemy",
+        "Protective Alloy",
+        "Runic Alloy x2",
+        "Swift Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 47,
+      "sockets": 4,
+      "seed_slot": "P2",
+      "seed_rune": "Unresolved",
+      "rewards": [
+        "Rune of the Hunt"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 70,
+      "sockets": 4,
+      "seed_slot": "P2",
+      "seed_rune": "Ward",
+      "rewards": [
+        "Greater Charging Rune",
+        "Greater Ward Rune",
+        "Thaumaturgic Flux (Level 18)",
+        "Warding Rune of Annihilation",
+        "Warding Rune of Courage",
+        "Warding Rune of Glancing",
+        "Warding Rune of Heart",
+        "Warding Rune of Reinforcement",
+        "Warding Rune of Salvaging",
+        "Warding Rune of Stability",
+        "Warding Rune of Symbiosis"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 45,
+      "sockets": 4,
+      "seed_slot": "P3",
+      "seed_rune": "Death",
+      "rewards": [
+        "Chaos Orb",
+        "Chaos Orb x2",
+        "Exalted Orb",
+        "Exalted Orb x2",
+        "Exalted Orb x3",
+        "Orb of Alchemy",
+        "Orb of Alchemy x3",
+        "Regal Orb",
+        "Runic Alloy",
+        "Swift Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 1,
+      "sockets": 4,
+      "seed_slot": "P3",
+      "seed_rune": "Power",
+      "rewards": [
+        "Divine Orb"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 72,
+      "sockets": 4,
+      "seed_slot": "P3",
+      "seed_rune": "Soul",
+      "rewards": [
+        "Exalted Orb x3",
+        "Swift Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 65,
+      "sockets": 4,
+      "seed_slot": "P3",
+      "seed_rune": "Tidal",
+      "rewards": [
+        "Cyclonic Alloy",
+        "Exalted Orb x2",
+        "Expansive Alloy",
+        "Glassblower's Bauble x2",
+        "Glassblower's Bauble x3",
+        "Orb of Alchemy x3",
+        "Regal Orb x3"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 67,
+      "sockets": 4,
+      "seed_slot": "P4",
+      "seed_rune": "Cyclonic",
+      "rewards": [
+        "Cyclonic Alloy",
+        "Exalted Orb x3",
+        "Greater Jeweller's Orb",
+        "Unique Jewellery"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 39,
+      "sockets": 4,
+      "seed_slot": "P4",
+      "seed_rune": "Ward",
+      "rewards": [
+        "Animus Exchange",
+        "Healing Runes",
+        "Leylines",
+        "Refutation",
+        "Runic Reprieve",
+        "Skyfall",
+        "Triskelion Cascade"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 69,
+      "sockets": 4,
+      "seed_slot": "P4",
+      "seed_rune": "Wisdom",
+      "rewards": [
+        "Unique Amulet",
+        "Unique Belt",
+        "Unique Ring"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 3,
+      "sockets": 5,
+      "seed_slot": "P1",
+      "seed_rune": "Adaptive",
+      "rewards": [
+        "Chaos Orb",
+        "Chaos Orb x2",
+        "Chaos Orb x3",
+        "Exalted Orb",
+        "Exalted Orb x2",
+        "Exalted Orb x3",
+        "Mystic Alloy",
+        "Orb of Alchemy",
+        "Orb of Alchemy x3",
+        "Perfect Orb of Augmentation",
+        "Perfect Orb of Transmutation",
+        "Random Currency x5",
+        "Regal Orb",
+        "Runic Alloy x2",
+        "Swift Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 37,
+      "sockets": 5,
+      "seed_slot": "P1",
+      "seed_rune": "Celestial",
+      "rewards": [
+        "Orb of Chance",
+        "Rare Unique Item",
+        "Unique Body Armour",
+        "Unique Boots",
+        "Unique Gloves",
+        "Unique Helmet"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 2,
+      "sockets": 5,
+      "seed_slot": "P1",
+      "seed_rune": "Cyclonic",
+      "rewards": [
+        "Concussive Runes",
+        "Conductive Runes",
+        "Conductive Runes (Level 20)",
+        "Detonate Living",
+        "Detonate Living (Level 20)",
+        "Eternal March",
+        "Eternal March (Level 20)",
+        "Fragments Of The Past",
+        "Fragments Of The Past (Level 20)",
+        "Frostflame Nova",
+        "Frostflame Nova (Level 20)",
+        "Repulsion",
+        "Repulsion (Level 20)",
+        "Verisium Pile"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 52,
+      "sockets": 5,
+      "seed_slot": "P1",
+      "seed_rune": "Prismatic",
+      "rewards": [
+        "Gemcutter's Prism x2",
+        "Gemcutter's Prism x3",
+        "Glassblower's Bauble x2",
+        "Glassblower's Bauble x3",
+        "Greater Jeweller's Orb",
+        "Lesser Jeweller's Orb",
+        "Masterwork Rune",
+        "Orb of Augmentation x2",
+        "Orb of Transmutation x2",
+        "Perfect Jeweller's Orb",
+        "Prismatic Alloy",
+        "Uncut Spirit Gem"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 49,
+      "sockets": 5,
+      "seed_slot": "P2",
+      "seed_rune": "Arcane",
+      "rewards": [
+        "Exalted Orb x2",
+        "Greater Orb of Augmentation x3",
+        "Lesser Jeweller's Orb",
+        "Regal Orb x3",
+        "Uncut Spirit Gem (Level 19)"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 17,
+      "sockets": 5,
+      "seed_slot": "P2",
+      "seed_rune": "Bond",
+      "rewards": [
+        "Thane Girt's Rune of Wildness",
+        "Thane Grannell's Rune of Mastery",
+        "Thane Leld's Rune of Spring",
+        "Thane Myrk's Rune of Summer"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 24,
+      "sockets": 5,
+      "seed_slot": "P2",
+      "seed_rune": "Cold",
+      "rewards": [
+        "Courtesan Mannan's Rune of Cruelty",
+        "Lady Hestra's Rune of Winter",
+        "Lesser Inspiration Rune",
+        "Lesser Stone Rune",
+        "Orb of Transmutation"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 26,
+      "sockets": 5,
+      "seed_slot": "P2",
+      "seed_rune": "Fire",
+      "rewards": [
+        "Greater Orb of Transmutation x3",
+        "Mind Rune",
+        "Uncut Skill Gem",
+        "Uncut Skill Gem (Level 19)",
+        "Ward Rune"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 59,
+      "sockets": 5,
+      "seed_slot": "P2",
+      "seed_rune": "Rage",
+      "rewards": [
+        "The Greatwolf's Rune of Claws",
+        "The Greatwolf's Rune of Willpower",
+        "Unique One Hand Mace",
+        "Unique Quarterstaff",
+        "Unique Spear",
+        "Unique Talisman",
+        "Unique Two Hand Mace"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 27,
+      "sockets": 5,
+      "seed_slot": "P2",
+      "seed_rune": "Rebirth",
+      "rewards": [
+        "Adaptive Alloy",
+        "Cyclonic Alloy",
+        "Expansive Alloy",
+        "Mystic Alloy",
+        "Orb of Alchemy",
+        "Prismatic Alloy",
+        "Protective Alloy",
+        "Runic Alloy x2",
+        "Swift Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 38,
+      "sockets": 5,
+      "seed_slot": "P2",
+      "seed_rune": "Sky",
+      "rewards": [
+        "Animus Splinters",
+        "Explosive Transmutation",
+        "Fist Of Kalguur",
+        "Hollow Shell",
+        "Rain of Blades",
+        "Rain of Blades (Level 20)",
+        "Runic Extraction",
+        "Runic Infusion",
+        "Saqawal's Rune of Erosion",
+        "Saqawal's Rune of Memory",
+        "Saqawal's Rune of the Sky",
+        "Verisium Pile",
+        "Voltaic Barrier",
+        "Wardbound Minions"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 46,
+      "sockets": 5,
+      "seed_slot": "P2",
+      "seed_rune": "Tidal",
+      "rewards": [
+        "Craiceann's Rune of Recovery",
+        "Craiceann's Rune of Warding"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 22,
+      "sockets": 5,
+      "seed_slot": "P2",
+      "seed_rune": "Toxic",
+      "rewards": [
+        "Fenumus' Rune of Agony",
+        "Fenumus' Rune of Draining",
+        "Fenumus' Rune of Spinning"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 47,
+      "sockets": 5,
+      "seed_slot": "P2",
+      "seed_rune": "Unresolved",
+      "rewards": [
+        "Farrul's Rune of Grace",
+        "Rune of the Hunt"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 45,
+      "sockets": 5,
+      "seed_slot": "P3",
+      "seed_rune": "Death",
+      "rewards": [
+        "Chaos Orb",
+        "Chaos Orb x2",
+        "Chaos Orb x3",
+        "Exalted Orb",
+        "Exalted Orb x2",
+        "Exalted Orb x3",
+        "Mystic Alloy",
+        "Orb of Alchemy",
+        "Orb of Alchemy x3",
+        "Perfect Orb of Augmentation",
+        "Perfect Orb of Transmutation",
+        "Random Currency x5",
+        "Regal Orb",
+        "Runic Alloy",
+        "Swift Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 32,
+      "sockets": 5,
+      "seed_slot": "P3",
+      "seed_rune": "Electrocuting",
+      "rewards": [
+        "Greater Orb of Augmentation x3",
+        "Uncut Skill Gem (Level 19)",
+        "Warding Rune of Courage",
+        "Warding Rune of Desperation",
+        "Warding Rune of Disintegration",
+        "Warding Rune of Nourishment",
+        "Warding Rune of Protection",
+        "Warding Rune of Reinforcement"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 1,
+      "sockets": 5,
+      "seed_slot": "P3",
+      "seed_rune": "Power",
+      "rewards": [
+        "Divine Orb",
+        "Divine Orb x2"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 33,
+      "sockets": 5,
+      "seed_slot": "P3",
+      "seed_rune": "Sky",
+      "rewards": [
+        "Masterwork Rune",
+        "Perfect Orb of Augmentation",
+        "Perfect Orb of Transmutation"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 57,
+      "sockets": 5,
+      "seed_slot": "P3",
+      "seed_rune": "Ward",
+      "rewards": [
+        "Bitter Dead",
+        "Bitter Dead (Level 20)",
+        "Grim Pillars",
+        "Grim Pillars (Level 20)",
+        "Powered by Verisium (Level 20)",
+        "Remnants of Kalguur",
+        "Remnants of Kalguur (Level 20)",
+        "Runeforged Blades",
+        "Scouring Flame",
+        "Thaumaturgic Flux (Level 19)",
+        "Verisium Manifestations",
+        "Verisium Manifestations (Level 20)",
+        "Verisium Pile"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 53,
+      "sockets": 5,
+      "seed_slot": "P4",
+      "seed_rune": "Arcane",
+      "rewards": [
+        "Masterwork Rune",
+        "Mystic Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 58,
+      "sockets": 5,
+      "seed_slot": "P4",
+      "seed_rune": "Bloodletting",
+      "rewards": [
+        "Orb of Chance",
+        "Thaumaturgic Flux (Level 19)"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 60,
+      "sockets": 5,
+      "seed_slot": "P4",
+      "seed_rune": "Stone",
+      "rewards": [
+        "Warding Rune of Armature",
+        "Warding Rune of Bodyguards",
+        "Warding Rune of Equinox",
+        "Warding Rune of Hollowing",
+        "Warding Rune of Obsession"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 55,
+      "sockets": 5,
+      "seed_slot": "P5",
+      "seed_rune": "Bond",
+      "rewards": [
+        "Greater Orb of Augmentation x3",
+        "Greater Orb of Transmutation x3",
+        "Prismatic Alloy",
+        "Rare Unique Item"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 56,
+      "sockets": 5,
+      "seed_slot": "P5",
+      "seed_rune": "Tidal",
+      "rewards": [
+        "Random Currency x5",
+        "Uncut Spirit Gem (Level 19)"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 44,
+      "sockets": 6,
+      "seed_slot": "P*",
+      "seed_rune": "Moon",
+      "rewards": [
+        "Greater Regal Orb x3",
+        "Vorana's Saga"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 3,
+      "sockets": 6,
+      "seed_slot": "P1",
+      "seed_rune": "Adaptive",
+      "rewards": [
+        "Chaos Orb",
+        "Chaos Orb x2",
+        "Chaos Orb x3",
+        "Exalted Orb",
+        "Exalted Orb x2",
+        "Exalted Orb x3",
+        "Mystic Alloy",
+        "Orb of Alchemy",
+        "Orb of Alchemy x3",
+        "Perfect Chaos Orb",
+        "Perfect Exalted Orb",
+        "Perfect Orb of Augmentation",
+        "Perfect Orb of Transmutation",
+        "Random Currency x5",
+        "Regal Orb",
+        "Runic Alloy x2",
+        "Sovereign Alloy",
+        "Swift Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 37,
+      "sockets": 6,
+      "seed_slot": "P1",
+      "seed_rune": "Celestial",
+      "rewards": [
+        "Orb of Chance",
+        "Orb of Chance x2",
+        "Rare Unique Item",
+        "Unique Body Armour",
+        "Unique Boots",
+        "Unique Gloves",
+        "Unique Helmet"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 30,
+      "sockets": 6,
+      "seed_slot": "P1",
+      "seed_rune": "Cold",
+      "rewards": [
+        "Armourer's Scrap x2",
+        "Chilling Flux",
+        "Lesser Adept Rune",
+        "Lesser Glacial Rune"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 2,
+      "sockets": 6,
+      "seed_slot": "P1",
+      "seed_rune": "Cyclonic",
+      "rewards": [
+        "Concussive Runes",
+        "Conductive Runes",
+        "Conductive Runes (Level 20)",
+        "Detonate Living",
+        "Detonate Living (Level 20)",
+        "Eternal March",
+        "Eternal March (Level 20)",
+        "Fragments Of The Past",
+        "Fragments Of The Past (Level 20)",
+        "Frostflame Nova",
+        "Frostflame Nova (Level 20)",
+        "Orb of Annulment",
+        "Repulsion",
+        "Repulsion (Level 20)",
+        "Verisium Pile"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 7,
+      "sockets": 6,
+      "seed_slot": "P1",
+      "seed_rune": "Fire",
+      "rewards": [
+        "2x blacksmiths whetstone",
+        "Blazing Flux",
+        "Lesser Desert Rune",
+        "Lesser Robust Rune"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 29,
+      "sockets": 6,
+      "seed_slot": "P1",
+      "seed_rune": "Lightning",
+      "rewards": [
+        "Arcanist's Etcher x2",
+        "Crackling Flux",
+        "Lesser Resolve Rune",
+        "Lesser Storm Rune"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 73,
+      "sockets": 6,
+      "seed_slot": "P1",
+      "seed_rune": "Momentum",
+      "rewards": [
+        "Greater Orb of Augmentation",
+        "Greater Orb of Transmutation",
+        "Thaumaturgic Flux (Level 20)",
+        "Uncut Skill Gem",
+        "Uncut Skill Gem (Level 20)",
+        "Uncut Spirit Gem (Level 20)",
+        "Uncut Support Gem"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 36,
+      "sockets": 6,
+      "seed_slot": "P1",
+      "seed_rune": "Oath",
+      "rewards": [
+        "Greater Chaos Orb",
+        "Greater Chaos Orb x3",
+        "Greater Exalted Orb",
+        "Greater Exalted Orb x3",
+        "Greater Regal Orb",
+        "Greater Regal Orb x3"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 34,
+      "sockets": 6,
+      "seed_slot": "P1",
+      "seed_rune": "Time",
+      "rewards": [
+        "Countess Seske's Rune of Archery",
+        "Farrul's Rune of the Chase",
+        "Hedgewitch Assandra's Rune of Wisdom"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 76,
+      "sockets": 6,
+      "seed_slot": "P1",
+      "seed_rune": "Time",
+      "rewards": [
+        "Farrul's Rune of the Chase"
+      ],
+      "status": "inferred; review"
+    },
+    {
+      "family": 42,
+      "sockets": 6,
+      "seed_slot": "P1",
+      "seed_rune": "Toxic",
+      "rewards": [
+        "Ancient Rune of Decay",
+        "Ancient Rune of Detonation",
+        "Ancient Rune of Discovery",
+        "Ancient Rune of Shattering",
+        "Ancient Rune of the Titan",
+        "Unique Jewellery",
+        "Void Flux"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 27,
+      "sockets": 6,
+      "seed_slot": "P2",
+      "seed_rune": "Rebirth",
+      "rewards": [
+        "Adaptive Alloy",
+        "Cyclonic Alloy",
+        "Expansive Alloy",
+        "Mystic Alloy",
+        "Orb of Alchemy",
+        "Prismatic Alloy",
+        "Protective Alloy",
+        "Runic Alloy x2",
+        "Sovereign Alloy",
+        "Swift Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 38,
+      "sockets": 6,
+      "seed_slot": "P2",
+      "seed_rune": "Sky",
+      "rewards": [
+        "Animus Splinters",
+        "Animus Splinters (Level 20)",
+        "Explosive Transmutation",
+        "Explosive Transmutation (Level 20)",
+        "Fist Of Kalguur",
+        "Hollow Shell",
+        "Hollow Shell (Level 20)",
+        "Rain of Blades",
+        "Rain of Blades (Level 20)",
+        "Runic Extraction",
+        "Runic Infusion",
+        "Saqawal's Rune of Erosion",
+        "Saqawal's Rune of Memory",
+        "Saqawal's Rune of the Sky",
+        "Verisium Pile",
+        "Voltaic Barrier",
+        "Voltaic Barrier (Level 20)",
+        "Wardbound Minions",
+        "Wardbound Minions (Level 20)"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 18,
+      "sockets": 6,
+      "seed_slot": "P2",
+      "seed_rune": "Vision",
+      "rewards": [
+        "Adept Rune",
+        "Artificer's Orb x2",
+        "Artificer's Orb x3",
+        "Greater Adept Rune",
+        "Greater Resolve Rune",
+        "Greater Robust Rune",
+        "Medved's Saga",
+        "Olroth's Saga",
+        "Resolve Rune",
+        "Robust Rune",
+        "Uhtred's Saga",
+        "Vorana's Saga"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 43,
+      "sockets": 6,
+      "seed_slot": "P3",
+      "seed_rune": "Bond",
+      "rewards": [
+        "Greater Exalted Orb x3",
+        "Vorana's Saga"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 45,
+      "sockets": 6,
+      "seed_slot": "P3",
+      "seed_rune": "Death",
+      "rewards": [
+        "Chaos Orb",
+        "Chaos Orb x2",
+        "Chaos Orb x3",
+        "Exalted Orb",
+        "Exalted Orb x2",
+        "Exalted Orb x3",
+        "Mystic Alloy",
+        "Orb of Alchemy",
+        "Orb of Alchemy x3",
+        "Perfect Chaos Orb",
+        "Perfect Exalted Orb",
+        "Perfect Orb of Augmentation",
+        "Perfect Orb of Transmutation",
+        "Random Currency x5",
+        "Regal Orb",
+        "Runic Alloy",
+        "Sovereign Alloy",
+        "Swift Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 1,
+      "sockets": 6,
+      "seed_slot": "P3",
+      "seed_rune": "Power",
+      "rewards": [
+        "Divine Orb",
+        "Divine Orb x2",
+        "Divine Orb x3"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 31,
+      "sockets": 6,
+      "seed_slot": "P3",
+      "seed_rune": "Prismatic",
+      "rewards": [
+        "Artificer's Orb x3",
+        "Blazing Flux",
+        "Chilling Flux",
+        "Crackling Flux",
+        "Orb of Alchemy",
+        "Runic Alloy x2"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 33,
+      "sockets": 6,
+      "seed_slot": "P3",
+      "seed_rune": "Sky",
+      "rewards": [
+        "Countess Seske's Rune of Archery",
+        "Masterwork Rune",
+        "Perfect Orb of Augmentation",
+        "Perfect Orb of Transmutation"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 16,
+      "sockets": 6,
+      "seed_slot": "P4",
+      "seed_rune": "Moon",
+      "rewards": [
+        "Greater Regal Orb x3",
+        "Medved's Saga"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 6,
+      "sockets": 6,
+      "seed_slot": "P4",
+      "seed_rune": "Power",
+      "rewards": [
+        "Perfect Chaos Orb",
+        "Perfect Exalted Orb"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 39,
+      "sockets": 6,
+      "seed_slot": "P4",
+      "seed_rune": "Ward",
+      "rewards": [
+        "Animus Exchange",
+        "Animus Exchange (Level 20)",
+        "Healing Runes",
+        "Leylines",
+        "Leylines (Level 20)",
+        "Refutation",
+        "Refutation (Level 20)",
+        "Runic Reprieve",
+        "Runic Reprieve (Level 20)",
+        "Skyfall",
+        "Skyfall (Level 20)",
+        "Triskelion Cascade",
+        "Triskelion Cascade (Level 20)"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 40,
+      "sockets": 6,
+      "seed_slot": "P5",
+      "seed_rune": "Power",
+      "rewards": [
+        "Sovereign Alloy",
+        "Void Flux"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 35,
+      "sockets": 6,
+      "seed_slot": "P5",
+      "seed_rune": "Sky",
+      "rewards": [
+        "Hedgewitch Assandra's Rune of Wisdom"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 4,
+      "sockets": 6,
+      "seed_slot": "P6",
+      "seed_rune": "Power",
+      "rewards": [
+        "Olroth's Saga"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 41,
+      "sockets": 6,
+      "seed_slot": "P6",
+      "seed_rune": "Time",
+      "rewards": [
+        "Greater Chaos Orb x3",
+        "Uhtred's Saga"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 2,
+      "sockets": 7,
+      "seed_slot": "P1",
+      "seed_rune": "Cyclonic",
+      "rewards": [
+        "Concussive Runes",
+        "Conductive Runes",
+        "Conductive Runes (Level 20)",
+        "Detonate Living",
+        "Detonate Living (Level 20)",
+        "Eternal March",
+        "Eternal March (Level 20)",
+        "Fragments Of The Past",
+        "Fragments Of The Past (Level 20)",
+        "Frostflame Nova",
+        "Frostflame Nova (Level 20)",
+        "Orb of Annulment",
+        "Orb of Annulment x2",
+        "Repulsion",
+        "Repulsion (Level 20)",
+        "Verisium Pile"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 23,
+      "sockets": 7,
+      "seed_slot": "P1",
+      "seed_rune": "Soul",
+      "rewards": [
+        "Betrayal of Aldur",
+        "Breath of Aldur",
+        "Ire of Aldur",
+        "Passion of Aldur"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 19,
+      "sockets": 7,
+      "seed_slot": "P1",
+      "seed_rune": "Wisdom",
+      "rewards": [
+        "Aldur's Saga",
+        "Astrid's Creativity",
+        "Cadigan's Epiphany"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 24,
+      "sockets": 7,
+      "seed_slot": "P2",
+      "seed_rune": "Cold",
+      "rewards": [
+        "Breath of Aldur",
+        "Courtesan Mannan's Rune of Cruelty",
+        "Lady Hestra's Rune of Winter",
+        "Lesser Inspiration Rune",
+        "Lesser Stone Rune",
+        "Orb of Transmutation"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 26,
+      "sockets": 7,
+      "seed_slot": "P2",
+      "seed_rune": "Fire",
+      "rewards": [
+        "Greater Orb of Transmutation x3",
+        "Mind Rune",
+        "Passion of Aldur",
+        "Uncut Skill Gem",
+        "Uncut Skill Gem (Level 19)",
+        "Ward Rune"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 25,
+      "sockets": 7,
+      "seed_slot": "P2",
+      "seed_rune": "Lightning",
+      "rewards": [
+        "Ire of Aldur"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 27,
+      "sockets": 7,
+      "seed_slot": "P2",
+      "seed_rune": "Rebirth",
+      "rewards": [
+        "Adaptive Alloy",
+        "Celestial Alloy",
+        "Cyclonic Alloy",
+        "Expansive Alloy",
+        "Mystic Alloy",
+        "Orb of Alchemy",
+        "Prismatic Alloy",
+        "Protective Alloy",
+        "Runic Alloy x2",
+        "Sovereign Alloy",
+        "Swift Alloy",
+        "The Runebinder's Alloy",
+        "The Runefather's Alloy",
+        "Transcendent Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 22,
+      "sockets": 7,
+      "seed_slot": "P2",
+      "seed_rune": "Toxic",
+      "rewards": [
+        "Betrayal of Aldur",
+        "Fenumus' Rune of Agony",
+        "Fenumus' Rune of Draining",
+        "Fenumus' Rune of Spinning"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 18,
+      "sockets": 7,
+      "seed_slot": "P2",
+      "seed_rune": "Vision",
+      "rewards": [
+        "Adept Rune",
+        "Aldur's Saga",
+        "Artificer's Orb x2",
+        "Artificer's Orb x3",
+        "Greater Adept Rune",
+        "Greater Resolve Rune",
+        "Greater Robust Rune",
+        "Medved's Saga",
+        "Olroth's Saga",
+        "Resolve Rune",
+        "Robust Rune",
+        "Uhtred's Saga",
+        "Vorana's Saga"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 28,
+      "sockets": 7,
+      "seed_slot": "P3",
+      "seed_rune": "Momentum",
+      "rewards": [
+        "Transcendent Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 20,
+      "sockets": 7,
+      "seed_slot": "P4",
+      "seed_rune": "Adaptive",
+      "rewards": [
+        "Astrid's Creativity",
+        "Celestial Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 21,
+      "sockets": 7,
+      "seed_slot": "P6",
+      "seed_rune": "Soul",
+      "rewards": [
+        "Cadigan's Epiphany",
+        "Celestial Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 9,
+      "sockets": 7,
+      "seed_slot": "P7",
+      "seed_rune": "Bloodletting",
+      "rewards": [
+        "The Runebinder's Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 14,
+      "sockets": 7,
+      "seed_slot": "P7",
+      "seed_rune": "Moon",
+      "rewards": [
+        "The Runefather's Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 3,
+      "sockets": 8,
+      "seed_slot": "P1",
+      "seed_rune": "Adaptive",
+      "rewards": [
+        "Chaos Orb",
+        "Chaos Orb x2",
+        "Chaos Orb x3",
+        "Exalted Orb",
+        "Exalted Orb x2",
+        "Exalted Orb x3",
+        "Mystic Alloy",
+        "Orb of Alchemy",
+        "Orb of Alchemy x3",
+        "Perfect Chaos Orb",
+        "Perfect Exalted Orb",
+        "Perfect Orb of Augmentation",
+        "Perfect Orb of Augmentation x3",
+        "Perfect Orb of Transmutation",
+        "Perfect Orb of Transmutation x3",
+        "Random Currency x5",
+        "Regal Orb",
+        "Runic Alloy x2",
+        "Sovereign Alloy",
+        "Swift Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 17,
+      "sockets": 8,
+      "seed_slot": "P2",
+      "seed_rune": "Bond",
+      "rewards": [
+        "Katla's Gloom",
+        "Kolr's Hunt",
+        "Medved's Tending",
+        "Thane Girt's Rune of Wildness",
+        "Thane Grannell's Rune of Mastery",
+        "Thane Leld's Rune of Spring",
+        "Thane Myrk's Rune of Summer",
+        "Thrud's Might",
+        "Uhtred's Sidereus",
+        "Vorana's Carnage"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 11,
+      "sockets": 8,
+      "seed_slot": "P4",
+      "seed_rune": "Fire",
+      "rewards": [
+        "Perfect Orb of Augmentation x3",
+        "Vorana's Carnage"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 16,
+      "sockets": 8,
+      "seed_slot": "P4",
+      "seed_rune": "Moon",
+      "rewards": [
+        "Greater Regal Orb x3",
+        "Medved's Saga",
+        "Perfect Regal Orb x3",
+        "Serle's Triumph"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 12,
+      "sockets": 8,
+      "seed_slot": "P4",
+      "seed_rune": "Tempest",
+      "rewards": [
+        "Kolr's Hunt",
+        "Perfect Orb of Transmutation x3"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 13,
+      "sockets": 8,
+      "seed_slot": "P6",
+      "seed_rune": "Life",
+      "rewards": [
+        "Medved's Tending",
+        "Perfect Orb of Transmutation x3"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 8,
+      "sockets": 8,
+      "seed_slot": "P6",
+      "seed_rune": "Vision",
+      "rewards": [
+        "Katla's Gloom",
+        "Perfect Orb of Augmentation x3"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 9,
+      "sockets": 8,
+      "seed_slot": "P7",
+      "seed_rune": "Bloodletting",
+      "rewards": [
+        "Perfect Orb of Augmentation x3",
+        "The Runebinder's Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 14,
+      "sockets": 8,
+      "seed_slot": "P7",
+      "seed_rune": "Moon",
+      "rewards": [
+        "Perfect Orb of Transmutation x3",
+        "The Runefather's Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 15,
+      "sockets": 8,
+      "seed_slot": "P8",
+      "seed_rune": "Cold",
+      "rewards": [
+        "Perfect Orb of Transmutation x3",
+        "Uhtred's Sidereus"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 50,
+      "sockets": 8,
+      "seed_slot": "P8",
+      "seed_rune": "Power",
+      "rewards": [
+        "Perfect Regal Orb x3"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 10,
+      "sockets": 8,
+      "seed_slot": "P8",
+      "seed_rune": "Rebirth",
+      "rewards": [
+        "Perfect Orb of Augmentation x3",
+        "Thrud's Might"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 3,
+      "sockets": 9,
+      "seed_slot": "P1",
+      "seed_rune": "Adaptive",
+      "rewards": [
+        "Chaos Orb",
+        "Chaos Orb x2",
+        "Chaos Orb x3",
+        "Exalted Orb",
+        "Exalted Orb x2",
+        "Exalted Orb x3",
+        "Mystic Alloy",
+        "Orb of Alchemy",
+        "Orb of Alchemy x3",
+        "Perfect Chaos Orb",
+        "Perfect Chaos Orb x3",
+        "Perfect Exalted Orb",
+        "Perfect Exalted Orb x3",
+        "Perfect Orb of Augmentation",
+        "Perfect Orb of Augmentation x3",
+        "Perfect Orb of Transmutation",
+        "Perfect Orb of Transmutation x3",
+        "Random Currency x5",
+        "Regal Orb",
+        "Runic Alloy x2",
+        "Sovereign Alloy",
+        "Swift Alloy"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 37,
+      "sockets": 9,
+      "seed_slot": "P1",
+      "seed_rune": "Celestial",
+      "rewards": [
+        "Orb of Chance",
+        "Orb of Chance x2",
+        "Orb of Chance x3",
+        "Rare Unique Item",
+        "Unique Body Armour",
+        "Unique Boots",
+        "Unique Gloves",
+        "Unique Helmet",
+        "Very Rare Unique Item"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 2,
+      "sockets": 9,
+      "seed_slot": "P1",
+      "seed_rune": "Cyclonic",
+      "rewards": [
+        "Concussive Runes",
+        "Conductive Runes",
+        "Conductive Runes (Level 20)",
+        "Detonate Living",
+        "Detonate Living (Level 20)",
+        "Eternal March",
+        "Eternal March (Level 20)",
+        "Fragments Of The Past",
+        "Fragments Of The Past (Level 20)",
+        "Frostflame Nova",
+        "Frostflame Nova (Level 20)",
+        "Orb of Annulment",
+        "Orb of Annulment x2",
+        "Orb of Annulment x3",
+        "Repulsion",
+        "Repulsion (Level 20)",
+        "Verisium Pile"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 75,
+      "sockets": 9,
+      "seed_slot": "P1",
+      "seed_rune": "Opulent",
+      "rewards": [
+        "Hinekora's Lock"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 74,
+      "sockets": 9,
+      "seed_slot": "P1",
+      "seed_rune": "Power",
+      "rewards": [
+        "Mirror of Kalandra"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 1,
+      "sockets": 9,
+      "seed_slot": "P3",
+      "seed_rune": "Power",
+      "rewards": [
+        "Divine Orb",
+        "Divine Orb x10",
+        "Divine Orb x2",
+        "Divine Orb x3"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 6,
+      "sockets": 9,
+      "seed_slot": "P4",
+      "seed_rune": "Power",
+      "rewards": [
+        "Perfect Chaos Orb",
+        "Perfect Exalted Orb",
+        "Very Rare Unique Item"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 4,
+      "sockets": 9,
+      "seed_slot": "P6",
+      "seed_rune": "Power",
+      "rewards": [
+        "Olroth's Saga",
+        "Perfect Chaos Orb x3"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 5,
+      "sockets": 9,
+      "seed_slot": "P7",
+      "seed_rune": "Power",
+      "rewards": [
+        "Perfect Exalted Orb x3"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 48,
+      "sockets": 9,
+      "seed_slot": "P9",
+      "seed_rune": "Power",
+      "rewards": [
+        "Orb of Annulment x3"
+      ],
+      "status": "calculator"
+    },
+    {
+      "family": 1,
+      "sockets": 10,
+      "seed_slot": "P3",
+      "seed_rune": "Power",
+      "rewards": [
+        "Aldur's Legacy",
+        "Divine Orb",
+        "Divine Orb x10",
+        "Divine Orb x2",
+        "Divine Orb x3",
+        "Medved's Boon",
+        "Olroth's Boon",
+        "Uhtred's Boon",
+        "Vorana's Boon"
+      ],
+      "status": "calculator"
+    }
+  ],
+  "missing_families": [
+    54
+  ],
+  "duplicate_keys": [],
+  "calculator_family_count": 74
+}
