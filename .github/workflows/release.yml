@@ -57,18 +57,9 @@ jobs:
             Split-Path $path | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
           }
       - name: Build and verify installer
-        shell: cmd
-        run: Build.bat
-      - name: Check packaged application startup and recognition
-        shell: pwsh
-        run: |
-          $env:QT_QPA_PLATFORM = 'windows'
-          $process = Start-Process -FilePath 'dist/PoE2-Data-Logger/PoE2-Data-Logger.exe' -ArgumentList '--smoke-test' -PassThru
-          if (-not $process.WaitForExit(60000)) {
-            $process.Kill()
-            throw 'Packaged application startup timed out.'
-          }
-          if ($process.ExitCode -ne 0) { throw "Packaged application check failed: $($process.ExitCode)" }
+        run: python tools/run_build.py
+      - name: Check installer, update and saved-file retention
+        run: python tools/verify_installer.py $env:INSTALLER
       - name: Create checksum
         shell: pwsh
         run: |

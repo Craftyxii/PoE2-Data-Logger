@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 import csv
 import hashlib
 import io
@@ -122,7 +123,7 @@ class WorkflowTests(unittest.TestCase):
         old_context = logger.scan_context()
         backup = Path(self.tmp.name) / "backup.sqlite3"
         backup.write_bytes(logger.backup_bytes())
-        with sqlite3.connect(backup) as db:
+        with closing(sqlite3.connect(backup)) as db:
             self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
             self.assertEqual(db.execute("SELECT COUNT(*) FROM commits").fetchone()[0], 1)
         before = logger.currency_names()

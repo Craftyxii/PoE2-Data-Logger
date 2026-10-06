@@ -3914,7 +3914,7 @@ def main(smoke_test=False):
         if "lock" in locals() and lock:
             lock.unlock()
         if smoke_test:
-            return 1
+            raise
         QMessageBox.critical(None, "PoE2 Data Logger could not start",
                              f"{error}\n\nData folder: {store.DATA_DIR}")
         return 1

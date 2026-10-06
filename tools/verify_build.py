@@ -72,11 +72,11 @@ def verify(executable, check_files=True):
             required[-1] = runtime / 'PySide6/Qt/plugins/platforms/qwindows.dll'
         for path in required:
             if not path.is_file() or path.stat().st_size == 0:
-                raise ValueError(f'Missing runtime file: {path.relative_to(executable.parent)}')
+                raise ValueError(f'Missing runtime file: {path.relative_to(executable.parent).as_posix()}')
         for path in runtime.rglob('*'):
             if path.suffix.casefold() in ('.exe', '.dll', '.pyd') and path.is_file():
                 if pe_machine(path) != 0x8664:
-                    raise ValueError(f'Incompatible Windows binary: {path.relative_to(runtime)}')
+                    raise ValueError(f'Incompatible Windows binary: {path.relative_to(runtime).as_posix()}')
                 native_files += 1
     return {'options': options, 'python_version': version,
             'python_library': '_internal/' + library,
