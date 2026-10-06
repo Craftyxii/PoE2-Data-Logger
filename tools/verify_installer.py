@@ -59,7 +59,7 @@ def launch(executable, arguments, timeout=120, env=None):
 
 
 def verify(installer):
-    match = re.fullmatch(r"PoE2-Data-Logger-Setup-v([0-9]+\.[0-9]+)(-beta)?\.exe", installer.name)
+    match = re.fullmatch(r"PoE2-Data-Logger-Setup-v([0-9]+\.[0-9]+(?:\.[0-9]+)?)(-beta)?\.exe", installer.name)
     if not match:
         raise RuntimeError("Installer filename does not contain a valid release version.")
     version, beta = match.group(1), bool(match.group(2))

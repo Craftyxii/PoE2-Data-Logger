@@ -159,8 +159,9 @@ class ScanRegionsPage(QWidget):
         self.region_tabs.setStyleSheet("QTabBar::tab { background:#1C1C1E; color:#BCB7AE; padding:10px; border-bottom:2px solid #3D352C; }"
                                      "QTabBar::tab:selected { color:#FBE3B2; border-bottom:2px solid #E5AA32; }")
         self.keys = list(REGIONS)
-        for key, title in zip(self.keys, ("Opened remnant", "Visible seeds", "Waystone", "Tablet", "Currency / items", "Ritual")):
-            self.region_tabs.addTab(title)
+        for key, (title, _, _, _) in REGIONS.items():
+            index = self.region_tabs.addTab(title)
+            self.region_tabs.setTabData(index, key)
         layout.addWidget(self.region_tabs)
         toolbar = QHBoxLayout()
         live = QPushButton("Select region in game")
@@ -208,7 +209,9 @@ class ScanRegionsPage(QWidget):
             self.region_tabs.setCurrentIndex(self.keys.index(key))
 
     def _select(self):
-        key = self.keys[self.region_tabs.currentIndex()]
+        key = self.region_tabs.tabData(self.region_tabs.currentIndex())
+        if key not in REGIONS:
+            return
         self.canvas.active = key
         group = REGIONS[key][1]
         path = self.custom / (group + ".jpg")

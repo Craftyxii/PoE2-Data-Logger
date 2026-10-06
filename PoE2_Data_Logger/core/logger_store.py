@@ -111,6 +111,16 @@ def _set_meta(db, key, value):
                (key, _dump(value)))
 
 
+def _waystone_settings(config):
+    settings = {}
+    for key, default in WAYSTONE_DEFAULTS.items():
+        value = config.get(key, default)
+        if value is None and default is not None:
+            value = default
+        settings[key] = list(value) if isinstance(value, list) else value
+    return settings
+
+
 def initialize():
     global _READY
     if _READY:
@@ -343,7 +353,10 @@ def initialize():
                                ((name,) for name in OMEN_NAMES))
                 _set_meta(db, "ritual_names_initialized", True)
             config = _meta(db, "settings")
-            if any(key not in config for key in ("deli", "wisp")):
+            waystone = _waystone_settings(config)
+            if (any(key not in config for key in ("deli", "wisp")) or
+                    any(key not in config or config[key] != value for key, value in waystone.items())):
+                config.update(waystone)
                 config.setdefault("deli", False)
                 config.setdefault("wisp", False)
                 _set_meta(db, "settings", config)
@@ -1309,9 +1322,9 @@ def start_map():
         mid = _map_id(number)
         config = _meta(db, "settings")
         _set_meta(db, "previous_expedition", config["expedition"])
-        _set_meta(db, "previous_waystone_settings", {key: config.get(key) for key in WAYSTONE_DEFAULTS})
+        _set_meta(db, "previous_waystone_settings", _waystone_settings(config))
         if current:
-            config.update(WAYSTONE_DEFAULTS)
+            config.update(_waystone_settings({}))
         config["expedition"] = 1
         db.execute("INSERT INTO maps VALUES(?,?,?,?)",
                    (mid, _dump(_snapshot(config)), _dump([None, None, None]), _now()))
@@ -1348,7 +1361,7 @@ def undo_empty_map():
             config["expedition"] = _meta(db, "previous_expedition", 1) if number > 1 else 1
             previous = _meta(db, "previous_waystone_settings")
             if number > 1 and previous:
-                config.update(previous)
+                config.update(_waystone_settings(previous))
             _set_meta(db, "settings", config)
     return get_state()
 

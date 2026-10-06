@@ -32,7 +32,7 @@ from PoE2_Data_Logger.core.workbook_export import export_xlsx
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 33.34 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 33.34.1 Beta"
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
                             if getattr(sys, "frozen", False) else
@@ -776,6 +776,31 @@ class LoggerWindow(QMainWindow):
         self.approve_scan_button.setVisible(kind is not None)
         self.reject_scan_button.setVisible(kind is not None)
         self.review_clear_tablets_button.setVisible(kind == "tablet")
+        if not hasattr(self, "ritual_table"):
+            return
+        for review_kind, table, actions in (
+                ("currency", self.inventory_table, (self.inventory_add_row_button,)),
+                ("ritual", self.ritual_table, (self.ritual_add_row_button, self.ritual_remove_row_button))):
+            editable = kind == review_kind and self.approve_scan_button.isEnabled()
+            table.setEditTriggers(
+                QTableWidget.EditTrigger.DoubleClicked | QTableWidget.EditTrigger.AnyKeyPressed
+                if editable else QTableWidget.EditTrigger.NoEditTriggers)
+            for action in actions:
+                action.setEnabled(editable)
+            for row in range(table.rowCount()):
+                if review_kind == "currency":
+                    controls = table.cellWidget(row, 3)
+                    if controls:
+                        controls.setEnabled(editable)
+                else:
+                    deferred = table.item(row, 5)
+                    if deferred:
+                        flags = deferred.flags()
+                        deferred.setFlags(flags | Qt.ItemFlag.ItemIsUserCheckable if editable else
+                                          flags & ~Qt.ItemFlag.ItemIsUserCheckable)
+        ritual_editable = kind == "ritual" and self.approve_scan_button.isEnabled()
+        self.ritual_tribute.setReadOnly(not ritual_editable)
+        self.ritual_rerolls.setReadOnly(not ritual_editable)
 
     def _review_saved(self, kind, number):
         if self.pending_review_kind != kind:
@@ -1393,7 +1418,9 @@ class LoggerWindow(QMainWindow):
         phase = QHBoxLayout()
         phase.addWidget(QLabel("Snapshot"))
         phase.addWidget(self.inventory_phase)
-        phase.addWidget(button("Add review row", self.add_inventory_row))
+        self.inventory_add_row_button = button("Add review row", self.add_inventory_row)
+        self.inventory_add_row_button.setEnabled(False)
+        phase.addWidget(self.inventory_add_row_button)
         phase.addStretch()
         review.addLayout(phase)
         self.inventory_table = QTableWidget(0, 4)
@@ -1403,6 +1430,7 @@ class LoggerWindow(QMainWindow):
         self.inventory_table.setColumnWidth(2, 75)
         self.inventory_table.setColumnWidth(3, 205)
         self.inventory_table.itemChanged.connect(self._inventory_row_changed)
+        self.inventory_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.inventory_table.setMinimumHeight(360)
         review.addWidget(self.inventory_table)
         self.inventory_table.hide()
@@ -1446,6 +1474,8 @@ class LoggerWindow(QMainWindow):
         totals = QHBoxLayout()
         self.ritual_tribute = line("Available Tribute")
         self.ritual_rerolls = line("Rerolls remaining")
+        self.ritual_tribute.setReadOnly(True)
+        self.ritual_rerolls.setReadOnly(True)
         totals.addWidget(QLabel("Available Tribute"))
         totals.addWidget(self.ritual_tribute)
         totals.addWidget(QLabel("Rerolls remaining"))
@@ -1460,11 +1490,16 @@ class LoggerWindow(QMainWindow):
         self.ritual_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.ritual_table.verticalHeader().setDefaultSectionSize(38)
         self.ritual_table.setMinimumHeight(300)
+        self.ritual_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         review.addWidget(self.ritual_table)
         self.ritual_table.hide()
         actions = QHBoxLayout()
-        actions.addWidget(button("Add reward row", self.add_ritual_row))
-        actions.addWidget(button("Remove selected row", self.remove_ritual_row))
+        self.ritual_add_row_button = button("Add reward row", self.add_ritual_row)
+        self.ritual_remove_row_button = button("Remove selected row", self.remove_ritual_row)
+        self.ritual_add_row_button.setEnabled(False)
+        self.ritual_remove_row_button.setEnabled(False)
+        actions.addWidget(self.ritual_add_row_button)
+        actions.addWidget(self.ritual_remove_row_button)
         actions.addStretch()
         review.addLayout(actions)
         review.addWidget(QLabel("Type is Omen or Item. Correct quantity and Tribute if visible; "
@@ -2114,8 +2149,10 @@ class LoggerWindow(QMainWindow):
         return (context["_scan_generation"], context["_capture_map_id"], context["_capture_expedition"])
 
     def _chain_fields_changed(self):
-        for field in self.rune_inputs:
-            if not value(field):
+        # A correction can briefly empty one rune of a scanned pair. Keep its
+        # part and recipe until the whole draft is cleared or a scan replaces it.
+        if not any(value(field) for field in self.rune_inputs):
+            for field in self.rune_inputs:
                 field.setProperty("chainPart", None)
                 field.setProperty("chainRecipe", None)
         if self._chain_context is not None:
@@ -4264,7 +4301,9 @@ def instance_lock():
         user32.FindWindowW.restype = wintypes.HWND
         user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
         user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
-        window = user32.FindWindowW(None, WINDOW_TITLE) or user32.FindWindowW(None, "PoE2 Data Logger")
+        window = (user32.FindWindowW(None, WINDOW_TITLE)
+                  or user32.FindWindowW(None, "PoE2 Data Logger 33.34 Beta")
+                  or user32.FindWindowW(None, "PoE2 Data Logger"))
         if window:
             user32.ShowWindow(window, 9)
             user32.SetForegroundWindow(window)

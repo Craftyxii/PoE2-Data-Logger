@@ -33,7 +33,7 @@ jobs:
       - name: Check release version
         shell: pwsh
         run: |
-          $match = Select-String -Path packaging/installer.nsi -Pattern '^!define APP_VERSION "([0-9]+\.[0-9]+)"$'
+          $match = Select-String -Path packaging/installer.nsi -Pattern '^!define APP_VERSION "([0-9]+\.[0-9]+(?:\.[0-9]+)?)"$'
           if (-not $match) { throw 'Installer version is missing.' }
           $version = $match.Matches[0].Groups[1].Value
           $channel = Select-String -Path packaging/installer.nsi -Pattern '^!define APP_CHANNEL "(beta)"$'

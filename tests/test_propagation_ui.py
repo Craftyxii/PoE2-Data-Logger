@@ -1,3 +1,4 @@
+import csv
 import io
 import os
 from pathlib import Path
@@ -8,6 +9,8 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from PoE2_Data_Logger.core import logger_store as logger, service, store
@@ -82,6 +85,54 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E03")
         self.assertEqual(self.window.header_expedition.currentData(), 3)
         self.assertEqual(self.window.expedition.currentData(), 3)
+
+    def test_keyboard_correction_preserves_pair_in_review_and_export(self):
+        self.scan(["Death", "Power"], "Divine Orb x2")
+        self.scan(["Opulent"], "Greater Regal Orb x3")
+        field = self.window.rune_inputs[1]
+        QTest.keyClick(field, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        QTest.keyClick(field, Qt.Key.Key_Backspace)
+        self.assertEqual(field.text(), "")
+        with self.assertRaisesRegex(ValueError, "Fill runes in order"):
+            self.window.commit_chain()
+        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+        QTest.keyClicks(field, "Time")
+        self.assertEqual(self.draft(), [("1", "Death"), ("1", "Time"), ("2", "Opulent")])
+        self.assertEqual(self.window.chain_review_table.item(1, 2).text(), "Divine Orb x2")
+        self.window.review_commit_chain_button.click()
+        rows = list(csv.reader(io.StringIO(logger.export_csv().decode("utf-8-sig"))))
+        self.assertEqual([(row[26], row[27], row[32]) for row in rows[1:]],
+                         [("Death", "Time", "M0001-E01"), ("Opulent", "", "M0001-E01")])
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+
+    def test_empty_paired_correction_survives_expedition_switch(self):
+        self.scan(["Death", "Power"], "Divine Orb x2")
+        self.window.rune_inputs[1].clear()
+        self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
+        self.assertEqual(self.draft(), [])
+        self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(1))
+        QTest.keyClicks(self.window.rune_inputs[1], "Time")
+        self.assertEqual(self.draft(), [("1", "Death"), ("1", "Time")])
+        self.assertEqual(self.window.chain_review_table.item(1, 2).text(), "Divine Orb x2")
+
+    def test_clearing_all_runes_discards_old_scan_grouping(self):
+        self.scan(["Death", "Power"], "Divine Orb x2")
+        for field in self.window.rune_inputs:
+            field.clear()
+        self.window.rune_inputs[0].setText("Death")
+        self.window.rune_inputs[1].setText("Time")
+        self.assertEqual(self.draft(), [("1", "Death"), ("2", "Time")])
+        self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "")
+        self.assertEqual(self.window.chain_review_table.item(1, 2).text(), "")
+
+    def test_new_scan_replaces_cleared_trailing_pair_member(self):
+        self.scan(["Death", "Power"], "Divine Orb x2")
+        self.window.rune_inputs[1].clear()
+        self.scan(["Opulent"], "Greater Regal Orb x3")
+        self.assertEqual(self.draft(), [("1", "Death"), ("2", "Opulent")])
+        self.assertEqual(self.window.chain_review_table.item(1, 2).text(), "Greater Regal Orb x3")
+        self.assertEqual(self.window._chain_steps(), [
+            {"rune1": "Death", "rune2": ""}, {"rune1": "Opulent", "rune2": ""}])
 
     def test_switching_expedition_preserves_separate_drafts(self):
         self.scan(["Rage", "Time"])
