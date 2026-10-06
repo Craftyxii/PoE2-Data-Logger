@@ -2076,6 +2076,7 @@ class LoggerWindow(QMainWindow):
     def _reveal_review_overlay(self, token):
         if (self._overlay_enabled and not self._closed and not self._editing_regions and
                 not self._region_selection_pending and self.tabs.currentIndex() == 0 and
+                all(reading is None for reading in (self._inventory_reading, self._ritual_reading, self._remnant_reading)) and
                 token == self._overlay_review_token and self.pending_review_kind):
             self.show_overlay(automatic=True)
 

@@ -266,6 +266,33 @@ class ScanContextTests(unittest.TestCase):
         self.assertIsNone(self.window._ritual_hash)
         self.assertIsNone(self.window._inventory_capture_context)
 
+    def test_clear_auto_scan_does_not_open_overlay_while_reading(self):
+        logger.save_settings({"ocr_auto_commit": True})
+        self.window.refresh()
+        self.window._overlay_enabled = True
+        with patch.object(self.window, "show_overlay") as show:
+            callback = self.capture_inventory(live=True)
+            self.app.processEvents()
+            show.assert_not_called()
+            callback(self.inventory_result())
+            self.app.processEvents()
+            show.assert_not_called()
+        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
+
+    def test_uncertain_scan_still_opens_review_overlay(self):
+        logger.save_settings({"ocr_auto_commit": True})
+        self.window.refresh()
+        self.window._overlay_enabled = True
+        with patch.object(self.window, "show_overlay") as show:
+            callback = self.capture_inventory(live=True)
+            self.app.processEvents()
+            result = self.inventory_result()
+            result["items"][0]["count_needs_review"] = True
+            callback(result)
+            self.app.processEvents()
+            show.assert_called_once_with(automatic=True)
+        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+
     def test_hotkey_delivery_keeps_original_inventory_phase(self):
         from PoE2_Data_Logger.core import service
         buffer = __import__("io").BytesIO()
