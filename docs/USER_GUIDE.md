@@ -10,7 +10,7 @@ Remnant modes are **Visible seed only**, **Opened remnant only**, and **Both**. 
 
 Auto-commit saves clear readings. Uncertain text, ambiguous matches and unknown items remain in **Review**. Correct a reading and choose **Approve** to save it or **Reject** to skip it. Waystone and tablet approvals update the configuration; other activities save their records to the log.
 
-The optional **HUD overlay** shows held reviews over a borderless or windowed game. Its opacity is adjustable. **Show / hide HUD** has its own shortcut, initially **Ctrl+Shift+H**; that shortcut remains available outside the game. Exclusive fullscreen behavior has not been verified.
+The optional **HUD overlay** shows held reviews over a borderless or windowed game. Its opacity is adjustable. **Show / hide HUD** has its own shortcut, initially **Ctrl+Shift+H**; that shortcut remains available outside the game.
 
 ## Records and export
 

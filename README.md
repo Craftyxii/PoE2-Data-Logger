@@ -12,7 +12,7 @@ See the [user guide](docs/USER_GUIDE.md) for map setup, hotkeys, scans, reviews 
 
 | Location | Contents |
 | --- | --- |
-| [PoE2_Data_Logger/](PoE2_Data_Logger/) | Current application code and required resources |
+| [PoE2_Data_Logger/](PoE2_Data_Logger/) | Application code and resources |
 | [packaging/sources.py](packaging/sources.py) | Source and resource groups used by the build |
 | [SOURCES.md](SOURCES.md) | Code index, grouped by what each file does |
 | [DEPENDENCIES.md](DEPENDENCIES.md) | Runtime libraries, build tools and bundled third-party components |
@@ -20,9 +20,7 @@ See the [user guide](docs/USER_GUIDE.md) for map setup, hotkeys, scans, reviews 
 | [requirements-build.txt](requirements-build.txt) | Build dependency declarations |
 | [packaging/](packaging/) | PyInstaller and NSIS packaging |
 | [tools/](tools/) | Build verification |
-| [docs/](docs/) | Current user documentation |
-
-This source contains the current v33 application. Historical tests, test logs, generated databases, build output and the unused full-size icon are excluded.
+| [docs/](docs/) | User guide |
 
 ## Run from source
 

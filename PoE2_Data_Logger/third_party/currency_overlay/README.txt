@@ -31,7 +31,6 @@ native weighted squared-difference kernel replaces only the inner pixel
 loops.
 The logger aligns framed captures to their repeated 12x5 inventory grid and
 normalizes nearly black background pixels to the upstream navy reference.
-The same normalization is used in the native and original-JS parity checks.
 Empty/dim slot motifs are excluded. When the inventory catalog is present,
 an uncertain match stays in review unless the independent price-dialog
 reader clearly agrees with its best inventory family. Stack counts use the upstream desaturated-value

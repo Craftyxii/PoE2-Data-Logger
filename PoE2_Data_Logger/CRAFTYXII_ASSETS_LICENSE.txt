@@ -26,11 +26,11 @@ Attribution alone does not grant permission. Keep this notice with authorized di
 
 4. Software and databases
 
-This notice makes no CraftyXII copyright claim over the software, purely AI-generated material, game-derived databases, remnant families, recipes, rune information, socket information or other in-game facts.
+This notice claims rights only in the branding described above. It makes no CraftyXII copyright claim over the software, game-derived databases, remnant families, recipes, rune information, socket information or other in-game facts.
 
 It places no restriction on independently collecting, recreating or using that factual information.
 
-Existing rights in human-authored third-party code and materials remain unaffected. GPL-covered software remains governed by GNU GPLv3. This notice imposes no additional restriction on rights granted by that license.
+Existing rights in third-party code and materials remain unaffected. GPL-covered software remains governed by GNU GPLv3. This notice imposes no additional restriction on rights granted by that license.
 
 5. Other rights
 

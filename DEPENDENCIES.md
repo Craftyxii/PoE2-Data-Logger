@@ -1,6 +1,6 @@
 # Libraries and bundled components
 
-These are the dependency declarations for the current v33 source. Exact versions and version ranges below come from [requirements.txt](requirements.txt) and [requirements-build.txt](requirements-build.txt).
+Runtime dependencies are declared in [requirements.txt](requirements.txt); build dependencies are in [requirements-build.txt](requirements-build.txt).
 
 ## Runtime libraries
 
@@ -37,4 +37,4 @@ The application also uses Python 3.12's standard library, including SQLite, CSV,
 | Currency overlay / Exiled Exchange 2 | Currency and inventory readers, icon matching and reference data | [README](PoE2_Data_Logger/third_party/currency_overlay/README.txt), [currency-overlay license](PoE2_Data_Logger/third_party/currency_overlay/LICENSE), [Exiled Exchange 2 license](PoE2_Data_Logger/third_party/currency_overlay/EXILED-EXCHANGE-2-LICENSE.txt) |
 | DejaVu fonts | Regular and bold fonts used by the app | [Font license](PoE2_Data_Logger/fonts/LICENSE.txt) |
 
-Library dependency declarations above are separate from these bundled files. Source revision details are recorded in each component's README.
+Each component's README records its source revision.

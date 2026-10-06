@@ -1,4 +1,4 @@
-"""Current v33 source and resource groups, used by the PyInstaller build."""
+"""Source and resource groups for PyInstaller."""
 
 CORE_SOURCES = (
     "logger_store.py",

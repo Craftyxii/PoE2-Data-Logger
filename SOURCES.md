@@ -1,6 +1,6 @@
-# Current source files
+# Source files
 
-The application code below is included in the current v33 runtime. [packaging/sources.py](packaging/sources.py) declares the source and resource groups used by [the PyInstaller specification](packaging/PoE2-Data-Logger.spec).
+[packaging/sources.py](packaging/sources.py) groups the application modules and resources used by [the PyInstaller specification](packaging/PoE2-Data-Logger.spec).
 
 ## Logging, records and exports
 
@@ -54,7 +54,7 @@ The application code below is included in the current v33 runtime. [packaging/so
 
 - [Build.bat](Build.bat) builds and verifies the Windows installer.
 - [Start.bat](Start.bat) runs the desktop app from source.
-- [packaging/sources.py](packaging/sources.py) groups the current build inputs.
+- [packaging/sources.py](packaging/sources.py) groups the build inputs.
 - [packaging/PoE2-Data-Logger.spec](packaging/PoE2-Data-Logger.spec) packages the app and libraries.
 - [packaging/installer.nsi](packaging/installer.nsi) defines the Windows installer.
 - [tools/verify_build.py](tools/verify_build.py) checks the packaged Windows runtime.
