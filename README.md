@@ -1,6 +1,14 @@
 # PoE2 Data Logger
 
-PoE2 Data Logger records Expedition remnants and rune chains, map and tablet modifiers, monster counts, inventory currency and items, and Ritual rewards. Everything is saved on your computer, with Excel and CSV exports for analysis.
+PoE2 Data Logger is a Windows desktop app for recording Expedition remnant recipe groups and rune propagation chains, map and tablet modifiers, monster kill counts, inventory currency and items, and Ritual rewards. It uses local OCR for supported scans, alongside manual controls for map settings, kill counts and chain runes.
+
+It combines your selected tablets, Atlas Master, waystone affixes, area level, biome and city type with your logged Ritual rewards, currency found and other results. Every map receives a unique **Map ID**, and all its records stay linked to that ID. Export the log to an **Excel or CSV spreadsheet** for analysis.
+
+Every remnant receives its own unique **Remnant ID**. On City maps, each expedition and its rune propagation chain are linked to the map through a unique **Expedition ID**. Chain steps retain their order, and each saved chain has a unique **Scan Commit number**.
+
+Currency tracking keeps one current starting inventory and one current ending inventory per map. Repeated scans replace the corresponding totals instead of adding them again. Exports include **before and after counts and net changes**.
+
+Scans and records are processed and stored locally. **The app does not upload your data**; you choose whether to export and share it.
 
 ## Download
 
