@@ -3,7 +3,7 @@ name: Windows installer
 on:
   push:
     branches:
-      - 'fix/v33.1'
+      - 'fix/v33.2'
     tags:
       - 'v[0-9]*'
   workflow_dispatch:
@@ -40,7 +40,10 @@ jobs:
           }
           "INSTALLER=PoE2-Data-Logger-Setup-v$version.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Install dependencies
-        run: python -m pip install -r requirements-build.txt
+        run: |
+          python -m pip install --upgrade "pip>=26.2"
+          if ($LASTEXITCODE -ne 0) { throw 'Build tool update failed.' }
+          python -m pip install -r requirements-build.txt
       - name: Run regression tests
         run: python tools/run_tests.py
       - name: Prepare NSIS

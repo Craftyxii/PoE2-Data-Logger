@@ -38,6 +38,8 @@ def _image(encoded):
                     image.height > 8192 or image.width * image.height > store.MAX_IMAGE_PIXELS):
                 raise ValueError("Screenshot must be at least 200×100 and at most 12 megapixels.")
             image.verify()
+        with Image.open(io.BytesIO(raw)) as image:
+            image.load()
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
         raise ValueError("Screenshot is damaged or is not a PNG or JPEG.") from error
     return raw

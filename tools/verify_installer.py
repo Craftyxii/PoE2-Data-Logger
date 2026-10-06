@@ -23,9 +23,13 @@ def verify(installer):
         data.write_bytes(b"saved database contents")
         user_file = directory / "saved-export.csv"
         user_file.write_bytes(b"saved export contents")
+        planted_tool = directory / "icacls.exe"
+        planted_tool.write_bytes(b"Executable search-path sentinel")
         def check_saved():
             if data.read_bytes() != b"saved database contents" or user_file.read_bytes() != b"saved export contents":
                 raise RuntimeError("Installer changed saved user files.")
+            if planted_tool.read_bytes() != b"Executable search-path sentinel":
+                raise RuntimeError("Installer changed the executable search-path sentinel.")
         for _ in range(2):
             launch(installer, f"/S /D={directory}")
             check_saved()
@@ -48,7 +52,7 @@ def verify(installer):
                 raise RuntimeError("Uninstaller did not remove the application runtime.")
             time.sleep(0.1)
         check_saved()
-        print("Installer, update, startup, recognition and saved-file retention checks passed.")
+        print("Installer, system tool resolution, update, startup, recognition and saved-file retention checks passed.")
     finally:
         shutil.rmtree(directory, ignore_errors=True)
 

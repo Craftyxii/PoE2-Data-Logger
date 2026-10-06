@@ -66,6 +66,8 @@ def modifier_value(raw):
             unit = "seconds" if re.search(r"\bseconds?\b", text, re.I) else "count"
         elif not amounts and re.search(r"\ban? additional\b|\bthe first unearthed\b", text, re.I):
             value, unit = 1, "count"
+        elif not amounts and affix_unit(text) == "flag":
+            value, unit = 1, "flag"
         else:
             return None
     if not 0 <= value <= 9999:
@@ -79,9 +81,17 @@ def modifier_value(raw):
 def looks_like_modifier(raw):
     text = str(raw).strip()
     compact = re.sub(r"[^a-z0-9]", "", text.lower())
-    if "usesremaining" in compact or compact.startswith(("adds", "canbeused", "itemlevel", "inspect")):
+    if "usesremaining" in compact or compact.startswith(("adds", "canbeused", "itemlevel", "inspect",
+                                                         "rightclick", "shiftclick", "toggle")):
         return False
-    return bool("%" in text or re.search(r"\b(?:additional|extra|seconds?|first unearthed)\b", text, re.I))
+    prose = re.search(r"^(?:Map(?: Bosses)?|Monsters?|Expeditions?|Abysses|Abyssal Monsters|"
+                      r"Abyss (?:Pits|Cracks)|Breaches|Unstable Breaches|Ritual (?:Altars|Favours)|"
+                      r"Delirium (?:Fog|Encounters)|Vaal Beacons|Natural Rare Monsters|Unique Monsters|"
+                      r"Players|Favours|Revived Monsters)\b.*\b"
+                      r"(?:has|have|contains?|grants?|spawns?|costs?|are|is|leads?|allows?|drops?|"
+                      r"pauses?|reappear|deal|gain|steal|inflict)\b", text, re.I)
+    return bool("%" in text or affix_unit(text) == "flag" or prose or
+                re.search(r"\b(?:additional|extra|seconds?|first unearthed)\b", text, re.I))
 
 
 def new_affix_names(uncertain, known, ocr_rows=None):

@@ -1,5 +1,7 @@
 @echo off
 cd /d "%~dp0"
+py -3.12 -m pip install --upgrade "pip>=26.2"
+if errorlevel 1 exit /b 1
 py -3.12 -m pip install -r requirements-build.txt
 if errorlevel 1 exit /b 1
 py -3.12 -m PyInstaller --clean --noconfirm packaging\PoE2-Data-Logger.spec

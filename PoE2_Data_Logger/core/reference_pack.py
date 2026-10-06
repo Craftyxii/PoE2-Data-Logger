@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 from PoE2_Data_Logger.core import logger_store as logger
 from PoE2_Data_Logger.core import store
@@ -29,14 +29,53 @@ def _name(raw, limit=200):
     return raw.strip()
 
 
-def _image(raw, limit=MAX_IMAGE):
+def _image(raw, limit=MAX_IMAGE, kind=None):
     if len(raw) > limit:
         raise ValueError("Reference image is too large.")
-    with Image.open(io.BytesIO(raw)) as image:
-        if image.format not in ("PNG", "JPEG") or image.width * image.height > 12_000_000:
-            raise ValueError("Reference must be a PNG/JPEG under 12 megapixels.")
-        image.verify()
+    try:
+        with Image.open(io.BytesIO(raw)) as image:
+            if (image.format not in ("PNG", "JPEG") or max(image.size) > 8192 or
+                    image.width * image.height > store.MAX_IMAGE_PIXELS):
+                raise ValueError("Reference must be a PNG/JPEG under 12 megapixels.")
+            if kind and min(image.size) < 20:
+                raise ValueError("Reference icons must be at least 20 pixels on each side.")
+            image.verify()
+        with Image.open(io.BytesIO(raw)) as image:
+            image.load()
+            if kind:
+                canonical_size = (image.size == (96, 96) if kind in ("currency", "item")
+                                  else max(image.size) <= 512)
+                byte_limit = 100000 if kind in ("currency", "item") else 300000
+                if (image.format == "PNG" and image.mode == "RGB" and canonical_size and
+                        len(raw) <= byte_limit):
+                    return raw
+                image = image.convert("RGB")
+                if kind in ("currency", "item"):
+                    image = image.resize((96, 96))
+                else:
+                    image.thumbnail((512, 512))
+                    if min(image.size) < 20:
+                        raise ValueError("Reference Omen icons must be at least 20 pixels on each side.")
+                output = io.BytesIO()
+                image.save(output, format="PNG", optimize=True)
+                return output.getvalue()
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
+        raise ValueError("Reference image is damaged or is not a PNG or JPEG.") from error
     return raw
+
+
+def _existing_recipe(db, name):
+    matches = db.execute("SELECT name FROM recipes WHERE name=? COLLATE NOCASE", (name,)).fetchall()
+    if len(matches) > 1:
+        raise ValueError("Recipe database contains conflicting case spellings.")
+    return matches[0][0] if matches else None
+
+
+def _recipe_name(db, raw):
+    name = _existing_recipe(db, _name(raw))
+    if name is None:
+        raise ValueError("Reference pack references an unknown recipe.")
+    return name
 
 
 def export_pack():
@@ -126,10 +165,14 @@ def _inspect(path):
         if any(not isinstance(data.get(key), list) or len(data[key]) > 10000 for key in required):
             raise ValueError("Reference pack has invalid database records.")
         expected = {"manifest.json"}
+        icon_files = set()
         for icon in data["icons"]:
             if not isinstance(icon, dict) or icon.get("kind") not in ("currency", "omen", "item") or not re.fullmatch(
                     r"icons/\d{4}\.png", str(icon.get("file"))):
                 raise ValueError("Reference pack has an invalid icon entry.")
+            if icon["file"] in icon_files:
+                raise ValueError("Reference pack has duplicate icon files.")
+            icon_files.add(icon["file"])
             expected.add(icon["file"])
         for scan in data["scans"]:
             if not isinstance(scan, dict) or not re.fullmatch(
@@ -140,12 +183,13 @@ def _inspect(path):
             raise ValueError("Reference pack contains unexpected or missing files.")
         assets = {}
         for entry in data["icons"] + data["scans"]:
-            raw = _image(archive.read(entry["file"]))
+            raw = archive.read(entry["file"])
             if hashlib.sha256(raw).hexdigest() != entry.get("sha256"):
                 raise ValueError("Reference image hash does not match its label.")
             if entry["file"].startswith("screens/") and Path(entry["file"]).stem != entry["sha256"]:
                 raise ValueError("Reference screenshot filename does not match its hash.")
-            assets[entry["file"]] = raw
+            kind = entry["kind"] if entry["file"].startswith("icons/") else None
+            assets[entry["file"]] = _image(raw, kind=kind)
     return data, assets
 
 
@@ -159,19 +203,26 @@ def import_pack(path, replace_existing=False):
         with logger._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             changed_recipes, changed_families = set(), set()
+            incoming_recipes = {}
             for row in data["recipes"]:
                 name = _name(row["name"])
+                name = _existing_recipe(db, name) or name
                 sockets = logger._integer(row["sockets"], "Recipe sockets", 2, 10)
                 combo = _name(row["combo"], 500)
                 runes = [part.strip() for part in combo.split("+")]
                 if len(runes) != sockets or any(not rune for rune in runes):
                     raise ValueError("Imported recipe needs one rune per socket.")
+                values = (name, sockets, " + ".join(runes),
+                          None if row.get("level_band") is None else str(row["level_band"])[:100],
+                          None if row.get("category") is None else str(row["category"])[:100],
+                          None if row.get("source") is None else str(row["source"])[:200])
+                if name in incoming_recipes:
+                    if incoming_recipes[name] != values:
+                        raise ValueError("Reference pack contains conflicting records for the same recipe.")
+                    continue
+                incoming_recipes[name] = values
                 op = "REPLACE" if replace_existing else "IGNORE"
-                result = db.execute(f"INSERT OR {op} INTO recipes VALUES(?,?,?,?,?,?)",
-                                    (name, sockets, combo,
-                                     None if row.get("level_band") is None else str(row["level_band"])[:100],
-                                     None if row.get("category") is None else str(row["category"])[:100],
-                                     None if row.get("source") is None else str(row["source"])[:200]))
+                result = db.execute(f"INSERT OR {op} INTO recipes VALUES(?,?,?,?,?,?)", values)
                 counts["recipes"] += result.rowcount
                 if result.rowcount:
                     changed_recipes.add(name)
@@ -179,10 +230,9 @@ def import_pack(path, replace_existing=False):
                 number = logger._integer(row["id"], "Family", 1, 9999)
                 top = logger._integer(row["top_socket"], "Top socket", 3, 10)
                 recipes = json.loads(row["recipes_json"])
-                if not isinstance(recipes, list) or not recipes or len(recipes) > 100 or any(
-                        not isinstance(name, str) or not db.execute(
-                            "SELECT 1 FROM recipes WHERE name=?", (name,)).fetchone() for name in recipes):
+                if not isinstance(recipes, list) or not recipes or len(recipes) > 100:
                     raise ValueError("Imported family references an unknown recipe.")
+                recipes = [_recipe_name(db, name) for name in recipes]
                 if len(set(recipes)) != len(recipes) or any(db.execute(
                         "SELECT sockets FROM recipes WHERE name=?", (name,)).fetchone()[0] > top
                         for name in recipes):
@@ -224,7 +274,8 @@ def import_pack(path, replace_existing=False):
             aliases = {}
             for row in db.execute("SELECT position,alias,target FROM aliases ORDER BY position"):
                 aliases.setdefault(row["alias"].lower(), []).append((row["position"], row["target"]))
-            incoming = [(_name(row["alias"], 200), _name(row["target"])) for row in data["aliases"]]
+            incoming = [(_name(row["alias"], 200), _recipe_name(db, row["target"]))
+                        for row in data["aliases"]]
             incoming_targets = {}
             for alias, target in incoming:
                 incoming_targets.setdefault(alias.lower(), set()).add(target)
@@ -256,10 +307,9 @@ def import_pack(path, replace_existing=False):
                 if slot not in ["P*", *(f"P{i}" for i in range(1, sockets + 1))]:
                     raise ValueError("Imported seed position is outside its socket bar.")
                 rewards = json.loads(row["rewards_json"])
-                if not isinstance(rewards, list) or len(rewards) > 100 or any(
-                        not isinstance(name, str) or not db.execute(
-                            "SELECT 1 FROM recipes WHERE name=?", (name,)).fetchone() for name in rewards):
+                if not isinstance(rewards, list) or len(rewards) > 100:
                     raise ValueError("Imported seed references an unknown recipe.")
+                rewards = [_recipe_name(db, name) for name in rewards]
                 parent = db.execute("SELECT top_socket,recipes_json FROM families WHERE id=?", (family,)).fetchone()
                 if not parent:
                     raise ValueError("Imported seed references an unknown family.")
@@ -283,8 +333,11 @@ def import_pack(path, replace_existing=False):
                 if len(vector) != 1296 * 4:
                     raise ValueError("Invalid reviewed rune vector.")
                 import numpy as np
-                if not np.isfinite(np.frombuffer(vector, dtype=np.float32)).all():
+                values = np.frombuffer(vector, dtype=np.float32)
+                if not np.isfinite(values).all():
                     raise ValueError("Reviewed rune vectors must contain finite numbers.")
+                if np.linalg.norm(values.astype(np.float64)) > 1.00001:
+                    raise ValueError("Reviewed rune vectors must have a norm of at most one.")
                 op = "REPLACE" if replace_existing else "IGNORE"
                 result = db.execute(f"INSERT OR {op} INTO reviewed_glyphs VALUES(?,?,?)",
                                     (sha, _name(row["rune"], 80), vector))
@@ -294,7 +347,8 @@ def import_pack(path, replace_existing=False):
                            for kind, table in (("currency", "currency_icons"), ("omen", "omen_icons"),
                                                 ("item", "item_icons"))}
             for row in data["icons"]:
-                kind, name, sha = row["kind"], _name(row["name"], 160), row["sha256"]
+                kind, name = row["kind"], _name(row["name"], 160)
+                sha = hashlib.sha256(assets[row["file"]]).hexdigest()
                 names_table, icons_table = {"currency": ("currency_items", "currency_icons"),
                                             "omen": ("ritual_names", "omen_icons"),
                                             "item": ("item_names", "item_icons")}[kind]

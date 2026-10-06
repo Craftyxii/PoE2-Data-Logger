@@ -58,6 +58,8 @@ def read_hovered_text(timeout=.48):
     user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
     user32.keybd_event.argtypes = (wintypes.BYTE, wintypes.BYTE, wintypes.DWORD, ctypes.c_size_t)
     with _CLIPBOARD_LOCK:
+        if not game_foreground():
+            return None
         previous = user32.GetClipboardSequenceNumber()
         held_ctrl = bool(user32.GetAsyncKeyState(VK_CONTROL) & 0x8000)
         if not held_ctrl:
@@ -70,6 +72,8 @@ def read_hovered_text(timeout=.48):
                 user32.keybd_event(VK_CONTROL, 0, KEYUP, 0)
         deadline = time.monotonic() + max(0.0, min(float(timeout), .48))
         while True:
+            if not game_foreground():
+                return None
             if user32.GetClipboardSequenceNumber() != previous:
                 text = _clipboard_text(user32, kernel32)
                 if text.startswith("Item Class:"):

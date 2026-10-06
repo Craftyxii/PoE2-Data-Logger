@@ -467,21 +467,26 @@ def _validate_settings(db, data):
     return c
 
 
+def _save_settings(db, data, *, confirmed_affixes=()):
+    for name in confirmed_affixes:
+        if not isinstance(name, str) or not name.strip() or len(name) > 120 or "%" in name:
+            raise ValueError("Review the tablet affix name before saving.")
+        db.execute("INSERT OR IGNORE INTO affixes(name) VALUES(?)", (name.strip(),))
+    c = _validate_settings(db, data)
+    pending = _meta(db, "ocr_pending")
+    if pending and c["expedition"] != _meta(db, "settings")["expedition"]:
+        raise ValueError("Save or discard the scanned remnant before switching expeditions.")
+    _set_meta(db, "settings", c)
+    current = _meta(db, "current_map_number", 0)
+    if current and not _meta(db, "pending_new_map") and not _map_has_activity(db, _map_id(current)):
+        db.execute("UPDATE maps SET snapshot_json=? WHERE map_id=?",
+                   (_dump(_snapshot(c)), _map_id(current)))
+
+
 def save_settings(data, *, confirmed_affixes=()):
     with _connect() as db:
-        for name in confirmed_affixes:
-            if not isinstance(name, str) or not name.strip() or len(name) > 120 or "%" in name:
-                raise ValueError("Review the tablet affix name before saving.")
-            db.execute("INSERT OR IGNORE INTO affixes(name) VALUES(?)", (name.strip(),))
-        c = _validate_settings(db, data)
-        pending = _meta(db, "ocr_pending")
-        if pending and c["expedition"] != _meta(db, "settings")["expedition"]:
-            raise ValueError("Save or discard the scanned remnant before switching expeditions.")
-        _set_meta(db, "settings", c)
-        current = _meta(db, "current_map_number", 0)
-        if current and not _meta(db, "pending_new_map") and not _map_has_activity(db, _map_id(current)):
-            db.execute("UPDATE maps SET snapshot_json=? WHERE map_id=?",
-                       (_dump(_snapshot(c)), _map_id(current)))
+        db.execute("BEGIN IMMEDIATE")
+        _save_settings(db, data, confirmed_affixes=confirmed_affixes)
     return get_state()
 
 
@@ -618,12 +623,13 @@ def save_seed_state(data):
 
 
 def clear_tablets():
-    state = save_settings({"tablets_used": 4, "plus_two_tablets": 0,
-                           "tablet_affixes": [{"affix": "", "value": None} for _ in range(16)],
-                           "tablet_raw_mods": [[] for _ in range(4)]})
     with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        _save_settings(db, {"tablets_used": 4, "plus_two_tablets": 0,
+                            "tablet_affixes": [{"affix": "", "value": None} for _ in range(16)],
+                            "tablet_raw_mods": [[] for _ in range(4)]})
         _set_meta(db, "tablet_auto_next", 1)
-    return state
+    return get_state()
 
 
 def tablet_next_slot():
@@ -633,29 +639,31 @@ def tablet_next_slot():
 
 def advance_tablet_slot(number):
     with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
         if _meta(db, "tablet_auto_next", 1) == number and 1 <= number <= 4:
             _set_meta(db, "tablet_auto_next", number + 1)
 
 
 def save_scanned_tablet(matches, raw_mods):
-    number = tablet_next_slot()
-    if number > 4:
-        raise ValueError("Four tablets are already saved. Clear tablet config before scanning a new set.")
     if not matches or len(matches) > 4 or not isinstance(raw_mods, list):
         raise ValueError("Review the tablet modifiers before saving.")
-    state = get_state()["settings"]
-    slots = ([{"affix": "", "value": None} for _ in range(16)] if number == 1 else
-             [dict(item) for item in state["tablet_affixes"]])
-    raw = ([[] for _ in range(4)] if number == 1 else
-           [list(item) for item in state["tablet_raw_mods"]])
-    for offset, item in enumerate(matches):
-        slots[(number - 1) * 4 + offset] = {"affix": item["affix"], "value": item["value"],
-                                          "unit": item.get("unit") or affix_unit(item["affix"])}
-    raw[number - 1] = list(raw_mods)
-    save_settings({"tablets_used": max(state["tablets_used"], number), "plus_two_tablets": 0 if number == 1 else
-                   state["plus_two_tablets"], "tablet_affixes": slots,
-                   "tablet_raw_mods": raw})
     with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        number = _meta(db, "tablet_auto_next", 1)
+        if number > 4:
+            raise ValueError("Four tablets are already saved. Clear tablet config before scanning a new set.")
+        state = _meta(db, "settings")
+        slots = ([{"affix": "", "value": None} for _ in range(16)] if number == 1 else
+                 [dict(item) for item in state["tablet_affixes"]])
+        raw = ([[] for _ in range(4)] if number == 1 else
+               [list(item) for item in state["tablet_raw_mods"]])
+        for offset, item in enumerate(matches):
+            slots[(number - 1) * 4 + offset] = {"affix": item["affix"], "value": item["value"],
+                                              "unit": item.get("unit") or affix_unit(item["affix"])}
+        raw[number - 1] = list(raw_mods)
+        _save_settings(db, {"tablets_used": max(state["tablets_used"], number),
+                            "plus_two_tablets": 0 if number == 1 else state["plus_two_tablets"],
+                            "tablet_affixes": slots, "tablet_raw_mods": raw})
         _set_meta(db, "tablet_auto_next", number + 1)
         mid_number = _meta(db, "current_map_number", 0)
         pending = not mid_number or _meta(db, "pending_new_map", False)
@@ -929,8 +937,10 @@ def commit_remnant(first, next_recipe=None, family=None, scan_id=None, expected_
         return _commit_remnant(db, first, next_recipe, family, scan_id, visible_seed)
 
 
-def _commit_remnant(db, first, next_recipe=None, family=None, scan_id=None, visible_seed=None):
-    result = _resolve(db, first, next_recipe, family)
+def _commit_remnant(db, first, next_recipe=None, family=None, scan_id=None, visible_seed=None,
+                    seed_rows=None):
+    result = (_resolve(db, first, next_recipe, family) if seed_rows is None else
+              {"status": "ready", "family": family, "rows": seed_rows})
     if result["status"] != "ready":
         raise ValueError("Choose a matching family or enter Next Recipe before committing.")
     config = _validate_settings(db, {})
@@ -1005,18 +1015,20 @@ def _commit_remnant(db, first, next_recipe=None, family=None, scan_id=None, visi
             "scan_commit_number": commit_number}
 
 
-def _seed_recipes(db, family, sockets):
+def _seed_recipes(db, family, sockets, rewards):
     record = db.execute("SELECT recipes_json FROM families WHERE id=? AND valid=1", (family,)).fetchone()
     recipes = _load(record[0]) if record else []
-    eligible = [name for name in recipes if (row := db.execute(
-        "SELECT sockets FROM recipes WHERE name=?", (name,)).fetchone()) and row[0] <= sockets]
-    if not eligible:
-        raise ValueError("The family has no recipes at this socket stage.")
-    first, second = eligible[0], eligible[1] if len(eligible)>1 else None
-    resolved = _resolve(db, first, second, family)
-    if resolved["status"] != "ready" or any(row["sockets"] > sockets for row in resolved["rows"]):
+    if not rewards or len(set(rewards)) != len(rewards) or not set(rewards).issubset(recipes):
         raise ValueError("The family stage and Recipe DB disagree. Review the database entry.")
-    return first, second, resolved
+    rows = []
+    for name in recipes:
+        if name not in rewards:
+            continue
+        recipe = db.execute("SELECT sockets,combo FROM recipes WHERE name=?", (name,)).fetchone()
+        if not recipe or not recipe["combo"] or recipe["sockets"] > sockets:
+            raise ValueError("The family stage and Recipe DB disagree. Review the database entry.")
+        rows.append({"recipe": name, "sockets": recipe["sockets"], "combo": recipe["combo"]})
+    return rows
 
 
 def commit_seed_batch(result, selections, automatic=False):
@@ -1069,14 +1081,16 @@ def commit_seed_batch(result, selections, automatic=False):
             if automatic and (source.get("candidates") != [family] or
                               str(stage["status"]).startswith("inferred")):
                 raise ValueError("Choose a verified family before auto-committing.")
-            if not _load(stage["rewards_json"]):
+            rewards = _load(stage["rewards_json"])
+            if not rewards:
                 raise ValueError("The visible seed stage has no verified rewards.")
-            first, second, _ = _seed_recipes(db, family, sockets)
+            rows = _seed_recipes(db, family, sockets, rewards)
             seed = {"sockets": sockets, "slot": item.get("seed_slot"),
                     "rune": item.get("seed_rune"), "scan_index": index+1, "mode": "seed"}
-            resolved.append((index, first, second, family, seed))
-        saved = [{"index": index, **_commit_remnant(db, first, second, family, visible_seed=seed)}
-                 for index, first, second, family, seed in sorted(resolved)]
+            resolved.append((index, family, seed, rows))
+        saved = [{"index": index, **_commit_remnant(db, rows[0]["recipe"], family=family,
+                                                  visible_seed=seed, seed_rows=rows)}
+                 for index, family, seed, rows in sorted(resolved)]
         remaining = any(i not in seen and not reading.get("saved") and not reading.get("rejected")
                         for i, reading in enumerate(readings))
         next_pending = None
@@ -1091,6 +1105,7 @@ def commit_seed_batch(result, selections, automatic=False):
         return {"committed": True, "saved": saved, "pending": next_pending,
                 "context": {"_scan_generation": _meta(db, "session_generation", 0),
                             "_capture_map_id": _map_id(number),
+                            "_capture_map_pending": bool(_meta(db, "pending_new_map", False)),
                             "_capture_expedition": expedition},
                 "scan_commit_number": saved[-1]["scan_commit_number"]}
 

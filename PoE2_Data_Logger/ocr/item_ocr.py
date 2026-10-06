@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import io
 import re
+import hashlib
+import threading
+from collections import OrderedDict
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -14,8 +17,32 @@ from PoE2_Data_Logger.ocr import currency_ocr
 from PoE2_Data_Logger.ocr.affix_capture import affix_key, affix_unit, modifier_value, looks_like_modifier
 
 
+_RITUAL_MATCH_CACHE = OrderedDict()
+_RITUAL_MATCH_LOCK = threading.Lock()
+
+
 def _key(text):
     return re.sub(r"[^a-z0-9]", "", str(text).lower())
+
+
+def _reference_image(raw, maximum):
+    def bounded(source):
+        if (min(source.size) < 1 or max(source.size) > 8192 or
+                source.width * source.height > 12_000_000):
+            return None
+        image = source.convert("RGB")
+        image.thumbnail((maximum, maximum), Image.Resampling.LANCZOS)
+        return image
+
+    try:
+        if isinstance(raw, Image.Image):
+            return bounded(raw)
+        if not isinstance(raw, bytes):
+            return None
+        with Image.open(io.BytesIO(raw)) as source:
+            return bounded(source)
+    except (TypeError, ValueError, OSError, Image.DecompressionBombError):
+        return None
 
 
 def is_ritual_page(lines):
@@ -312,11 +339,9 @@ def scan_inventory_grid(image, references=(), read=None):
     reader = currency_ocr.get_reader()
     examples = []
     for reference in references:
-        raw = reference["image"]
-        if isinstance(raw, bytes):
-            with Image.open(io.BytesIO(raw)) as stored:
-                raw = stored.convert("RGB")
-        examples.append({"name": reference["name"], "image": raw})
+        raw = _reference_image(reference.get("image"), 96)
+        if raw is not None:
+            examples.append({"name": reference["name"], "image": raw})
     found, unknown = [], []
     for slot in range(1, 61):
         cell = inventory_cell(image, slot)
@@ -439,6 +464,8 @@ def parse_ritual(lines, omen_names):
         proposals.append({"category": category, "name": name, "quantity": quantity,
                           "tribute": tribute, "source": raw, "score": round(score, 2),
                           "name_match": round(name_match, 3)})
+        if isinstance(line, dict) and all(key in line for key in ("x", "y", "right", "bottom")):
+            proposals[-1]["box"] = (line["x"], line["y"], line["right"], line["bottom"])
         if isinstance(line, dict) and line.get("y") is not None:
             anchors.append((len(proposals) - 1, line))
     return {"items": proposals[:100], "unmatched": unmatched + [r["text"] if isinstance(r, dict) else str(r) for r in lines[100:]],
@@ -526,6 +553,41 @@ def ritual_totals(lines, image=None):
     return {"tribute_available": tribute, "rerolls_remaining": rerolls}
 
 
+def _ritual_icon_matches(shown, icon, scale, page_key):
+    key = (page_key, icon.shape, hashlib.sha256(icon.tobytes()).digest(), scale)
+    with _RITUAL_MATCH_LOCK:
+        cached = _RITUAL_MATCH_CACHE.get(key)
+        if cached is not None:
+            _RITUAL_MATCH_CACHE.move_to_end(key)
+            return cached
+    matches = []
+    for factor in (1.0, .8, 1.25):
+        width, height = round(icon.shape[1] * scale * factor), round(icon.shape[0] * scale * factor)
+        if min(width, height) < 16 or width >= shown.shape[1] or height >= shown.shape[0]:
+            continue
+        sample = cv2.resize(icon, (width, height), interpolation=cv2.INTER_AREA)
+        scores = cv2.matchTemplate(shown, sample, cv2.TM_CCOEFF_NORMED)
+        strongest = 0.0
+        for _ in range(20):
+            _, score, _, point = cv2.minMaxLoc(scores)
+            if score < .965:
+                break
+            strongest = max(strongest, score)
+            x, y = point
+            matches.append((score, (x / scale, y / scale, width / scale, height / scale)))
+            scores[max(0, y - height + 1):y + height,
+                   max(0, x - width + 1):x + width] = -1
+        if strongest >= .97:
+            break
+    matches = tuple(matches)
+    with _RITUAL_MATCH_LOCK:
+        _RITUAL_MATCH_CACHE[key] = matches
+        _RITUAL_MATCH_CACHE.move_to_end(key)
+        if len(_RITUAL_MATCH_CACHE) > 256:
+            _RITUAL_MATCH_CACHE.popitem(last=False)
+    return matches
+
+
 def scan_ritual_page(image, omen_names, references=()):
     if not isinstance(image, Image.Image):
         with Image.open(image) as source:
@@ -546,52 +608,76 @@ def scan_ritual_page(image, omen_names, references=()):
     shown = np.asarray(image.convert("RGB"), dtype=np.uint8)
     if scale < 1:
         shown = cv2.resize(shown, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
-    existing = {item["name"] for item in omens}
+    if (shown == shown[0, 0]).all():
+        references = []
+    page_key = (shown.shape, hashlib.sha256(shown.tobytes()).digest())
     candidates = []
     for reference in list(references)[:128]:
         name = reference.get("name")
-        if name not in omen_names or (name in existing and not markers):
+        if name not in omen_names:
             continue
-        raw = reference.get("image")
-        try:
-            with Image.open(io.BytesIO(raw)) as stored:
-                icon = np.asarray(stored.convert("RGB"), dtype=np.uint8)
-        except (TypeError, ValueError, OSError):
+        stored = _reference_image(reference.get("image"), 512)
+        if stored is None:
             continue
-        if min(icon.shape[:2]) < 20 or float(icon.std()) < 12:
+        icon = np.asarray(stored, dtype=np.uint8)
+        if (min(icon.shape[:2]) < 20 or float(icon.std()) < 12 or
+                (icon == icon[0, 0]).all()):
             continue
-        best = 0.0
-        location = None
-        for factor in (.8, 1.0, 1.25):
-            width, height = round(icon.shape[1] * scale * factor), round(icon.shape[0] * scale * factor)
-            if min(width, height) < 16 or width >= shown.shape[1] or height >= shown.shape[0]:
-                continue
-            sample = cv2.resize(icon, (width, height), interpolation=cv2.INTER_AREA)
-            _, score, _, point = cv2.minMaxLoc(cv2.matchTemplate(shown, sample, cv2.TM_CCOEFF_NORMED))
-            if score > best:
-                best = score
-                location = (point[0] / scale, point[1] / scale, width / scale, height / scale)
-            if best >= .97:
-                break
-        if best >= .965:
-            candidates.append((best, name, location))
-    matched_markers = set()
-    for score, name, location in sorted(candidates, reverse=True)[:20]:
-        x, y, width, height = location
-        nearby = [index for index, marker in enumerate(markers)
-                  if x - width * .25 <= marker["x"] <= x + width * 1.25 and
-                     y - height * .25 <= marker["y"] <= y + height * 1.25]
+        candidates.extend((score, name, location)
+                          for score, location in _ritual_icon_matches(shown, icon, scale, page_key))
+    occurrences = []
+    for candidate in sorted(candidates, reverse=True):
+        x, y, width, height = candidate[2]
+        if any(x < a + w and a < x + width and y < b + h and b < y + height
+               for _, _, (a, b, w, h) in occurrences):
+            continue
+        occurrences.append(candidate)
+        if len(occurrences) == 20:
+            break
+    occurrences.sort(key=lambda candidate: (candidate[2][1], candidate[2][0]))
+    occurrence_markers = {index: [] for index in range(len(occurrences))}
+    for marker_index, marker in enumerate(markers):
+        nearby = []
+        for index, (_, _, (x, y, width, height)) in enumerate(occurrences):
+            if (x - width * .25 <= marker["x"] <= x + width * 1.25 and
+                    y - height * .25 <= marker["y"] <= y + height * 1.25):
+                distance = (marker["x"] - (x + width)) ** 2 + (marker["y"] - (y + height)) ** 2
+                nearby.append((distance, index))
+        if nearby:
+            occurrence_markers[min(nearby)[1]].append(marker_index)
+    assigned = {}
+    for name in {candidate[1] for candidate in occurrences}:
         named = [item for item in omens if item["name"] == name]
-        if len(named) == 1 and nearby:
-            named[0]["deferred"] = True
-            matched_markers.update(nearby)
-        if name not in existing:
-            matched_markers.update(nearby)
+        locations = [index for index, candidate in enumerate(occurrences) if candidate[1] == name]
+        pairs = []
+        for item_index, item in enumerate(named):
+            box = item.get("box")
+            for index in locations:
+                x, y, width, height = occurrences[index][2]
+                distance = ((x + width / 2 - (box[0] + box[2]) / 2) ** 2 +
+                            (y + height / 2 - (box[1] + box[3]) / 2) ** 2) if box else float("inf")
+                pairs.append((distance, item_index, index))
+        used_items = set()
+        for _, item_index, index in sorted(pairs):
+            if item_index in used_items or index in assigned:
+                continue
+            assigned[index] = named[item_index]
+            used_items.add(item_index)
+            if len(locations) > 1 and not named[item_index].get("box"):
+                named[item_index]["needs_review"] = True
+    matched_markers = set()
+    for index, (score, name, location) in enumerate(occurrences):
+        nearby = occurrence_markers[index]
+        matched_markers.update(nearby)
+        if index in assigned:
+            assigned[index]["deferred"] = bool(assigned[index].get("deferred") or nearby)
+        else:
+            x, y, width, height = location
             result["items"].append({"category": "Omen", "name": name, "quantity": 1,
                                     "tribute": None, "source": f"icon reference {score:.2f}",
                                     "score": round(score, 2), "deferred": bool(nearby),
+                                    "box": (x, y, x + width, y + height),
                                     "needs_review": True})
-            existing.add(name)
     for index, marker in enumerate(markers):
         if index not in matched_markers:
             result["items"].append({"category": "Omen", "name": "Deferred omen", "quantity": 1,

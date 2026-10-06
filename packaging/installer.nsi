@@ -1,5 +1,5 @@
 Unicode true
-!define APP_VERSION "33.1"
+!define APP_VERSION "33.2"
 Name "PoE2 Data Logger"
 OutFile "${__FILEDIR__}\..\PoE2-Data-Logger-Setup-v${APP_VERSION}.exe"
 VIProductVersion "${APP_VERSION}.0.0"
@@ -41,7 +41,7 @@ Section "PoE2 Data Logger" Main
   File /r "${__FILEDIR__}\..\dist\PoE2-Data-Logger\*"
   File "${__FILEDIR__}\..\PoE2_Data_Logger\CRAFTYXII_ASSETS_LICENSE.txt"
   CreateDirectory "$INSTDIR\Databases"
-  nsExec::ExecToLog 'icacls.exe "$INSTDIR\Databases" /grant *S-1-5-32-545:(OI)(CI)M'
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "$INSTDIR\Databases" /grant *S-1-5-32-545:(OI)(CI)M'
   Pop $0
   StrCmp $0 "0" +2
     Abort "Could not set up the writable Databases folder."

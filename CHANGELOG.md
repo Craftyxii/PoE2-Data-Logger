@@ -1,3 +1,16 @@
+# PoE2 Data Logger v33.2
+
+- Preserve all tablet modifiers, including modifiers without a numeric percentage.
+- Keep separate occurrences of the same Ritual Omen and their deferred states.
+- Reuse icon matches for unchanged Ritual pages and skip matching uniformly empty captures.
+- Honor corrected visible-seed reward mappings and keep remaining approvals usable after a new map starts.
+- Save settings and tablet slots atomically, with rollback if their history commit fails.
+- Cancel discarded captures, clear stale drafts after Undo, and prevent delayed references from linking to a different map or scan.
+- Recover from failed recognition without leaving scans stuck or allowing stale results to replace a newer review.
+- Fully decode and bound imported reference images, reject inflated rune vectors, and canonicalize recipe references across case differences.
+- Check foreground focus before copying and reading clipboard text.
+- Resolve the installer's permission tool from the Windows system directory and check installation with a planted filename present.
+
 # PoE2 Data Logger v33.1
 
 - Preserve inventory phases and capture context through recognition and review; discard superseded and rejected results.

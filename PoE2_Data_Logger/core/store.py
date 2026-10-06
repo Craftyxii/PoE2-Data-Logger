@@ -158,8 +158,19 @@ def reviewed_glyphs(runes=None):
             choices = sorted(set(runes))
             rows = db.execute("SELECT seed_rune,vector FROM reviewed_glyphs WHERE seed_rune IN ("+
                               ",".join("?" for _ in choices)+")", choices).fetchall() if choices else []
-    result = [(r[0], np.frombuffer(r[1], dtype=np.float32)) for r in rows]
-    return [(name, values) for name, values in result if values.shape == (1296,)]
+    result = []
+    for name, raw in rows:
+        try:
+            values = np.frombuffer(raw, dtype=np.float32)
+        except (TypeError, ValueError):
+            continue
+        if values.shape != (1296,) or not np.isfinite(values).all():
+            continue
+        norm = np.linalg.norm(values.astype(np.float64))
+        if norm > 1:
+            values = (values.astype(np.float64) / norm).astype(np.float32)
+        result.append((name, values))
+    return result
 
 
 def _record(row):

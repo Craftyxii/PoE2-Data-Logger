@@ -243,7 +243,7 @@ class LoggerWindow(QMainWindow):
         self.images = {"seed": None, "opened": None}
         self.results = {"seed": None, "opened": None}
         self.current_file = {"seed": "", "opened": ""}
-        self.saved_scan = None
+        self.saved_scan = self._saved_scan_capture = None
         self._seed_readings = []
         self._seed_loading = False
         self._both_seed_context = None
@@ -288,6 +288,7 @@ class LoggerWindow(QMainWindow):
         self._ritual_hash = None
         self._currency_catalog_loaded = False
         self.pending_review_kind = None
+        self._failed_review = False
         self._pending_tablet_slot = None
         self._pending_currency_map = None
         self._pending_currency_phase = None
@@ -345,12 +346,58 @@ class LoggerWindow(QMainWindow):
             return
         self.statusBar().clearMessage()
         if error:
+            failed = getattr(callback, "_scan_failure", None)
+            if failed and not failed(error):
+                return
             self.error(str(error))
         elif callback:
             try:
                 callback(result)
             except Exception as problem:
                 self.error(str(problem))
+
+    def _submit_scan(self, label, function, done, kind, capture):
+        field = {"currency": "_inventory_reading", "ritual": "_ritual_reading",
+                 "remnant": "_remnant_reading", "seed": "_remnant_reading"}[kind]
+        def completed(result):
+            active = getattr(self, field) is capture
+            try:
+                done(result)
+            except Exception as error:
+                self._scan_failed(kind, capture, error, reading_finished=active)
+                raise
+        completed._scan_failure = lambda error: self._scan_failed(kind, capture, error)
+        self._submit(label, function, completed)
+
+    def _scan_failed(self, kind, capture, error, reading_finished=False):
+        field = {"currency": "_inventory_reading", "ritual": "_ritual_reading",
+                 "remnant": "_remnant_reading", "seed": "_remnant_reading"}[kind]
+        reading = getattr(self, field)
+        if (reading is not capture and not (reading_finished and reading is None) or
+                self.pending_review_kind != kind):
+            return False
+        setattr(self, field, None)
+        if kind == "currency":
+            self._inventory_capture_context = None
+            self._pending_currency_map = self._pending_currency_phase = None
+        elif kind == "ritual":
+            self._ritual_capture_context = None
+            self._pending_ritual_map = None
+        else:
+            logger.discard_ocr_id()
+            self.results[kind if kind == "seed" else "opened"] = None
+            self.resolved = None
+            for widget in (self.first_recipe, self.next_recipe):
+                with QSignalBlocker(widget):
+                    widget.clear()
+            self.recipe_table.hide()
+            if kind == "seed":
+                self._clear_seed_queue()
+        summary = f"Scan failed: {error}. Scan again or reject this reading."
+        self._review_pending(kind, summary, False)
+        self._failed_review = True
+        set_message(self.review_summary, summary, "error")
+        return True
 
     def run(self, action):
         try:
@@ -635,6 +682,7 @@ class LoggerWindow(QMainWindow):
         self.tabs.addTab(page, "Disclaimer")
 
     def _review_pending(self, kind, summary, can_commit=True, rows=None):
+        self._failed_review = False
         if kind not in ("remnant", "seed"):
             self._remnant_reading = None
         if kind != "tablet":
@@ -732,6 +780,7 @@ class LoggerWindow(QMainWindow):
         return self.commit_review()
 
     def reject_review(self):
+        self._failed_review = False
         service.HOTKEY.cancel_capture()
         self._remnant_reading = None
         kind = self.pending_review_kind
@@ -756,6 +805,8 @@ class LoggerWindow(QMainWindow):
             self.hide_overlay()
 
     def commit_review(self):
+        if self._failed_review:
+            raise ValueError("This scan failed. Scan again or reject this reading before saving.")
         kind = self.pending_review_kind
         if kind == "seed":
             return self.commit_seed_review()
@@ -1852,6 +1903,7 @@ class LoggerWindow(QMainWindow):
         return commit_number
 
     def clear_tablets(self):
+        service.HOTKEY.cancel_capture()
         logger.clear_tablets()
         self._pending_tablet_slot = None
         self.refresh()
@@ -1886,11 +1938,22 @@ class LoggerWindow(QMainWindow):
         else:
             previous = None
         state = logger.start_map()
+        self._clear_map_review()
+        self.refresh()
+        self.review_kind.setText("New map")
+        set_message(self.review_summary, "Waystone settings cleared. Scan or enter the new map's waystone.")
+        if previous:
+            self._set_commit_badge(state["scan_commit_count"])
+        self.note(f"Map {state['current_map_id']} started."
+                  + (" Previous map totals saved." if previous else ""), True)
+
+    def _clear_map_review(self):
         self.pending_review_kind = None
+        self._failed_review = False
+        self._remnant_reading = None
         self._pending_currency_map = self._pending_ritual_map = self._pending_tablet_slot = None
         self._pending_currency_phase = None
         self._inventory_reading = self._ritual_reading = None
-        self.refresh()
         self._inventory_capture = self._inventory_capture_context = None
         self._ritual_hash = self._ritual_capture_context = None
         self.inventory_table.setRowCount(0)
@@ -1902,7 +1965,7 @@ class LoggerWindow(QMainWindow):
         self._clear_seed_queue()
         self.results = {"seed": None, "opened": None}
         self.images = {"seed": None, "opened": None}
-        self.saved_scan = self.resolved = None
+        self.saved_scan = self._saved_scan_capture = self.resolved = None
         for field in (self.first_recipe, self.next_recipe):
             with QSignalBlocker(field):
                 field.clear()
@@ -1918,12 +1981,6 @@ class LoggerWindow(QMainWindow):
         self.ritual_review_group.hide()
         self.remnant_log_group.hide()
         self._show_image(None)
-        self.review_kind.setText("New map")
-        set_message(self.review_summary, "Waystone settings cleared. Scan or enter the new map's waystone.")
-        if previous:
-            self._set_commit_badge(state["scan_commit_count"])
-        self.note(f"Map {state['current_map_id']} started."
-                  + (" Previous map totals saved." if previous else ""), True)
 
     def new_chain(self):
         state = service.dispatch("/api/next-chain")
@@ -1933,7 +1990,13 @@ class LoggerWindow(QMainWindow):
         self.note(f"{state['current_expedition_id']} is ready for its chain.")
 
     def undo_map(self):
+        context = logger.scan_context()
         logger.undo_empty_map()
+        if logger.scan_context() != context:
+            service.HOTKEY.cancel_capture()
+            self._clear_map_review()
+            self.review_kind.setText("Nothing waiting for review")
+            set_message(self.review_summary, "Map change undone. Scan the current map again.")
         self.refresh()
         self.note("Empty map undone.")
 
@@ -2375,6 +2438,8 @@ class LoggerWindow(QMainWindow):
         self._review_pending("seed" if mode == "seed" else "remnant", "Reading remnant image…", False)
         self.current_file[mode] = Path(filename).name
         self.images[mode] = raw
+        if mode == "seed":
+            self.saved_scan = self._saved_scan_capture = None
         self._show_image(raw)
         set_message(self.scan_status, "Reading image…")
         self.scan_status.show()
@@ -2383,12 +2448,13 @@ class LoggerWindow(QMainWindow):
             if not number or logger._meta(db, "pending_new_map", False):
                 number += 1
             map_id = logger._map_id(number)
-        self._submit("Reading image…",
+        self._submit_scan("Reading image…",
                      lambda: service.dispatch(f"/api/scan?mode={mode}",
                                               {"image": encoded, "map_id": map_id,
                                                "scan_generation": context["_scan_generation"],
                                                "scan_context": context, "defer_ocr_id": True}),
-                     lambda result: self._scan_done(mode, result, raw, capture))
+                     lambda result: self._scan_done(mode, result, raw, capture),
+                     "seed" if mode == "seed" else "remnant", capture)
 
     def _scan_done(self, mode, result, raw, capture=None):
         if capture is not None and capture is not self._remnant_reading:
@@ -2430,6 +2496,8 @@ class LoggerWindow(QMainWindow):
         self.review_group.show()
         self.results[mode] = result
         self.images[mode] = raw or b""
+        if mode == "seed":
+            self.saved_scan = self._saved_scan_capture = None
         if mode == "opened":
             if self.mode != "both":
                 self._clear_seed_queue()
@@ -2542,6 +2610,8 @@ class LoggerWindow(QMainWindow):
             return
         self._seed_loading = True
         reading = self._seed_readings[row]
+        if self._saved_scan_capture and self._saved_scan_capture["reading"] is not reading:
+            self.saved_scan = self._saved_scan_capture = None
         for widget, key in ((self.seed_sockets, "sockets"), (self.seed_slot, "seed_slot"),
                             (self.seed_rune, "seed_rune")):
             widget.setText(str(reading.get(key) or ""))
@@ -2559,6 +2629,7 @@ class LoggerWindow(QMainWindow):
         reading = self._seed_readings[row]
         if reading.get("saved"):
             return
+        self.saved_scan = self._saved_scan_capture = None
         if not family_only:
             try:
                 reading["sockets"] = int(value(self.seed_sockets))
@@ -2723,6 +2794,8 @@ class LoggerWindow(QMainWindow):
             if reading.get("saved"):
                 raise ValueError("A saved remnant cannot be rejected here.")
             reading["rejected"] = True
+            if self._saved_scan_capture and self._saved_scan_capture["reading"] is reading:
+                self.saved_scan = self._saved_scan_capture = None
             use = self.seed_table.item(row, 0)
             use.setCheckState(Qt.CheckState.Unchecked)
             use.setFlags(Qt.ItemFlag.NoItemFlags)
@@ -2817,6 +2890,10 @@ class LoggerWindow(QMainWindow):
         if not raw:
             raise ValueError("Scan a visible seed first.")
         row = self.seed_table.currentRow()
+        capture = {"image": raw, "context": logger.scan_context(),
+                   "reading": self._seed_readings[row] if 0 <= row < len(self._seed_readings) else None,
+                   "selection": tuple(value(widget) for widget in
+                                      (self.seed_sockets, self.seed_slot, self.seed_rune, self.seed_family))}
         if 0 <= row < len(self._seed_readings):
             bounds = self._seed_readings[row].get("bar_bounds")
             if bounds:
@@ -2834,23 +2911,38 @@ class LoggerWindow(QMainWindow):
                 "rune": value(self.seed_rune), "family": value(self.seed_family)}
         self._submit("Saving reviewed reference…",
                      lambda: service.dispatch("/api/save-scan", data),
-                     self._seed_saved)
+                     lambda result: self._seed_saved(result, capture))
 
-    def _seed_saved(self, result):
-        self.saved_scan = result
+    def _seed_saved(self, result, capture=None):
+        associated = capture is None
+        if capture is not None and self.images["seed"] is capture["image"]:
+            row = self.seed_table.currentRow()
+            reading = self._seed_readings[row] if 0 <= row < len(self._seed_readings) else None
+            associated = (capture["context"] == logger.scan_context() and
+                          (not self._seed_readings or reading is capture["reading"]) and
+                          capture["selection"] == tuple(value(widget) for widget in
+                              (self.seed_sockets, self.seed_slot, self.seed_rune, self.seed_family)) and
+                          not (capture["reading"] or {}).get("rejected"))
+        if associated:
+            self.saved_scan = result
+            self._saved_scan_capture = capture
         self.refresh()
         self.note(f"Reviewed scan #{result['id']} saved locally.", True)
 
     def discard_scan(self):
+        service.HOTKEY.cancel_capture()
+        self._remnant_reading = None
         logger.discard_ocr_id()
         self._clear_seed_queue()
         self.results = {"seed": None, "opened": None}
         self.images = {"seed": None, "opened": None}
-        self.saved_scan = None
+        self.saved_scan = self._saved_scan_capture = None
         self._show_image(None)
         self.review_group.hide()
         if self.pending_review_kind in ("remnant", "seed"):
             self.pending_review_kind = None
+            self._failed_review = False
+            self._review_controls(None)
             self.review_kind.setText("Nothing waiting for review")
             set_message(self.review_summary, "Pending remnant scan discarded.")
             self.approve_scan_button.setEnabled(False)
@@ -2894,6 +2986,8 @@ class LoggerWindow(QMainWindow):
             set_message(self.recipe_status, "No matching family sequence.", "error")
 
     def commit_remnant(self):
+        if self._failed_review and self.pending_review_kind in ("remnant", "seed"):
+            raise ValueError("This scan failed. Scan again or reject this reading before saving.")
         if self._remnant_reading is not None:
             raise ValueError("Wait for the remnant scan to finish before saving.")
         if not self.resolved or self.resolved["status"] != "ready":
@@ -2931,7 +3025,7 @@ class LoggerWindow(QMainWindow):
         self.next_recipe.clear()
         self.results = {"seed": None, "opened": None}
         self.images = {"seed": None, "opened": None}
-        self.saved_scan = None
+        self.saved_scan = self._saved_scan_capture = None
         self.resolved = None
         self._show_image(None)
         self.review_group.hide()
@@ -3290,9 +3384,9 @@ class LoggerWindow(QMainWindow):
         self._show_inventory_preview(image)
         self._review_pending("currency", f"Reading {phase} inventory…", False)
         references = logger.inventory_icons()
-        self._submit("Matching inventory icons…",
+        self._submit_scan("Matching inventory icons…",
                      lambda: item_ocr.scan_inventory_grid(image, references) if capture is self._inventory_reading else None,
-                     lambda result: self._inventory_read(result, live, map_id, capture))
+                     lambda result: self._inventory_read(result, live, map_id, capture), "currency", capture)
 
     def _show_inventory_preview(self, image):
         buffer = io.BytesIO()
@@ -3490,6 +3584,8 @@ class LoggerWindow(QMainWindow):
 
     def save_inventory(self):
         reviewing = self.pending_review_kind == "currency"
+        if reviewing and self._failed_review:
+            raise ValueError("This scan failed. Scan again or reject this reading before saving.")
         if reviewing and self._inventory_reading is not None:
             raise ValueError("Wait for the inventory scan to finish before saving.")
         if reviewing and self._inventory_capture_context is not None:
@@ -3561,9 +3657,9 @@ class LoggerWindow(QMainWindow):
         self._review_pending("ritual", "Reading Ritual rewards…", False)
         names = logger.ritual_names()
         references = logger.omen_icons()
-        self._submit("Reading Ritual rewards…",
+        self._submit_scan("Reading Ritual rewards…",
                      lambda: item_ocr.scan_ritual_page(image, names, references) if capture is self._ritual_reading else None,
-                     lambda result: self._ritual_read(result, live, map_id, capture))
+                     lambda result: self._ritual_read(result, live, map_id, capture), "ritual", capture)
 
     def _ritual_read(self, result, live=True, expected_map_id=None, capture=None):
         if capture is not None and capture is not self._ritual_reading:
@@ -3623,6 +3719,8 @@ class LoggerWindow(QMainWindow):
             self.ritual_table.hide()
 
     def save_ritual(self):
+        if self.pending_review_kind == "ritual" and self._failed_review:
+            raise ValueError("This scan failed. Scan again or reject this reading before saving.")
         if self.pending_review_kind == "ritual" and self._ritual_reading is not None:
             raise ValueError("Wait for the Ritual scan to finish before saving.")
         if self.pending_review_kind == "ritual" and self._ritual_capture_context is not None:
@@ -3701,12 +3799,13 @@ class LoggerWindow(QMainWindow):
         self.results = {"seed": None, "opened": None}
         self.images = {"seed": None, "opened": None}
         self.pending_review_kind = None
+        self._failed_review = False
         self._pending_currency_map = self._pending_ritual_map = self._pending_tablet_slot = None
         self._pending_currency_phase = None
         self._inventory_reading = self._ritual_reading = self._inventory_capture_context = None
         self._ritual_capture_context = self._remnant_reading = None
         service.HOTKEY.cancel_capture()
-        self.saved_scan = self.resolved = None
+        self.saved_scan = self._saved_scan_capture = self.resolved = None
         self._inventory_capture = self._ritual_hash = None
         self._pending_tasks.clear()
         self.inventory_table.setRowCount(0)
