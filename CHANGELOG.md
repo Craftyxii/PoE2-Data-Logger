@@ -7,7 +7,7 @@
 - Correct numeric Excel fields and validate reference-pack round trips and imported screenshot data.
 - Fix shortcut replacement, clipboard retries, capture size checks and scaled region selection.
 - Serialize commit numbering and reject chain entries for finished maps.
-- Correct packaged-module verification and preserve saved Databases during uninstallation.
+- Correct packaged-module verification and installer resource paths; preserve saved Databases during uninstallation.
 
 # PoE2 Data Logger v33
 

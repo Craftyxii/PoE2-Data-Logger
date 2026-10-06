@@ -8,5 +8,5 @@ py -3.12 tools\verify_build.py dist\PoE2-Data-Logger\PoE2-Data-Logger.exe
 if errorlevel 1 exit /b 1
 py -3.12 -c "from PoE2_Data_Logger.ocr.opened_scan import verify_models; verify_models('dist/PoE2-Data-Logger/_internal/rapidocr/models')"
 if errorlevel 1 exit /b 1
-makensis packaging\installer.nsi
+makensis "%~dp0packaging\installer.nsi"
 if errorlevel 1 exit /b 1
