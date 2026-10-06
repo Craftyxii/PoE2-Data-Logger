@@ -25,7 +25,8 @@ WM_HOTKEY = 0x0312
 WM_TIMER = 0x0113
 WM_QUIT = 0x0012
 HOTKEY_ID = 0x4A31
-DEDICATED = ("remnant", "waystone", "tablet", "currency", "ritual", "overlay")
+DEDICATED = ("remnant", "waystone", "tablet", "currency", "ritual", "propagation", "overlay")
+GENERAL_MODES = ("seed", "opened", "both")
 KEY_CODES = {
     "BACKSPACE": 0x08, "TAB": 0x09, "ENTER": 0x0D, "PAUSE": 0x13,
     "CAPSLOCK": 0x14, "ESCAPE": 0x1B, "SPACE": 0x20, "PAGEUP": 0x21,
@@ -145,7 +146,9 @@ class HotkeyManager:
     def start(self):
         with store._connect() as db:
             settings = logger._meta(db, "ocr_shortcut", {"combo": "", "mode": "opened"})
-        self.mode = settings.get("mode") if settings.get("mode") in self.readers else "opened"
+        configured_mode = settings.get("mode")
+        self.mode = (configured_mode if configured_mode in GENERAL_MODES and configured_mode in self.readers
+                     else "opened")
         self.combo = settings.get("combo", "")
         self.combos = {name: str((settings.get("combos") or {}).get(name, ""))
                        for name in DEDICATED}
@@ -164,7 +167,7 @@ class HotkeyManager:
                     "overlay_sequence": self._overlay_sequence}
 
     def set_mode(self, mode):
-        if mode not in self.readers:
+        if mode not in GENERAL_MODES or mode not in self.readers:
             raise ValueError("Choose visible seed or opened remnant mode.")
         with self._lock:
             self.mode = mode
@@ -361,6 +364,8 @@ class HotkeyManager:
             return
         with self._lock:
             mode = self.mode if kind in ("default", "remnant") else kind
+            if kind in ("default", "remnant") and mode not in GENERAL_MODES:
+                mode = "opened"
             self._capture_revision += 1
             revision = self._capture_revision
         try:
@@ -370,7 +375,8 @@ class HotkeyManager:
                 self._capture_lock.release()
                 return
             with logger._connect() as db:
-                region_key = {"opened": "live_region", "currency": "inventory_region",
+                region_key = {"opened": "live_region", "propagation": "propagation_region",
+                              "currency": "inventory_region",
                               "ritual": "ritual_region"}.get(mode)
                 region = logger._meta(db, region_key, None) if region_key else None
                 number = logger._meta(db, "current_map_number", 0)
@@ -384,7 +390,8 @@ class HotkeyManager:
                 from PoE2_Data_Logger.platform.hover_copy import _tooltip_bounds
                 from PoE2_Data_Logger.ui.region_select import region_for
                 bounds = _tooltip_bounds()
-                region_key = {"opened": "live_region", "seed": "seed_region", "currency": "inventory_region",
+                region_key = {"opened": "live_region", "propagation": "propagation_region",
+                              "seed": "seed_region", "currency": "inventory_region",
                               "ritual": "ritual_region"}.get(mode)
                 if region_key:
                     region = region_for(region_key, bounds)
@@ -424,6 +431,9 @@ class HotkeyManager:
                     self._check_image(tooltip)
                 except Exception as exc:
                     tooltip = exc
+            elif mode == "propagation":
+                image = self._grab(region)
+                self._check_image(image)
             elif mode in ("currency", "ritual"):
                 if not region:
                     raise ValueError(f"Select the {mode} capture region in Scan settings first.")
@@ -472,6 +482,18 @@ class HotkeyManager:
         event = None
         raw = None
         try:
+            if kind == "propagation":
+                reader = self.readers.get("propagation")
+                if reader is None:
+                    from PoE2_Data_Logger.ocr.propagation_scan import scan_propagation
+                    reader = scan_propagation
+                memory = io.BytesIO()
+                image.convert("RGB").save(memory, format="PNG")
+                raw = memory.getvalue()
+                result = reader(image)
+                result["mode"] = "propagation"
+                event = {"mode": "propagation", "result": result, "error": ""}
+                return
             if copied:
                 with logger._connect() as db:
                     affixes = [row[0] for row in db.execute("SELECT name FROM affixes ORDER BY rowid")]
@@ -573,7 +595,10 @@ class HotkeyManager:
                 finally:
                     name.unlink(missing_ok=True)
             if mode == "both":
-                mode = result["mode"]
+                selected_mode = result["mode"]
+                if selected_mode not in ("seed", "opened"):
+                    raise ValueError("Choose visible seed or opened remnant mode.")
+                mode = selected_mode
             result["mode"] = mode
             if mode != "seed" or result.get("remnants") or result.get("sockets"):
                 result["_target_map_id"] = remnant_map

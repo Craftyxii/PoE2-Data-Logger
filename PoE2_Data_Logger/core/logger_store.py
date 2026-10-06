@@ -35,14 +35,14 @@ BASE_EXTRA_HEADERS = ("Item Rarity %", "Monster Rarity %", "Pack Size %",
 TABLET_DETAIL_HEADERS = (*(label for tablet in range(1, 5) for slot in range(1, 5)
                            for label in (f"Tablet {tablet} Mod {slot} Value", f"Tablet {tablet} Mod {slot} Unit")),
                         *(f"Tablet {tablet} Random Modifiers" for tablet in range(1, 5)))
-EXPORT_EXTRA_HEADERS = (*BASE_EXTRA_HEADERS, *TABLET_DETAIL_HEADERS)
+EXPORT_EXTRA_HEADERS = (*BASE_EXTRA_HEADERS, *TABLET_DETAIL_HEADERS, "Deli", "Wisp")
 TABLET_EXPORT_HEADERS = tuple(label for tablet in range(1, 5) for slot in range(1, 5)
                              for label in (f"Tablet {tablet} Mod {slot} Affix", f"Tablet {tablet} Mod {slot} %"))
 CONFIG_EXPORT_HEADERS = ("Tier", "Area Level", "Base Map Mods", "Map Mods", "# +2 Mod Tablets",
                          "Tablet Mods", "Total Mods", "Aldur's Saga Affix", "Atlas Master",
                          "Perk 1", "Perk 2", "Perk 3", "Perk 4", "Master +Mods", "Irradiated",
                          "Waystone %", "Tablets Used", *BASE_EXTRA_HEADERS[:-1], *TABLET_EXPORT_HEADERS,
-                         *TABLET_DETAIL_HEADERS)
+                         *TABLET_DETAIL_HEADERS, "Deli", "Wisp")
 
 
 def _tablet_detail_values(context):
@@ -64,7 +64,8 @@ def _config_export_values(context):
             *(perks[:4] + [""] * max(0, 4 - len(perks))),
             *[context.get(key, "") for key in ("master_adds_mod", "irradiated", "waystone", "tablets_used")],
             *_extra_export_values(context)[:len(BASE_EXTRA_HEADERS) - 1],
-            *(tablets[:32] + [""] * max(0, 32 - len(tablets))), *_tablet_detail_values(context)]
+            *(tablets[:32] + [""] * max(0, 32 - len(tablets))), *_tablet_detail_values(context),
+            context.get("deli", ""), context.get("wisp", "")]
 
 
 def _extra_export_values(context):
@@ -77,7 +78,7 @@ def _extra_export_values(context):
             "\n".join(mod for mod in mods if mod),
             *(mods[:10] + [""] * max(0, 10 - len(mods))),
             *("\n".join(tablets[n]) if n < len(tablets) else "" for n in range(4)), "",
-            *_tablet_detail_values(context)]
+            *_tablet_detail_values(context), context.get("deli", ""), context.get("wisp", "")]
 
 
 def _dump(value):
@@ -341,6 +342,11 @@ def initialize():
                 db.executemany("INSERT OR IGNORE INTO ritual_names(name) VALUES(?)",
                                ((name,) for name in OMEN_NAMES))
                 _set_meta(db, "ritual_names_initialized", True)
+            config = _meta(db, "settings")
+            if any(key not in config for key in ("deli", "wisp")):
+                config.setdefault("deli", False)
+                config.setdefault("wisp", False)
+                _set_meta(db, "settings", config)
         _READY = True
 
 
@@ -403,7 +409,9 @@ def _validate_settings(db, data):
         raise ValueError("Choose Biome and City Type from the map dropdowns.")
     c["irradiated"] = bool(c["irradiated"])
     c["ocean"] = bool(c["ocean"])
-    c["expedition"] = _integer(c["expedition"], "Expedition #", 1, 2)
+    c["deli"] = bool(c.get("deli", False))
+    c["wisp"] = bool(c.get("wisp", False))
+    c["expedition"] = _integer(c["expedition"], "Expedition #", 1)
     c["auto_commit"] = bool(c.get("auto_commit", False))
     c["tablet_auto_commit"] = bool(c.get("tablet_auto_commit", False))
     c["ocr_auto_commit"] = bool(c.get("ocr_auto_commit", False))
@@ -795,6 +803,8 @@ def _snapshot(config):
         "master_selections": {name: list(items) for name, items in config["master_selections"].items()},
         "master_adds_mod": master_adds_mod, "irradiated": "Yes" if config["irradiated"] else "No",
         "ocean": "Yes" if config["ocean"] else "No",
+        "deli": "Yes" if config.get("deli", False) else "No",
+        "wisp": "Yes" if config.get("wisp", False) else "No",
         "waystone": config["waystone"], "expedition": config["expedition"],
         "tablets_used": tablet_count, "tablet_capacity": config["tablets_used"], "tablet_values": tablet_values,
         "tablet_affixes": pairs, "tablet_random_mods": random_mods,
@@ -912,6 +922,7 @@ def discard_ocr_id():
 
 def start_next_chain():
     with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
         if not _meta(db, "current_map_number"):
             raise ValueError("Start a map before starting another chain.")
         if _meta(db, "pending_new_map"):
@@ -919,9 +930,7 @@ def start_next_chain():
         if _meta(db, "ocr_pending"):
             raise ValueError("Save or discard the scanned remnant before starting another chain.")
         config = _meta(db, "settings")
-        if config["expedition"] == 2:
-            raise ValueError("This map is already on Expedition #2.")
-        config["expedition"] = 2
+        config["expedition"] += 1
         _set_meta(db, "settings", config)
     return get_state()
 
@@ -1138,7 +1147,11 @@ def commit_chain_runes(runes):
     return commit_chain_steps([{"rune1": rune, "rune2": ""} for rune in cleaned])
 
 
-def commit_chain_steps(steps):
+def commit_chain_draft(steps, expected_context=None):
+    return commit_chain_steps(steps, advance_expedition=True, expected_context=expected_context)
+
+
+def commit_chain_steps(steps, *, advance_expedition=False, expected_context=None):
     if not isinstance(steps, list) or not 1 <= len(steps) <= 96:
         raise ValueError("Enter 1–96 chain steps in order.")
     cleaned = []
@@ -1154,15 +1167,27 @@ def commit_chain_steps(steps):
             raise ValueError("Start a map before committing a chain.")
         if _meta(db, "pending_new_map"):
             raise ValueError("Start the next map before committing a chain.")
+        if expected_context is not None:
+            if not isinstance(expected_context, dict):
+                raise ValueError("The chain capture context is invalid. Scan again.")
+            current = {"_scan_generation": _meta(db, "session_generation", 0),
+                       "_capture_map_id": _map_id(number),
+                       "_capture_map_pending": False,
+                       "_capture_expedition": _meta(db, "settings")["expedition"]}
+            if any(expected_context.get(key) != value for key, value in current.items()):
+                raise ValueError("The map, expedition or session changed. Scan again before committing the chain.")
+        if advance_expedition and _meta(db, "ocr_pending"):
+            raise ValueError("Save or discard the scanned remnant before committing the chain.")
         mid = _map_id(number)
-        expedition = _meta(db, "settings")["expedition"]
+        config = _meta(db, "settings")
+        expedition = config["expedition"]
         eid = _exp_id(mid, expedition)
         step = max([int(row[0] or 0) for table in ("legacy_export", "new_export")
                     for row in db.execute(f"SELECT chain_step FROM {table} WHERE expedition_id=? AND chain_step IS NOT NULL AND chain_step!=''",
                                           (eid,))] or [0]) + 1
         existing = _first_row(db, "expedition_id", eid)
         det = db.execute("SELECT detonated FROM expeditions WHERE expedition_id=?", (eid,)).fetchone()
-        context = _snapshot(_meta(db, "settings"))
+        context = _snapshot(config)
         commit_number = _record_commit(db, "Chain", mid, eid, f"Steps {step}–{step + len(cleaned) - 1}",
                                        context=context, details={"steps": [
                                            {"step": step + offset, "rune1": rune1, "rune2": rune2}
@@ -1177,9 +1202,15 @@ def commit_chain_steps(steps):
             row[67 + len(BASE_EXTRA_HEADERS) - 1] = commit_number
             _add_new(db, row)
         db.execute("INSERT OR IGNORE INTO expeditions VALUES(?,?,?,?)", (eid, mid, expedition, None))
-        return {"map_id": mid, "expedition_id": eid,
-                "steps": list(range(step, step + len(cleaned))),
-                "scan_commit_number": commit_number}
+        result = {"map_id": mid, "expedition_id": eid,
+                  "steps": list(range(step, step + len(cleaned))),
+                  "scan_commit_number": commit_number}
+        if advance_expedition:
+            config["expedition"] = expedition + 1
+            _set_meta(db, "settings", config)
+            result.update(next_expedition=config["expedition"],
+                          next_expedition_id=_exp_id(mid, config["expedition"]))
+        return result
 
 
 def save_kills(normal, magic, rare):
@@ -1571,11 +1602,14 @@ def export_currency_csv():
     writer = csv.writer(output)
     writer.writerow(["Map ID", "Currency", "Start Count", "End Count", "Net Change",
                      "Start Recorded UTC", "End Recorded UTC", "Start Commit #", "End Commit #",
-                     *(f"Start {header}" for header in CONFIG_EXPORT_HEADERS),
-                     *(f"End {header}" for header in CONFIG_EXPORT_HEADERS)])
+                     *(f"Start {header}" for header in CONFIG_EXPORT_HEADERS[:-2]),
+                     *(f"End {header}" for header in CONFIG_EXPORT_HEADERS[:-2]),
+                     "Start Deli", "Start Wisp", "End Deli", "End Wisp"])
     for map_id, phases in sorted(snapshots.items()):
         start = _load(phases["start"]["items_json"]) if "start" in phases else {}
         end = _load(phases["end"]["items_json"]) if "end" in phases else {}
+        start_config = _config_export_values(_load(phases["start"]["snapshot_json"]) if "start" in phases else {})
+        end_config = _config_export_values(_load(phases["end"]["snapshot_json"]) if "end" in phases else {})
         for name in sorted(set(start) | set(end)):
             both = "start" in phases and "end" in phases
             writer.writerow(_csv_row([map_id, name, start.get(name, 0) if "start" in phases else "",
@@ -1585,8 +1619,7 @@ def export_currency_csv():
                              phases["end"]["recorded_at"] if "end" in phases else "",
                              commits.get((map_id, "start"), "") if "start" in phases else "",
                              commits.get((map_id, "end"), "") if "end" in phases else "",
-                             *_config_export_values(_load(phases["start"]["snapshot_json"]) if "start" in phases else {}),
-                             *_config_export_values(_load(phases["end"]["snapshot_json"]) if "end" in phases else {})]))
+                             *start_config[:-2], *end_config[:-2], *start_config[-2:], *end_config[-2:]]))
     return output.getvalue().encode("utf-8-sig")
 
 
@@ -1711,7 +1744,8 @@ def export_maps_csv():
                      "Biome", "City Type", "Ocean Map",
                      *[f"Map Mod {n}" for n in range(1, 11)], "Last Commit #",
                      "Perk 1", "Perk 2", "Perk 3", "Perk 4", "Master +Mods", "Base Map Mods",
-                     "# +2 Mod Tablets", "Tablets Used", *TABLET_EXPORT_HEADERS, *TABLET_DETAIL_HEADERS])
+                     "# +2 Mod Tablets", "Tablets Used", *TABLET_EXPORT_HEADERS, *TABLET_DETAIL_HEADERS,
+                     "Deli", "Wisp"])
     with _connect() as db:
         commits = {row["map_id"]: row["number"] for row in db.execute(
             "SELECT number,map_id FROM commits WHERE map_id!='' ORDER BY number")}
@@ -1762,7 +1796,7 @@ def export_maps_csv():
                                      context.get("tablets", ""), context.get("tablets_used", ""),
                                      *(list(context.get("tablet_values") or [])[:32] +
                                        [""] * max(0, 32 - len(context.get("tablet_values") or []))),
-                                     *_tablet_detail_values(context)]
+                                     *_tablet_detail_values(context), context.get("deli", ""), context.get("wisp", "")]
             writer.writerow(_csv_row([int(v) if isinstance(v, float) and v.is_integer() else v
                                      for v in values]))
     return output.getvalue().encode("utf-8-sig")
@@ -1774,6 +1808,18 @@ def get_state():
         n = _meta(db, "current_map_number")
         mid = _map_id(n) if n else ""
         eid = _exp_id(mid, config["expedition"]) if n else ""
+        pending = _meta(db, "ocr_pending")
+        rid = ""
+        if mid and pending and pending.get("map_id") == mid and pending.get("expedition_id") == eid:
+            rid = pending.get("remnant_id", "")
+        elif mid:
+            for table in ("new_export", "legacy_export"):
+                saved = db.execute(f"SELECT remnant_id FROM {table} WHERE map_id=? AND expedition_id=? "
+                                   "AND remnant_id IS NOT NULL AND remnant_id!='' ORDER BY position DESC LIMIT 1",
+                                   (mid, eid)).fetchone()
+                if saved:
+                    rid = saved[0]
+                    break
         k = db.execute("SELECT kills_json FROM maps WHERE map_id=?", (mid,)).fetchone()
         d = db.execute("SELECT detonated FROM expeditions WHERE expedition_id=?", (eid,)).fetchone()
         families = [{"id": row["id"], "top_socket": row["top_socket"],
@@ -1810,9 +1856,10 @@ def get_state():
         return {
             "settings": config, "area_level": area_level(config),
             "current_map_id": mid, "current_expedition_id": eid,
+            "current_remnant_id": rid,
             "next_remnant_id": f"R{_meta(db, 'next_remnant_number'):04d}",
             "scan_commit_count": _meta(db, "scan_commit_count", 0),
-            "ocr_pending": _meta(db, "ocr_pending"),
+            "ocr_pending": pending,
             "pending_new_map": _meta(db, "pending_new_map"),
             "kills": _load(k[0]) if k else [None, None, None],
             "detonated": d[0] if d else None,
@@ -1865,7 +1912,7 @@ def export_csv(*, _db=None):
         for table in ("legacy_export", "new_export"):
             for item in db.execute(f"SELECT row_json FROM {table} ORDER BY position"):
                 values = _load(item[0])
-                if len(values) in (67, 90, 91):
+                if len(values) in (67, 90, 91, 67 + len(BASE_EXTRA_HEADERS) + len(TABLET_DETAIL_HEADERS)):
                     values.extend([""] * (67 + len(EXPORT_EXTRA_HEADERS) - len(values)))
                 if len(values) != 67 + len(EXPORT_EXTRA_HEADERS):
                     raise ValueError("Saved Export row has an invalid width.")
@@ -1899,9 +1946,9 @@ def export_record_history_csv(*, _db=None):
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     writer.writerow(["Scan Commit #", "Type", "Map ID", "Expedition ID", "Reference", "Recorded UTC",
-                     *HISTORY_DETAIL_HEADERS, *CONFIG_EXPORT_HEADERS, "Tablet Slot Capacity",
+                     *HISTORY_DETAIL_HEADERS, *CONFIG_EXPORT_HEADERS[:-2], "Tablet Slot Capacity",
                      *(f"{master} Configured Perk {n}" for master in ("Jado", "Doryani", "Hilda")
-                       for n in range(1, 5))])
+                       for n in range(1, 5)), "Deli", "Wisp"])
     starts = {}
     with (nullcontext(_db) if _db is not None else _connect()) as db:
         for commit in db.execute("SELECT * FROM commits ORDER BY number"):
@@ -1964,7 +2011,8 @@ def export_record_history_csv(*, _db=None):
             selections = context.get("master_selections", {})
             configured = [selections.get(master, [""] * 4)[n]
                           for master in ("Jado", "Doryani", "Hilda") for n in range(4)]
-            config_values = [*_config_export_values(context), context.get("tablet_capacity", ""), *configured]
+            config = _config_export_values(context)
+            config_values = [*config[:-2], context.get("tablet_capacity", ""), *configured, *config[-2:]]
             for entry in entries or [{}]:
                 values = {**shared, **entry}
                 entry_base = [*base]
@@ -1983,12 +2031,13 @@ def export_all_csv():
         item_columns = {row[0].casefold(): f"Item: {row[0]}"
                         for row in db.execute("SELECT name FROM item_names ORDER BY name")}
     remnant_reader = csv.DictReader(io.StringIO(remnant_data.decode("utf-8-sig")))
-    remnant_headers = list(remnant_reader.fieldnames)
+    remnant_headers = [name for name in remnant_reader.fieldnames if name not in ("Deli", "Wisp")]
     remnants = list(remnant_reader)
     history_reader = csv.DictReader(io.StringIO(history_data.decode("utf-8-sig")))
     headers = remnant_headers + [name for name in history_reader.fieldnames
-                                if name not in remnant_headers and name != "Recipe"]
+                                if name not in remnant_headers and name not in ("Recipe", "Deli", "Wisp")]
     headers.extend(item_columns.values())
+    headers.extend(["Deli", "Wisp"])
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=headers, extrasaction="ignore")
     writer.writeheader()

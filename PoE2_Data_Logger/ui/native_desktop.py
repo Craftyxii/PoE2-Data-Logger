@@ -32,6 +32,7 @@ from PoE2_Data_Logger.core.workbook_export import export_xlsx
 
 
 HERE = Path(__file__).resolve().parent.parent
+WINDOW_TITLE = "PoE2 Data Logger 33.34 Beta"
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
                             if getattr(sys, "frozen", False) else
@@ -285,6 +286,10 @@ class LoggerWindow(QMainWindow):
         self._ritual_reading = None
         self._ritual_capture_context = None
         self._remnant_reading = None
+        self._propagation_reading = None
+        self._chain_context = None
+        self._chain_drafts = {}
+        self._chain_scan_number = 0
         self._ritual_hash = None
         self._currency_catalog_loaded = False
         self.pending_review_kind = None
@@ -297,7 +302,7 @@ class LoggerWindow(QMainWindow):
         self._extra_waystone_mods = []
         for font in ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf"):
             QFontDatabase.addApplicationFont(str(HERE / "fonts" / font))
-        self.setWindowTitle("PoE2 Data Logger")
+        self.setWindowTitle(WINDOW_TITLE)
         self.setWindowIcon(QIcon(str(HERE / "power_rune.ico")))
         self.resize(1280, 860)
         self.setStyleSheet(APP_STYLE)
@@ -519,6 +524,26 @@ class LoggerWindow(QMainWindow):
         heading.addWidget(self.page_subtitle)
         top.addLayout(heading)
         top.addStretch()
+        self.header_map_id = QLabel("—")
+        self.header_remnant_id = QLabel("—")
+        self.header_expedition = combo([1, 2])
+        self.header_expedition.setMinimumWidth(145)
+        identifiers = QHBoxLayout()
+        identifiers.setSpacing(14)
+        for label, field in (("MAP ID", self.header_map_id),
+                             ("REMNANT ID", self.header_remnant_id),
+                             ("EXPEDITION # / ID", self.header_expedition)):
+            column = QVBoxLayout()
+            column.setSpacing(3)
+            caption = QLabel(label)
+            caption.setProperty("role", "eyebrow")
+            column.addWidget(caption)
+            if isinstance(field, QLabel):
+                field.setMinimumWidth(80)
+                field.setStyleSheet("font-size:17px;font-weight:700;color:#FFFFFF;")
+            column.addWidget(field)
+            identifiers.addLayout(column)
+        top.addLayout(identifiers)
         actions = QHBoxLayout()
         actions.addWidget(button("Undo new map", lambda: self.run(self.undo_map)))
         actions.addWidget(button("+ New map", lambda: self.run(self.finish_map), "primary"))
@@ -532,6 +557,8 @@ class LoggerWindow(QMainWindow):
         self.header_city_type = combo(logger.CITY_TYPES)
         self.header_ocean = QCheckBox("Ocean")
         self.header_irradiated = QCheckBox("Irradiated")
+        self.header_deli = QCheckBox("Deli")
+        self.header_wisp = QCheckBox("Wisp")
         for field in (self.header_biome, self.header_city_type):
             field.setStyleSheet("font-size:15px;font-weight:600;")
             field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -545,10 +572,12 @@ class LoggerWindow(QMainWindow):
             caption.setProperty("role", "eyebrow")
             card_layout.addWidget(caption)
             if index == 1:
-                toggles = QHBoxLayout()
-                toggles.addWidget(self.header_ocean)
-                toggles.addWidget(self.header_irradiated)
-                toggles.addStretch()
+                toggles = QGridLayout()
+                toggles.setVerticalSpacing(3)
+                for number, field in enumerate((self.header_ocean, self.header_irradiated,
+                                                 self.header_deli, self.header_wisp)):
+                    toggles.addWidget(field, number // 2, number % 2)
+                toggles.setColumnStretch(2, 1)
                 card_layout.addLayout(toggles)
             else:
                 card_layout.addWidget((self.header_biome, None, self.stat_values[2],
@@ -574,6 +603,8 @@ class LoggerWindow(QMainWindow):
         self._build_readme()
         self._build_license()
         self._build_disclaimer()
+        self.header_expedition.currentIndexChanged.connect(
+            lambda: self.run(lambda: self.set_expedition(self.header_expedition)))
         for key, widgets in self._map_tag_controls().items():
             for widget in widgets:
                 changed = widget.toggled if isinstance(widget, QCheckBox) else widget.currentIndexChanged
@@ -685,6 +716,14 @@ class LoggerWindow(QMainWindow):
 
     def _review_pending(self, kind, summary, can_commit=True, rows=None):
         self._failed_review = False
+        if kind == "remnant" and self.recipe_table.property("savedRemnant"):
+            self._render_recipe_rows([])
+            with QSignalBlocker(self.recipe_family):
+                select(self.recipe_family, "")
+            set_message(self.recipe_status, "Resolve an observed recipe before manual saving.")
+            self.scan_status.hide()
+        if kind != "propagation":
+            self._propagation_reading = None
         if kind not in ("remnant", "seed"):
             self._remnant_reading = None
         if kind != "tablet":
@@ -698,7 +737,8 @@ class LoggerWindow(QMainWindow):
         self.pending_review_kind = kind
         self.review_kind.setText({"remnant": "Remnant", "seed": "Visible remnants",
                                   "waystone": "Waystone", "tablet": "Tablet",
-                                  "currency": "Currency inventory", "ritual": "Ritual rewards"}[kind])
+                                  "currency": "Currency inventory", "ritual": "Ritual rewards",
+                                  "propagation": "Propagation scan"}[kind])
         set_message(self.review_summary, summary)
         self.found_table.setRowCount(0)
         for label, detail, check in rows or []:
@@ -706,9 +746,9 @@ class LoggerWindow(QMainWindow):
             self.found_table.insertRow(index)
             for column, text in enumerate((label, detail, check)):
                 self.found_table.setItem(index, column, QTableWidgetItem(str(text)))
-        self.found_table.setVisible(kind in ("waystone", "tablet") and
+        self.found_table.setVisible(kind in ("waystone", "tablet", "propagation") and
                                     self.found_table.rowCount() > 0)
-        self.found_label.setVisible((kind in ("waystone", "tablet") and self.found_table.rowCount() > 0) or
+        self.found_label.setVisible((kind in ("waystone", "tablet", "propagation") and self.found_table.rowCount() > 0) or
                                     (kind == "currency" and self.inventory_table.rowCount() > 0) or
                                     (kind == "ritual" and self.ritual_table.rowCount() > 0))
         self.approve_scan_button.setEnabled(can_commit)
@@ -794,6 +834,7 @@ class LoggerWindow(QMainWindow):
         self._pending_currency_map = self._pending_ritual_map = self._pending_tablet_slot = None
         self._pending_currency_phase = None
         self._inventory_reading = self._ritual_reading = None
+        self._propagation_reading = None
         self.approve_scan_button.setEnabled(False)
         self._review_controls(None)
         self.currency_review_group.hide()
@@ -833,6 +874,8 @@ class LoggerWindow(QMainWindow):
             return self.save_inventory()
         if kind == "ritual":
             return self.save_ritual()
+        if kind == "propagation":
+            return self._append_propagation()
         raise ValueError("There is no scan waiting to commit.")
 
     def _build_review(self):
@@ -862,6 +905,7 @@ class LoggerWindow(QMainWindow):
         self.review_items_content.addWidget(self.found_label)
         self.found_label.hide()
         self.found_table = QTableWidget(0, 3)
+        self.found_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.found_table.setHorizontalHeaderLabels(["Found", "Reading", "Check"])
         self.found_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.found_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -975,6 +1019,28 @@ class LoggerWindow(QMainWindow):
         controls.addWidget(self.manual_remnant_button)
         controls.addStretch()
         latest.addLayout(controls)
+        self.chain_review_group = QGroupBox("PROPAGATION CHAIN DRAFT")
+        chain_review = QVBoxLayout(self.chain_review_group)
+        self.chain_review_status = message("Scan propagation using its dedicated key, or enter runes on Expedition.")
+        chain_review.addWidget(self.chain_review_status)
+        self.chain_review_table = QTableWidget(0, 3)
+        self.chain_review_table.setHorizontalHeaderLabels(["Chain part", "Rune", "Recipe"])
+        self.chain_review_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.chain_review_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.chain_review_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.chain_review_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.chain_review_table.verticalHeader().setDefaultSectionSize(38)
+        self.chain_review_table.setMinimumHeight(170)
+        self.chain_review_table.setMaximumHeight(340)
+        chain_review.addWidget(self.chain_review_table)
+        chain_actions = QHBoxLayout()
+        self.review_commit_chain_button = button("Commit chain", lambda: self.run(self.commit_chain), "primary")
+        chain_actions.addWidget(self.review_commit_chain_button)
+        chain_actions.addWidget(button("Edit chain", lambda: self.tabs.setCurrentIndex(1)))
+        chain_actions.addStretch()
+        chain_review.insertLayout(1, chain_actions)
+        self.review_items_content.insertWidget(0, self.chain_review_group)
+        self.chain_review_group.hide()
         content.addStretch()
 
     def _build_expedition(self):
@@ -1008,6 +1074,7 @@ class LoggerWindow(QMainWindow):
         for index, (kind, title) in enumerate((("remnant", "Remnant"), ("waystone", "Waystone"),
                                                ("tablet", "Tablet"), ("currency", "Currency inventory"),
                                                ("ritual", "Ritual page"),
+                                               ("propagation", "Propagation scan"),
                                                ("overlay", "Show / hide HUD")), 1):
             keys.addWidget(QLabel(title), index, 0)
             label = QLabel("Off")
@@ -1017,6 +1084,10 @@ class LoggerWindow(QMainWindow):
             keys.addWidget(button("Clear", lambda checked=False, target=kind:
                                   self.run(lambda: self.clear_hotkey(target))), index, 3)
         hotkey.addLayout(keys)
+        propagation_help = QLabel("Propagation uses only its own key. Clear reads add runes to the chain draft; "
+                                  "Commit chain saves the draft and advances the expedition number.")
+        propagation_help.setWordWrap(True)
+        hotkey.addWidget(propagation_help)
         overlay = self._group("HUD overlay", content)
         self.overlay_checkbox = QCheckBox("Enable HUD overlay")
         self.overlay_checkbox.setChecked(self._overlay_enabled)
@@ -1194,8 +1265,12 @@ class LoggerWindow(QMainWindow):
         checks = QHBoxLayout()
         self.irradiated = QCheckBox("Irradiated +1")
         self.ocean = QCheckBox("Ocean Map +1")
+        self.deli = QCheckBox("Deli")
+        self.wisp = QCheckBox("Wisp")
         checks.addWidget(self.irradiated)
         checks.addWidget(self.ocean)
+        checks.addWidget(self.deli)
+        checks.addWidget(self.wisp)
         checks.addStretch()
         traits.addLayout(checks)
         self.area = message("")
@@ -1412,7 +1487,7 @@ class LoggerWindow(QMainWindow):
         expedition_row = QHBoxLayout()
         expedition_row.addWidget(QLabel("Expedition #"))
         expedition_row.addWidget(self.expedition)
-        expedition_row.addWidget(button("Expedition 2 · new chain", lambda: self.run(self.new_chain)))
+        expedition_row.addWidget(button("Next expedition · new chain", lambda: self.run(self.new_chain)))
         expedition_row.addStretch()
         chain.addLayout(expedition_row)
         self.chain_note = message("Enter the whole chain, then commit it once.")
@@ -1592,6 +1667,7 @@ class LoggerWindow(QMainWindow):
             self.rune_grid.addWidget(QLabel(f"Rune {i + 1}"), i // 3 * 2, i % 3)
             self.rune_grid.addWidget(field, i // 3 * 2 + 1, i % 3)
             self.rune_inputs.append(field)
+            field.textChanged.connect(self._chain_fields_changed)
 
     def refresh(self):
         waystone_draft = None
@@ -1680,11 +1756,12 @@ class LoggerWindow(QMainWindow):
             self._fill_tablet_slot(number, entries, raw)
             select(self.tablets_used, max(capacity, number))
         self.tablet_active()
-        select(self.expedition, config["expedition"])
+        self._sync_header_ids(state)
+        self._load_chain_context()
         self.chain_note.setText(f"Commit the entire chain to {state['current_expedition_id'] or 'the first map'} in order.")
         self.chain_list.clear()
         for entry in state["chain"]:
-            self.chain_list.addItem(f"#{entry['step']}  {entry['rune1']}")
+            self.chain_list.addItem(f"#{entry['step']}  " + " · ".join(filter(None, (entry['rune1'], entry['rune2']))))
         self.chain_list.setVisible(bool(state["chain"]))
         for index, widget in enumerate((self.normal, self.magic, self.rare)):
             widget.setText("" if state["kills"][index] is None else str(state["kills"][index]))
@@ -1752,7 +1829,7 @@ class LoggerWindow(QMainWindow):
     def _set_ocr_indicator(self):
         shortcuts = service.HOTKEY.status()
         scan_key = bool(shortcuts["combo"] or any(shortcuts["combos"].get(kind)
-                        for kind in ("remnant", "waystone", "tablet", "currency", "ritual")))
+                        for kind in ("remnant", "waystone", "tablet", "currency", "ritual", "propagation")))
         active = bool(shortcuts["registered"] and scan_key)
         if active and service.HOTKEY.focused is not None:
             active = service.HOTKEY.focused()
@@ -1782,7 +1859,27 @@ class LoggerWindow(QMainWindow):
         return {"biome": (self.header_biome, self.biome),
                 "city_type": (self.header_city_type, self.city_type),
                 "ocean": (self.header_ocean, self.ocean),
-                "irradiated": (self.header_irradiated, self.irradiated)}
+                "irradiated": (self.header_irradiated, self.irradiated),
+                "deli": (self.header_deli, self.deli),
+                "wisp": (self.header_wisp, self.wisp)}
+
+    def _sync_header_ids(self, state):
+        mid = state["current_map_id"]
+        self.header_map_id.setText(mid or "—")
+        self.header_remnant_id.setText(state["current_remnant_id"] or "—")
+        current = state["settings"]["expedition"]
+        for control in (self.header_expedition, self.expedition):
+            with QSignalBlocker(control):
+                for number in range(1, max(2, current + 1) + 1):
+                    if control.findData(number) < 0:
+                        control.addItem(str(number), number)
+                select(control, current)
+        with QSignalBlocker(self.header_expedition):
+            for index in range(self.header_expedition.count()):
+                number = self.header_expedition.itemData(index)
+                self.header_expedition.setItemText(index,
+                    f"{number} · {mid}-E{number:02d}" if mid else str(number))
+        select(self.header_expedition, state["settings"]["expedition"])
 
     def _sync_map_tags(self, config):
         for key, widgets in self._map_tag_controls().items():
@@ -1834,6 +1931,7 @@ class LoggerWindow(QMainWindow):
         logger.save_settings({"waystone": value(self.waystone), "tier": value(self.tier),
                               "map_mods": value(self.map_mods), "irradiated": self.irradiated.isChecked(),
                               "ocean": self.ocean.isChecked(), "aldur": value(self.aldur),
+                              "deli": self.deli.isChecked(), "wisp": self.wisp.isChecked(),
                               "biome": value(self.biome), "city_type": value(self.city_type),
                               "item_rarity": value(self.item_rarity),
                               "monster_rarity": value(self.monster_rarity),
@@ -1953,6 +2051,7 @@ class LoggerWindow(QMainWindow):
         self.pending_review_kind = None
         self._failed_review = False
         self._remnant_reading = None
+        self._propagation_reading = None
         self._pending_currency_map = self._pending_ritual_map = self._pending_tablet_slot = None
         self._pending_currency_phase = None
         self._inventory_reading = self._ritual_reading = None
@@ -1986,8 +2085,6 @@ class LoggerWindow(QMainWindow):
 
     def new_chain(self):
         state = service.dispatch("/api/next-chain")
-        for field in self.rune_inputs:
-            field.clear()
         self.refresh()
         self.note(f"{state['current_expedition_id']} is ready for its chain.")
 
@@ -2002,9 +2099,145 @@ class LoggerWindow(QMainWindow):
         self.refresh()
         self.note("Empty map undone.")
 
-    def set_expedition(self):
-        logger.save_settings({"expedition": value(self.expedition)})
+    def set_expedition(self, widget=None):
+        control = self.expedition if widget is None else widget
+        try:
+            logger.save_settings({"expedition": value(control)})
+        except Exception:
+            self.state = logger.get_state()
+            select(self.expedition, self.state["settings"]["expedition"])
+            self._sync_header_ids(self.state)
+            raise
         self.refresh()
+
+    def _chain_key(self, context):
+        return (context["_scan_generation"], context["_capture_map_id"], context["_capture_expedition"])
+
+    def _chain_fields_changed(self):
+        for field in self.rune_inputs:
+            if not value(field):
+                field.setProperty("chainPart", None)
+                field.setProperty("chainRecipe", None)
+        if self._chain_context is not None:
+            self._chain_drafts[self._chain_key(self._chain_context)] = [
+                {"rune": value(field), "part": field.property("chainPart"),
+                 "recipe": field.property("chainRecipe") or ""} for field in self.rune_inputs]
+        self._refresh_chain_review()
+
+    def _load_chain_context(self):
+        context = logger.scan_context()
+        if self._chain_context != context:
+            if (self._chain_context is not None and
+                    self._chain_context["_scan_generation"] != context["_scan_generation"]):
+                self._chain_drafts.clear()
+            self._chain_context = context
+            draft = self._chain_drafts.get(self._chain_key(context), [])
+            if len(draft) > len(self.rune_inputs):
+                self.add_runes(len(draft) - len(self.rune_inputs))
+            for index, field in enumerate(self.rune_inputs):
+                item = draft[index] if index < len(draft) else {}
+                with QSignalBlocker(field):
+                    field.setProperty("chainPart", item.get("part"))
+                    field.setProperty("chainRecipe", item.get("recipe", ""))
+                    field.setText(item.get("rune", ""))
+            if self.pending_review_kind == "propagation":
+                self._propagation_reading = None
+                self.pending_review_kind = None
+                self._review_controls(None)
+                self.found_table.hide()
+                self.found_label.hide()
+        self._refresh_chain_review()
+
+    def _chain_steps(self):
+        steps = []
+        previous = None
+        for index, field in enumerate(self.rune_inputs):
+            rune = value(field)
+            if not rune:
+                continue
+            part = field.property("chainPart") or f"manual-{index}"
+            if part == previous and not steps[-1]["rune2"]:
+                steps[-1]["rune2"] = rune
+            else:
+                steps.append({"rune1": rune, "rune2": ""})
+            previous = part
+        return steps
+
+    def _refresh_chain_review(self):
+        if not hasattr(self, "chain_review_table") or not hasattr(self, "rune_inputs"):
+            return
+        table = self.chain_review_table
+        table.setRowCount(0)
+        previous = None
+        part_number = 0
+        for index, field in enumerate(self.rune_inputs):
+            rune = value(field)
+            if not rune:
+                continue
+            part = field.property("chainPart") or f"manual-{index}"
+            if part != previous:
+                part_number += 1
+            previous = part
+            row = table.rowCount()
+            table.insertRow(row)
+            for column, text in enumerate((str(part_number), rune, field.property("chainRecipe") or "")):
+                table.setItem(row, column, QTableWidgetItem(text))
+        self.chain_review_group.setVisible(table.rowCount() > 0)
+        self.review_commit_chain_button.setEnabled(table.rowCount() > 0)
+        expedition_id = self.state.get("current_expedition_id") or "the active expedition"
+        set_message(self.chain_review_status,
+                    f"{expedition_id} · {part_number} chain parts · {table.rowCount()} runes in scan order. "
+                    "Commit chain saves these parts and advances the expedition number.")
+
+    def _propagation_read(self, result, raw=None):
+        logger.validate_scan_context(result)
+        self._load_chain_context()
+        self._propagation_reading = dict(result)
+        self._show_image(raw)
+        runes = result.get("runes", [])
+        rows = [(f"Rune {index + 1}", rune, "Left to right") for index, rune in enumerate(runes)]
+        self._review_pending("propagation", result.get("status") or "Check the selected recipe and marked runes.",
+                             bool(result.get("can_use") and 1 <= len(runes) <= 2), rows)
+        if result.get("can_use") and 1 <= len(runes) <= 2:
+            self._append_propagation()
+
+    def _append_propagation(self):
+        result = self._propagation_reading
+        if self.pending_review_kind != "propagation" or not result or not result.get("can_use"):
+            raise ValueError("Scan a selected recipe with one or two clear propagation marks.")
+        logger.validate_scan_context(result)
+        logger.validate_scan_context(self._chain_context)
+        runes = result.get("runes", [])
+        if not 1 <= len(runes) <= 2 or any(not isinstance(rune, str) or not rune.strip() for rune in runes):
+            raise ValueError("Scan a selected recipe with one or two clear propagation marks.")
+        occupied = [index for index, field in enumerate(self.rune_inputs) if value(field)]
+        start = occupied[-1] + 1 if occupied else 0
+        if start + len(runes) > 96:
+            raise ValueError("This chain draft already has the maximum of 96 runes.")
+        if start + len(runes) > len(self.rune_inputs):
+            self.add_runes(start + len(runes) - len(self.rune_inputs))
+        self._chain_scan_number += 1
+        for offset, rune in enumerate(runes):
+            field = self.rune_inputs[start + offset]
+            with QSignalBlocker(field):
+                field.setProperty("chainPart", f"scan-{self._chain_scan_number}")
+                field.setProperty("chainRecipe", result.get("selected_recipe") or "")
+                field.setText(rune.strip())
+        self._chain_fields_changed()
+        self._propagation_reading = None
+        self.pending_review_kind = None
+        self.approve_scan_button.setEnabled(False)
+        self._review_controls(None)
+        self.found_table.hide()
+        self.found_label.hide()
+        set_message(self.review_summary,
+                    f"{result.get('selected_recipe') or 'Selected recipe'} · " + " → ".join(runes)
+                    + " added to the chain draft. Use Commit chain when the chain is complete.", "success")
+        self._overlay_review_token += 1
+        token = self._overlay_review_token
+        QTimer.singleShot(0, lambda: self.show_overlay() if self._overlay_enabled and
+                          not self._editing_regions and not self._region_selection_pending and
+                          token == self._overlay_review_token and self.tabs.currentIndex() == 0 else None)
 
     def commit_chain(self):
         runes = [value(field) for field in self.rune_inputs]
@@ -2012,12 +2245,20 @@ class LoggerWindow(QMainWindow):
             runes.pop()
         if not runes or any(not rune for rune in runes):
             raise ValueError("Fill runes in order, starting at Rune 1.")
-        saved = logger.commit_chain_runes(runes)
+        saved = logger.commit_chain_draft(self._chain_steps(), expected_context=self._chain_context)
+        service.HOTKEY.cancel_capture()
+        self._propagation_reading = None
         for field in self.rune_inputs:
             field.clear()
+        if self.pending_review_kind == "propagation":
+            self.pending_review_kind = None
+            self._review_controls(None)
         self.refresh()
         self._set_commit_badge(saved["scan_commit_number"])
-        self.note(f"{saved['expedition_id']} · {len(saved['steps'])} runes saved in order.", True)
+        text = (f"{saved['expedition_id']} · {len(saved['steps'])} chain parts saved in order. "
+                f"{saved['next_expedition_id']} is ready.")
+        set_message(self.review_summary, text, "success")
+        self.note(text, True)
 
     def save_counts(self):
         data = self.counts_data()
@@ -2096,6 +2337,8 @@ class LoggerWindow(QMainWindow):
         self.setWindowOpacity(self._overlay_opacity / 100 if self._overlay_enabled else 1.0)
         if visible:
             self.showMinimized() if minimized else self.show()
+        elif not self._overlay_enabled:
+            self.showNormal()
         self.overlay_escape.setEnabled(self._overlay_enabled)
         self.overlay_toggle_button.setEnabled(self._overlay_enabled)
         with QSignalBlocker(self.overlay_checkbox):
@@ -2129,7 +2372,12 @@ class LoggerWindow(QMainWindow):
             self._overlay_review_token += 1
             self._overlay_revealed = False
             self._overlay_auto_review = False
-            self.hide()
+            hotkey = service.HOTKEY.status()
+            if (not self._editing_regions and hotkey["supported"] and
+                    hotkey["registered"] and hotkey["combos"].get("overlay")):
+                self.hide()
+            else:
+                self.showMinimized()
 
     def _hide_overlay_capture(self, ready):
         try:
@@ -2564,6 +2812,7 @@ class LoggerWindow(QMainWindow):
         self.scan_status.show()
         if result.get("remnant_id"):
             self.stat_values[0].setText(result["map_id"])
+            self._sync_header_ids(logger.get_state())
         if mode == "opened":
             found = result.get("opened_recipes") or []
             rows = [(f"Reward {i + 1}", item.get("recipe") or item.get("raw", ""),
@@ -2967,20 +3216,31 @@ class LoggerWindow(QMainWindow):
 
     def _invalidate_resolution(self):
         self.resolved = None
+        if self.recipe_table.property("savedRemnant"):
+            if (self.pending_review_kind != "remnant" and
+                    not value(self.first_recipe) and not value(self.next_recipe)):
+                return
+            self.recipe_table.setProperty("savedRemnant", None)
+            self.recipe_table.setRowCount(0)
         if self.pending_review_kind == "remnant":
             self.approve_scan_button.setEnabled(bool(value(self.first_recipe) or
                 (self.results["opened"] and self.results["opened"].get("first_recipe"))))
         self.recipe_table.hide()
 
+    def _render_recipe_rows(self, rows, saved=None):
+        self.recipe_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.recipe_table.setProperty("savedRemnant", saved)
+        self.recipe_table.setRowCount(len(rows))
+        self.recipe_table.setVisible(bool(rows))
+        for row, item in enumerate(rows):
+            for col, key in enumerate(("recipe", "sockets", "combo")):
+                self.recipe_table.setItem(row, col, QTableWidgetItem(str(item[key])))
+
     def resolve_recipe(self, preserve_review=False):
         result = logger.resolve(value(self.first_recipe), value(self.next_recipe),
                                 value(self.recipe_family))
         self.resolved = result
-        self.recipe_table.setRowCount(len(result["rows"]))
-        self.recipe_table.setVisible(bool(result["rows"]))
-        for row, item in enumerate(result["rows"]):
-            for col, key in enumerate(("recipe", "sockets", "combo")):
-                self.recipe_table.setItem(row, col, QTableWidgetItem(str(item[key])))
+        self._render_recipe_rows(result["rows"])
         if result["status"] == "ready":
             rows = [(f"Recipe {i + 1}", item["recipe"], f"{item['sockets']} sockets · {item['combo']}")
                     for i, item in enumerate(result["rows"])]
@@ -3036,6 +3296,10 @@ class LoggerWindow(QMainWindow):
             self._populate_seed_table()
 
     def _saved_remnant(self, saved):
+        with logger._connect() as db:
+            commit = db.execute("SELECT details_json FROM commits WHERE number=? AND reference=?",
+                                (saved["scan_commit_number"], saved["remnant_id"])).fetchone()
+        rows = logger._load(commit[0])["recipes"] if commit else []
         self._review_saved("remnant", saved["scan_commit_number"])
         self.first_recipe.clear()
         self.next_recipe.clear()
@@ -3047,9 +3311,11 @@ class LoggerWindow(QMainWindow):
         self.review_group.hide()
         self.opened_lines.clear()
         self.approve_scan_button.setEnabled(False)
-        self.recipe_table.setRowCount(0)
-        self.recipe_table.hide()
         self.refresh()
+        self._render_recipe_rows(rows, saved["remnant_id"])
+        self.remnant_log_group.show()
+        set_message(self.recipe_status, f"{saved['map_id']} · {saved['expedition_id']} · "
+                    f"{saved['remnant_id']} · Family {saved['family']} · Saved recipes", "success")
         self._set_commit_badge(saved["scan_commit_number"])
         set_message(self.scan_status, f"{saved['remnant_id']} · Family {saved['family']} · "
                     f"{saved['recipes']} recipe rows saved to Export.", "success")
@@ -3074,6 +3340,8 @@ class LoggerWindow(QMainWindow):
                 self.error(event["error"])
             elif event["mode"] == "item":
                 self.run(lambda: self._hover_item_read(event["result"], service.HOTKEY.image(event["id"])))
+            elif event["mode"] == "propagation":
+                self.run(lambda: self._propagation_read(event["result"], service.HOTKEY.image(event["id"])))
             elif event["mode"] in ("currency", "ritual"):
                 raw = service.HOTKEY.image(event["id"])
                 if raw:
@@ -3996,7 +4264,7 @@ def instance_lock():
         user32.FindWindowW.restype = wintypes.HWND
         user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
         user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
-        window = user32.FindWindowW(None, "PoE2 Data Logger")
+        window = user32.FindWindowW(None, WINDOW_TITLE) or user32.FindWindowW(None, "PoE2 Data Logger")
         if window:
             user32.ShowWindow(window, 9)
             user32.SetForegroundWindow(window)

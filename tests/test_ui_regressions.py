@@ -118,6 +118,68 @@ class UIRegressionTests(unittest.TestCase):
         with patch.object(store, "_reviewed_vector", return_value=None):
             return work()
 
+    def test_header_map_flags_sync_without_changing_area(self):
+        area = self.window.stat_values[2].text()
+        self.window.header_deli.setChecked(True)
+        self.window.header_wisp.setChecked(True)
+        self.assertTrue(self.window.deli.isChecked())
+        self.assertTrue(self.window.wisp.isChecked())
+        self.assertTrue(logger.get_state()["settings"]["deli"])
+        self.assertTrue(logger.get_state()["settings"]["wisp"])
+        self.assertEqual(self.window.stat_values[2].text(), area)
+        self.window.deli.setChecked(False)
+        self.window.wisp.setChecked(False)
+        self.assertFalse(self.window.header_deli.isChecked())
+        self.assertFalse(self.window.header_wisp.isChecked())
+        self.assertFalse(logger.get_state()["settings"]["deli"])
+        self.assertFalse(logger.get_state()["settings"]["wisp"])
+        self.assertEqual(self.window.stat_values[2].text(), area)
+
+    def test_header_expedition_controls_existing_chain_selection(self):
+        self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
+        self.assertEqual(self.window.expedition.currentData(), 2)
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertIn("M0001-E02", self.window.header_expedition.currentText())
+        self.assertIn("M0001-E02", self.window.chain_note.text())
+        self.window.rune_inputs[0].setText("Rage")
+        self.window.rune_inputs[1].setText("Time")
+        self.window.commit_chain()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E03")
+        self.assertEqual(self.window.header_expedition.currentData(), 3)
+        self.assertEqual(logger.get_state()["chain"], [])
+        self.window.expedition.setCurrentIndex(self.window.expedition.findData(1))
+        self.assertEqual(self.window.header_expedition.currentData(), 1)
+        self.assertIn("M0001-E01", self.window.header_expedition.currentText())
+        self.assertEqual(logger.get_state()["chain"], [])
+        self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
+        self.assertEqual([row["rune1"] for row in logger.get_state()["chain"]], ["Rage", "Time"])
+
+    def test_header_remnant_id_follows_review_save_and_map_transition(self):
+        self.assertEqual(self.window.header_map_id.text(), "M0001")
+        self.assertEqual(self.window.header_remnant_id.text(), "—")
+        self.window.show_result("opened", self.opened_result())
+        self.assertEqual(self.window.header_remnant_id.text(), "R0001")
+        self.window.discard_scan()
+        self.assertEqual(self.window.header_remnant_id.text(), "—")
+        self.window.show_result("opened", self.opened_result())
+        self.window.approve_remnant_scan()
+        self.assertEqual(self.window.header_remnant_id.text(), "R0001")
+        self.window.finish_map()
+        self.assertEqual(self.window.header_map_id.text(), "M0002")
+        self.assertEqual(self.window.header_remnant_id.text(), "—")
+        self.assertEqual(self.window.header_expedition.currentData(), 1)
+        self.assertIn("M0002-E01", self.window.header_expedition.currentText())
+
+    def test_rejected_expedition_change_restores_header_and_tab(self):
+        self.window.show_result("opened", self.opened_result())
+        select(self.window.header_expedition, 2)
+        with self.assertRaisesRegex(ValueError, "before switching expeditions"):
+            self.window.set_expedition(self.window.header_expedition)
+        self.assertEqual(self.window.header_expedition.currentData(), 1)
+        self.assertEqual(self.window.expedition.currentData(), 1)
+        self.assertEqual(self.window.header_remnant_id.text(), "R0001")
+        self.assertEqual(logger.get_state()["settings"]["expedition"], 1)
+
     def test_discard_cancels_delayed_remnant_and_autosave(self):
         self.window.set_auto_commit(True)
         self.window.show_result("opened", self.opened_result())

@@ -53,6 +53,7 @@ def verify(executable, check_files=True):
                  'PoE2_Data_Logger.platform.hotkey',
                  'PoE2_Data_Logger.ocr.opened_scan',
                  'PoE2_Data_Logger.ocr.item_ocr',
+                 'PoE2_Data_Logger.ocr.propagation_scan',
                  'PoE2_Data_Logger.core.workbook_export'):
         if name not in module_archive.toc:
             raise ValueError(f'Launcher is missing application module: {name}')

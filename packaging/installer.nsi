@@ -1,12 +1,16 @@
 Unicode true
-!define APP_VERSION "33.3"
-Name "PoE2 Data Logger"
-OutFile "${__FILEDIR__}\..\PoE2-Data-Logger-Setup-v${APP_VERSION}.exe"
+!define APP_VERSION "33.34"
+!define APP_CHANNEL "beta"
+!define APP_DISPLAY_VERSION "${APP_VERSION} Beta"
+!define APP_RELEASE_VERSION "${APP_VERSION}-${APP_CHANNEL}"
+!define APP_NAME "PoE2 Data Logger ${APP_DISPLAY_VERSION}"
+Name "${APP_NAME}"
+OutFile "${__FILEDIR__}\..\PoE2-Data-Logger-Setup-v${APP_RELEASE_VERSION}.exe"
 VIProductVersion "${APP_VERSION}.0.0"
-VIAddVersionKey /LANG=1033 "ProductName" "PoE2 Data Logger"
-VIAddVersionKey /LANG=1033 "ProductVersion" "${APP_VERSION}"
-VIAddVersionKey /LANG=1033 "FileVersion" "${APP_VERSION}"
-VIAddVersionKey /LANG=1033 "FileDescription" "PoE2 Data Logger Installer"
+VIAddVersionKey /LANG=1033 "ProductName" "${APP_NAME}"
+VIAddVersionKey /LANG=1033 "ProductVersion" "${APP_DISPLAY_VERSION}"
+VIAddVersionKey /LANG=1033 "FileVersion" "${APP_DISPLAY_VERSION}"
+VIAddVersionKey /LANG=1033 "FileDescription" "${APP_NAME} Installer"
 VIAddVersionKey /LANG=1033 "LegalCopyright" "PoE2 Data Logger"
 InstallDir "$PROGRAMFILES32\PoE2 Data Logger"
 RequestExecutionLevel admin
@@ -18,7 +22,11 @@ ShowUninstDetails show
 
 Function .onInit
   System::Call 'user32::FindWindowW(p 0, w "PoE2 Data Logger") p.r0'
-  StrCmp $0 "0" ready
+  StrCmp $0 "0" check_beta running
+  check_beta:
+    System::Call 'user32::FindWindowW(p 0, w "${APP_NAME}") p.r0'
+    StrCmp $0 "0" ready
+  running:
     MessageBox MB_ICONEXCLAMATION|MB_OK "Close PoE2 Data Logger before installing this update."
     Abort
   ready:
@@ -26,7 +34,11 @@ FunctionEnd
 
 Function un.onInit
   System::Call 'user32::FindWindowW(p 0, w "PoE2 Data Logger") p.r0'
-  StrCmp $0 "0" ready
+  StrCmp $0 "0" check_beta running
+  check_beta:
+    System::Call 'user32::FindWindowW(p 0, w "${APP_NAME}") p.r0'
+    StrCmp $0 "0" ready
+  running:
     MessageBox MB_ICONEXCLAMATION|MB_OK "Close PoE2 Data Logger before uninstalling."
     Abort
   ready:
@@ -50,8 +62,8 @@ Section "PoE2 Data Logger" Main
   CreateShortcut "$SMPROGRAMS\PoE2 Data Logger\PoE2 Data Logger.lnk" "$INSTDIR\PoE2-Data-Logger.exe" "" "$INSTDIR\PoE2-Data-Logger.exe" 0
   CreateShortcut "$DESKTOP\PoE2 Data Logger.lnk" "$INSTDIR\PoE2-Data-Logger.exe" "" "$INSTDIR\PoE2-Data-Logger.exe" 0
   CreateShortcut "$SMPROGRAMS\PoE2 Data Logger\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\PoE2DataLogger" "DisplayName" "PoE2 Data Logger"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\PoE2DataLogger" "DisplayVersion" "${APP_VERSION}"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\PoE2DataLogger" "DisplayName" "${APP_NAME}"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\PoE2DataLogger" "DisplayVersion" "${APP_DISPLAY_VERSION}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\PoE2DataLogger" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\PoE2DataLogger" "DisplayIcon" "$INSTDIR\PoE2-Data-Logger.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\PoE2DataLogger" "Publisher" "PoE2 Data Logger"

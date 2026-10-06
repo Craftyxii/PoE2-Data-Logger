@@ -108,7 +108,7 @@ class WorkflowTests(unittest.TestCase):
     def test_map_transition_carries_tablets_and_clears_waystone_fields(self):
         logger.save_settings({"tier": 16, "waystone": 87, "map_mods": 4,
                               "waystone_name": "Storm Peak", "waystone_mods": ["Example modifier"],
-                              "biome": "Forest", "irradiated": True})
+                              "biome": "Forest", "irradiated": True, "deli": True, "wisp": True})
         logger.finish_map(0, 0, 0, 0)
         state = logger.start_map()
         self.assertEqual(state["settings"]["waystone"], 0)
@@ -116,6 +116,137 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(state["settings"]["waystone_mods"], [])
         self.assertEqual(state["settings"]["biome"], "Forest")
         self.assertTrue(state["settings"]["irradiated"])
+        self.assertTrue(state["settings"]["deli"])
+        self.assertTrue(state["settings"]["wisp"])
+
+    def export_rows(self, data):
+        rows = list(csv.reader(io.StringIO(data.decode("utf-8-sig"))))
+        self.assertTrue(all(len(row) == len(rows[0]) for row in rows[1:]))
+        self.assertEqual(len(rows[0]), len(set(rows[0])))
+        return [dict(zip(rows[0], row)) for row in rows[1:]]
+
+    def save_map_flag_records(self):
+        for kind in ("Map settings", "Tablet config", "Atlas Master", "Master perks"):
+            logger.record_commit(kind)
+        logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
+        logger.commit_chain("Rage", "Time")
+        logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 3}])
+        logger.save_currency_snapshot("end", [{"name": "Chaos Orb", "quantity": 5}])
+        logger.save_ritual_page([{"category": "Item", "name": "Example reward", "quantity": 1}])
+
+    def test_map_flags_default_validate_and_do_not_change_area_level(self):
+        state = logger.get_state()
+        self.assertIs(state["settings"]["deli"], False)
+        self.assertIs(state["settings"]["wisp"], False)
+        area = state["area_level"]
+        state = logger.save_settings({"deli": 1, "wisp": 1})
+        self.assertIs(state["settings"]["deli"], True)
+        self.assertIs(state["settings"]["wisp"], True)
+        self.assertEqual(state["area_level"], area)
+        state = logger.save_settings({"deli": 0})
+        self.assertIs(state["settings"]["deli"], False)
+        self.assertIs(state["settings"]["wisp"], True)
+        self.assertEqual(state["area_level"], area)
+
+    def test_map_flags_snapshot_export_and_preserve_previous_maps(self):
+        logger.save_settings({"deli": True, "wisp": True})
+        self.save_map_flag_records()
+        logger.finish_map(12, 3, 1, 2)
+        tables = ("maps", "new_export", "currency_snapshots", "ritual_pages", "commits")
+        with logger._connect() as db:
+            before = {table: [tuple(row) for row in db.execute(f"SELECT * FROM {table} WHERE map_id='M0001'")]
+                      for table in tables}
+            for table in ("maps", "currency_snapshots", "ritual_pages", "commits"):
+                for snapshot, in db.execute(f"SELECT snapshot_json FROM {table} WHERE map_id='M0001'"):
+                    self.assertEqual((json.loads(snapshot)["deli"], json.loads(snapshot)["wisp"]), ("Yes", "Yes"))
+        logger.start_map()
+        logger.save_settings({"deli": False, "wisp": True})
+        self.save_map_flag_records()
+        with logger._connect() as db:
+            after = {table: [tuple(row) for row in db.execute(f"SELECT * FROM {table} WHERE map_id='M0001'")]
+                     for table in tables}
+        self.assertEqual(after, before)
+        for exporter in (logger.export_csv, logger.export_maps_csv, logger.export_ritual_csv,
+                         logger.export_record_history_csv, logger.export_all_csv):
+            with self.subTest(exporter=exporter.__name__):
+                rows = self.export_rows(exporter())
+                self.assertTrue(rows)
+                for row in rows:
+                    self.assertEqual((row["Deli"], row["Wisp"]),
+                                     ("Yes" if row["Map ID"] == "M0001" else "No", "Yes"))
+        for row in self.export_rows(logger.export_currency_csv()):
+            expected = ("Yes" if row["Map ID"] == "M0001" else "No", "Yes")
+            self.assertEqual((row["Start Deli"], row["Start Wisp"]), expected)
+            self.assertEqual((row["End Deli"], row["End Wisp"]), expected)
+        export = list(csv.reader(io.StringIO(logger.export_csv().decode("utf-8-sig"))))
+        self.assertEqual(export[0].index("Scan Commit #"), 90)
+        self.assertEqual(export[0][-2:], ["Deli", "Wisp"])
+        with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
+            self.assertIsNone(archive.testzip())
+            ns = {"s": workbook_export.NS}
+            sheet = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+            rows = sheet.findall("s:sheetData/s:row", ns)
+            headers = {cell.get("r").rstrip("1"): "".join(cell.itertext()) for cell in rows[0]}
+            fields = [{headers[cell.get("r").rstrip("0123456789")]: "".join(cell.itertext())
+                       for cell in row} for row in rows[1:]]
+            self.assertTrue(fields)
+            for row in fields:
+                self.assertEqual((row["Deli"], row["Wisp"]),
+                                 ("Yes" if row["Map ID"] == "M0001" else "No", "Yes"))
+
+    def test_map_flag_upgrade_preserves_legacy_records_and_exports_blank(self):
+        logger.save_settings({"deli": True, "wisp": True})
+        self.save_map_flag_records()
+        tables = ("maps", "new_export", "legacy_export", "currency_snapshots", "ritual_pages", "commits")
+        with logger._connect() as db:
+            config = logger._meta(db, "settings")
+            config.pop("wisp")
+            logger._set_meta(db, "settings", config)
+            for table in ("maps", "currency_snapshots", "ritual_pages", "commits"):
+                for row in list(db.execute(f"SELECT rowid,snapshot_json FROM {table}")):
+                    snapshot = json.loads(row[1])
+                    snapshot.pop("deli", None)
+                    snapshot.pop("wisp", None)
+                    db.execute(f"UPDATE {table} SET snapshot_json=? WHERE rowid=?", (logger._dump(snapshot), row[0]))
+            for row in list(db.execute("SELECT position,row_json FROM new_export")):
+                db.execute("UPDATE new_export SET row_json=? WHERE position=?",
+                           (logger._dump(json.loads(row[1])[:-2]), row[0]))
+            before = {table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")] for table in tables}
+        logger._READY = False
+        logger.initialize()
+        state = logger.get_state()
+        self.assertIs(state["settings"]["deli"], True)
+        self.assertIs(state["settings"]["wisp"], False)
+        with logger._connect() as db:
+            after = {table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")] for table in tables}
+        self.assertEqual(after, before)
+        for exporter in (logger.export_csv, logger.export_maps_csv, logger.export_ritual_csv,
+                         logger.export_record_history_csv, logger.export_all_csv):
+            with self.subTest(exporter=exporter.__name__):
+                for row in self.export_rows(exporter()):
+                    self.assertEqual((row["Deli"], row["Wisp"]), ("", ""))
+        for row in self.export_rows(logger.export_currency_csv()):
+            self.assertEqual([row[name] for name in ("Start Deli", "Start Wisp", "End Deli", "End Wisp")], [""] * 4)
+        logger.record_commit("Map settings")
+        history = self.export_rows(logger.export_record_history_csv())
+        self.assertEqual((history[-1]["Deli"], history[-1]["Wisp"]), ("Yes", "No"))
+
+    def test_new_map_flag_columns_preserve_existing_export_positions(self):
+        logger.add_item_name("Example reward")
+        positions = {
+            logger.export_currency_csv: {"End Tier": 117},
+            logger.export_record_history_csv: {"Tablet Slot Capacity": 149, "Jado Configured Perk 1": 150,
+                                               "Hilda Configured Perk 4": 161},
+            logger.export_all_csv: {"Type": 127, "Tablet Slot Capacity": 156, "Jado Configured Perk 1": 157,
+                                    "Hilda Configured Perk 4": 168, "Item: Example reward": 169},
+        }
+        for exporter, fields in positions.items():
+            with self.subTest(exporter=exporter.__name__):
+                headers = next(csv.reader(io.StringIO(exporter().decode("utf-8-sig"))))
+                for name, index in fields.items():
+                    self.assertEqual(headers.index(name), index)
+                flags = ["Start Deli", "Start Wisp", "End Deli", "End Wisp"] if exporter == logger.export_currency_csv else ["Deli", "Wisp"]
+                self.assertEqual(headers[-len(flags):], flags)
 
     def test_reset_preserves_settings_references_and_backup(self):
         logger.save_settings({"tier": 16, "waystone": 87})
@@ -223,6 +354,56 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotEqual(first["expedition_id"], second["expedition_id"])
         with logger._connect() as db:
             self.assertEqual([row[0] for row in db.execute("SELECT detonated FROM expeditions WHERE map_id='M0001' ORDER BY expedition_id")], [2, 3])
+
+    def test_current_remnant_id_tracks_pending_saved_and_active_map(self):
+        self.assertEqual(logger.get_state()["current_remnant_id"], "")
+        pending = logger.assign_ocr_id("opened")
+        self.assertEqual(logger.get_state()["current_remnant_id"], pending["remnant_id"])
+        saved = logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
+        self.assertEqual(saved["remnant_id"], pending["remnant_id"])
+        self.assertIsNone(logger.get_state()["ocr_pending"])
+        self.assertEqual(logger.get_state()["current_remnant_id"], saved["remnant_id"])
+        logger.finish_map(0, 0, 0, 0)
+        future = logger.assign_ocr_id("opened")
+        self.assertEqual(future["map_id"], "M0002")
+        state = logger.get_state()
+        self.assertEqual(state["current_map_id"], "M0001")
+        self.assertEqual(state["current_remnant_id"], saved["remnant_id"])
+        logger.discard_ocr_id()
+        state = logger.start_map()
+        self.assertEqual(state["current_map_id"], "M0002")
+        self.assertEqual(state["current_remnant_id"], "")
+
+    def test_current_remnant_id_filters_expedition_beyond_recent_list(self):
+        first = logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
+        logger.start_next_chain()
+        for _ in range(11):
+            second = logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
+        self.assertEqual(logger.get_state()["current_remnant_id"], second["remnant_id"])
+        self.assertNotIn(first["remnant_id"], [row["remnant_id"] for row in logger.get_state()["recent"]])
+        with logger._connect() as db:
+            before = {table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")]
+                      for table in ("maps", "expeditions", "new_export", "commits")}
+        logger.save_settings({"expedition": 1})
+        self.assertEqual(logger.get_state()["current_remnant_id"], first["remnant_id"])
+        pending = logger.assign_ocr_id("opened")
+        self.assertEqual(logger.get_state()["current_remnant_id"], pending["remnant_id"])
+        logger.discard_ocr_id()
+        self.assertEqual(logger.get_state()["current_remnant_id"], first["remnant_id"])
+        logger.save_settings({"expedition": 2})
+        self.assertEqual(logger.get_state()["current_remnant_id"], second["remnant_id"])
+        with logger._connect() as db:
+            after = {table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")] for table in before}
+        self.assertEqual(after, before)
+
+    def test_current_remnant_id_falls_back_to_imported_records(self):
+        saved = logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
+        with logger._connect() as db:
+            db.execute("INSERT INTO legacy_export SELECT * FROM new_export")
+            db.execute("DELETE FROM new_export")
+        self.assertEqual(logger.get_state()["current_remnant_id"], saved["remnant_id"])
+        newest = logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
+        self.assertEqual(logger.get_state()["current_remnant_id"], newest["remnant_id"])
 
     def test_reference_pack_rejects_invalid_reward_values(self):
         self.add_scan()

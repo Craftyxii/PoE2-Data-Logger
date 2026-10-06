@@ -201,7 +201,8 @@ class CurrencyReader:
     def icon(self, image: Image.Image, count_digits=None):
         pending = None
         pixels = np.asarray(image.convert("RGB"))
-        inside = pixels[3:-3, 3:-3] if min(image.size) > 12 else pixels
+        dx, dy = max(1, round(image.width * .18)), max(1, round(image.height * .18))
+        inside = pixels[dy:-dy, dx:-dx] if min(image.size) > 12 else pixels
         if float(np.percentile(inside, 95)) < 32:
             return {"family": None, "members": [], "score": 0, "margin": 0, "all": []}
         if self.inventory_match:

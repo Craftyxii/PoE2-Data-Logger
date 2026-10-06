@@ -17,6 +17,7 @@ OCR_SOURCES = (
     "ocr/item_ocr.py",
     "ocr/item_text.py",
     "ocr/opened_scan.py",
+    "ocr/propagation_scan.py",
     "ocr/runehelper_ocr.py",
     "ocr/scan.py",
     "ocr/prototype.py",

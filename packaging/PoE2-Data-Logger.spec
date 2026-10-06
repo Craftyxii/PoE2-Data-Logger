@@ -39,6 +39,7 @@ exe = EXE(
     debug=False, bootloader_ignore_signals=False, strip=False, upx=True, console=False,
     contents_directory="_internal",
     icon=str(app / "power_rune.ico"), disable_windowed_traceback=False,
+    version=str(project / "packaging" / "version_info.txt"),
     argv_emulation=False, target_arch=None, codesign_identity=None, entitlements_file=None,
 )
 coll = COLLECT(exe, analysis.binaries, analysis.datas, strip=False, upx=True,

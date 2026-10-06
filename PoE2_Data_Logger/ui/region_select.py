@@ -15,6 +15,7 @@ from PoE2_Data_Logger.core import store
 
 REGIONS = {
     "live_region": ("Opened remnant", "opened", (0, .12, .32, .72), "#E5AA32"),
+    "propagation_region": ("Propagation · include the left cursor", "opened", (0, 0, .35, 1), "#EFCBA1"),
     "seed_region": ("Visible seeds", "seed", (0, 0, 1, 1), "#E5AA32"),
     "waystone_region": ("Waystone tooltip", "inventory", (0, 0, 1, 1), "#E5AA32"),
     "tablet_region": ("Tablet tooltip", "inventory", (0, 0, 1, 1), "#EFCBA1"),

@@ -18,6 +18,7 @@ MODULES = (
     'PoE2_Data_Logger.platform.hotkey',
     'PoE2_Data_Logger.ocr.opened_scan',
     'PoE2_Data_Logger.ocr.item_ocr',
+    'PoE2_Data_Logger.ocr.propagation_scan',
     'PoE2_Data_Logger.core.workbook_export',
 )
 

@@ -43,8 +43,11 @@ def count_crops(cell):
             patch = ImageOps.expand(patch, border=10, fill='black')
             patches.append(patch.resize((patch.width * 2, patch.height * 2), Image.Resampling.BICUBIC))
     anchor = strip[:max(8, round(cell.height * .28)), :max(7, round(cell.width * .14))]
-    possible = bool(((anchor.min(axis=2) > 145) &
-                     (anchor.max(axis=2).astype(np.int16) - anchor.min(axis=2) < 55)).any())
+    anchor_ink = ((anchor.min(axis=2) > 145) &
+                  (anchor.max(axis=2).astype(np.int16) - anchor.min(axis=2) < 55)).astype(np.uint8)
+    count, _, stats, _ = cv2.connectedComponentsWithStats(anchor_ink, 8)
+    possible = bool(groups) or any(h >= max(3, round(cell.height * .09)) and area >= 5
+                                  for x, y, w, h, area in stats[1:count])
     return patches, possible
 
 

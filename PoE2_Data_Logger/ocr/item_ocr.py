@@ -327,6 +327,48 @@ def _inventory_labels(image):
     return labels
 
 
+def _inventory_equipment_slots(image):
+    pixels = np.asarray(image.convert("RGB"), dtype=np.float32)
+    groups = [{slot} for slot in range(1, 61)]
+
+    def join(first, second):
+        a = next(group for group in groups if first in group)
+        b = next(group for group in groups if second in group)
+        if a is not b:
+            a.update(b)
+            groups.remove(b)
+
+    def continuous(axis, at, start, end):
+        radius = max(1, round(min(image.width / 12, image.height / 5) * .04))
+        strip = (pixels[start:end, at-radius:at+radius+1] if axis == 1
+                 else pixels[at-radius:at+radius+1, start:end])
+        r, g, b = strip[:, :, 0], strip[:, :, 1], strip[:, :, 2]
+        navy = (b > r * 1.3) & (b > g * 1.3) & (b < 65)
+        if float(navy.mean()) >= .3:
+            return False
+        changes = np.abs(np.diff(strip, axis=axis)).max(axis=(axis, 2))
+        return float((changes < 35).mean()) >= .75
+
+    for row in range(5):
+        top, bottom = round(row * image.height / 5), round((row + 1) * image.height / 5)
+        for column in range(1, 12):
+            if continuous(1, round(column * image.width / 12), top, bottom):
+                join(row * 12 + column, row * 12 + column + 1)
+    for row in range(1, 5):
+        for column in range(12):
+            left, right = round(column * image.width / 12), round((column + 1) * image.width / 12)
+            if continuous(0, round(row * image.height / 5), left, right):
+                join((row - 1) * 12 + column + 1, row * 12 + column + 1)
+    equipment = set()
+    for group in groups:
+        columns = [(slot - 1) % 12 for slot in group]
+        rows = [(slot - 1) // 12 for slot in group]
+        width, height = max(columns) - min(columns) + 1, max(rows) - min(rows) + 1
+        if 2 <= len(group) <= 8 and width <= 2 and height <= 4 and len(group) == width * height:
+            equipment.update(group)
+    return equipment
+
+
 def scan_inventory_grid(image, references=(), read=None):
     if not isinstance(image, Image.Image):
         with Image.open(image) as source:
@@ -334,6 +376,7 @@ def scan_inventory_grid(image, references=(), read=None):
     if image.width < 360 or image.height < 180 or image.width * image.height > 12_000_000:
         raise ValueError("Select the complete 12×5 inventory grid.")
     image = inventory_grid(image)
+    equipment = _inventory_equipment_slots(image)
     labels = _inventory_labels(image) if read is None else None
     read = read or ocr_lines
     reader = currency_ocr.get_reader()
@@ -356,7 +399,7 @@ def scan_inventory_grid(image, references=(), read=None):
         if icon.get("family"):
             if labels is not None:
                 tier = labels[slot].get("tier", "")
-                if labels[slot].get("tier_present") and not tier:
+                if len(icon["members"]) > 1 and labels[slot].get("tier_present") and not tier:
                     unknown.append({"slot": slot, "candidate": " / ".join(icon["members"]),
                                     "score": round(score, 3), "reason": "check tier badge"})
                     continue
@@ -398,7 +441,7 @@ def scan_inventory_grid(image, references=(), read=None):
                 guessed = native_count is None and generic_unclear
             found.append({"slot": slot, "name": name, "quantity": quantity,
                           "score": round(score, 3), "count_needs_review": guessed})
-        elif icon.get("all") and (icon.get("uncertain") or score >= .55):
+        elif slot not in equipment and icon.get("all") and (icon.get("uncertain") or score >= .55):
             unknown.append({"slot": slot, "candidate": icon["all"][0]["name"],
                             "score": round(score, 3)})
     return {"items": found, "unknown": unknown, "status": "review"}
