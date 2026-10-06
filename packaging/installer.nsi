@@ -1,5 +1,5 @@
 Unicode true
-!define APP_VERSION "33.2"
+!define APP_VERSION "33.3"
 Name "PoE2 Data Logger"
 OutFile "${__FILEDIR__}\..\PoE2-Data-Logger-Setup-v${APP_VERSION}.exe"
 VIProductVersion "${APP_VERSION}.0.0"

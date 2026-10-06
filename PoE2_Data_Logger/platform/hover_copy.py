@@ -104,13 +104,12 @@ def _cursor_position():
 def _tooltip_bounds():
     if sys.platform != "win32":
         raise ValueError("Hovered-item screen capture is available on Windows.")
+    from PoE2_Data_Logger.platform.live_watch import external_window_title
+
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     user32.GetForegroundWindow.restype = wintypes.HWND
     window = user32.GetForegroundWindow()
-    title = ctypes.create_unicode_buffer(256)
-    user32.GetWindowTextW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
-    user32.GetWindowTextW(wintypes.HWND(window), title, len(title))
-    if "path of exile 2" in title.value.casefold():
+    if "path of exile 2" in external_window_title(user32, window).casefold():
         rect, origin = wintypes.RECT(), wintypes.POINT()
         if user32.GetClientRect(wintypes.HWND(window), ctypes.byref(rect)) and user32.ClientToScreen(
                 wintypes.HWND(window), ctypes.byref(origin)):

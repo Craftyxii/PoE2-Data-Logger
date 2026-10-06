@@ -593,6 +593,8 @@ class LoggerWindow(QMainWindow):
             self.help_menu.addAction(label, lambda checked=False, index=index: self.tabs.setCurrentIndex(index))
 
     def _page_changed(self, index):
+        if self._end_hotkey_capture() and index != 7:
+            service.HOTKEY.start()
         if index != 0:
             self._overlay_auto_review = False
             self._overlay_review_token += 1
@@ -2027,12 +2029,18 @@ class LoggerWindow(QMainWindow):
     def edit_region(self):
         self.choose_scan_region("live_region")
 
+    def _end_hotkey_capture(self):
+        if not self._capturing_hotkey:
+            return False
+        self._capturing_hotkey = False
+        self.releaseKeyboard()
+        self.overlay_escape.setEnabled(self._overlay_enabled)
+        return True
+
     def arm_hotkey(self, target="default"):
-        if self._capturing_hotkey:
-            self._capturing_hotkey = False
-            self.releaseKeyboard()
-            self.overlay_escape.setEnabled(self._overlay_enabled)
+        if self._end_hotkey_capture():
             service.HOTKEY.start()
+            self.refresh_hotkey()
             self.note("Hotkey selection cancelled.")
             return
         if service.HOTKEY.status()["supported"]:
@@ -2044,10 +2052,17 @@ class LoggerWindow(QMainWindow):
         self.note(f"Press a key or combination for {action}. Click Set key again to cancel.")
 
     def clear_hotkey(self, target="default"):
-        if target == "default":
-            service.HOTKEY.configure("")
-        else:
-            service.HOTKEY.configure_for(target, "")
+        capturing = self._end_hotkey_capture()
+        try:
+            if target == "default":
+                service.HOTKEY.configure("")
+            else:
+                service.HOTKEY.configure_for(target, "")
+        except Exception:
+            if capturing:
+                self.run(service.HOTKEY.start)
+            self.refresh_hotkey()
+            raise
         self.refresh_hotkey()
         action = "Show / hide HUD" if target == "overlay" else f"{target.title()} scan"
         self.note(f"{action} shortcut cleared.")
@@ -2109,10 +2124,7 @@ class LoggerWindow(QMainWindow):
 
     def hide_overlay(self):
         if self._overlay_enabled:
-            if self._capturing_hotkey:
-                self._capturing_hotkey = False
-                self.releaseKeyboard()
-                self.overlay_escape.setEnabled(True)
+            if self._end_hotkey_capture():
                 service.HOTKEY.start()
             self._overlay_review_token += 1
             self._overlay_revealed = False
@@ -2350,9 +2362,7 @@ class LoggerWindow(QMainWindow):
             if key in (Qt.Key.Key_Control, Qt.Key.Key_Shift, Qt.Key.Key_Alt, Qt.Key.Key_Meta):
                 return True
             target = self._capturing_hotkey
-            self._capturing_hotkey = False
-            self.releaseKeyboard()
-            self.overlay_escape.setEnabled(self._overlay_enabled)
+            self._end_hotkey_capture()
             modifiers = event.modifiers()
             if event.nativeVirtualKey():
                 from PoE2_Data_Logger.platform.hotkey import virtual_key_name
@@ -2387,10 +2397,16 @@ class LoggerWindow(QMainWindow):
                                                  (Qt.KeyboardModifier.MetaModifier, "Win"))
                       if modifiers & flag]
             shortcut = "+".join(prefix + [name])
-            if target == "default":
-                self.run(lambda: service.HOTKEY.configure(shortcut))
-            else:
-                self.run(lambda: service.HOTKEY.configure_for(target, shortcut))
+            try:
+                if target == "default":
+                    service.HOTKEY.configure(shortcut)
+                else:
+                    service.HOTKEY.configure_for(target, shortcut)
+            except Exception as error:
+                self.run(service.HOTKEY.start)
+                self.refresh_hotkey()
+                self.error(str(error))
+                return True
             self.refresh_hotkey()
             assigned = (service.HOTKEY.status()["combo"] if target == "default" else
                         service.HOTKEY.status()["combos"].get(target))

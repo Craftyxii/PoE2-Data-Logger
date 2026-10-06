@@ -1,3 +1,10 @@
+# PoE2 Data Logger v33.3
+
+- Prevent hotkey changes and region navigation from waiting on the logger's own window-title response.
+- Restore existing shortcuts after a rejected assignment and keep the error visible.
+- Cancel key capture when clearing a shortcut, leaving scan settings or hiding the HUD.
+- Open the region selector directly from screenshot pixels without PNG compression.
+
 # PoE2 Data Logger v33.2
 
 - Preserve all tablet modifiers, including modifiers without a numeric percentage.

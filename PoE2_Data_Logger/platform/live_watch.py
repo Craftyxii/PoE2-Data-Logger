@@ -1,6 +1,27 @@
 from __future__ import annotations
 
+import os
 import sys
+
+
+def external_window_title(user32, window):
+    import ctypes
+    from ctypes import wintypes
+
+    if not window:
+        return ""
+    user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    process_id = wintypes.DWORD()
+    if (not user32.GetWindowThreadProcessId(wintypes.HWND(window), ctypes.byref(process_id)) or
+            not process_id.value or process_id.value == os.getpid()):
+        return ""
+    user32.GetWindowTextW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
+    user32.GetWindowTextW.restype = ctypes.c_int
+    title = ctypes.create_unicode_buffer(256)
+    if not user32.GetWindowTextW(wintypes.HWND(window), title, len(title)):
+        return ""
+    return title.value
 
 
 def game_foreground():
@@ -11,13 +32,8 @@ def game_foreground():
 
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     user32.GetForegroundWindow.restype = wintypes.HWND
-    user32.GetWindowTextW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
     window = user32.GetForegroundWindow()
-    if not window:
-        return False
-    title = ctypes.create_unicode_buffer(256)
-    user32.GetWindowTextW(wintypes.HWND(window), title, len(title))
-    return title.value.strip().casefold() == "path of exile 2"
+    return external_window_title(user32, window).strip().casefold() == "path of exile 2"
 
 
 def validate_region(region):

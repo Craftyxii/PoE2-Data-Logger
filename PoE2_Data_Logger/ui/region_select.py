@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import math
-import io
 import sys
 from pathlib import Path
 
 from PIL import Image
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QDialog, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTabBar, QVBoxLayout, QWidget
 
 from PoE2_Data_Logger.core import logger_store as logger
@@ -277,9 +276,12 @@ class RegionEditor(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, screenshot is None)
         self.picture = QPixmap()
         if screenshot is not None:
-            raw = io.BytesIO()
-            screenshot.save(raw, format="PNG")
-            self.picture.loadFromData(raw.getvalue())
+            alpha = "A" in screenshot.getbands() or "transparency" in screenshot.info
+            image = screenshot.convert("RGBA" if alpha else "RGB")
+            raw = image.tobytes()
+            self.picture = QPixmap.fromImage(QImage(
+                raw, image.width, image.height, image.width * (4 if alpha else 3),
+                QImage.Format.Format_RGBA8888 if alpha else QImage.Format.Format_RGB888).copy())
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.selection = QRect()
