@@ -12,6 +12,8 @@ for line in process.stdout:
 code = process.wait()
 if code and os.environ.get("GITHUB_ACTIONS") == "true":
     detail = "".join(tail)[-12000:]
-    detail = detail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-    print(f"::error title=Windows build::{detail}")
+    for offset in range(0, len(detail), 3000):
+        part = detail[offset:offset + 3000]
+        part = part.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::error title=Windows build {offset // 3000 + 1}::{part}")
 raise SystemExit(code)
