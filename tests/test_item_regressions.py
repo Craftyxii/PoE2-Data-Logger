@@ -7,7 +7,7 @@ from PIL import Image
 
 from PoE2_Data_Logger.ocr import currency_ocr, item_ocr, item_text
 from PoE2_Data_Logger.ocr.affix_capture import affix_catalog, looks_like_modifier
-from PoE2_Data_Logger.ui.native_desktop import clear_ritual_read
+from PoE2_Data_Logger.ui.native_desktop import clear_currency_read, clear_ritual_read
 
 
 class ItemRegressionTests(unittest.TestCase):
@@ -172,6 +172,38 @@ class ItemRegressionTests(unittest.TestCase):
         self.assertEqual(source.size, (600, 300))
         self.assertEqual(inventory.size, (96, 48))
         self.assertEqual(omen.size, (512, 256))
+
+    def inventory_custom_read(self, names, include_builtin=False):
+        icon = Image.fromarray(np.random.default_rng(51).integers(40, 230, (40, 40, 3), dtype=np.uint8))
+        grid = Image.new("RGB", (480, 200), (26, 26, 40))
+        grid.paste(icon, (0, 0))
+        references = [{"name": name, "image": icon} for name in names]
+        reader = currency_ocr.CurrencyReader()
+        labels = {slot: {"count_present": False, "count": 1, "tier_present": False}
+                  for slot in range(1, 61)}
+        readings = [{"family": None, "all": [], "score": 0}]
+        if include_builtin:
+            grid.paste(icon, (40, 0))
+            readings.append({"family": "ExaltedOrb", "members": ["Exalted Orb"], "score": .99})
+        with patch.object(item_ocr, "_inventory_labels", return_value=labels), patch.object(
+                item_ocr, "inventory_grid", side_effect=lambda image: image), patch.object(
+                currency_ocr, "get_reader", return_value=reader), patch.object(
+                reader, "icon", side_effect=readings):
+            return item_ocr.scan_inventory_grid(grid, references)
+
+    def test_ambiguous_custom_slot_remains_reviewable_beside_a_clear_builtin_item(self):
+        result = self.inventory_custom_read(["Chaos Orb"] * 3 + ["Exalted Orb"], include_builtin=True)
+        self.assertEqual([(entry["slot"], entry["name"]) for entry in result["items"]], [(2, "Exalted Orb")])
+        self.assertEqual(len(result["unknown"]), 1)
+        self.assertEqual(result["unknown"][0]["slot"], 1)
+        self.assertEqual(set(result["unknown"][0]["candidate"].split(" / ")), {"Chaos Orb", "Exalted Orb"})
+        self.assertFalse(clear_currency_read(result))
+
+    def test_unique_custom_item_still_allows_automatic_approval(self):
+        result = self.inventory_custom_read(["Chaos Orb"] * 3)
+        self.assertEqual([(entry["slot"], entry["name"]) for entry in result["items"]], [(1, "Chaos Orb")])
+        self.assertEqual(result["unknown"], [])
+        self.assertTrue(clear_currency_read(result))
 
 
 if __name__ == "__main__":

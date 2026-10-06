@@ -342,6 +342,8 @@ def scan_inventory_grid(image, references=(), read=None):
         raw = _reference_image(reference.get("image"), 96)
         if raw is not None:
             examples.append({"name": reference["name"], "image": raw})
+    if examples and hasattr(reader, "prepare_examples"):
+        examples = reader.prepare_examples(examples)
     found, unknown = [], []
     for slot in range(1, 61):
         cell = inventory_cell(image, slot)
@@ -375,6 +377,11 @@ def scan_inventory_grid(image, references=(), read=None):
                 if top["score"] > -1200 and top["score"] - runner > 150:
                     name = top["name"]
                     score = top["score"]
+                elif top["score"] > -1200:
+                    unknown.append({"slot": slot, "candidate": " / ".join(
+                        entry["name"] for entry in ranked if top["score"] - entry["score"] <= 150),
+                        "score": round(top["score"], 3), "reason": "shared reference; check name"})
+                    continue
         if name:
             if labels is not None:
                 generic_count = labels[slot].get("count")

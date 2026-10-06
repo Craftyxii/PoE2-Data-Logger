@@ -8,6 +8,7 @@
 - Cancel discarded captures, clear stale drafts after Undo, and prevent delayed references from linking to a different map or scan.
 - Recover from failed recognition without leaving scans stuck or allowing stale results to replace a newer review.
 - Fully decode and bound imported reference images, reject inflated rune vectors, and canonicalize recipe references across case differences.
+- Match large inventory-reference collections in bounded batches and keep competing names visible when one item has several examples.
 - Check foreground focus before copying and reading clipboard text.
 - Resolve the installer's permission tool from the Windows system directory and check installation with a planted filename present.
 

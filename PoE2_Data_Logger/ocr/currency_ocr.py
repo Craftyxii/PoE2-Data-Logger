@@ -25,6 +25,17 @@ ROOT = Path(__file__).resolve().parent.parent / "third_party" / "currency_overla
 _READERS = threading.local()
 
 
+class _ExampleBank:
+    def __init__(self, owner, signature, references, order):
+        self.owner = id(owner)
+        self.signature = signature
+        self.references = references
+        self.order = order
+
+    def __bool__(self):
+        return bool(self.references)
+
+
 def get_reader():
     if not hasattr(_READERS, "reader"):
         _READERS.reader = CurrencyReader()
@@ -118,6 +129,9 @@ class CurrencyReader:
     def __init__(self):
         self._rank_cache = OrderedDict()
         self._scaled_candidates = {}
+        self._example_atlases = OrderedDict()
+        self._example_rank_cache = OrderedDict()
+        self._example_thread = threading.get_ident()
         self.context = quickjs.Context()
         self.context.set_memory_limit(128 * 1024 * 1024)
         self.context.eval("var module = {exports:{}};")
@@ -146,7 +160,10 @@ class CurrencyReader:
                 variants_path.stat().st_mtime_ns if variants_path.exists() else 0)
         self.context.eval("function examplesJSON(s) { var p = JSON.parse(s); var ranked = IconMatcher.match(p.cell, "
                           "p.refs.map(function(r) { return {name:r.name, rgb:r.rgb}; })).ranked; "
-                          "return JSON.stringify(ranked.slice(0,3)); }")
+                          "var names=Object.create(null), distinct=[]; "
+                          "for(var i=0;i<ranked.length;i++) { if(!names[ranked[i].name]) { "
+                          "names[ranked[i].name]=true; distinct.push(ranked[i]); } } "
+                          "return JSON.stringify(distinct.slice(0,3)); }")
         self.match_examples = self.context.get("examplesJSON")
         self.context.eval("module = {exports:{}};")
         self.context.eval((ROOT / "digit-reader.js").read_text(encoding="utf-8"))
@@ -288,14 +305,107 @@ class CurrencyReader:
             self._rank_cache.popitem(last=False)
         return ranked
 
-    def examples(self, image: Image.Image, references):
-        def rgb40(source):
-            return np.asarray(source.convert("RGB").resize((40, 40), Image.Resampling.LANCZOS),
-                              dtype=np.uint8).reshape(-1).tolist()
+    def prepare_examples(self, references):
+        if threading.get_ident() != self._example_thread:
+            raise ValueError("Icon reference readers belong to their worker thread.")
+        if isinstance(references, _ExampleBank):
+            if references.owner != id(self):
+                raise ValueError("Prepared icon references belong to a different reader.")
+            return references
+        grouped = {}
+        order = {}
+        signature = hashlib.sha256()
+        for reference in references:
+            pixels = np.asarray(reference["image"].convert("RGB").resize(
+                (40, 40), Image.Resampling.LANCZOS), dtype=np.uint8).copy()
+            pixels[:13, :13] = [26, 26, 40]
+            raw = pixels.tobytes()
+            name = reference["name"]
+            order.setdefault(name, len(order))
+            names = grouped.setdefault(raw, [])
+            if name not in names:
+                names.append(name)
+                encoded = name.encode("utf-8", "surrogatepass")
+                signature.update(len(encoded).to_bytes(8, "little"))
+                signature.update(encoded)
+                signature.update(raw)
+        return _ExampleBank(self, signature.digest(),
+                            tuple((raw, tuple(names)) for raw, names in grouped.items()), order)
 
-        payload = {"cell": rgb40(image), "refs": [{"name": ref["name"], "rgb": rgb40(ref["image"])}
-                                                 for ref in references]}
-        return json.loads(self.match_examples(json.dumps(payload, separators=(",", ":"))))
+    def _example_atlas(self, references):
+        digest = hashlib.sha256()
+        for raw, _ in references:
+            digest.update(raw)
+        key = len(references), digest.digest()
+        cached = self._example_atlases.get(key)
+        if cached is not None:
+            self._example_atlases.move_to_end(key)
+            return cached
+        atlas = np.concatenate([cv2.copyMakeBorder(
+            np.frombuffer(raw, dtype=np.uint8).reshape(40, 40, 3).astype(np.float32),
+            4, 4, 4, 4, cv2.BORDER_REPLICATE) for raw, _ in references], axis=0)
+        atlas.flags.writeable = False
+        self._example_atlases[key] = atlas
+        if len(self._example_atlases) > 8:
+            self._example_atlases.popitem(last=False)
+        return atlas
+
+    @staticmethod
+    def _exact_example_score(rgb, raw, weights, total, shifts):
+        candidate = np.frombuffer(raw, dtype=np.uint8).reshape(40, 40, 3)
+        padded = np.pad(candidate, ((4, 4), (4, 4), (0, 0)), mode="edge")
+        windows = np.lib.stride_tricks.sliding_window_view(padded, (40, 40), axis=(0, 1))
+        difference = windows.transpose(0, 1, 3, 4, 2)[shifts[:, 0], shifts[:, 1]].astype(np.float64) - rgb
+        errors = (np.square(difference).sum(axis=3) * weights.astype(np.float64)).sum(axis=(1, 2))
+        return -float(errors.min()) / total
+
+    def examples(self, image: Image.Image, references):
+        bank = self.prepare_examples(references)
+        if not bank:
+            return []
+        rgb = np.asarray(image.convert("RGB").resize((40, 40), Image.Resampling.LANCZOS),
+                         dtype=np.float32).copy()
+        rgb[:13, :13] = [26, 26, 40]
+        key = bank.signature, rgb.tobytes()
+        cached = self._example_rank_cache.get(key)
+        if cached is not None:
+            self._example_rank_cache.move_to_end(key)
+            return [dict(row) for row in cached]
+        distances = np.square(rgb - [26, 26, 40]).sum(axis=2)
+        weights = np.where(distances > 900, 1, np.where(distances > 144, .2, 0)).astype(np.float32)
+        weights[:13, :13] = 0
+        total = float(weights.sum(dtype=np.float64))
+        if total <= 0:
+            return []
+        mask = np.sqrt(weights)
+        best = {}
+        scored = []
+        for start in range(0, len(bank.references), 128):
+            batch = bank.references[start:start + 128]
+            errors = cv2.matchTemplate(self._example_atlas(batch), rgb, cv2.TM_SQDIFF, mask=mask)
+            rows = np.arange(len(batch))[:, None] * 48 + np.arange(9)
+            alignment_errors = errors[rows]
+            minima = alignment_errors.min(axis=(1, 2))
+            for (raw, names), error, alignments in zip(batch, minima, alignment_errors):
+                score = -max(0, float(error)) / total
+                shifts = np.argwhere(alignments <= error + total * 16)
+                scored.append((score, raw, names, shifts))
+                for name in names:
+                    best[name] = max(best.get(name, float("-inf")), score)
+        cutoff = sorted(best.values(), reverse=True)[min(2, len(best) - 1)] - 16
+        exact = {}
+        for score, raw, names, shifts in sorted(scored, key=lambda entry: entry[0], reverse=True):
+            if score < cutoff or all(exact.get(name) == 0 for name in names):
+                continue
+            score = self._exact_example_score(rgb, raw, weights, total, shifts)
+            for name in names:
+                exact[name] = max(exact.get(name, float("-inf")), score)
+        ranked = sorted(({"name": name, "score": score} for name, score in exact.items()),
+                        key=lambda row: (-row["score"], bank.order[row["name"]]))[:3]
+        self._example_rank_cache[key] = tuple(dict(row) for row in ranked)
+        if len(self._example_rank_cache) > 128:
+            self._example_rank_cache.popitem(last=False)
+        return ranked
 
     def count(self, image: Image.Image):
         image = image.copy()
