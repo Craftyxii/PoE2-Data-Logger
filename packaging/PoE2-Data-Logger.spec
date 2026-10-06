@@ -6,11 +6,11 @@ project = Path(SPECPATH).resolve().parent
 app = project / "PoE2_Data_Logger"
 sources = run_path(str(project / "packaging" / "sources.py"))
 expected = set(sources["APP_SOURCES"])
-actual = {path.name for path in app.glob("*.py")}
+actual = {path.relative_to(app).as_posix() for path in app.rglob("*.py")}
 if expected != actual:
     raise ValueError(f"Update packaging/sources.py for added or removed modules: {expected ^ actual}")
-datas = [(str(app / name), ".") for name in sources["FILE_RESOURCES"]]
-datas += [(str(app / name), name) for name in sources["DIRECTORY_RESOURCES"]]
+datas = [(str(app / name), "PoE2_Data_Logger") for name in sources["FILE_RESOURCES"]]
+datas += [(str(app / name), "PoE2_Data_Logger/" + name) for name in sources["DIRECTORY_RESOURCES"]]
 for source in sources["APP_SOURCES"]:
     if not (app / source).is_file():
         raise FileNotFoundError(app / source)
@@ -26,8 +26,8 @@ for package in ("rapidocr", "onnxruntime", "quickjs", "cv2"):
     hiddenimports += imports
 
 analysis = Analysis(
-    [str(app / "native_desktop.py")],
-    pathex=[str(app)], binaries=binaries, datas=datas, hiddenimports=hiddenimports,
+    [str(app / "__main__.py")],
+    pathex=[str(project)], binaries=binaries, datas=datas, hiddenimports=hiddenimports,
     hookspath=[], hooksconfig={}, runtime_hooks=[],
     excludes=["PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtWebChannel",
               "PySide6.QtWebView", "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtQuickWidgets"],

@@ -8,12 +8,12 @@ from pathlib import Path
 
 from PIL import ImageGrab
 
-import logger_store as logger
-import store
-from opened_scan import scan_opened, scan_both
-from scan import scan
-from hover_copy import read_hovered_text
-from item_text import parse_item_text
+from PoE2_Data_Logger.core import logger_store as logger
+from PoE2_Data_Logger.core import store
+from PoE2_Data_Logger.ocr.opened_scan import scan_opened, scan_both
+from PoE2_Data_Logger.ocr.scan import scan
+from PoE2_Data_Logger.platform.hover_copy import read_hovered_text
+from PoE2_Data_Logger.ocr.item_text import parse_item_text
 
 
 MOD_ALT = 0x0001
@@ -113,7 +113,7 @@ class HotkeyManager:
         self.hover_reader = hover_reader or read_hovered_text
         self.tooltip_grabber = tooltip_grabber
         if focused is None and self.supported and sys.platform == "win32":
-            from live_watch import game_foreground
+            from PoE2_Data_Logger.platform.live_watch import game_foreground
             focused = game_foreground
         self.focused = focused
         self.mode = "opened"
@@ -342,8 +342,8 @@ class HotkeyManager:
                 generation = logger._meta(db, "session_generation", 0)
                 expedition = 1 if not number or logger._meta(db, "pending_new_map", False) else logger._meta(db, "settings")["expedition"]
             if self.supported and sys.platform == "win32":
-                from hover_copy import _tooltip_bounds
-                from region_select import region_for
+                from PoE2_Data_Logger.platform.hover_copy import _tooltip_bounds
+                from PoE2_Data_Logger.ui.region_select import region_for
                 bounds = _tooltip_bounds()
                 region_key = {"opened": "live_region", "seed": "seed_region", "currency": "inventory_region",
                               "ritual": "ritual_region"}.get(mode)
@@ -359,25 +359,25 @@ class HotkeyManager:
             image = tooltip = None
             if kind in ("default", "remnant"):
                 if kind == "default" and self.supported and self.tooltip_grabber is None:
-                    from hover_copy import capture_remnant_context
+                    from PoE2_Data_Logger.platform.hover_copy import capture_remnant_context
                     image, tooltip = capture_remnant_context(region, self.grabber)
                 else:
                     image = self._grab(region)
                 self._check_image(image)
                 if mode == "opened" and not region:
-                    from runehelper_ocr import default_frame
+                    from PoE2_Data_Logger.ocr.runehelper_ocr import default_frame
                     image = default_frame(image)
                 if kind == "default" and self.supported:
                     if tooltip is None:
-                        from hover_copy import capture_near_cursor
+                        from PoE2_Data_Logger.platform.hover_copy import capture_near_cursor
                         tooltip = (self.tooltip_grabber or capture_near_cursor)()
                     self._check_image(tooltip)
             elif mode in ("waystone", "tablet"):
                 try:
-                    from hover_copy import capture_near_cursor
+                    from PoE2_Data_Logger.platform.hover_copy import capture_near_cursor
                     tooltip = (self.tooltip_grabber or capture_near_cursor)()
                     if self.tooltip_grabber is None and sys.platform == "win32":
-                        from region_select import region_for
+                        from PoE2_Data_Logger.ui.region_select import region_for
                         selected = region_for(mode + "_region", bounds)
                         tooltip = tooltip.crop((selected["x"] - bounds[0], selected["y"] - bounds[1],
                                                 selected["x"] + selected["w"] - bounds[0],
@@ -392,7 +392,7 @@ class HotkeyManager:
                 self._check_image(image)
             activity_crops = {}
             if kind == "default" and tooltip is not None:
-                from region_select import region_for
+                from PoE2_Data_Logger.ui.region_select import region_for
                 frozen_bounds = bounds if self.supported and sys.platform == "win32" else (
                     0, 0, tooltip.width, tooltip.height)
                 for activity, key in (("ritual", "ritual_region"), ("currency", "inventory_region")):
@@ -431,7 +431,7 @@ class HotkeyManager:
             native = None
             if (kind == "default" and mode == "opened" and
                     self.readers.get("opened") is scan_opened):
-                from auto_commit import candidate
+                from PoE2_Data_Logger.core.auto_commit import candidate
                 native = scan_opened(image, allow_fallback=False, verify_header=True)
                 if not candidate(native)["ready"]:
                     native = None
@@ -456,9 +456,9 @@ class HotkeyManager:
                 event = {"mode": mode, "result": native, "error": ""}
                 return
             if mode in ("waystone", "tablet") or (kind == "default" and self.supported):
-                from hover_copy import capture_near_cursor
-                import item_ocr
-                import item_text
+                from PoE2_Data_Logger.platform.hover_copy import capture_near_cursor
+                from PoE2_Data_Logger.ocr import item_ocr
+                from PoE2_Data_Logger.ocr import item_text
                 if isinstance(tooltip, Exception):
                     raise tooltip
                 tooltip_image = tooltip if tooltip is not None else (self.tooltip_grabber or capture_near_cursor)()

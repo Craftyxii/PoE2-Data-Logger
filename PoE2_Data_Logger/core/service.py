@@ -9,12 +9,12 @@ from urllib.parse import parse_qs, urlsplit
 
 from PIL import Image, UnidentifiedImageError
 
-import logger_store as logger
-import store
-from auto_commit import commit as auto_commit_remnant
-from hotkey import HotkeyManager
-from opened_scan import scan_opened, scan_both
-from scan import scan
+from PoE2_Data_Logger.core import logger_store as logger
+from PoE2_Data_Logger.core import store
+from PoE2_Data_Logger.core.auto_commit import commit as auto_commit_remnant
+from PoE2_Data_Logger.platform.hotkey import HotkeyManager
+from PoE2_Data_Logger.ocr.opened_scan import scan_opened, scan_both
+from PoE2_Data_Logger.ocr.scan import scan
 
 
 MAX_UPLOAD = 16 * 1024 * 1024

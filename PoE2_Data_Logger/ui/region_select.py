@@ -10,8 +10,8 @@ from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QDialog, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTabBar, QVBoxLayout, QWidget
 
-import logger_store as logger
-import store
+from PoE2_Data_Logger.core import logger_store as logger
+from PoE2_Data_Logger.core import store
 
 
 REGIONS = {
@@ -42,7 +42,7 @@ def region_for(key, bounds):
         boxes = logger._meta(db, "scan_region_boxes", {})
         legacy = logger._meta(db, key, None)
     if key not in boxes and legacy:
-        from live_watch import validate_region
+        from PoE2_Data_Logger.platform.live_watch import validate_region
         return validate_region(legacy)
     x, y, w, h = checked_box(boxes.get(key, REGIONS[key][2]))
     left, top, right, bottom = bounds
@@ -145,7 +145,7 @@ class ScanRegionsPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.root = Path(__file__).resolve().parent / "region_examples"
+        self.root = Path(__file__).resolve().parent.parent / "region_examples"
         self.custom = store.DATA_DIR / "region_examples"
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 18, 12, 22)

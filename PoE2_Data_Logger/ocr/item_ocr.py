@@ -9,9 +9,9 @@ import numpy as np
 import cv2
 from PIL import Image, ImageOps
 
-from opened_scan import OCR_LOCK, _engine
-import currency_ocr
-from affix_capture import affix_key, affix_unit, modifier_value, looks_like_modifier
+from PoE2_Data_Logger.ocr.opened_scan import OCR_LOCK, _engine
+from PoE2_Data_Logger.ocr import currency_ocr
+from PoE2_Data_Logger.ocr.affix_capture import affix_key, affix_unit, modifier_value, looks_like_modifier
 
 
 def _key(text):
@@ -222,7 +222,7 @@ def _stack_count(cell, read):
 
 def _inventory_labels(image):
     from rapidocr.ch_ppocr_rec.typings import TextRecInput
-    from inventory_labels import count_crops, tier_crops, fallback_crops
+    from PoE2_Data_Logger.ocr.inventory_labels import count_crops, tier_crops, fallback_crops
 
     labels = {slot: {} for slot in range(1, 61)}
     patches, positions = [], []
@@ -437,7 +437,7 @@ def parse_ritual(lines, omen_names):
 
 
 def deferred_markers(image):
-    with Image.open(Path(__file__).resolve().parent / "deferred_marker.png") as reference:
+    with Image.open(Path(__file__).resolve().parent.parent / "deferred_marker.png") as reference:
         marker = np.asarray(reference.convert("L"))
     gray = np.asarray(image.convert("L"))
     scale = 1.0

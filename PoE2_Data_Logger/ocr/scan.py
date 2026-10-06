@@ -11,13 +11,13 @@ import joblib
 import numpy as np
 from PIL import Image
 
-import store
-from cv_eval import decode, features
-from glyph_eval import vector
-from prototype import center_for, crop_at, ncc_find_all
+from PoE2_Data_Logger.core import store
+from PoE2_Data_Logger.ocr.cv_eval import decode, features
+from PoE2_Data_Logger.ocr.glyph_eval import vector
+from PoE2_Data_Logger.ocr.prototype import center_for, crop_at, ncc_find_all
 
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parent.parent
 
 
 @lru_cache(maxsize=1)

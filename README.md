@@ -12,7 +12,11 @@ See the [user guide](docs/USER_GUIDE.md) for map setup, hotkeys, scans, reviews 
 
 | Location | Contents |
 | --- | --- |
-| [PoE2_Data_Logger/](PoE2_Data_Logger/) | Application code and resources |
+| [PoE2_Data_Logger/core/](PoE2_Data_Logger/core/) | Logging, records, reference databases and exports |
+| [PoE2_Data_Logger/ocr/](PoE2_Data_Logger/ocr/) | OCR adapters, item readers and rune scanning |
+| [PoE2_Data_Logger/ui/](PoE2_Data_Logger/ui/) | Desktop interface, review overlay and region editor |
+| [PoE2_Data_Logger/platform/](PoE2_Data_Logger/platform/) | Hotkeys, clipboard capture and game-window checks |
+| [PoE2_Data_Logger/third_party/](PoE2_Data_Logger/third_party/) | Bundled library code, models, reference data and licenses |
 | [packaging/sources.py](packaging/sources.py) | Source and resource groups used by the build |
 | [SOURCES.md](SOURCES.md) | Code index, grouped by what each file does |
 | [DEPENDENCIES.md](DEPENDENCIES.md) | Runtime libraries, build tools and bundled third-party components |
@@ -34,8 +38,7 @@ Start.bat
 To run without the batch file:
 
 ```text
-cd PoE2_Data_Logger
-py -3.12 -m native_desktop
+py -3.12 -m PoE2_Data_Logger
 ```
 
 ## Build on Windows

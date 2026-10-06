@@ -10,8 +10,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-import logger_store as logger
-import runehelper_ocr
+from PoE2_Data_Logger.core import logger_store as logger
+from PoE2_Data_Logger.ocr import runehelper_ocr
 
 OCR_LOCK = threading.Lock()
 MODEL_HASHES = {
@@ -29,7 +29,7 @@ def verify_models(model_root):
 
 
 def scan_both(path):
-    from scan import scan
+    from PoE2_Data_Logger.ocr.scan import scan
     opened = scan_opened(path, allow_fallback=False)
     if opened.get("first_recipe") or opened.get("opened_recipes"):
         return {**opened, "mode": "opened", "scan_selection": "both"}

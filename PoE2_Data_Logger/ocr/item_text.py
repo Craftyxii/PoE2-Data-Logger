@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from affix_capture import looks_like_modifier
+from PoE2_Data_Logger.ocr.affix_capture import looks_like_modifier
 
 
 MAX_ITEM_TEXT = 30000
@@ -77,7 +77,7 @@ def parse_item_text(text, affixes=()):
         return None
     mods = _modifier_lines(lines, kind)
     if kind == "tablet":
-        from item_ocr import parse_tablet
+        from PoE2_Data_Logger.ocr.item_ocr import parse_tablet
 
         proposals = parse_tablet([{"text": line, "score": 1.0} for line in mods], affixes)
         return {"kind": kind, "mods": mods, "matches": proposals["matches"],
@@ -149,7 +149,7 @@ def parse_screen_tooltip(ocr_rows, affixes=()):
                           if looks_like_modifier(line) and not _PROPERTY.match(line)), None)
         if start is None:
             return None
-        from item_ocr import merge_tablet_lines, parse_tablet
+        from PoE2_Data_Logger.ocr.item_ocr import merge_tablet_lines, parse_tablet
 
         rows = []
         for offset, line in enumerate(body[start:], index + start):
@@ -172,7 +172,7 @@ def parse_screen_tooltip(ocr_rows, affixes=()):
 
 
 def read_screen_tooltip(image, affixes=(), ocr_rows=None):
-    from item_ocr import ocr_lines
+    from PoE2_Data_Logger.ocr.item_ocr import ocr_lines
     rows = [dict(row) for row in ocr_rows] if ocr_rows is not None else ocr_lines(image)
     parts = [dict(part) for row in rows for part in row.get("parts", [row])]
     anchor = next((row for row in parts if _TABLET_TITLE.fullmatch(row["text"].strip()) or

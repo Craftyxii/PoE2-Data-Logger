@@ -18,7 +18,7 @@ import numpy as np
 import onnxruntime as ort
 from PIL import Image
 
-ROOT = Path(__file__).resolve().parent / "third_party" / "runehelper"
+ROOT = Path(__file__).resolve().parent.parent / "third_party" / "runehelper"
 
 
 def _find_panel(gray: np.ndarray):

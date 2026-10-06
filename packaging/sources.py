@@ -1,38 +1,50 @@
 """Source and resource groups for PyInstaller."""
 
 CORE_SOURCES = (
-    "logger_store.py",
-    "store.py",
-    "service.py",
-    "auto_commit.py",
-    "reference_pack.py",
-    "ritual_catalog.py",
-    "workbook_export.py",
+    "core/logger_store.py",
+    "core/store.py",
+    "core/service.py",
+    "core/auto_commit.py",
+    "core/reference_pack.py",
+    "core/ritual_catalog.py",
+    "core/workbook_export.py",
 )
 
-SCANNER_SOURCES = (
-    "affix_capture.py",
-    "currency_ocr.py",
-    "inventory_labels.py",
-    "item_ocr.py",
-    "item_text.py",
-    "opened_scan.py",
-    "runehelper_ocr.py",
-    "scan.py",
-    "prototype.py",
-    "cv_eval.py",
-    "glyph_eval.py",
+OCR_SOURCES = (
+    "ocr/affix_capture.py",
+    "ocr/currency_ocr.py",
+    "ocr/inventory_labels.py",
+    "ocr/item_ocr.py",
+    "ocr/item_text.py",
+    "ocr/opened_scan.py",
+    "ocr/runehelper_ocr.py",
+    "ocr/scan.py",
+    "ocr/prototype.py",
+    "ocr/cv_eval.py",
+    "ocr/glyph_eval.py",
 )
 
-DESKTOP_SOURCES = (
-    "native_desktop.py",
-    "hotkey.py",
-    "hover_copy.py",
-    "live_watch.py",
-    "region_select.py",
+UI_SOURCES = (
+    "ui/native_desktop.py",
+    "ui/region_select.py",
 )
 
-APP_SOURCES = CORE_SOURCES + SCANNER_SOURCES + DESKTOP_SOURCES
+PLATFORM_SOURCES = (
+    "platform/hotkey.py",
+    "platform/hover_copy.py",
+    "platform/live_watch.py",
+)
+
+PACKAGE_SOURCES = (
+    "__init__.py",
+    "__main__.py",
+    "core/__init__.py",
+    "ocr/__init__.py",
+    "ui/__init__.py",
+    "platform/__init__.py",
+)
+
+APP_SOURCES = PACKAGE_SOURCES + CORE_SOURCES + OCR_SOURCES + UI_SOURCES + PLATFORM_SOURCES
 
 DATABASE_RESOURCES = (
     "bootstrap.json.gz",

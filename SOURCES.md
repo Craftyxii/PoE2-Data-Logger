@@ -4,41 +4,47 @@
 
 ## Logging, records and exports
 
+[Browse core source](PoE2_Data_Logger/core/)
+
 | File | Purpose |
 | --- | --- |
-| [logger_store.py](PoE2_Data_Logger/logger_store.py) | Map settings, remnant records, inventory snapshots, Ritual records and review state |
-| [store.py](PoE2_Data_Logger/store.py) | Scanner records, seed candidates and reviewed glyphs |
-| [service.py](PoE2_Data_Logger/service.py) | Application actions and scan routing |
-| [auto_commit.py](PoE2_Data_Logger/auto_commit.py) | Accepting clear remnant readings |
-| [reference_pack.py](PoE2_Data_Logger/reference_pack.py) | Reference database import and export |
-| [ritual_catalog.py](PoE2_Data_Logger/ritual_catalog.py) | Ritual reward catalog helpers |
-| [workbook_export.py](PoE2_Data_Logger/workbook_export.py) | Excel workbook export |
+| [logger_store.py](PoE2_Data_Logger/core/logger_store.py) | Map settings, remnant records, inventory snapshots, Ritual records and review state |
+| [store.py](PoE2_Data_Logger/core/store.py) | Scanner records, seed candidates and reviewed glyphs |
+| [service.py](PoE2_Data_Logger/core/service.py) | Application actions and scan routing |
+| [auto_commit.py](PoE2_Data_Logger/core/auto_commit.py) | Accepting clear remnant readings |
+| [reference_pack.py](PoE2_Data_Logger/core/reference_pack.py) | Reference database import and export |
+| [ritual_catalog.py](PoE2_Data_Logger/core/ritual_catalog.py) | Ritual reward catalog helpers |
+| [workbook_export.py](PoE2_Data_Logger/core/workbook_export.py) | Excel workbook export |
 
 ## Scanners and item readers
 
+[Browse OCR source](PoE2_Data_Logger/ocr/)
+
 | File | Purpose |
 | --- | --- |
-| [affix_capture.py](PoE2_Data_Logger/affix_capture.py) | Waystone and tablet affix capture |
-| [currency_ocr.py](PoE2_Data_Logger/currency_ocr.py) | Currency and inventory OCR |
-| [inventory_labels.py](PoE2_Data_Logger/inventory_labels.py) | Inventory item-label helpers |
-| [item_ocr.py](PoE2_Data_Logger/item_ocr.py) | Item and Ritual reward readings |
-| [item_text.py](PoE2_Data_Logger/item_text.py) | Tooltip text parsing |
-| [opened_scan.py](PoE2_Data_Logger/opened_scan.py) | Opened remnant scanning and OCR model checks |
-| [runehelper_ocr.py](PoE2_Data_Logger/runehelper_ocr.py) | RuneHelper OCR adapter |
-| [scan.py](PoE2_Data_Logger/scan.py) | Visible remnant seed scanning |
-| [prototype.py](PoE2_Data_Logger/prototype.py) | Rune-bar geometry and template matching |
-| [cv_eval.py](PoE2_Data_Logger/cv_eval.py) | Socket feature extraction and decoding |
-| [glyph_eval.py](PoE2_Data_Logger/glyph_eval.py) | Rune glyph feature vectors |
+| [affix_capture.py](PoE2_Data_Logger/ocr/affix_capture.py) | Waystone and tablet affix capture |
+| [currency_ocr.py](PoE2_Data_Logger/ocr/currency_ocr.py) | Currency and inventory OCR |
+| [inventory_labels.py](PoE2_Data_Logger/ocr/inventory_labels.py) | Inventory item-label helpers |
+| [item_ocr.py](PoE2_Data_Logger/ocr/item_ocr.py) | Item and Ritual reward readings |
+| [item_text.py](PoE2_Data_Logger/ocr/item_text.py) | Tooltip text parsing |
+| [opened_scan.py](PoE2_Data_Logger/ocr/opened_scan.py) | Opened remnant scanning and OCR model checks |
+| [runehelper_ocr.py](PoE2_Data_Logger/ocr/runehelper_ocr.py) | RuneHelper OCR adapter |
+| [scan.py](PoE2_Data_Logger/ocr/scan.py) | Visible remnant seed scanning |
+| [prototype.py](PoE2_Data_Logger/ocr/prototype.py) | Rune-bar geometry and template matching |
+| [cv_eval.py](PoE2_Data_Logger/ocr/cv_eval.py) | Socket feature extraction and decoding |
+| [glyph_eval.py](PoE2_Data_Logger/ocr/glyph_eval.py) | Rune glyph feature vectors |
 
 ## Desktop, hotkeys and screen capture
 
+[Browse interface source](PoE2_Data_Logger/ui/) · [Browse platform source](PoE2_Data_Logger/platform/)
+
 | File | Purpose |
 | --- | --- |
-| [native_desktop.py](PoE2_Data_Logger/native_desktop.py) | Main desktop interface and review overlay |
-| [hotkey.py](PoE2_Data_Logger/hotkey.py) | Global hotkeys and scan capture |
-| [hover_copy.py](PoE2_Data_Logger/hover_copy.py) | Hovered tooltip copy helpers |
-| [live_watch.py](PoE2_Data_Logger/live_watch.py) | Game-window checks used during capture |
-| [region_select.py](PoE2_Data_Logger/region_select.py) | Capture-region selection and reference screenshots |
+| [native_desktop.py](PoE2_Data_Logger/ui/native_desktop.py) | Main desktop interface and review overlay |
+| [hotkey.py](PoE2_Data_Logger/platform/hotkey.py) | Global hotkeys and scan capture |
+| [hover_copy.py](PoE2_Data_Logger/platform/hover_copy.py) | Hovered tooltip copy helpers |
+| [live_watch.py](PoE2_Data_Logger/platform/live_watch.py) | Game-window checks used during capture |
+| [region_select.py](PoE2_Data_Logger/ui/region_select.py) | Capture-region selection and reference screenshots |
 
 ## Resources and third-party code
 

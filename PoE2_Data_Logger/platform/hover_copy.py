@@ -46,7 +46,7 @@ def _clipboard_text(user32, kernel32):
 def read_hovered_text(timeout=.48):
     if sys.platform != "win32":
         return None
-    from live_watch import game_foreground
+    from PoE2_Data_Logger.platform.live_watch import game_foreground
 
     if not game_foreground():
         return None

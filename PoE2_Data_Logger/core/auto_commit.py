@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import math
 
-import logger_store as logger
+from PoE2_Data_Logger.core import logger_store as logger
 
 
 def _family(label):

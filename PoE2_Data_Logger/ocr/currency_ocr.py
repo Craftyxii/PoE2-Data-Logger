@@ -19,7 +19,7 @@ import cv2
 import quickjs
 from PIL import Image
 
-ROOT = Path(__file__).resolve().parent / "third_party" / "currency_overlay"
+ROOT = Path(__file__).resolve().parent.parent / "third_party" / "currency_overlay"
 
 
 def catalog_version():

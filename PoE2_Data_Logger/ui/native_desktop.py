@@ -21,17 +21,17 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QTextBrowser, QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
 
-import logger_store as logger
-import reference_pack
-from affix_capture import new_affix_names, affix_unit, modifier_value
-import item_ocr
-import service
-import store
-from region_select import RegionEditor, ScanRegionsPage
-from workbook_export import export_xlsx
+from PoE2_Data_Logger.core import logger_store as logger
+from PoE2_Data_Logger.core import reference_pack
+from PoE2_Data_Logger.ocr.affix_capture import new_affix_names, affix_unit, modifier_value
+from PoE2_Data_Logger.ocr import item_ocr
+from PoE2_Data_Logger.core import service
+from PoE2_Data_Logger.core import store
+from PoE2_Data_Logger.ui.region_select import RegionEditor, ScanRegionsPage
+from PoE2_Data_Logger.core.workbook_export import export_xlsx
 
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parent.parent
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
                             if getattr(sys, "frozen", False) else
@@ -2243,7 +2243,7 @@ class LoggerWindow(QMainWindow):
             self.overlay_escape.setEnabled(self._overlay_enabled)
             modifiers = event.modifiers()
             if event.nativeVirtualKey():
-                from hotkey import virtual_key_name
+                from PoE2_Data_Logger.platform.hotkey import virtual_key_name
                 name = virtual_key_name(event.nativeVirtualKey())
             elif modifiers & Qt.KeyboardModifier.KeypadModifier:
                 keypad = {Qt.Key.Key_Plus: "NumAdd", Qt.Key.Key_Minus: "NumSubtract",
@@ -2722,7 +2722,7 @@ class LoggerWindow(QMainWindow):
 
     def maybe_auto_commit(self, opened):
         if self.mode == "both":
-            from auto_commit import candidate
+            from PoE2_Data_Logger.core.auto_commit import candidate
             if (self.state["settings"].get("auto_commit") and self._both_link is not None and
                     self._both_approved and candidate(opened)["ready"]):
                 self.commit_remnant()
@@ -3021,9 +3021,9 @@ class LoggerWindow(QMainWindow):
                 return
             try:
                 from PIL import ImageGrab
-                from hover_copy import _tooltip_bounds
-                from region_select import region_for, REGIONS
-                from live_watch import game_foreground
+                from PoE2_Data_Logger.platform.hover_copy import _tooltip_bounds
+                from PoE2_Data_Logger.ui.region_select import region_for, REGIONS
+                from PoE2_Data_Logger.platform.live_watch import game_foreground
                 if not game_foreground():
                     raise ValueError("Switch to Path of Exile 2, then select the region again.")
                 bounds = _tooltip_bounds()

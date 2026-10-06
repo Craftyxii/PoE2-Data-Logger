@@ -6,7 +6,7 @@ import re
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile, ZIP_DEFLATED
 
-import logger_store as logger
+from PoE2_Data_Logger.core import logger_store as logger
 
 
 NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"

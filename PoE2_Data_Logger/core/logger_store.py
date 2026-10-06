@@ -14,11 +14,11 @@ from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
-import store
-from affix_capture import affix_catalog, affix_key, affix_unit, modifier_value, tablet_random_mod_counts
+from PoE2_Data_Logger.core import store
+from PoE2_Data_Logger.ocr.affix_capture import affix_catalog, affix_key, affix_unit, modifier_value, tablet_random_mod_counts
 
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parent.parent
 _INIT_LOCK = threading.Lock()
 _READY = False
 BIOMES = ("None", "Water", "Mountain", "Grass", "Forest", "Swamp", "Desert", "Ocean", "Island")
@@ -293,7 +293,7 @@ def initialize():
                 db.executemany("INSERT OR IGNORE INTO currency_items(name) VALUES(?)",
                                ((name,) for name in sorted(names) if name))
                 _set_meta(db, "currency_items_initialized", True)
-            from currency_ocr import catalog_names, catalog_version
+            from PoE2_Data_Logger.ocr.currency_ocr import catalog_names, catalog_version
             catalog_key = catalog_version()
             if _meta(db, "currency_inventory_catalog_version") != catalog_key:
                 db.executemany("INSERT OR IGNORE INTO currency_items(name) VALUES(?)",
@@ -337,7 +337,7 @@ def initialize():
                     _set_meta(db, "settings", config)
                 _set_meta(db, "tablet_capacity_default_v17", True)
             if not _meta(db, "ritual_names_initialized"):
-                from ritual_catalog import OMEN_NAMES
+                from PoE2_Data_Logger.core.ritual_catalog import OMEN_NAMES
                 db.executemany("INSERT OR IGNORE INTO ritual_names(name) VALUES(?)",
                                ((name,) for name in OMEN_NAMES))
                 _set_meta(db, "ritual_names_initialized", True)
@@ -2036,7 +2036,7 @@ def save_export_file(kind="xlsx"):
     if not directory.is_dir():
         raise ValueError("The export folder no longer exists. Choose another folder.")
     if kind == "xlsx":
-        from workbook_export import export_xlsx
+        from PoE2_Data_Logger.core.workbook_export import export_xlsx
         data = export_xlsx()
         filename = "PoE2_Export.xlsx"
     else:

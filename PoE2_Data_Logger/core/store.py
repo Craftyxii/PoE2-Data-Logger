@@ -12,14 +12,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("RUNESHAPE_SCAN_DATA_DIR", str(Path.home() / "Runeshape Scan")))
 MAX_IMAGE_PIXELS = 12_000_000
 STATES = json.loads((HERE / "catalog.json").read_text())["states"]
 
 
 def states() -> list[dict]:
-    import logger_store
+    from PoE2_Data_Logger.core import logger_store
     logger_store.initialize()
     with _connect() as db:
         rows = db.execute("SELECT s.family,s.sockets,s.seed_slot,s.seed_rune,s.rewards_json,s.status "
@@ -35,7 +35,7 @@ def candidates(sockets: int, slot: str, rune: str) -> list[dict]:
 
 
 def validate(sockets, slot, rune, family=None):
-    from logger_store import _integer
+    from PoE2_Data_Logger.core.logger_store import _integer
     depth = _integer(sockets, "Socket count", 3, 10)
     if slot not in [f"P{i}" for i in range(1, depth + 1)]:
         raise ValueError("Visible slot must be inside the socket bar.")
@@ -129,8 +129,8 @@ def save_scan(raw: bytes, file_name: str, sockets, slot: str, rune: str, family=
 def _reviewed_vector(raw: bytes, sockets: int, slot: str):
     import numpy as np
     from PIL import Image
-    from glyph_eval import vector
-    from prototype import center_for, crop_at, ncc_find
+    from PoE2_Data_Logger.ocr.glyph_eval import vector
+    from PoE2_Data_Logger.ocr.prototype import center_for, crop_at, ncc_find
 
     with Image.open(io.BytesIO(raw)) as source:
         im = source.convert("RGB")
@@ -149,7 +149,7 @@ def _reviewed_vector(raw: bytes, sockets: int, slot: str):
 
 def reviewed_glyphs(runes=None):
     import numpy as np
-    import logger_store
+    from PoE2_Data_Logger.core import logger_store
     logger_store.initialize()
     with _connect() as db:
         if runes is None:
@@ -185,7 +185,7 @@ def image_for(scan_id):
 
 
 def export_csv():
-    from logger_store import _csv_row
+    from PoE2_Data_Logger.core.logger_store import _csv_row
     out = io.StringIO(newline="")
     writer = csv.writer(out)
     writer.writerow(["Scan ID", "Recorded at (UTC)", "Screenshot", "Sockets",

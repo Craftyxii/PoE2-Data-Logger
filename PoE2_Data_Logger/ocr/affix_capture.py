@@ -25,7 +25,7 @@ def affix_key(raw):
 
 @lru_cache(maxsize=1)
 def affix_catalog():
-    data = json.loads((Path(__file__).resolve().parent / "affix_catalog.json").read_text(encoding="utf-8"))
+    data = json.loads((Path(__file__).resolve().parent.parent / "affix_catalog.json").read_text(encoding="utf-8"))
     return data["affixes"]
 
 

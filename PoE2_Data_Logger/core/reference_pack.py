@@ -12,8 +12,8 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from PIL import Image
 
-import logger_store as logger
-import store
+from PoE2_Data_Logger.core import logger_store as logger
+from PoE2_Data_Logger.core import store
 
 
 FORMAT = "poe2-data-logger-references"

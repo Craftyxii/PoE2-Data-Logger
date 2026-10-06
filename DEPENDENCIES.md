@@ -19,7 +19,7 @@ Runtime dependencies are declared in [requirements.txt](requirements.txt); build
 | PySide6 | `6.9.3` | Desktop interface, review overlay and capture-region editor |
 | QuickJS | `1.19.4` | Running the bundled currency and inventory readers |
 
-The application also uses Python 3.12's standard library, including SQLite, CSV, JSON, XML and ZIP support. Excel export is written by [workbook_export.py](PoE2_Data_Logger/workbook_export.py); it does not require openpyxl at runtime.
+The application also uses Python 3.12's standard library, including SQLite, CSV, JSON, XML and ZIP support. Excel export is written by [workbook_export.py](PoE2_Data_Logger/core/workbook_export.py); it does not require openpyxl at runtime.
 
 ## Build tools
 
