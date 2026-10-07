@@ -10,6 +10,63 @@ from PoE2_Data_Logger.ocr import item_ocr
 
 
 class RitualTotalsTests(unittest.TestCase):
+    def test_visible_grid_header_populates_both_fields_when_title_ocr_is_missing(self):
+        folder = Path(__file__).parent / "fixtures/ritual_headers"
+        for case in json.loads((folder / "expected.json").read_text()):
+            with self.subTest(rerolls=case["rerolls"]), Image.open(folder / case["image"]) as image:
+                result = item_ocr.ritual_totals([], image, grid={"bounds": case["bounds"]})
+                self.assertEqual(result, {"tribute_available": case["tribute"],
+                                          "rerolls_remaining": case["rerolls"]})
+
+    def test_rerolls_can_populate_when_available_tribute_is_unreadable(self):
+        folder = Path(__file__).parent / "fixtures/ritual_headers"
+        case = next(case for case in json.loads((folder / "expected.json").read_text()) if case["rerolls"] == 0)
+        with Image.open(folder / case["image"]) as image, \
+                patch.object(item_ocr, "ocr_lines", return_value=[]):
+            result = item_ocr.ritual_totals([], image, grid={"bounds": case["bounds"]})
+        self.assertEqual(result, {"tribute_available": None, "rerolls_remaining": 0})
+
+    def test_header_tribute_uses_grid_position_without_favours_title(self):
+        rows = [{"text": "20,237 Tribute", "score": .999, "x": 900, "y": 10, "right": 1100, "bottom": 30},
+                {"text": "18,956 Tribute", "score": .999, "x": 382, "y": 185, "right": 555, "bottom": 212}]
+        with patch.object(item_ocr, "_ritual_grid_rerolls", return_value=4), \
+                patch.object(item_ocr, "ocr_lines") as read:
+            result = item_ocr.ritual_totals(rows, Image.new("RGB", (1200, 900)),
+                                            grid={"bounds": (121, 237, 753, 763)})
+            read.assert_not_called()
+        self.assertEqual(result, {"tribute_available": 18956, "rerolls_remaining": 4})
+
+    def test_reduced_header_reads_complete_two_digit_counter(self):
+        folder = Path(__file__).parent / "fixtures/ritual_headers"
+        for value, bounds in ((36, (14, 65, 330, 328)), (35, (9, 67, 325, 330))):
+            with self.subTest(rerolls=value), Image.open(folder / f"header_{value}_half.png") as image:
+                self.assertEqual(item_ocr._ritual_grid_rerolls(image, {"bounds": bounds}), value)
+
+    def test_grid_only_capture_leaves_header_fields_blank(self):
+        with patch.object(item_ocr, "_engine") as engine:
+            result = item_ocr.ritual_totals([], Image.new("RGB", (640, 530)),
+                                           grid={"bounds": (2, 2, 634, 529)})
+            self.assertEqual(result, {"tribute_available": None, "rerolls_remaining": None})
+            engine.assert_not_called()
+
+    def test_zero_available_tribute_is_preserved_without_title(self):
+        rows = [{"text": "0 Tribute", "score": .999, "x": 382, "y": 185, "right": 555, "bottom": 212}]
+        with patch.object(item_ocr, "_ritual_grid_rerolls", return_value=0):
+            result = item_ocr.ritual_totals(rows, Image.new("RGB", (1200, 900)),
+                                           grid={"bounds": (121, 237, 753, 763)})
+        self.assertEqual(result, {"tribute_available": 0, "rerolls_remaining": 0})
+
+    def test_tribute_number_and_word_detected_as_separate_parts_use_merged_row(self):
+        rows = [{"text": "18,956 Tribute", "score": .999, "x": 382, "y": 185, "right": 555, "bottom": 212,
+                 "parts": [{"text": "18,956", "score": .999, "x": 382, "y": 185, "right": 455, "bottom": 212},
+                           {"text": "Tribute", "score": .999, "x": 460, "y": 185, "right": 555, "bottom": 212}]}]
+        with patch.object(item_ocr, "_ritual_grid_rerolls", return_value=4), \
+                patch.object(item_ocr, "ocr_lines") as read:
+            result = item_ocr.ritual_totals(rows, Image.new("RGB", (1200, 900)),
+                                           grid={"bounds": (121, 237, 753, 763)})
+            read.assert_not_called()
+        self.assertEqual(result, {"tribute_available": 18956, "rerolls_remaining": 4})
+
     def test_actual_counter_pixels_preserve_zero_and_two_digit_values(self):
         folder = Path(__file__).parent / "fixtures/ritual_counters"
         cases = json.loads((folder / "expected.json").read_text())

@@ -87,9 +87,8 @@ def commit(opened, seed=None, scan_id=None):
         return {"committed": False, "reason": result["reason"]}
     try:
         saved = logger.commit_remnant(result["first"], result["next"], result["family"],
-                                      scan_id, expected_pending=pending)
+                                      scan_id, expected_pending=pending, expected_context=opened,
+                                      seed_context=seed if isinstance(seed, dict) else None)
     except ValueError as error:
-        if str(error) in ("The scanned remnant was already saved or discarded.", "Auto-commit is off."):
-            return {"committed": False, "reason": str(error)}
-        raise
+        return {"committed": False, "reason": str(error)}
     return {"committed": True, **saved}

@@ -1,10 +1,12 @@
 import ast
 from pathlib import Path
 import re
+import subprocess
+import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from tools.verify_installer import check_version, verify
+from tools.verify_installer import check_version, verify, verify_blocked_launch
 
 
 class InstallerReleaseTests(unittest.TestCase):
@@ -107,6 +109,68 @@ class ReleasePackagingTests(unittest.TestCase):
         for version in ("33", "33.34.", "33.34.1.0", "33.34.1-beta"):
             with self.subTest(version=version):
                 self.assertIsNone(re.fullmatch(pattern, f'!define APP_VERSION "{version}"'))
+
+    def test_install_and_uninstall_guard_previous_activity_beta_clients(self):
+        installer = (self.root / "packaging/installer.nsi").read_text(encoding="utf-8")
+        for name in (".onInit", "un.onInit"):
+            with self.subTest(function=name):
+                body = installer.split(f"Function {name}\n", 1)[1].split("FunctionEnd", 1)[0]
+                for title in ("PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta"):
+                    self.assertIn(f'FindWindowW(p 0, w "{title}")', body)
+                running = body.split("  running:\n", 1)[1].split("  ready:", 1)[0]
+                self.assertIn("/SD IDOK", running)
+                self.assertIn("SetErrorLevel 2\n    Abort", running)
+
+
+class RunningClientGuardTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.directory = Path(temporary.name)
+        self.executable = self.directory / "installer.exe"
+        self.protected = (self.directory / "client.exe", self.directory / "runtime-sentinel.bin")
+        for path in self.protected:
+            path.write_bytes(b"retained client runtime")
+        self.check_saved = Mock()
+
+    def test_blocked_operation_requires_nonzero_exit_and_retains_runtime_and_saved_files(self):
+        with patch("tools.verify_installer.subprocess.run", return_value=Mock(returncode=2)) as run:
+            verify_blocked_launch(self.executable, "/S", self.protected, self.check_saved)
+        run.assert_called_once_with(f'"{self.executable}" /S', timeout=20, check=False)
+        self.check_saved.assert_called_once_with()
+
+    def test_successful_operation_with_a_running_client_is_rejected(self):
+        with patch("tools.verify_installer.subprocess.run", return_value=Mock(returncode=0)):
+            with self.assertRaisesRegex(RuntimeError, "allowed an operation"):
+                verify_blocked_launch(self.executable, "/S", self.protected, self.check_saved)
+        self.check_saved.assert_not_called()
+
+    def test_runtime_replacement_or_deletion_is_rejected_even_after_nonzero_exit(self):
+        for remove in (False, True):
+            with self.subTest(remove=remove):
+                self.protected[1].write_bytes(b"retained client runtime")
+                def mutate(*args, **kwargs):
+                    if remove:
+                        self.protected[1].unlink()
+                    else:
+                        self.protected[1].write_bytes(b"changed runtime")
+                    return Mock(returncode=2)
+                with patch("tools.verify_installer.subprocess.run", side_effect=mutate):
+                    with self.assertRaisesRegex(RuntimeError, "retained runtime"):
+                        verify_blocked_launch(self.executable, "/S", self.protected, self.check_saved)
+        self.check_saved.assert_not_called()
+
+    def test_saved_file_damage_is_rejected(self):
+        self.check_saved.side_effect = RuntimeError("saved user files changed")
+        with patch("tools.verify_installer.subprocess.run", return_value=Mock(returncode=2)):
+            with self.assertRaisesRegex(RuntimeError, "saved user files changed"):
+                verify_blocked_launch(self.executable, "/S", self.protected, self.check_saved)
+
+    def test_hung_operation_times_out(self):
+        with patch("tools.verify_installer.subprocess.run", side_effect=subprocess.TimeoutExpired("installer", 20)):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                verify_blocked_launch(self.executable, "/S", self.protected, self.check_saved)
+        self.check_saved.assert_not_called()
 
 
 if __name__ == "__main__":

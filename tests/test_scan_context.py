@@ -369,9 +369,8 @@ class ScanContextTests(unittest.TestCase):
         self.window.approve_remnant_scan()
         self.assertEqual(logger.get_state()["scan_commit_count"], 1)
         self.assertTrue(self.window._seed_readings[0]["saved"])
-        self.window.show_result("opened", opened)
         with self.assertRaises(ValueError):
-            self.window.approve_remnant_scan()
+            self.window.show_result("opened", opened)
         self.assertEqual(logger.get_state()["scan_commit_count"], 1)
 
 

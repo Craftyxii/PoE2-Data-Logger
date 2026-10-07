@@ -8,15 +8,19 @@ Every remnant receives its own unique **Remnant ID**. On City maps, each expedit
 
 Currency tracking keeps one current starting inventory and one current ending inventory per map. Repeated scans replace the corresponding totals instead of adding them again. Exports include **before and after counts and net changes**.
 
+**Kills / Currency** shows a clean session counter with each found item's icon, name and total. Approved end scans update the positive gains from each map's start/end pair; repeated scans replace that map's contribution. Resetting IDs clears the counter. Local inventory-reference tools are available in **Data export → Developer Mode**.
+
 Scans and records are processed and stored locally. **The app does not upload your data**; you choose whether to export and share it.
 
 ## Download
 
-Download **PoE2-Data-Logger-Setup-v1.2.1-beta.exe** from the [1.2.1 Beta release page](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.2.1-beta). The installer includes the libraries and resources needed to run the app.
+Download **PoE2-Data-Logger-Setup-v1.2.2-beta.exe** from the [1.2.2 Beta release page](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.2.2-beta). The installer includes the libraries and resources needed to run the app.
 
 The separate **Atlas / Character Settings** tab provides a clickable PoE2 atlas with numbered effect dropdowns, immediate hover descriptions, Autofill and gear item rarity. Excel exports include a companion atlas worksheet linked to each map through its saved Atlas Setup ID.
 
 Kills are recorded separately for Normal, Magic, Rare and Unique monsters. Each accepted propagation scan adds one remnant detonation to its expedition; **Commit chain** saves the ordered runes and advances that map's expedition number.
+
+Approved name corrections in Currency and Ritual review save captured artwork as local recognition examples and create dedicated item-count export columns. Unnamed rows are rejected. Remnant review stays tied to its captured expedition while propagation continues. **Scan settings** offers 1, 2, 4 or 6 CPU OCR threads, applied after restarting the app.
 
 See the [user guide](docs/USER_GUIDE.md) for map setup, hotkeys, scans, reviews and exporting your data.
 
@@ -55,7 +59,7 @@ py -3.12 -m PoE2_Data_Logger
 
 ## Build on Windows
 
-Install Python 3.12 and NSIS, add `makensis` to PATH, then run **Build.bat** from the repository folder. It installs the build dependencies, packages the app, checks the bundled runtime and OCR models, and creates **PoE2-Data-Logger-Setup-v1.2.1-beta.exe**.
+Install Python 3.12 and NSIS, add `makensis` to PATH, then run **Build.bat** from the repository folder. It installs the build dependencies, packages the app, checks the bundled runtime and OCR models, and creates **PoE2-Data-Logger-Setup-v1.2.2-beta.exe**.
 
 The source groups in [packaging/sources.py](packaging/sources.py) feed the PyInstaller specification. Add a new app module or resource there when changing the build.
 

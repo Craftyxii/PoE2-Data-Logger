@@ -18,6 +18,8 @@ import numpy as np
 import onnxruntime as ort
 from PIL import Image
 
+from PoE2_Data_Logger.core import ocr_runtime
+
 ROOT = Path(__file__).resolve().parent.parent / "third_party" / "runehelper"
 
 
@@ -66,7 +68,7 @@ def default_frame(image: Image.Image):
 def _model():
     info = json.loads((ROOT / "english.json").read_text(encoding="utf-8"))
     options = ort.SessionOptions()
-    options.intra_op_num_threads = 2
+    options.intra_op_num_threads = ocr_runtime.active_threads()
     options.inter_op_num_threads = 1
     session = ort.InferenceSession(str(ROOT / "english.onnx"), sess_options=options,
                                    providers=["CPUExecutionProvider"])

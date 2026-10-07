@@ -112,6 +112,33 @@ class PropagationTotalsTests(unittest.TestCase):
             self.accept()
         self.assertEqual(self.records(), before)
 
+    def test_same_chain_pending_remnant_is_preserved_while_counting_propagation(self):
+        pending = logger.assign_ocr_id("opened")
+        number = logger.get_state()["next_remnant_id"]
+        self.assertEqual(self.accept(["Death", "Rebirth"])["detonated"], 1)
+        state = logger.get_state()
+        self.assertEqual(state["ocr_pending"], pending)
+        self.assertEqual(state["next_remnant_id"], number)
+        self.assertEqual(state["current_expedition_id"], pending["expedition_id"])
+        self.assertEqual(state["scan_commit_count"], 1)
+
+    def test_pending_remnant_for_another_map_cannot_receive_propagation(self):
+        pending = {"remnant_id": "R0001", "map_id": "M0002", "expedition_id": "M0002-E01"}
+        with logger._connect() as db:
+            logger._set_meta(db, "ocr_pending", pending)
+        before = self.records()
+        with self.assertRaisesRegex(ValueError, "another map"):
+            self.accept()
+        self.assertEqual(self.records(), before)
+
+    def test_pending_remnant_other_expedition_on_same_map_stays_independent(self):
+        pending = logger.assign_ocr_id("opened")
+        logger.commit_chain_draft([{"rune1": "Death"}], logger.scan_context())
+        accepted = self.accept(["Power"])
+        self.assertEqual(accepted["expedition_id"], "M0001-E02")
+        self.assertEqual(logger.get_state()["ocr_pending"], pending)
+        self.assertEqual(pending["expedition_id"], "M0001-E01")
+
     def test_legacy_corrections_and_omitted_count_preservation(self):
         self.assertEqual(self.accept(current_value="7")["detonated"], 8)
         logger.save_counts(10, 2, 1, 3)

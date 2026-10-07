@@ -76,7 +76,7 @@ def dispatch(path, data=None):
         return store.candidates(int(q["sockets"][0]), q["slot"][0], q["rune"][0])
     if route == "/api/scan":
         context = data.get("scan_context") or logger.scan_context()
-        logger.validate_scan_context(context)
+        logger.validate_remnant_context(context)
         expected_generation = data.get("scan_generation", context["_scan_generation"])
         if expected_generation != context["_scan_generation"]:
             raise ValueError("This scan belongs to the previous session. Scan again.")
@@ -93,7 +93,7 @@ def dispatch(path, data=None):
             if mode == "both":
                 mode = result["mode"]
             result["mode"] = mode
-            logger.validate_scan_context(context)
+            logger.validate_remnant_context(context)
             if mode != "seed" or result.get("remnants") or result.get("sockets"):
                 if data.get("defer_ocr_id"):
                     result["_target_map_id"] = data.get("map_id")

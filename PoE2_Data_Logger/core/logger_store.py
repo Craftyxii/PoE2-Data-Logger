@@ -344,6 +344,14 @@ def initialize():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,
                     image_png BLOB NOT NULL,recorded_at TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS omen_icon_name_idx ON omen_icons(name);
+                CREATE TABLE IF NOT EXISTS review_icon_examples(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,
+                    kind TEXT NOT NULL CHECK(kind IN ('currency','item','omen')),
+                    columns INTEGER NOT NULL,rows INTEGER NOT NULL,
+                    image_png BLOB NOT NULL,image_sha256 TEXT NOT NULL,
+                    recorded_at TEXT NOT NULL,
+                    UNIQUE(columns,rows,image_sha256));
+                CREATE INDEX IF NOT EXISTS review_icon_name_idx ON review_icon_examples(name);
                 CREATE TABLE IF NOT EXISTS commits(
                     number INTEGER PRIMARY KEY,kind TEXT NOT NULL,map_id TEXT,
                     expedition_id TEXT,reference TEXT,recorded_at TEXT NOT NULL);
@@ -414,6 +422,8 @@ def initialize():
                                ((s["family"], s["sockets"], s["seed_slot"], s["seed_rune"],
                                  _dump(s["rewards"]), s["status"]) for s in store.STATES))
                 _set_meta(db, "seed_states_initialized", True)
+            from PoE2_Data_Logger.core.catalog_repairs import repair_farrul_hunt_family
+            repair_farrul_hunt_family(db)
             if not _meta(db, "rain_of_blades_six_socket_fix"):
                 db.execute("UPDATE recipes SET sockets=6,combo=? WHERE name=? AND sockets=5 AND combo=?",
                            ("Tempest + Sky + Ward + Stone + Arcane + Ward", "Rain of Blades (Level 20)",
@@ -651,9 +661,6 @@ def _save_settings(db, data, *, confirmed_affixes=()):
         db.execute("INSERT OR IGNORE INTO affixes(name) VALUES(?)", (name.strip(),))
     c = _validate_settings(db, data)
     source = _meta(db, "settings")
-    pending = _meta(db, "ocr_pending")
-    if pending and c["expedition"] != source["expedition"]:
-        raise ValueError("Save or discard the scanned remnant before switching expeditions.")
     current = _meta(db, "current_map_number", 0)
     next_map = bool(_meta(db, "pending_new_map"))
     waystone_fields = WAYSTONE_DEFAULTS.keys() & data.keys()
@@ -1132,6 +1139,53 @@ def validate_scan_context(result):
         raise ValueError("The expedition changed during the scan. Scan the current expedition again.")
 
 
+def _validate_remnant_context(db, result):
+    """Keep a remnant bound to its capture when propagation advances a chain.
+
+    Map/session changes still invalidate a reading. Only a retained remnant
+    token or a committed chain on this map can account for an older expedition.
+    Other scan types continue to use the stricter current-expedition check.
+    """
+    if not isinstance(result, dict):
+        raise ValueError("The remnant capture context is invalid. Scan again.")
+    pending = _meta(db, "ocr_pending")
+    number = _meta(db, "current_map_number", 0)
+    new_map = not number or bool(_meta(db, "pending_new_map", False))
+    current_map = _map_id(number) if number else None
+    if "_scan_generation" in result:
+        if result["_scan_generation"] != _meta(db, "session_generation", 0):
+            raise ValueError("This scan belongs to the previous session. Scan again.")
+        if result.get("_capture_map_id") != current_map:
+            raise ValueError("The map changed during the scan. Scan the current map again.")
+        if "_capture_map_pending" in result and result["_capture_map_pending"] != bool(_meta(db, "pending_new_map", False)):
+            raise ValueError("The map ended during the scan. Scan again.")
+    if any(key in result for key in ("remnant_id", "expedition_id")):
+        if not pending or any(result.get(key) != pending.get(key) for key in
+                              ("remnant_id", "map_id", "expedition_id")):
+            raise ValueError("The scanned remnant was already saved or discarded. Scan again.")
+    if "_scan_generation" not in result:
+        return
+    mid = _map_id(number + 1 if new_map else number)
+    current_expedition = 1 if new_map else _meta(db, "settings")["expedition"]
+    captured = result.get("_capture_expedition", current_expedition)
+    captured = _integer(captured, "Captured expedition", 1)
+    if any(key in result for key in ("remnant_id", "expedition_id")) and pending["expedition_id"] != _exp_id(mid, captured):
+        raise ValueError("The remnant and its capture belong to different expeditions. Scan again.")
+    if captured == current_expedition:
+        return
+    eid = _exp_id(mid, captured)
+    retained = bool(pending and pending.get("map_id") == mid and pending.get("expedition_id") == eid)
+    completed = not new_map and db.execute(
+        "SELECT 1 FROM commits WHERE kind='Chain' AND map_id=? AND expedition_id=? LIMIT 1", (mid, eid)).fetchone()
+    if not retained and not completed:
+        raise ValueError("The expedition changed during the scan. Scan the current expedition again.")
+
+
+def validate_remnant_context(result):
+    with _connect() as db:
+        _validate_remnant_context(db, result)
+
+
 def assign_ocr_id(mode, expected_map_id=None, expected_generation=None, expected_expedition=None):
     if mode not in ("seed", "opened"):
         raise ValueError("Choose visible seed or opened remnant mode.")
@@ -1141,16 +1195,21 @@ def assign_ocr_id(mode, expected_map_id=None, expected_generation=None, expected
             raise ValueError("This scan belongs to the previous session. Scan again.")
         current = _meta(db, "current_map_number")
         new_map = current == 0 or _meta(db, "pending_new_map")
-        expedition = 1 if new_map else _meta(db, "settings")["expedition"]
-        if expected_expedition is not None and expected_expedition != expedition:
-            raise ValueError("The expedition changed during the scan. Scan the current expedition again.")
+        number = current + 1 if new_map else current
+        mid = _map_id(number)
+        expedition = _integer(expected_expedition, "Captured expedition", 1) if expected_expedition is not None else (
+            1 if new_map else _meta(db, "settings")["expedition"])
+        _validate_remnant_context(db, {"_scan_generation": _meta(db, "session_generation", 0),
+            "_capture_map_id": _map_id(current) if current else None,
+            "_capture_map_pending": bool(_meta(db, "pending_new_map", False)),
+            "_capture_expedition": expedition})
         pending = _meta(db, "ocr_pending")
         if pending:
             if expected_map_id is not None and pending["map_id"] != expected_map_id:
                 raise ValueError("The map changed during the scan. Scan the current map again.")
+            if expected_expedition is not None and pending["expedition_id"] != _exp_id(mid, expedition):
+                raise ValueError("Another remnant is awaiting review for a different expedition. Save or reject that remnant first.")
             return pending
-        number = current + 1 if new_map else current
-        mid = _map_id(number)
         if expected_map_id is not None and mid != expected_map_id:
             raise ValueError("The map changed during the scan. Scan the current map again.")
         pending = {"remnant_id": f"R{_meta(db, 'next_remnant_number'):04d}",
@@ -1174,17 +1233,20 @@ def start_next_chain():
             raise ValueError("Start a map before starting another chain.")
         if _meta(db, "pending_new_map"):
             raise ValueError("The next map is marked; its first chain is Expedition #1.")
-        if _meta(db, "ocr_pending"):
-            raise ValueError("Save or discard the scanned remnant before starting another chain.")
         config = _meta(db, "settings")
         config["expedition"] += 1
         _set_meta(db, "settings", config)
     return get_state()
 
 
-def commit_remnant(first, next_recipe=None, family=None, scan_id=None, expected_pending=None, visible_seed=None):
+def commit_remnant(first, next_recipe=None, family=None, scan_id=None, expected_pending=None, visible_seed=None,
+                    *, expected_context=None, seed_context=None):
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
+        if expected_context is not None:
+            _validate_remnant_context(db, expected_context)
+        if seed_context is not None:
+            _validate_remnant_context(db, seed_context)
         if expected_pending is not None:
             if not _meta(db, "settings").get("auto_commit", False):
                 raise ValueError("Auto-commit is off.")
@@ -1194,7 +1256,7 @@ def commit_remnant(first, next_recipe=None, family=None, scan_id=None, expected_
 
 
 def _commit_remnant(db, first, next_recipe=None, family=None, scan_id=None, visible_seed=None,
-                    seed_rows=None):
+                    seed_rows=None, captured_expedition=None):
     result = (_resolve(db, first, next_recipe, family) if seed_rows is None else
               {"status": "ready", "family": family, "rows": seed_rows})
     if result["status"] != "ready":
@@ -1209,11 +1271,18 @@ def _commit_remnant(db, first, next_recipe=None, family=None, scan_id=None, visi
         config.update(_waystone_settings(prepared["settings"]))
     elif current and new_map:
         config.update(WAYSTONE_DEFAULTS)
-    expedition = 1 if new_map else config["expedition"]
-    eid = _exp_id(mid, expedition)
     remnant_number = _meta(db, "next_remnant_number")
     rid = f"R{remnant_number:04d}"
     pending = _meta(db, "ocr_pending")
+    expedition = 1 if new_map else config["expedition"]
+    if pending:
+        match = re.fullmatch(re.escape(mid) + r"-E(\d+)", str(pending.get("expedition_id", "")))
+        if pending.get("remnant_id") != rid or pending.get("map_id") != mid or not match:
+            raise ValueError("Scanned remnant belongs to another map or chain. Save or discard it first.")
+        expedition = _integer(int(match.group(1)), "Captured expedition", 1)
+    if captured_expedition is not None:
+        expedition = _integer(captured_expedition, "Captured expedition", 1)
+    eid = _exp_id(mid, expedition)
     if pending and (pending["remnant_id"], pending["map_id"], pending["expedition_id"]) != (rid, mid, eid):
         raise ValueError("Scanned remnant belongs to another map or chain. Save or discard it first.")
     occurrence = str(uuid.uuid4())
@@ -1298,18 +1367,14 @@ def _seed_recipes(db, family, sockets, rewards):
 def commit_seed_batch(result, selections, automatic=False):
     if not isinstance(result, dict) or not isinstance(selections, list) or not 1 <= len(selections) <= 24:
         raise ValueError("Select the visible remnants to commit.")
+    if any(key not in result for key in ("_scan_generation", "_capture_map_id", "_capture_expedition", "_capture_map_pending")):
+        raise ValueError("The visible seed capture context is missing. Scan again.")
     readings = result.get("remnants") or [result]
     if not isinstance(readings, list) or not 1 <= len(readings) <= 24:
         raise ValueError("Scan the visible remnants first.")
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
-        context = {"_scan_generation": _meta(db, "session_generation", 0),
-                   "_capture_map_id": _map_id(_meta(db, "current_map_number", 0))
-                                      if _meta(db, "current_map_number", 0) else None,
-                   "_capture_expedition": 1 if not _meta(db, "current_map_number", 0) or
-                         _meta(db, "pending_new_map", False) else _meta(db, "settings")["expedition"]}
-        if any(result.get(key) != expected for key, expected in context.items()):
-            raise ValueError("The map, expedition or session changed. Scan again before committing.")
+        _validate_remnant_context(db, result)
         if ("_capture_map_pending" in result and result["_capture_map_pending"] !=
                 bool(_meta(db, "pending_new_map", False))):
             raise ValueError("The map ended during the scan. Scan again.")
@@ -1317,6 +1382,7 @@ def commit_seed_batch(result, selections, automatic=False):
         if not pending or any(result.get(key) != pending[key] for key in
                               ("remnant_id", "map_id", "expedition_id")):
             raise ValueError("The visible seed scan was already saved or discarded. Scan again.")
+        captured_expedition = _integer(result.get("_capture_expedition"), "Captured expedition", 1)
         if automatic and not _meta(db, "settings").get("auto_commit", False):
             raise ValueError("Auto-commit is off.")
         resolved = []
@@ -1353,13 +1419,14 @@ def commit_seed_batch(result, selections, automatic=False):
                     "rune": item.get("seed_rune"), "scan_index": index+1, "mode": "seed"}
             resolved.append((index, family, seed, rows))
         saved = [{"index": index, **_commit_remnant(db, rows[0]["recipe"], family=family,
-                                                  visible_seed=seed, seed_rows=rows)}
+                                                  visible_seed=seed, seed_rows=rows,
+                                                  captured_expedition=captured_expedition)}
                  for index, family, seed, rows in sorted(resolved)]
         remaining = any(i not in seen and not reading.get("saved") and not reading.get("rejected")
                         for i, reading in enumerate(readings))
         next_pending = None
         number = _meta(db, "current_map_number")
-        expedition = _meta(db, "settings")["expedition"]
+        expedition = captured_expedition
         if remaining:
             next_pending = {"remnant_id": f"R{_meta(db, 'next_remnant_number'):04d}",
                             "map_id": _map_id(number),
@@ -1431,8 +1498,6 @@ def commit_chain_steps(steps, *, advance_expedition=False, expected_context=None
                        "_capture_expedition": _meta(db, "settings")["expedition"]}
             if any(expected_context.get(key) != value for key, value in current.items()):
                 raise ValueError("The map, expedition or session changed. Scan again before committing the chain.")
-        if advance_expedition and _meta(db, "ocr_pending"):
-            raise ValueError("Save or discard the scanned remnant before committing the chain.")
         mid = _map_id(number)
         config = _meta(db, "settings")
         expedition = config["expedition"]
@@ -1514,9 +1579,10 @@ def increment_propagation_detonated(expected_context, *, current_value=_UNSET, r
                    "_capture_expedition": expedition}
         if any(expected_context.get(key) != value for key, value in current.items()):
             raise ValueError("The map, expedition or session changed. Scan propagation again.")
-        if _meta(db, "ocr_pending"):
-            raise ValueError("Save or discard the scanned remnant before accepting propagation.")
         eid = _exp_id(mid, expedition)
+        pending = _meta(db, "ocr_pending")
+        if pending and (not isinstance(pending, dict) or pending.get("map_id") != mid):
+            raise ValueError("The scanned remnant belongs to another map. Save or discard it first.")
         count = (_detonated_value(db, eid, current_value) or 0) + 1
         db.execute("INSERT INTO expeditions VALUES(?,?,?,?) ON CONFLICT(expedition_id) "
                    "DO UPDATE SET detonated=excluded.detonated", (eid, mid, expedition, count))
@@ -1719,14 +1785,13 @@ def currency_names():
 
 
 def add_currency_item(name):
-    name = str(name or "").strip()
-    if not name or len(name) > 120 or any(ch in name for ch in "\r\n\t"):
-        raise ValueError("Enter a currency name under 120 characters.")
+    from PoE2_Data_Logger.core.review_learning import validate_name
+    name = validate_name(str(name or ""), "Currency")
     with _connect() as db:
-        existing = db.execute("SELECT name FROM currency_items WHERE name=? COLLATE NOCASE", (name,)).fetchone()
+        existing = _catalog_name(db, "currency_items", name)
         if existing:
-            return existing[0]
-        if db.execute("SELECT 1 FROM item_names WHERE name=? COLLATE NOCASE", (name,)).fetchone():
+            return existing
+        if _catalog_name(db, "item_names", name):
             raise ValueError("This name already exists in the Item database.")
         db.execute("INSERT OR IGNORE INTO currency_items(name) VALUES(?)", (name,))
     return name
@@ -1772,14 +1837,13 @@ def item_names():
 
 
 def add_item_name(name):
-    name = str(name or "").strip()
-    if not name or len(name) > 120 or any(ord(ch) < 32 for ch in name):
-        raise ValueError("Enter an item name under 120 characters.")
+    from PoE2_Data_Logger.core.review_learning import validate_name
+    name = validate_name(str(name or ""), "Item")
     with _connect() as db:
-        existing = db.execute("SELECT name FROM item_names WHERE name=? COLLATE NOCASE", (name,)).fetchone()
+        existing = _catalog_name(db, "item_names", name)
         if existing:
-            return existing[0]
-        if db.execute("SELECT 1 FROM currency_items WHERE name=? COLLATE NOCASE", (name,)).fetchone():
+            return existing
+        if _catalog_name(db, "currency_items", name):
             raise ValueError("This name already exists in the Currency database.")
         db.execute("INSERT INTO item_names(name) VALUES(?)", (name,))
     return name
@@ -1825,7 +1889,91 @@ def inventory_names():
 
 def inventory_icons():
     return [{**row, "kind": kind} for kind, entries in
-            (("currency", currency_icons()), ("item", item_icons())) for row in entries]
+            (("currency", currency_icons()), ("item", item_icons())) for row in entries] + review_icons()
+
+
+def _catalog_name(db, table, name):
+    key = name.casefold()
+    return next((row[0] for row in db.execute(f"SELECT name FROM {table}")
+                 if row[0].casefold() == key), None)
+
+
+def _canonical_registered_name(db, name, category, *, register=True):
+    """Resolve review labels without changing an existing inventory category."""
+    from PoE2_Data_Logger.core.review_learning import validate_name
+    category = str(category or "Item").title()
+    if category not in ("Currency", "Item", "Omen"):
+        raise ValueError("Choose Currency, Item or Omen for the reviewed item.")
+    registered_omen = _catalog_name(db, "ritual_names", name.strip()) if isinstance(name, str) else None
+    name = validate_name(name, "Omen" if registered_omen else category)
+    currency = _catalog_name(db, "currency_items", name)
+    item = _catalog_name(db, "item_names", name)
+    omen = registered_omen
+    if currency and item:
+        raise ValueError("This name occurs in both Currency and Item databases. Correct the catalog first.")
+    if category == "Omen":
+        if item:
+            raise ValueError("This name already exists in the Item database and cannot be labelled Omen.")
+        canonical = omen or currency or name
+        if register:
+            if not omen:
+                db.execute("INSERT INTO ritual_names(name) VALUES(?)", (canonical,))
+            if not currency:
+                db.execute("INSERT INTO currency_items(name) VALUES(?)", (canonical,))
+        return canonical, "omen"
+    if omen:
+        return currency or omen, "omen"
+    if currency:
+        return currency, "currency"
+    if item:
+        return item, "item"
+    if register:
+        table = "currency_items" if category == "Currency" else "item_names"
+        db.execute(f"INSERT INTO {table}(name) VALUES(?)", (name,))
+    return name, "currency" if category == "Currency" else "item"
+
+
+def _save_review_examples(db, examples, accepted):
+    from PoE2_Data_Logger.core.review_learning import encode_example
+    if not isinstance(examples, (list, tuple)) or len(examples) > MAX_RITUAL_REWARDS:
+        raise ValueError("Review up to 120 captured icon examples at a time.")
+    for example in examples:
+        if not isinstance(example, dict):
+            raise ValueError("The reviewed icon examples are invalid.")
+        name, kind = _canonical_registered_name(db, example.get("name"),
+                                                example.get("category"), register=False)
+        approved = accepted.get(name.casefold())
+        if approved is None or approved[0] != kind:
+            raise ValueError("Only accepted named review rows can teach icon examples.")
+        if approved[1] <= 0:
+            continue
+        image, columns, rows = encode_example(example)
+        if kind in ("currency", "omen") and (columns, rows) != (1, 1):
+            raise ValueError("Currency and Omen examples must contain one complete inventory cell.")
+        digest = hashlib.sha256(image).hexdigest()
+        db.execute("INSERT INTO review_icon_examples(name,kind,columns,rows,image_png,image_sha256,recorded_at) "
+                   "VALUES(?,?,?,?,?,?,?) ON CONFLICT(columns,rows,image_sha256) DO UPDATE SET "
+                   "name=excluded.name,kind=excluded.kind,recorded_at=excluded.recorded_at",
+                   (name, kind, columns, rows, image, digest, _now()))
+
+
+def review_icons():
+    with _connect() as db:
+        return [{"id": row["id"], "name": row["name"], "kind": row["kind"],
+                 "columns": row["columns"], "rows": row["rows"], "image": row["image_png"],
+                 "reviewed": True}
+                for row in db.execute("SELECT * FROM review_icon_examples ORDER BY id")]
+
+
+def delete_review_icon(icon_id):
+    with _connect() as db:
+        db.execute("DELETE FROM review_icon_examples WHERE id=?", (_integer(icon_id, "Icon ID", 1),))
+
+
+def ritual_icons():
+    return [{**row, "kind": kind} for kind, entries in
+            (("omen", omen_icons()), ("currency", currency_icons()), ("item", item_icons()))
+            for row in entries] + review_icons()
 
 
 def save_omen_icon(name, image):
@@ -1874,7 +2022,7 @@ def currency_target_map(phase):
         return _map_id(number)
 
 
-def save_currency_snapshot(phase, items, expected_map_id=None):
+def save_currency_snapshot(phase, items, expected_map_id=None, *, register_names=False, icon_examples=()):
     map_id = currency_target_map(phase)
     if not isinstance(items, list) or len(items) > 60:
         raise ValueError("A snapshot needs up to 60 inventory rows.")
@@ -1888,16 +2036,27 @@ def save_currency_snapshot(phase, items, expected_map_id=None):
         map_id = _map_id(number)
         if expected_map_id is not None and map_id != expected_map_id:
             raise ValueError(f"This currency scan belongs to {expected_map_id}. Scan {map_id} before saving.")
-        known = {row[0].lower(): row[0] for row in db.execute("SELECT name FROM currency_items")}
-        item_catalog = {row[0].lower(): row[0] for row in db.execute("SELECT name FROM item_names")}
+        if register_names:
+            for item in items:
+                if not isinstance(item, dict):
+                    raise ValueError("Review the inventory rows first.")
+                _canonical_registered_name(db, item.get("name"), "Currency")
+        known = {row[0].casefold(): row[0] for row in db.execute("SELECT name FROM currency_items")}
+        item_catalog = {row[0].casefold(): row[0] for row in db.execute("SELECT name FROM item_names")}
         known.update(item_catalog)
         totals = {}
         for item in items:
-            name = known.get(str(item.get("name") or "").strip().lower())
+            if not isinstance(item, dict):
+                raise ValueError("Review the inventory rows first.")
+            name = known.get(str(item.get("name") or "").strip().casefold())
             if name is None:
                 raise ValueError(f"Add {item.get('name')} to the Currency or Item database first.")
             quantity = _integer(item.get("quantity"), f"{name} stack count", 0, 1000000)
             totals[name] = totals.get(name, 0) + quantity
+        accepted = {name.casefold(): ("item" if name.casefold() in item_catalog else
+                    "omen" if _catalog_name(db, "ritual_names", name) else "currency", quantity)
+                    for name, quantity in totals.items()}
+        _save_review_examples(db, icon_examples, accepted)
         settings = _meta(db, "settings")
         current = _map_id(_meta(db, "current_map_number", 0))
         previous = db.execute("SELECT snapshot_json FROM maps WHERE map_id=?", (map_id,)).fetchone()
@@ -1911,7 +2070,7 @@ def save_currency_snapshot(phase, items, expected_map_id=None):
                    (map_id, phase, _dump(totals), _now(), _dump(context)))
         _record_commit(db, "Currency", map_id, reference=phase.title() + " inventory", context=context,
                        details={"phase": phase, "items": totals,
-                                "item_kinds": {name: "Item" if name.lower() in item_catalog else "Currency"
+                                "item_kinds": {name: "Item" if name.casefold() in item_catalog else "Currency"
                                                for name in totals}})
     return currency_for_map(map_id)
 
@@ -1927,6 +2086,72 @@ def currency_for_map(map_id):
             "net": {name: end.get(name, 0) - start.get(name, 0) for name in set(start) | set(end)}
             if "start" in snapshots and "end" in snapshots else {},
             "recorded_at": {phase: row["recorded_at"] for phase, row in snapshots.items()}}
+
+
+def session_currency_totals():
+    """Count positive inventory gains until the map IDs are reset.
+
+    Only each map's latest approved start/end pair contributes. An end-only
+    inventory is not evidence of a gain without its starting baseline, and
+    Ritual rewards are offers rather than inventory acquisitions.
+    """
+    with _connect() as db:
+        db.execute("BEGIN")
+        snapshots, saved_names = {}, {}
+        for row in db.execute("SELECT map_id,phase,items_json FROM currency_snapshots ORDER BY map_id,phase"):
+            items = {}
+            for name, quantity in _load(row["items_json"]).items():
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                key = name.strip().casefold()
+                saved_names.setdefault(key, name.strip())
+                items[key] = items.get(key, 0) + quantity
+            snapshots.setdefault(row["map_id"], {})[row["phase"]] = items
+        labels = {}
+        for table, kind in (("currency_items", "Currency"), ("item_names", "Item"),
+                            ("ritual_names", "Omen")):
+            for row in db.execute(f"SELECT name FROM {table} ORDER BY name"):
+                key = row[0].casefold()
+                if key in saved_names:
+                    labels[key] = (row[0], kind)
+        # Removing a local reference must not erase an already logged gain or
+        # change a saved equipment count into currency. Recover its old kind.
+        missing = set(saved_names) - set(labels)
+        if missing:
+            for row in db.execute("SELECT details_json FROM commits WHERE kind='Currency' ORDER BY number DESC"):
+                details = _load(row[0])
+                kinds = details.get("item_kinds", {})
+                for name in details.get("items", {}):
+                    if not isinstance(name, str):
+                        continue
+                    key = name.strip().casefold()
+                    if key in missing:
+                        kind = "Item" if kinds.get(name) == "Item" else "Currency"
+                        labels[key] = (saved_names[key], kind)
+                        missing.remove(key)
+                if not missing:
+                    break
+        totals, counted, pending_baseline, pending_end = {}, 0, 0, 0
+        for phases in snapshots.values():
+            if "start" not in phases:
+                pending_baseline += 1
+                continue
+            if "end" not in phases:
+                pending_end += 1
+                continue
+            counted += 1
+            start, end = phases["start"], phases["end"]
+            for key, quantity in end.items():
+                gained = quantity - start.get(key, 0)
+                if gained > 0:
+                    totals[key] = totals.get(key, 0) + gained
+        items = []
+        for key, quantity in totals.items():
+            name, kind = labels.get(key, (saved_names[key], "Currency"))
+            items.append({"name": name, "kind": kind, "quantity": quantity})
+        return {"items": sorted(items, key=lambda item: item["name"].casefold()),
+                "maps_counted": counted, "maps_pending_baseline": pending_baseline,
+                "maps_pending_end": pending_end}
 
 
 def export_currency_csv():
@@ -1973,12 +2198,10 @@ def ritual_names():
 
 
 def add_ritual_name(name):
-    name = str(name or "").strip()
-    if not name or len(name) > 160 or any(ch in name for ch in "\r\n\t"):
-        raise ValueError("Enter an Omen name under 160 characters.")
+    from PoE2_Data_Logger.core.review_learning import validate_name
+    name = validate_name(str(name or ""), "Omen")
     with _connect() as db:
-        db.execute("INSERT OR IGNORE INTO ritual_names VALUES(?)", (name,))
-    return name
+        return _canonical_registered_name(db, name, "Omen")[0]
 
 
 def ritual_pages_for_map(map_id):
@@ -1990,7 +2213,8 @@ def ritual_pages_for_map(map_id):
 
 
 def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
-                     tribute_available=None, rerolls_remaining=None):
+                     tribute_available=None, rerolls_remaining=None, *,
+                     register_names=False, icon_examples=()):
     if not isinstance(items, list) or len(items) > MAX_RITUAL_REWARDS:
         raise ValueError(f"Review up to {MAX_RITUAL_REWARDS} Ritual rewards on a page.")
     raw_text = str(raw_text or "")
@@ -2006,7 +2230,8 @@ def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
             raise ValueError("Review the Ritual reward rows first.")
         category = str(item.get("category") or "Item").strip().title()
         name = str(item.get("name") or "").strip()
-        if category not in ("Omen", "Item") or not name or len(name) > 200:
+        if (category not in ("Omen", "Item") or not name or len(name) > 200 or
+                any(ord(character) < 32 or ord(character) == 127 for character in name)):
             raise ValueError("Each Ritual reward needs an Omen/Item type and a name under 200 characters.")
         quantity = _integer(item.get("quantity", 1), "Ritual quantity", 1, 1000000)
         tribute = _integer(item.get("tribute"), "Tribute", 0, 1000000000, blank=True)
@@ -2028,6 +2253,17 @@ def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
         map_id = _map_id(number)
         if expected_map_id is not None and map_id != expected_map_id:
             raise ValueError(f"This Ritual scan belongs to {expected_map_id}. Scan {map_id} before saving.")
+        if register_names or icon_examples:
+            accepted = {}
+            for item in cleaned:
+                name, kind = _canonical_registered_name(db, item["name"], item["category"],
+                                                        register=register_names)
+                item["name"] = name
+                if kind == "omen":
+                    item["category"] = "Omen"
+                prior = accepted.get(name.casefold(), (kind, 0))
+                accepted[name.casefold()] = (kind, prior[1] + item["quantity"])
+            _save_review_examples(db, icon_examples, accepted)
         context = _bind_atlas_context(db, map_id, _snapshot(_meta(db, "settings")))
         old = (db.execute("SELECT id,page_number FROM ritual_pages WHERE map_id=? AND scan_hash=?",
                           (map_id, scan_hash)).fetchone() if scan_hash else None)
@@ -2410,14 +2646,62 @@ def export_record_history_csv(*, _db=None):
     return output.getvalue().encode("utf-8-sig")
 
 
+def _review_item_export_columns(db):
+    """Keep count columns canonical and recover their names from saved records.
+
+    History CSV has already escaped formula-like names. Reading raw saved names
+    also distinguishes a literal leading apostrophe from CSV's safety prefix.
+    The existing Item columns retain their order; other columns describe names
+    actually recorded rather than adding the entire bundled icon catalogue.
+    """
+    catalogs = {}
+    for kind, table in (("Item", "item_names"), ("Currency", "currency_items"), ("Omen", "ritual_names")):
+        names = catalogs[kind] = {}
+        for row in db.execute(f"SELECT name FROM {table} ORDER BY name"):
+            names.setdefault(row[0].casefold(), row[0])
+    columns = {("Item", key): f"Item: {name}" for key, name in catalogs["Item"].items()}
+    recorded = {}
+    starts = {}
+    for commit in db.execute("SELECT number,kind,map_id,details_json FROM commits ORDER BY number"):
+        details = _load(commit["details_json"])
+        entries = []
+        if commit["kind"] == "Currency":
+            phase = details.get("phase", "")
+            items = details.get("items", {})
+            start = starts.get(commit["map_id"])
+            names = set(items) | (set(start["items"]) if phase == "end" and start else set())
+            kinds = {**(start["kinds"] if phase == "end" and start else {}),
+                     **details.get("item_kinds", {})}
+            entries = [("Item" if kinds.get(name) == "Item" else "Currency", name)
+                       for name in sorted(names)]
+            if phase == "start":
+                starts[commit["map_id"]] = {"items": items, "kinds": kinds}
+        elif commit["kind"] == "Ritual":
+            entries = [(item["category"], item["name"]) for item in details.get("items", [])]
+        fields = []
+        for kind, name in entries:
+            if kind not in catalogs or not str(name).strip():
+                fields.append(None)
+                continue
+            key = (kind, name.casefold())
+            canonical = catalogs[kind].get(key[1], name)
+            columns.setdefault(key, f"{kind}: {canonical}")
+            fields.append(columns[key])
+        if entries:
+            recorded[str(commit["number"])] = fields
+    item_columns = [column for (kind, _), column in columns.items() if kind == "Item"]
+    extra_columns = sorted((column for (kind, _), column in columns.items() if kind != "Item"),
+                           key=str.casefold)
+    return [*item_columns, *extra_columns], recorded
+
+
 def export_all_csv(*, _db=None):
     with (nullcontext(_db) if _db is not None else _connect()) as db:
         if _db is None:
             db.execute("BEGIN")
         remnant_data = export_csv(_db=db)
         history_data = export_record_history_csv(_db=db)
-        item_columns = {row[0].casefold(): f"Item: {row[0]}"
-                        for row in db.execute("SELECT name FROM item_names ORDER BY name")}
+        item_columns, recorded_items = _review_item_export_columns(db)
     remnant_reader = csv.DictReader(io.StringIO(remnant_data.decode("utf-8-sig")))
     remnant_headers = [name for name in remnant_reader.fieldnames
                        if name not in (*ATLAS_EXPORT_HEADERS, "Deli", "Wisp", *HISTORY_APPEND_HEADERS)]
@@ -2426,7 +2710,7 @@ def export_all_csv(*, _db=None):
     headers = remnant_headers + [name for name in history_reader.fieldnames
                                 if name not in remnant_headers and
                                 name not in ("Recipe", *ATLAS_EXPORT_HEADERS, "Deli", "Wisp", *HISTORY_APPEND_HEADERS)]
-    headers.extend(item_columns.values())
+    headers.extend(item_columns)
     headers.extend([*ATLAS_EXPORT_HEADERS, "Deli", "Wisp", *HISTORY_APPEND_HEADERS])
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=headers, extrasaction="ignore")
@@ -2440,8 +2724,19 @@ def export_all_csv(*, _db=None):
             row["Type"] = "Chain" if row.get("Chain Step #") else "Remnant" if row.get("Remnant ID") else "Map totals"
             writer.writerow(row)
     offsets = {}
+    item_offsets = {}
     for history in history_reader:
         number = history["Scan Commit #"]
+        if history["Type"] in ("Currency", "Item", "Ritual"):
+            item_index = item_offsets.get(number, 0)
+            item_offsets[number] = item_index + 1
+            tracked = recorded_items.get(number, [])
+            item_column = tracked[item_index] if item_index < len(tracked) else None
+            # Unnamed review detections were rejected, including older records.
+            if number in recorded_items and not item_column:
+                continue
+        else:
+            item_column = None
         matching = by_commit.get(number, [])
         offset = offsets.get(number, 0)
         if history["Type"] in ("Remnant", "Chain") and offset < len(matching):
@@ -2454,7 +2749,6 @@ def export_all_csv(*, _db=None):
                 row["Remnant ID"] = history["Reference"]
             if row.get("Expedition ID"):
                 row["Expedition #"] = int(row["Expedition ID"].rsplit("-E", 1)[-1])
-        item_column = item_columns.get(history.get("Item Name", "").casefold())
         if item_column:
             row[item_column] = history.get("New Find Quantity", "") if history["Type"] == "Ritual" else history.get("Quantity", "")
         writer.writerow(row)

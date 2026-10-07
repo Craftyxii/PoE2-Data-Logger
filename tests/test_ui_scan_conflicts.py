@@ -68,7 +68,7 @@ class UIScanConflictTests(unittest.TestCase):
         elif kind == "manual":
             self.window._show_image(self.image_bytes())
             self.window.manual_remnant_button.click()
-            self.assertIsNone(logger.get_state()["ocr_pending"])
+            self.assertEqual(logger.get_state()["ocr_pending"]["expedition_id"], "M0001-E01")
         else:
             with logger._connect() as db:
                 stage = dict(db.execute("SELECT * FROM seed_states WHERE family=3 LIMIT 1").fetchone())
@@ -179,7 +179,7 @@ class UIScanConflictTests(unittest.TestCase):
     def test_nonremnant_scans_preserve_opened_remnant_token_and_recipe_draft(self):
         self.assert_incoming_scans_preserve_pending("opened")
 
-    def test_nonremnant_scans_preserve_manual_remnant_without_database_token(self):
+    def test_other_activity_scans_preserve_manual_remnant_binding(self):
         self.assert_incoming_scans_preserve_pending("manual")
 
     def test_nonremnant_scans_preserve_visible_seed_review(self):

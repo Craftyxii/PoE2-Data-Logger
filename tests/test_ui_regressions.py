@@ -170,15 +170,40 @@ class UIRegressionTests(unittest.TestCase):
         self.assertEqual(self.window.header_expedition.currentData(), 1)
         self.assertIn("M0002-E01", self.window.header_expedition.currentText())
 
-    def test_rejected_expedition_change_restores_header_and_tab(self):
+    def test_expedition_change_preserves_pending_remnant_original_binding(self):
         self.window.show_result("opened", self.opened_result())
+        pending = logger.get_state()["ocr_pending"]
         select(self.window.header_expedition, 2)
-        with self.assertRaisesRegex(ValueError, "before switching expeditions"):
-            self.window.set_expedition(self.window.header_expedition)
-        self.assertEqual(self.window.header_expedition.currentData(), 1)
-        self.assertEqual(self.window.expedition.currentData(), 1)
-        self.assertEqual(self.window.header_remnant_id.text(), "R0001")
-        self.assertEqual(logger.get_state()["settings"]["expedition"], 1)
+        self.window.set_expedition(self.window.header_expedition)
+        self.assertEqual(self.window.header_expedition.currentData(), 2)
+        self.assertEqual(self.window.expedition.currentData(), 2)
+        self.assertEqual(logger.get_state()["ocr_pending"], pending)
+        self.assertEqual(pending["expedition_id"], "M0001-E01")
+        self.assertEqual(logger.get_state()["settings"]["expedition"], 2)
+        self.assertEqual(self.window.pending_review_kind, "remnant")
+
+    def test_unclear_or_unsupported_waystone_tier_cannot_reuse_previous_tier(self):
+        for tier in (None, 14, 17):
+            with self.subTest(tier=tier):
+                select(self.window.tier, 16)
+                result = parse_item_text("Item Class: Waystones\nRarity: Rare\nStorm Peak\n"
+                                        "Waystone (Tier 15)\n--------\nWaystone Drop Chance: +85%\n"
+                                        "--------\nItem Level: 79\n--------\n"
+                                        "30% increased Rarity of Items found in this Area", self.window.state["affixes"])
+                result["fields"]["tier"] = tier
+                self.window._hover_item_read(result)
+                self.assertEqual(self.window.tier.currentData(), "")
+                self.assertFalse(self.window.approve_scan_button.isEnabled())
+                self.assertEqual(self.window.stat_values[2].text(), "—")
+                before = logger.get_state()["scan_commit_count"]
+                with self.assertRaises(ValueError):
+                    self.window.approve_review()
+                self.assertEqual(logger.get_state()["scan_commit_count"], before)
+                self.window.tier.setCurrentIndex(self.window.tier.findData(15))
+                self.assertTrue(self.window.approve_scan_button.isEnabled())
+                self.window.approve_review()
+                self.assertEqual(logger.get_state()["settings"]["tier"], 15)
+                self.assertEqual(logger.get_state()["scan_commit_count"], before + 1)
 
     def test_discard_cancels_delayed_remnant_and_autosave(self):
         self.window.set_auto_commit(True)
@@ -235,6 +260,17 @@ class UIRegressionTests(unittest.TestCase):
         with logger._connect() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM scans WHERE id=?", (saved["id"],)).fetchone()[0], 1)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM scan_links").fetchone()[0], 0)
+
+    def test_reference_save_stays_associated_after_propagation_advances(self):
+        work, callback = self.reference_job()
+        context = logger.scan_context()
+        logger.commit_chain_draft([{"rune1": "Rage"}], context)
+        self.window.refresh()
+        saved = self.persist_reference(work)
+        callback(saved)
+        self.assertEqual(self.window.saved_scan["id"], saved["id"])
+        self.assertEqual(self.window._saved_scan_capture["context"]["_capture_expedition"], 1)
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
 
     def test_reference_save_does_not_attach_to_replacement_capture(self):
         work, callback = self.reference_job()

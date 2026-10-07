@@ -20,6 +20,7 @@ FORMAT = "poe2-data-logger-references"
 MAX_PACK = 256 * 1024 * 1024
 MAX_ENTRIES = 2000
 MAX_IMAGE = 16 * 1024 * 1024
+MAX_REVIEW_IMAGE = 500000
 
 
 def _name(raw, limit=200):
@@ -78,6 +79,36 @@ def _recipe_name(db, raw):
     return name
 
 
+def _review_entry(entry):
+    from PoE2_Data_Logger.core.review_learning import validate_name
+
+    if (not isinstance(entry, dict) or entry.get("kind") not in ("currency", "omen", "item") or
+            not re.fullmatch(r"learned/\d{4}\.png", str(entry.get("file"))) or
+            not isinstance(entry.get("sha256"), str) or
+            not re.fullmatch(r"[a-f0-9]{64}", entry["sha256"])):
+        raise ValueError("Reference pack has an invalid learned icon entry.")
+    validate_name(entry.get("name"), entry["kind"].title())
+    columns, rows = entry.get("columns"), entry.get("rows")
+    if (type(columns) is not int or type(rows) is not int or
+            not 1 <= columns <= 2 or not 1 <= rows <= 4 or
+            (entry["kind"] in ("currency", "omen") and (columns, rows) != (1, 1))):
+        raise ValueError("Reference pack has an invalid learned icon footprint.")
+
+
+def _review_image(raw, entry):
+    from PoE2_Data_Logger.core.review_learning import encode_example
+
+    _image(raw, limit=MAX_REVIEW_IMAGE)
+    with Image.open(io.BytesIO(raw)) as image:
+        if (image.format != "PNG" or image.mode != "RGB" or
+                image.size != (96 * entry["columns"], 96 * entry["rows"])):
+            raise ValueError("Learned reference images must match their complete item footprint.")
+        # Validate visible artwork without re-encoding the stored PNG: its hash
+        # identifies a correction and must survive a pack round trip unchanged.
+        encode_example({"image": image, "columns": entry["columns"], "rows": entry["rows"]})
+    return raw
+
+
 def export_pack():
     assets = {}
     with logger._connect() as db:
@@ -106,6 +137,20 @@ def export_pack():
                 icons.append({"kind": kind, "name": row[0], "file": path,
                               "sha256": hashlib.sha256(assets[path]).hexdigest()})
         tables["icons"] = icons
+        learned = []
+        for row in db.execute("SELECT name,kind,columns,rows,image_png,image_sha256 "
+                              "FROM review_icon_examples ORDER BY id"):
+            path = f"learned/{len(learned):04d}.png"
+            entry = {"name": row["name"], "kind": row["kind"],
+                     "columns": row["columns"], "rows": row["rows"],
+                     "file": path, "sha256": row["image_sha256"]}
+            _review_entry(entry)
+            raw = _review_image(bytes(row["image_png"]), entry)
+            if hashlib.sha256(raw).hexdigest() != entry["sha256"]:
+                raise ValueError("Saved learned icon hash does not match its record.")
+            assets[path] = raw
+            learned.append(entry)
+        tables["review_icon_examples"] = learned
         scans = []
         for row in db.execute("SELECT file_name,image_name,image_sha256,sockets,seed_slot,"
                               "seed_rune,family,rewards_json,mapping_status FROM scans ORDER BY id"):
@@ -123,7 +168,7 @@ def export_pack():
                           "family": row["family"], "rewards_json": row["rewards_json"],
                           "status": row["mapping_status"]})
         tables["scans"] = scans
-    manifest = {"format": FORMAT, "version": 2, "data": tables}
+    manifest = {"format": FORMAT, "version": 3, "data": tables}
     if len(assets) + 1 > MAX_ENTRIES:
         raise ValueError("Reference pack has too many images. Export fewer than 2000 unique images.")
     manifest_raw = json.dumps(manifest, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -157,12 +202,15 @@ def _inspect(path):
             raise ValueError("Reference pack manifest is too large.")
         manifest = json.loads(archive.read("manifest.json"))
         if (not isinstance(manifest, dict) or manifest.get("format") != FORMAT or
-                manifest.get("version") not in (1, 2) or not isinstance(manifest.get("data"), dict)):
+                manifest.get("version") not in (1, 2, 3) or not isinstance(manifest.get("data"), dict)):
             raise ValueError("This is not a supported PoE2 reference pack.")
         data = manifest["data"]
         data.setdefault("item_names", [])
+        if manifest["version"] < 3:
+            data.setdefault("review_icon_examples", [])
         required = ("families", "recipes", "aliases", "seed_states", "affixes",
-                    "master_perks", "currency_names", "omen_names", "item_names", "glyphs", "icons", "scans")
+                    "master_perks", "currency_names", "omen_names", "item_names", "glyphs", "icons", "scans",
+                    "review_icon_examples")
         if any(not isinstance(data.get(key), list) or len(data[key]) > 10000 for key in required):
             raise ValueError("Reference pack has invalid database records.")
         expected = {"manifest.json"}
@@ -175,6 +223,18 @@ def _inspect(path):
                 raise ValueError("Reference pack has duplicate icon files.")
             icon_files.add(icon["file"])
             expected.add(icon["file"])
+        learned_labels = {}
+        for entry in data["review_icon_examples"]:
+            _review_entry(entry)
+            if entry["file"] in icon_files:
+                raise ValueError("Reference pack has duplicate learned icon files.")
+            icon_files.add(entry["file"])
+            expected.add(entry["file"])
+            key = (entry["columns"], entry["rows"], entry.get("sha256"))
+            label = (entry["name"].strip().casefold(), entry["kind"])
+            if key in learned_labels and learned_labels[key] != label:
+                raise ValueError("Reference pack has conflicting learned icon labels.")
+            learned_labels[key] = label
         for scan in data["scans"]:
             if not isinstance(scan, dict) or not re.fullmatch(
                     r"screens/[a-f0-9]{64}\.(png|jpg)", str(scan.get("file"))):
@@ -183,14 +243,15 @@ def _inspect(path):
         if set(names) != expected:
             raise ValueError("Reference pack contains unexpected or missing files.")
         assets = {}
-        for entry in data["icons"] + data["scans"]:
+        for entry in data["icons"] + data["scans"] + data["review_icon_examples"]:
             raw = archive.read(entry["file"])
             if hashlib.sha256(raw).hexdigest() != entry.get("sha256"):
                 raise ValueError("Reference image hash does not match its label.")
             if entry["file"].startswith("screens/") and Path(entry["file"]).stem != entry["sha256"]:
                 raise ValueError("Reference screenshot filename does not match its hash.")
             kind = entry["kind"] if entry["file"].startswith("icons/") else None
-            assets[entry["file"]] = _image(raw, kind=kind)
+            assets[entry["file"]] = (_review_image(raw, entry) if entry["file"].startswith("learned/")
+                                     else _image(raw, kind=kind))
     return data, assets
 
 
@@ -198,7 +259,7 @@ def import_pack(path, replace_existing=False):
     data, assets = _inspect(path)
     counts = {key: 0 for key in ("recipes", "families", "aliases", "seed_states", "affixes",
                                   "master_perks", "currency_names", "omen_names", "item_names", "glyphs",
-                                  "currency_icons", "omen_icons", "item_icons", "scans")}
+                                  "currency_icons", "omen_icons", "item_icons", "review_icon_examples", "scans")}
     created = []
     try:
         with logger._connect() as db:
@@ -249,15 +310,18 @@ def import_pack(path, replace_existing=False):
                        > family["top_socket"] for name in json.loads(family["recipes_json"])):
                     raise ValueError("Imported recipe exceeds an existing family's Top Socket.")
             for kind, table, limit in (("affixes", "affixes", 120),
-                                       ("currency_names", "currency_items", 120),
                                        ("omen_names", "ritual_names", 160),
+                                       ("currency_names", "currency_items", 120),
                                        ("item_names", "item_names", 120)):
                 for row in data[kind]:
-                    name = _name(row["name"], limit)
+                    raw_name = row["name"]
+                    name_limit = (160 if kind == "currency_names" and isinstance(raw_name, str) and
+                                  logger._catalog_name(db, "ritual_names", raw_name.strip()) else limit)
+                    name = _name(raw_name, name_limit)
                     other = {"currency_items": "item_names", "item_names": "currency_items"}.get(table)
-                    if other and db.execute(f"SELECT 1 FROM {other} WHERE name=? COLLATE NOCASE", (name,)).fetchone():
+                    if other and logger._catalog_name(db, other, name) is not None:
                         raise ValueError("An inventory name cannot belong to both Currency and Item databases.")
-                    if db.execute(f"SELECT 1 FROM {table} WHERE name=? COLLATE NOCASE", (name,)).fetchone():
+                    if logger._catalog_name(db, table, name) is not None:
                         continue
                     result = db.execute(f"INSERT OR IGNORE INTO {table}(name) VALUES(?)",
                                         (name,))
@@ -363,6 +427,29 @@ def import_pack(path, replace_existing=False):
                                (name, assets[row["file"]], logger._now()))
                     known_icons[kind].add((name, sha))
                     counts[kind + "_icons"] += 1
+            for row in data["review_icon_examples"]:
+                name, kind = logger._canonical_registered_name(
+                    db, row["name"], row["kind"].title(), register=False)
+                names_table = {"currency": "currency_items", "omen": "ritual_names", "item": "item_names"}[kind]
+                if kind != row["kind"] or logger._catalog_name(db, names_table, name) is None:
+                    raise ValueError("Learned icon label is missing from its name database or has the wrong category.")
+                if kind == "omen":
+                    currency = logger._catalog_name(db, "currency_items", name)
+                    logger._canonical_registered_name(db, name, "Omen")
+                    counts["currency_names"] += int(currency is None)
+                key = (row["columns"], row["rows"], row["sha256"])
+                existing = db.execute("SELECT id,name,kind FROM review_icon_examples "
+                                      "WHERE columns=? AND rows=? AND image_sha256=?", key).fetchone()
+                if existing:
+                    if replace_existing and (existing["name"], existing["kind"]) != (name, kind):
+                        db.execute("UPDATE review_icon_examples SET name=?,kind=?,recorded_at=? WHERE id=?",
+                                   (name, kind, logger._now(), existing["id"]))
+                        counts["review_icon_examples"] += 1
+                    continue
+                db.execute("INSERT INTO review_icon_examples"
+                           "(name,kind,columns,rows,image_png,image_sha256,recorded_at) VALUES(?,?,?,?,?,?,?)",
+                           (name, kind, *key[:2], assets[row["file"]], key[2], logger._now()))
+                counts["review_icon_examples"] += 1
             images = store.DATA_DIR / "images"
             images.mkdir(parents=True, exist_ok=True)
             for row in data["scans"]:

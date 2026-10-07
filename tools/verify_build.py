@@ -54,6 +54,12 @@ def verify(executable, check_files=True):
                  'PoE2_Data_Logger.ocr.opened_scan',
                  'PoE2_Data_Logger.ocr.item_ocr',
                  'PoE2_Data_Logger.ocr.propagation_scan',
+                 'PoE2_Data_Logger.ocr.runehelper_ocr',
+                 'PoE2_Data_Logger.core.catalog_repairs',
+                 'PoE2_Data_Logger.core.currency_display',
+                 'PoE2_Data_Logger.core.ocr_runtime',
+                 'PoE2_Data_Logger.core.review_learning',
+                 'PoE2_Data_Logger.ui.currency_counter',
                  'PoE2_Data_Logger.core.workbook_export'):
         if name not in module_archive.toc:
             raise ValueError(f'Launcher is missing application module: {name}')

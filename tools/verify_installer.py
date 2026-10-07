@@ -1,3 +1,4 @@
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -58,6 +59,66 @@ def launch(executable, arguments, timeout=120, env=None):
         raise RuntimeError(f"{executable.name} exited with code {process.returncode}.")
 
 
+def verify_blocked_launch(executable, arguments, protected_files, check_saved):
+    def fingerprints():
+        values = {}
+        for path in protected_files:
+            if not path.is_file():
+                raise RuntimeError(f"Running-client guard lost a retained runtime file: {path.name}.")
+            with path.open("rb") as stream:
+                values[path] = hashlib.file_digest(stream, "sha256").digest()
+        return values
+
+    before = fingerprints()
+    process = subprocess.run(f'"{executable}" {arguments}', timeout=20, check=False)
+    if process.returncode == 0:
+        raise RuntimeError(f"{executable.name} allowed an operation while a client was running.")
+    if fingerprints() != before:
+        raise RuntimeError("Running-client guard changed retained runtime files.")
+    check_saved()
+
+
+def verify_running_guards(installer, directory, check_saved):
+    import ctypes
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    # Explicitly use the native backend, overriding CI's offscreen regression setting.
+    app = QApplication.instance() or QApplication(["installer-guard-check", "-platform", "windows"])
+    if app.platformName() != "windows":
+        raise RuntimeError("Running-client guard checks require the native Windows Qt backend.")
+    find_window = ctypes.windll.user32.FindWindowW
+    find_window.argtypes = (ctypes.c_wchar_p, ctypes.c_wchar_p)
+    find_window.restype = ctypes.c_void_p
+    sentinel = directory / "_internal" / "installer-guard-sentinel.bin"
+    sentinel.write_bytes(b"Runtime retained while a previous beta client is running")
+    protected = (directory / "PoE2-Data-Logger.exe", directory / "Uninstall.exe", sentinel)
+    window = QWidget()
+    window.resize(320, 120)
+    try:
+        for title in ("PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta"):
+            window.setWindowTitle(title)
+            window.show()
+            deadline = time.monotonic() + 5
+            while not find_window(None, title):
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(f"Could not create the previous-client test window: {title}.")
+                app.processEvents()
+                time.sleep(0.01)
+            verify_blocked_launch(installer, f"/S /D={directory}", protected, check_saved)
+            # _?= avoids the uninstaller spawning a temporary copy, so its exit is checked directly.
+            verify_blocked_launch(directory / "Uninstall.exe", f"/S _?={directory}",
+                                  protected, check_saved)
+            print(f"Blocked update/uninstall and retained saved files for running {title}.")
+    finally:
+        window.close()
+        window.deleteLater()
+        app.sendPostedEvents(None, QEvent.DeferredDelete)
+        app.processEvents()
+        if sentinel.exists():
+            sentinel.unlink()
+
+
 def verify(installer):
     match = re.fullmatch(r"PoE2-Data-Logger-Setup-v([0-9]+\.[0-9]+(?:\.[0-9]+)?)(-beta)?\.exe", installer.name)
     if not match:
@@ -96,6 +157,7 @@ def verify(installer):
                     raise RuntimeError("Installed version does not match the release.")
                 if winreg.QueryValueEx(key, "DisplayName")[0] != expected_name:
                     raise RuntimeError("Installed application label does not match the release.")
+        verify_running_guards(installer, directory, check_saved)
         environment = dict(os.environ, QT_QPA_PLATFORM="windows",
                            POE2_SMOKE_REPORT=str(directory / "startup-check.txt"))
         try:
@@ -112,7 +174,7 @@ def verify(installer):
                 raise RuntimeError("Uninstaller did not remove the application runtime.")
             time.sleep(0.1)
         check_saved()
-        print("Installer, release labels, system tool resolution, update, startup, recognition and saved-file retention checks passed.")
+        print("Installer, release labels, system tool resolution, update, running-client guards, startup, recognition and saved-file retention checks passed.")
     finally:
         shutil.rmtree(directory, ignore_errors=True)
 

@@ -90,7 +90,7 @@ class Sheet:
 
 
 def _numeric_column(name):
-    return (name.startswith(("Item: ", "Stat: ", "Applied Stat: ")) or name in {"Socket Count", "Tier", "Area Level", "Base Map Mods", "Map Mods", "# +2 Mod Tablets",
+    return (name.startswith(("Item: ", "Currency: ", "Omen: ", "Stat: ", "Applied Stat: ")) or name in {"Socket Count", "Tier", "Area Level", "Base Map Mods", "Map Mods", "# +2 Mod Tablets",
         "Tablet Mods", "Total Mods", "Master +Mods", "Waystone %", "Tablets Used", "Item Rarity %",
         "Monster Rarity %", "Pack Size %", "Effectiveness %", "Source Row", "Chain Step #", "Expedition #",
         "Normal Kills (Map)", "Magic Kills (Map)", "Rare Kills (Map)", "Unique Kills (Map)", "Remnants Detonated (Expedition)",

@@ -12,11 +12,19 @@ Auto-commit saves clear readings. Uncertain text, ambiguous matches and unknown 
 
 The optional **HUD overlay** shows held reviews over a borderless or windowed game. Its opacity is adjustable. **Show / hide HUD** has its own shortcut, initially **Ctrl+Shift+H**; that shortcut remains available outside the game.
 
+**OCR CPU threads** under **Scan settings** offers 1, 2, 4 or 6 threads. The default is 2. Restart the app after changing it. More threads can help some readings but can slow others; the OCR models stay the same.
+
 ## Records and export
 
 For inventory tracking, select **Start of map** or **End of map** before scanning. Exported records include starting counts, ending counts and net changes. Ritual records include readable tribute and reroll values. Deferred rewards keep their appearance record and contribute zero new finds.
 
+The **Kills / Currency** page shows session currency totals with each item's icon and name. Totals use positive changes between approved starting and ending inventories for each map. Approving an end scan updates the counter; rescanning or correcting that map replaces its contribution. A map without an approved starting inventory waits for its baseline. Totals survive app restarts and clear with **Start fresh session / reset IDs**. Ritual offers do not add to inventory totals.
+
+Double-click a Currency or Ritual review name to label a captured item. Approving the scan saves that icon as a local recognition example and exports the item in its own count column. Rows left unnamed are rejected. Local inventory icon tools are under **Data export → Developer Mode**.
+
 Use the dedicated **Propagation scan** key to read the selected recipe and append its marked runes from left to right. The general scan key does not activate propagation. Each accepted scan adds **one remnant detonation**, including scans with two runes. Unclear or rejected readings add none. The Review page shows the chain in scan order. **Commit chain** saves it and advances the Expedition ID for the same map; it does not count those scans again. You can also enter chain runes manually and select an expedition from the header.
+
+Capture the selected recipe's gold arrow and the three small peaks above each propagated rune. Remnant and propagation reads share their reference database and keep independent pending reads, so an unresolved remnant does not block propagation.
 
 Enter Normal, Magic, Rare and Unique monster kills under **Kills / Currency**. Each has its own export column and belongs to its Map ID. The propagation detonation total belongs to its Expedition ID.
 

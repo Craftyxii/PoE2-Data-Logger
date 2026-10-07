@@ -1,5 +1,5 @@
 Unicode true
-!define APP_VERSION "1.2.1"
+!define APP_VERSION "1.2.2"
 !define APP_CHANNEL "beta"
 !define APP_DISPLAY_VERSION "${APP_VERSION} Beta"
 !define APP_RELEASE_VERSION "${APP_VERSION}-${APP_CHANNEL}"
@@ -31,12 +31,19 @@ Function .onInit
     StrCmp $0 "0" check_atlas_beta running
   check_atlas_beta:
     System::Call 'user32::FindWindowW(p 0, w "PoE2 Data Logger 1.1 Beta") p.r0'
+    StrCmp $0 "0" check_activity_beta running
+  check_activity_beta:
+    System::Call 'user32::FindWindowW(p 0, w "PoE2 Data Logger 1.2 Beta") p.r0'
+    StrCmp $0 "0" check_ritual_beta running
+  check_ritual_beta:
+    System::Call 'user32::FindWindowW(p 0, w "PoE2 Data Logger 1.2.1 Beta") p.r0'
     StrCmp $0 "0" check_beta running
   check_beta:
     System::Call 'user32::FindWindowW(p 0, w "${APP_NAME}") p.r0'
     StrCmp $0 "0" ready
   running:
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Close PoE2 Data Logger before installing this update."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Close PoE2 Data Logger before installing this update." /SD IDOK
+    SetErrorLevel 2
     Abort
   ready:
 FunctionEnd
@@ -52,12 +59,19 @@ Function un.onInit
     StrCmp $0 "0" check_atlas_beta running
   check_atlas_beta:
     System::Call 'user32::FindWindowW(p 0, w "PoE2 Data Logger 1.1 Beta") p.r0'
+    StrCmp $0 "0" check_activity_beta running
+  check_activity_beta:
+    System::Call 'user32::FindWindowW(p 0, w "PoE2 Data Logger 1.2 Beta") p.r0'
+    StrCmp $0 "0" check_ritual_beta running
+  check_ritual_beta:
+    System::Call 'user32::FindWindowW(p 0, w "PoE2 Data Logger 1.2.1 Beta") p.r0'
     StrCmp $0 "0" check_beta running
   check_beta:
     System::Call 'user32::FindWindowW(p 0, w "${APP_NAME}") p.r0'
     StrCmp $0 "0" ready
   running:
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Close PoE2 Data Logger before uninstalling."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Close PoE2 Data Logger before uninstalling." /SD IDOK
+    SetErrorLevel 2
     Abort
   ready:
 FunctionEnd

@@ -157,6 +157,19 @@ class PropagationHotkeyTests(unittest.TestCase):
         self.assertGreater(box[2] - box[0], 500)
         manager.readers["propagation"].assert_called_once()
 
+    def test_windows_custom_propagation_region_retains_context_before_left_panel_frame(self):
+        with logger._connect() as db:
+            logger._set_meta(db, "scan_region_boxes", {"propagation_region": [.04, .1, .3, .7]})
+        manager = self.manager(supported=True, focused=lambda: True)
+        with patch.object(hotkey.sys, "platform", "win32"), patch(
+                "PoE2_Data_Logger.platform.hover_copy._tooltip_bounds", return_value=(100, 150, 2020, 1230)):
+            manager.capture("propagation")
+        self.assertEqual(manager.status()["latest"]["error"], "")
+        box = manager.grabber.call_args.kwargs["bbox"]
+        self.assertEqual(box, (100, 258, 753, 1014))
+        with logger._connect() as db:
+            self.assertEqual(logger._meta(db, "scan_region_boxes")["propagation_region"], [.04, .1, .3, .7])
+
     def test_cancelled_propagation_capture_cannot_reappear(self):
         manager = None
         def read(image):
@@ -165,6 +178,90 @@ class PropagationHotkeyTests(unittest.TestCase):
         manager = self.manager(reader=read)
         manager.capture("propagation")
         self.assertIsNone(manager.status()["latest"])
+        self.assertTrue(manager._capture_lock.acquire(False))
+        manager._capture_lock.release()
+
+    def test_remnant_rejection_does_not_cancel_inflight_propagation(self):
+        manager = None
+        def read(image):
+            self.assertEqual(manager._active_capture_mode, "propagation")
+            revision = manager._capture_revision
+            manager.cancel_capture(modes=("seed", "opened", "both"))
+            self.assertEqual(manager._capture_revision, revision)
+            return {"runes": ["Death", "Rebirth"], "positions": [1, 2], "can_use": True}
+        manager = self.manager(reader=read)
+        manager.capture("propagation")
+        event = manager.status()["latest"]
+        self.assertEqual(event["mode"], "propagation")
+        self.assertEqual(event["result"]["runes"], ["Death", "Rebirth"])
+        self.assertIsNotNone(manager.image(event["id"]))
+        self.assertIsNone(manager._active_capture_mode)
+
+    def test_propagation_cancellation_does_not_cancel_inflight_opened_remnant(self):
+        manager = self.manager()
+        def read(image):
+            self.assertEqual(manager._active_capture_mode, "opened")
+            revision = manager._capture_revision
+            manager.cancel_capture(modes=("propagation",))
+            self.assertEqual(manager._capture_revision, revision)
+            return {"mode": "opened", "status": "Ready for review"}
+        manager.readers["opened"] = read
+        manager.capture("remnant")
+        event = manager.status()["latest"]
+        self.assertEqual(event["mode"], "opened")
+        self.assertEqual(event["result"]["status"], "Ready for review")
+        self.assertIsNotNone(manager.image(event["id"]))
+        self.assertIsNone(manager._active_capture_mode)
+
+    def test_selective_cancellation_discards_matching_worker_and_releases_capture(self):
+        manager = None
+        def read(image):
+            manager.cancel_capture(modes=("propagation",))
+            return {"runes": ["Rage"], "positions": [1], "can_use": True}
+        manager = self.manager(reader=read)
+        manager.capture("propagation")
+        self.assertIsNone(manager.status()["latest"])
+        self.assertIsNone(manager._image)
+        self.assertIsNone(manager._active_capture_mode)
+        self.assertTrue(manager._capture_lock.acquire(False))
+        manager._capture_lock.release()
+
+    def test_selective_cancellation_clears_matching_latest_without_affecting_other_worker(self):
+        manager = self.manager()
+        manager.capture("propagation")
+        previous = manager.status()["latest"]
+        self.assertIsNotNone(manager.image(previous["id"]))
+        def read(image):
+            revision = manager._capture_revision
+            manager.cancel_capture(modes=("propagation",))
+            self.assertEqual(manager._capture_revision, revision)
+            self.assertIsNone(manager.status()["latest"])
+            self.assertIsNone(manager.image(previous["id"]))
+            return {"mode": "opened", "status": "New remnant"}
+        manager.readers["opened"] = read
+        manager.capture("remnant")
+        self.assertEqual(manager.status()["latest"]["mode"], "opened")
+
+    def test_selective_cancellation_preserves_unrelated_finished_event(self):
+        manager = self.manager()
+        manager.capture("propagation")
+        event = manager.status()["latest"]
+        image = manager.image(event["id"])
+        revision = manager._capture_revision
+        manager.cancel_capture(modes=("seed", "opened", "both"))
+        self.assertIs(manager.status()["latest"], event)
+        self.assertEqual(manager.image(event["id"]), image)
+        self.assertEqual(manager._capture_revision, revision)
+        manager.cancel_capture()
+        self.assertIsNone(manager.status()["latest"])
+        self.assertIsNone(manager._image)
+        self.assertEqual(manager._capture_revision, revision + 1)
+
+    def test_lost_focus_after_capture_preparation_clears_active_mode_and_lock(self):
+        manager = self.manager(focused=Mock(side_effect=[True, False]))
+        manager.capture("propagation")
+        manager.readers["propagation"].assert_not_called()
+        self.assertIsNone(manager._active_capture_mode)
         self.assertTrue(manager._capture_lock.acquire(False))
         manager._capture_lock.release()
 

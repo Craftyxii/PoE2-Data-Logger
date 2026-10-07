@@ -128,6 +128,7 @@ class HotkeyManager:
         self._listener_stop = None
         self._capture_lock = threading.Lock()
         self._capture_revision = 0
+        self._active_capture_mode = None
         self._latest = None
         self._image = None
         self._sequence = 0
@@ -368,10 +369,13 @@ class HotkeyManager:
                 mode = "opened"
             self._capture_revision += 1
             revision = self._capture_revision
+            self._active_capture_mode = mode
         try:
             if self.before_capture:
                 self.before_capture()
             if self.focused is not None and not self.focused():
+                with self._lock:
+                    self._active_capture_mode = None
                 self._capture_lock.release()
                 return
             with logger._connect() as db:
@@ -395,6 +399,12 @@ class HotkeyManager:
                               "ritual": "ritual_region"}.get(mode)
                 if region_key:
                     region = region_for(region_key, bounds)
+                    if mode == "propagation":
+                        # The recipe selector sits outside the panel's left
+                        # frame. Retain that game context even if the saved
+                        # region starts at the frame or first rune tile.
+                        right = region["x"] + region["w"]
+                        region = {**region, "x": bounds[0], "w": right - bounds[0]}
                 elif mode == "both":
                     selected = [region_for(key, bounds) for key in ("live_region", "seed_region")]
                     left = min(r["x"] for r in selected)
@@ -615,15 +625,25 @@ class HotkeyManager:
                     event["result"]["map_id"] = remnant_map if phase == "start" else capture_map
             self._finish_capture(event, raw, revision)
 
-    def cancel_capture(self):
+    def cancel_capture(self, modes=None):
+        """Discard selected scan modes without cancelling an unrelated worker.
+
+        With no modes specified, retain the global cancellation used when the
+        map, session or application changes. An active worker keeps the capture
+        lock until it finishes; changing its revision prevents publication.
+        """
+        modes = None if modes is None else frozenset((modes,) if isinstance(modes, str) else modes)
         with self._lock:
-            self._capture_revision += 1
-            self._latest = self._image = None
+            if modes is None or self._active_capture_mode in modes:
+                self._capture_revision += 1
+            if modes is None or self._latest and self._latest.get("mode") in modes:
+                self._latest = self._image = None
 
     def _finish_capture(self, event, raw, revision=None):
         with self._lock:
             if revision is not None and revision != self._capture_revision:
                 event = None
+            self._active_capture_mode = None
             if event is not None:
                 self._sequence += 1
                 event["id"] = self._sequence

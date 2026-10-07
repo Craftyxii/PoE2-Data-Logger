@@ -11,6 +11,7 @@ import numpy as np
 from PIL import Image
 
 from PoE2_Data_Logger.core import logger_store as logger
+from PoE2_Data_Logger.core import ocr_runtime
 from PoE2_Data_Logger.ocr import runehelper_ocr
 
 OCR_LOCK = threading.Lock()
@@ -51,18 +52,23 @@ def _quantity(name):
     return int(match.group(1)) if match else 1
 
 
+def _levels(name):
+    return tuple(int(level) for level in re.findall(r"\blevel\s*(\d+)\b", name, flags=re.I))
+
+
 def _match(db, text, quantity, names):
     target = f"{text} x{quantity}" if quantity > 1 else text
+    levels = _levels(text)
     for spelling in (target, f"{quantity}x {text}"):
         try:
             exact = logger._canonical(db, spelling)
-            if _quantity(exact) == quantity:
+            if _quantity(exact) == quantity and _levels(exact) == levels:
                 return exact, 1.0
         except ValueError:
             pass
     target_key = _key(target)
     choices = sorted(((SequenceMatcher(None, target_key, _key(name)).ratio(), name)
-                      for name in names if _quantity(name) == quantity), reverse=True)
+                      for name in names if _quantity(name) == quantity and _levels(name) == levels), reverse=True)
     if not choices:
         return None, 0.0
     top, name = choices[0]
@@ -184,7 +190,7 @@ def _engine():
     models = {"Det": "PP-OCRv6_det_small.onnx", "Rec": "PP-OCRv6_rec_small.onnx",
               "Cls": "ch_ppocr_mobile_v2.0_cls_mobile.onnx"}
     verify_models(model_root)
-    return RapidOCR(params={"EngineConfig.onnxruntime.intra_op_num_threads": 2,
+    return RapidOCR(params={"EngineConfig.onnxruntime.intra_op_num_threads": ocr_runtime.active_threads(),
                             "EngineConfig.onnxruntime.inter_op_num_threads": 1,
                             **{f"{kind}.model_path": str(model_root / filename)
                                for kind, filename in models.items()}})

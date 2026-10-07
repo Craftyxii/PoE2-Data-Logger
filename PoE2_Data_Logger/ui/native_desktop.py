@@ -23,18 +23,22 @@ from PySide6.QtWidgets import (
 
 from PoE2_Data_Logger.core import logger_store as logger
 from PoE2_Data_Logger.core import reference_pack
+from PoE2_Data_Logger.core import review_learning
+from PoE2_Data_Logger.core import ocr_runtime
 from PoE2_Data_Logger.ocr.affix_capture import new_affix_names, affix_unit, modifier_value
 from PoE2_Data_Logger.ocr import item_ocr
 from PoE2_Data_Logger.core import service
 from PoE2_Data_Logger.core import store
 from PoE2_Data_Logger.ui.region_select import RegionEditor, ScanRegionsPage
 from PoE2_Data_Logger.ui.atlas_settings import AtlasSettingsPage
+from PoE2_Data_Logger.ui.currency_counter import SessionCurrencyCounter
+from PoE2_Data_Logger.core.currency_display import icon_png
 from PoE2_Data_Logger.core.workbook_export import export_xlsx
 from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.2.1 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.2.2 Beta"
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
                             if getattr(sys, "frozen", False) else
@@ -271,6 +275,7 @@ class LoggerWindow(QMainWindow):
         self.state = logger.get_state()
         if not self.state["current_map_id"]:
             self.state = logger.start_map()
+        self._ocr_active_threads = ocr_runtime.active_threads()
         self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="runeshape-ui")
         self.tasks = Tasks(self)
         self.tasks.completed.connect(self._task_done)
@@ -687,7 +692,7 @@ class LoggerWindow(QMainWindow):
                      "Set the expedition and log its propagation chain.",
                      "Read a waystone or tablet, then review and save the map setup.",
                      "Choose the active master and its perks.",
-                     "Record map kills and currency inventory snapshots.",
+                     "See currency found this session and record map kills.",
                      "Save the local data and manage your databases.",
                      "Set the hotkeys and scan behaviour.",
                      "Adjust the labelled capture boxes on a game screenshot.",
@@ -878,7 +883,7 @@ class LoggerWindow(QMainWindow):
         if kind in ("seed", "remnant"):
             return self.approve_remnant_scan()
         if kind == "currency":
-            known = {name.casefold() for name in logger.inventory_names()}
+            omen_names = {name.casefold() for name in logger.ritual_names()}
             controls = []
             for row in range(self.inventory_table.rowCount()):
                 review = self.inventory_table.cellWidget(row, 3)
@@ -886,8 +891,11 @@ class LoggerWindow(QMainWindow):
                     continue
                 name = self.inventory_table.item(row, 1).text().strip()
                 quantity = self.inventory_table.item(row, 2).text().strip()
-                if name.casefold() not in known:
-                    raise ValueError(f"Inventory row {row + 1}: choose a Currency or Item name, or reject the row.")
+                if not name:
+                    if review:
+                        self._set_currency_review(review, "rejected", unnamed=True)
+                    continue
+                review_learning.validate_name(name, "Omen" if name.casefold() in omen_names else "Currency")
                 logger._integer(quantity, name + " stack count", 0, 1000000)
                 if review:
                     controls.append(review)
@@ -897,13 +905,13 @@ class LoggerWindow(QMainWindow):
 
     def reject_review(self):
         self._failed_review = False
-        service.HOTKEY.cancel_capture()
-        self._remnant_reading = None
         kind = self.pending_review_kind
         if kind in ("seed", "remnant"):
             return self.reject_remnant_scan()
         if kind is None:
             return
+        service.HOTKEY.cancel_capture(modes=("propagation",) if kind == "propagation" else None)
+        self._remnant_reading = None
         if kind == "waystone":
             self._waystone_form_baseline = None
         elif kind == "tablet":
@@ -1092,8 +1100,7 @@ class LoggerWindow(QMainWindow):
         latest.addLayout(actions)
         self._review_controls(None)
         controls = QHBoxLayout()
-        self.manual_remnant_button = button("Enter remnant manually", lambda: self._review_pending(
-            "remnant", "Enter and resolve the observed recipe below.", False))
+        self.manual_remnant_button = button("Enter remnant manually", self.start_manual_remnant_review)
         controls.addWidget(self.manual_remnant_button)
         controls.addStretch()
         latest.addLayout(controls)
@@ -1130,6 +1137,24 @@ class LoggerWindow(QMainWindow):
     def _build_scan_settings(self):
         page, content = self._page()
         self.tabs.addTab(page, "Scan settings")
+        performance = self._group("Scan performance", content)
+        thread_row = QHBoxLayout()
+        thread_row.addWidget(QLabel("CPU OCR threads"))
+        self._ocr_saved_threads = ocr_runtime.saved_threads()
+        self.ocr_threads_select = combo(ocr_runtime.THREAD_OPTIONS, self._ocr_saved_threads)
+        self.ocr_threads_select.setAccessibleName("CPU OCR threads")
+        self.ocr_threads_select.currentIndexChanged.connect(lambda: self.run(self.save_ocr_threads))
+        thread_row.addWidget(self.ocr_threads_select)
+        thread_row.addStretch()
+        performance.addLayout(thread_row)
+        self.ocr_threads_status = QLabel()
+        self.ocr_threads_status.setWordWrap(True)
+        performance.addWidget(self.ocr_threads_status)
+        self._update_ocr_threads_status()
+        thread_help = QLabel("Higher counts may speed up large currency scans, but use more CPU while the game is running. "
+                             "Two threads is the default.")
+        thread_help.setWordWrap(True)
+        performance.addWidget(thread_help)
         self.tablet_region_label = QLabel()
         self.inventory_region_label = QLabel()
         self.ritual_region_label = QLabel()
@@ -1228,6 +1253,24 @@ class LoggerWindow(QMainWindow):
         self.tablet_scan_number.hide()
         self.tablet_scan_number.currentIndexChanged.connect(self.show_tablet_raw)
         content.addStretch()
+
+    def _update_ocr_threads_status(self):
+        saved = value(self.ocr_threads_select)
+        text = f"Using {self._ocr_active_threads} CPU OCR threads. "
+        if saved != self._ocr_active_threads:
+            text += f"Saved: {saved} threads; restart the app to apply."
+        else:
+            text += "Changes take effect after restarting the app."
+        self.ocr_threads_status.setText(text)
+
+    def save_ocr_threads(self):
+        try:
+            self._ocr_saved_threads = ocr_runtime.save_threads(value(self.ocr_threads_select))
+        except Exception:
+            select(self.ocr_threads_select, self._ocr_saved_threads)
+            self._update_ocr_threads_status()
+            raise
+        self._update_ocr_threads_status()
 
     def _build_reference_database(self):
         page, content = self._page()
@@ -1452,6 +1495,9 @@ class LoggerWindow(QMainWindow):
     def _build_inventory(self):
         page, content = self._page()
         self.tabs.addTab(page, "Kills / Currency")
+        self.session_currency = SessionCurrencyCounter()
+        self._session_currency_key = None
+        content.addWidget(self.session_currency)
         self._build_kill_controls(content)
         self.inventory_status = message("")
         self.inventory_status.setParent(self)
@@ -1492,8 +1538,11 @@ class LoggerWindow(QMainWindow):
         review.addWidget(QLabel("Repeat scans keep their history and update this map's current totals."))
         self.currency_saved = message("Start and end snapshots show each currency's net change per map.")
         review.addWidget(self.currency_saved)
+        content.addStretch()
 
+    def _build_inventory_reference_tools(self, content):
         examples = self._group("LOCAL INVENTORY ICON REFERENCES", content)
+        self.inventory_reference_group = examples.parentWidget()
         examples.addWidget(QLabel("For artwork missing from the bundled catalog, choose a captured slot and label it. "
                                   "Examples stay local for later scans."))
         examples.addWidget(self.inventory_preview)
@@ -1515,7 +1564,6 @@ class LoggerWindow(QMainWindow):
         self.icon_list.setMaximumHeight(125)
         examples.addWidget(self.icon_list)
         examples.addWidget(button("Remove selected icon example", lambda: self.run(self.remove_icon_example)))
-        content.addStretch()
 
     def _build_ritual(self):
         self.ritual_status = message("")
@@ -1561,7 +1609,8 @@ class LoggerWindow(QMainWindow):
         actions.addStretch()
         review.addLayout(actions)
         review.addWidget(QLabel("Type is Omen or Item. Correct quantity and Tribute if visible; "
-                                "leave Tribute blank if unreadable."))
+                                "leave Tribute blank if unreadable. Unnamed rows are rejected when you Approve. "
+                                "Approved name corrections teach future icon scans."))
         self.ritual_raw = QTextEdit()
         self.ritual_raw.setReadOnly(True)
         self.ritual_raw.setPlaceholderText("Full OCR text appears here so missing items can be added manually.")
@@ -1647,6 +1696,7 @@ class LoggerWindow(QMainWindow):
             self.developer_mode.setChecked(bool(logger._meta(db, "developer_mode", False)))
         self.developer_mode.toggled.connect(self.set_developer_mode)
         content.addWidget(self.developer_mode)
+        self._build_inventory_reference_tools(content)
         diagnostics = self._group("Logger status", content)
         self.diagnostics_group = diagnostics.parentWidget()
         fields = QHBoxLayout()
@@ -1749,7 +1799,8 @@ class LoggerWindow(QMainWindow):
         self.ritual_raw.setVisible(enabled)
         self.show_tablet_raw()
         self.counts.setVisible(enabled)
-        for group in (self.diagnostics_group, self.catalog_group, self.editors_group, self.scans_group):
+        for group in (self.diagnostics_group, self.catalog_group, self.editors_group, self.scans_group,
+                      self.inventory_reference_group):
             group.setVisible(enabled)
 
     def add_runes(self, count):
@@ -2082,9 +2133,17 @@ class LoggerWindow(QMainWindow):
     def update_area(self):
         if not hasattr(self, "area"):
             return
+        if value(self.tier) not in (15, 16):
+            set_message(self.area, "Confirm the waystone tier to calculate its area level.")
+            self.stat_values[2].setText("—")
+            if self.pending_review_kind == "waystone":
+                self.approve_scan_button.setEnabled(False)
+            return
         level = (79 if value(self.tier) == 15 else 80) + int(self.irradiated.isChecked()) + int(self.ocean.isChecked())
         set_message(self.area, f"Calculated Area Level: {level}")
         self.stat_values[2].setText(str(level))
+        if self.pending_review_kind == "waystone" and not self._failed_review:
+            self.approve_scan_button.setEnabled(True)
 
     def tablet_active(self):
         for i, group in enumerate(self.tablet_groups):
@@ -2388,20 +2447,35 @@ class LoggerWindow(QMainWindow):
 
     def _propagation_read(self, result, raw=None):
         logger.validate_scan_context(result)
-        self._require_remnant_review_finished()
+        preserve_remnant = (self.pending_review_kind in ("remnant", "seed") or
+                            bool(logger.get_state()["ocr_pending"]))
         self._load_chain_context()
+        runes = result.get("runes", [])
+        if preserve_remnant:
+            if result.get("can_use") and 1 <= len(runes) <= 2:
+                self._append_propagation(result, preserve_remnant_review=True)
+            else:
+                text = (result.get("status") or "Check the selected recipe and marked runes.")
+                text += " The pending remnant remains open for review."
+                set_message(self.chain_review_status, text, "error")
+                self.chain_review_group.show()
+                self.statusBar().showMessage(text, 15000)
+                self.tabs.setCurrentIndex(0)
+            token = self._overlay_review_token
+            QTimer.singleShot(0, lambda: self._reveal_review_overlay(token))
+            return
         self._propagation_reading = dict(result)
         self._show_image(raw)
-        runes = result.get("runes", [])
         rows = [(f"Rune {index + 1}", rune, "Left to right") for index, rune in enumerate(runes)]
         self._review_pending("propagation", result.get("status") or "Check the selected recipe and marked runes.",
                              bool(result.get("can_use") and 1 <= len(runes) <= 2), rows)
         if result.get("can_use") and 1 <= len(runes) <= 2:
             self._append_propagation()
 
-    def _append_propagation(self):
-        result = self._propagation_reading
-        if self.pending_review_kind != "propagation" or not result or not result.get("can_use"):
+    def _append_propagation(self, result=None, *, preserve_remnant_review=False):
+        result = result if preserve_remnant_review else self._propagation_reading
+        if ((not preserve_remnant_review and self.pending_review_kind != "propagation") or
+                not result or not result.get("can_use")):
             raise ValueError("Scan a selected recipe with one or two clear propagation marks.")
         logger.validate_scan_context(result)
         logger.validate_scan_context(self._chain_context)
@@ -2427,6 +2501,11 @@ class LoggerWindow(QMainWindow):
         self.state["scan_commit_count"] = saved["scan_commit_number"]
         self._set_commit_badge(saved["scan_commit_number"])
         self._chain_fields_changed()
+        if preserve_remnant_review:
+            self.statusBar().showMessage(" → ".join(runes) + " added to the chain draft. "
+                "The pending remnant remains open for review.", 15000)
+            self.tabs.setCurrentIndex(0)
+            return
         self._propagation_reading = None
         self.pending_review_kind = None
         self.approve_scan_button.setEnabled(False)
@@ -2444,13 +2523,14 @@ class LoggerWindow(QMainWindow):
                           token == self._overlay_review_token and self.tabs.currentIndex() == 0 else None)
 
     def commit_chain(self):
+        preserve_remnant = self.pending_review_kind in ("remnant", "seed")
         runes = [value(field) for field in self.rune_inputs]
         while runes and not runes[-1]:
             runes.pop()
         if not runes or any(not rune for rune in runes):
             raise ValueError("Fill runes in order, starting at Rune 1.")
         saved = logger.commit_chain_draft(self._chain_steps(), expected_context=self._chain_context)
-        service.HOTKEY.cancel_capture()
+        service.HOTKEY.cancel_capture(modes=("propagation",))
         self._propagation_reading = None
         for field in self.rune_inputs:
             field.clear()
@@ -2461,7 +2541,8 @@ class LoggerWindow(QMainWindow):
         self._set_commit_badge(saved["scan_commit_number"])
         text = (f"{saved['expedition_id']} · {len(saved['steps'])} chain parts saved in order. "
                 f"{saved['next_expedition_id']} is ready.")
-        set_message(self.review_summary, text, "success")
+        if not preserve_remnant:
+            set_message(self.review_summary, text, "success")
         self.note(text, True)
 
     def save_counts(self):
@@ -2625,9 +2706,11 @@ class LoggerWindow(QMainWindow):
         from PySide6.QtWidgets import QListWidgetItem
         self.reference_list.clear()
         for kind, entries in (("Omen", logger.omen_icons()),
-                              ("Currency", logger.currency_icons()), ("Item", logger.item_icons())):
+                              ("Currency", logger.currency_icons()), ("Item", logger.item_icons()),
+                              ("Review", logger.review_icons())):
             for entry in entries:
-                row = QListWidgetItem(f"{kind} · {entry['name']}")
+                label = entry["kind"].title() if kind == "Review" else kind
+                row = QListWidgetItem(f"{label} · {entry['name']}" + (" · learned in review" if kind == "Review" else ""))
                 picture = QPixmap()
                 picture.loadFromData(entry["image"])
                 row.setIcon(QIcon(picture.scaled(28, 28, Qt.AspectRatioMode.KeepAspectRatio,
@@ -2694,7 +2777,9 @@ class LoggerWindow(QMainWindow):
         if not item:
             raise ValueError("Select an example to remove.")
         kind, number = item.data(Qt.ItemDataRole.UserRole)
-        if kind == "omen":
+        if kind == "review":
+            logger.delete_review_icon(number)
+        elif kind == "omen":
             logger.delete_omen_icon(number)
         elif kind == "item":
             logger.delete_item_icon(number)
@@ -2757,7 +2842,8 @@ class LoggerWindow(QMainWindow):
         set_message(self.reference_status,
                     f"✓ Reference database imported · {total} new or updated records · "
                     f"{counts['scans']} remnant screenshots · {counts['currency_icons']} currency icons · "
-                    f"{counts['omen_icons']} Omen icons · {counts['item_icons']} Item icons.", "success")
+                    f"{counts['omen_icons']} Omen icons · {counts['item_icons']} Item icons · "
+                    f"{counts.get('review_icon_examples', 0)} learned review icons.", "success")
         self.note("Reference database imported and ready for the next scan.", True)
 
     def set_auto_commit(self, enabled):
@@ -2901,7 +2987,7 @@ class LoggerWindow(QMainWindow):
         service._image(encoded)
         mode = self.mode
         context = logger.scan_context()
-        service.HOTKEY.cancel_capture()
+        service.HOTKEY.cancel_capture(modes=("seed", "opened", "both"))
         capture = object()
         self._remnant_reading = capture
         self._review_pending("seed" if mode == "seed" else "remnant", "Reading remnant image…", False)
@@ -2956,7 +3042,7 @@ class LoggerWindow(QMainWindow):
         self._show_image(output.getvalue())
 
     def show_result(self, mode, result, raw=None):
-        logger.validate_scan_context(result)
+        logger.validate_remnant_context(result)
         if not result.get("remnant_id") and (mode == "opened" or result.get("remnants") or result.get("sockets")):
             result.update(logger.assign_ocr_id(mode, result.get("_target_map_id"),
                                               result.get("_scan_generation"), result.get("_capture_expedition")))
@@ -3183,7 +3269,14 @@ class LoggerWindow(QMainWindow):
         if not opened or not self.resolved or self.resolved.get("status") != "ready":
             self.approve_scan_button.setEnabled(False)
             return
-        if self._both_seed_context != logger.scan_context():
+        opened_context = {key: opened.get(key) for key in
+                          ("_scan_generation", "_capture_map_id", "_capture_expedition", "_capture_map_pending")}
+        try:
+            logger.validate_remnant_context(self._both_seed_context)
+            matching_context = self._both_seed_context == opened_context
+        except ValueError:
+            matching_context = False
+        if not matching_context:
             self.approve_scan_button.setEnabled(False)
             set_message(self.review_summary, "Scan the visible seeds for this map and expedition first.", "error")
             return
@@ -3245,7 +3338,7 @@ class LoggerWindow(QMainWindow):
 
     def reject_remnant_scan(self):
         self._remnant_reading = None
-        service.HOTKEY.cancel_capture()
+        service.HOTKEY.cancel_capture(modes=("seed", "opened", "both"))
         if self.pending_review_kind == "seed":
             if not self._seed_readings:
                 logger.discard_ocr_id()
@@ -3360,7 +3453,11 @@ class LoggerWindow(QMainWindow):
         if not raw:
             raise ValueError("Scan a visible seed first.")
         row = self.seed_table.currentRow()
-        capture = {"image": raw, "context": logger.scan_context(),
+        source_context = self.results.get("seed") or {}
+        context = ({key: source_context.get(key) for key in
+                    ("_scan_generation", "_capture_map_id", "_capture_expedition", "_capture_map_pending")}
+                   if "_scan_generation" in source_context else logger.scan_context())
+        capture = {"image": raw, "context": context,
                    "reading": self._seed_readings[row] if 0 <= row < len(self._seed_readings) else None,
                    "selection": tuple(value(widget) for widget in
                                       (self.seed_sockets, self.seed_slot, self.seed_rune, self.seed_family))}
@@ -3388,7 +3485,12 @@ class LoggerWindow(QMainWindow):
         if capture is not None and self.images["seed"] is capture["image"]:
             row = self.seed_table.currentRow()
             reading = self._seed_readings[row] if 0 <= row < len(self._seed_readings) else None
-            associated = (capture["context"] == logger.scan_context() and
+            try:
+                logger.validate_remnant_context(capture["context"])
+                valid_context = True
+            except ValueError:
+                valid_context = False
+            associated = (valid_context and
                           (not self._seed_readings or reading is capture["reading"]) and
                           capture["selection"] == tuple(value(widget) for widget in
                               (self.seed_sockets, self.seed_slot, self.seed_rune, self.seed_family)) and
@@ -3400,7 +3502,7 @@ class LoggerWindow(QMainWindow):
         self.note(f"Reviewed scan #{result['id']} saved locally.", True)
 
     def discard_scan(self):
-        service.HOTKEY.cancel_capture()
+        service.HOTKEY.cancel_capture(modes=("seed", "opened", "both"))
         self._remnant_reading = None
         logger.discard_ocr_id()
         self._clear_seed_queue()
@@ -3441,12 +3543,21 @@ class LoggerWindow(QMainWindow):
             for col, key in enumerate(("recipe", "sockets", "combo")):
                 self.recipe_table.setItem(row, col, QTableWidgetItem(str(item[key])))
 
+    def start_manual_remnant_review(self):
+        logger.assign_ocr_id("opened")
+        self._review_pending("remnant", "Enter and resolve the observed recipe below.", False)
+        self._sync_header_ids(logger.get_state())
+
     def resolve_recipe(self, preserve_review=False):
         result = logger.resolve(value(self.first_recipe), value(self.next_recipe),
                                 value(self.recipe_family))
         self.resolved = result
         self._render_recipe_rows(result["rows"])
         if result["status"] == "ready":
+            # Manual recipe entry has the same retained expedition binding as
+            # an OCR reading, including while a propagation chain advances.
+            if not logger.get_state()["ocr_pending"]:
+                logger.assign_ocr_id("opened")
             rows = [(f"Recipe {i + 1}", item["recipe"], f"{item['sockets']} sockets · {item['combo']}")
                     for i, item in enumerate(result["rows"])]
             if preserve_review and self.pending_review_kind == "remnant":
@@ -3485,19 +3596,22 @@ class LoggerWindow(QMainWindow):
             both_reading = self._seed_readings[self._both_link]
             if both_reading.get("saved") or both_reading.get("rejected"):
                 raise ValueError("This remnant was already saved or rejected.")
-            logger.validate_scan_context(self.results["opened"])
+            logger.validate_remnant_context(self.results["opened"])
         saved = logger.commit_remnant(value(self.first_recipe), value(self.next_recipe),
                                       value(self.recipe_family) or self.resolved["family"],
                                       self.saved_scan["id"] if self.saved_scan else None,
                                       visible_seed={"sockets": both_reading["sockets"],
                                           "slot": both_reading["seed_slot"], "rune": both_reading["seed_rune"],
-                                          "mode": "both"} if both_reading is not None else None)
+                                          "mode": "both"} if both_reading is not None else None,
+                                      expected_context=self.results.get("opened"),
+                                      seed_context=self._both_seed_context if both_reading is not None else None)
         if both_reading is not None:
             both_reading["saved"] = saved
             self._both_last_opened = self._opened_identity(self.results["opened"])
         self._saved_remnant(saved)
         if both_reading is not None:
-            self._both_seed_context = logger.scan_context()
+            self._both_seed_context = {**logger.scan_context(), "_capture_expedition":
+                                       int(saved["expedition_id"].rsplit("-E", 1)[1])}
             self._populate_seed_table()
 
     def _saved_remnant(self, saved):
@@ -3602,8 +3716,20 @@ class LoggerWindow(QMainWindow):
             for widget in self.tablet_affixes:
                 for name in added:
                     widget.addItem(name, name)
-        if fields["tier"] in (15, 16):
-            select(self.tier, fields["tier"])
+        with QSignalBlocker(self.tier):
+            unknown_tier = self.tier.findData("")
+            if fields["tier"] in (15, 16):
+                if unknown_tier >= 0:
+                    self.tier.removeItem(unknown_tier)
+                select(self.tier, fields["tier"])
+            else:
+                label = "Confirm tier…" if fields["tier"] is None else f"Review T{fields['tier']}…"
+                if unknown_tier < 0:
+                    self.tier.insertItem(0, label, "")
+                    unknown_tier = 0
+                else:
+                    self.tier.setItemText(unknown_tier, label)
+                self.tier.setCurrentIndex(unknown_tier)
         for key, widget in (("waystone", self.waystone), ("map_mods", self.map_mods),
                             ("item_rarity", self.item_rarity),
                             ("monster_rarity", self.monster_rarity),
@@ -3617,7 +3743,8 @@ class LoggerWindow(QMainWindow):
         self.waystone_name.setVisible(bool(result["name"]))
         self.update_area()
         missing = [label for key, label in (("tier", "Tier"), ("waystone", "Waystone %"),
-                                           ("map_mods", "Map Mods")) if fields[key] is None]
+                                           ("map_mods", "Map Mods")) if fields[key] is None or
+                   key == "tier" and fields[key] not in (15, 16)]
         set_message(self.map_scan_status,
                     f"Read {len(result['mods'])} waystone affixes. "
                     + (f"{len(self._extra_waystone_mods)} beyond the ten visible slots remain in the full Map Log text. "
@@ -3632,7 +3759,7 @@ class LoggerWindow(QMainWindow):
         self._review_pending("waystone",
                              f"{result.get('name') or 'Waystone'} · T{fields.get('tier') or '?'} · "
                              f"{fields.get('waystone') if fields.get('waystone') is not None else '?'}% · "
-                             f"{len(result.get('mods', []))} modifiers", True, rows)
+                             f"{len(result.get('mods', []))} modifiers", fields["tier"] in (15, 16), rows)
         if self.state["settings"].get("ocr_auto_commit"):
             if clear_waystone_read(result):
                 number = self.save_map_settings()
@@ -3939,7 +4066,8 @@ class LoggerWindow(QMainWindow):
             self.icon_slot.setValue(unknown[0]["slot"])
         set_message(self.inventory_status,
                     f"{len(result['items'])} inventory stacks matched. "
-                    f"{len(unknown)} uncertain slots or shared-icon tiers. Edit names or counts, then approve or reject flagged rows. "
+                    f"{len(unknown)} uncertain slots or shared-icon tiers. Enter names and counts, then Approve. "
+                    "Unnamed rows are rejected. Approved name corrections teach future icon scans. "
                     "Approve saves the reviewed snapshot.",
                     "success" if result["items"] and not unknown else "message")
         self._review_pending("currency",
@@ -3983,6 +4111,10 @@ class LoggerWindow(QMainWindow):
                                 "Double-click to edit the whole-number count, then approve the row.")
             if column == 1 and item.get("candidate"):
                 cell.setToolTip("Possible match: " + item["candidate"] + ". Enter the correct name, then approve.")
+            if column == 1:
+                cell.setData(Qt.ItemDataRole.UserRole, {"original": dict(item),
+                             "has_capture": isinstance(image, Image.Image) and type(item.get("slot")) is int
+                             and 1 <= item["slot"] <= 60})
             self.inventory_table.setItem(row, column, cell)
         controls = QWidget()
         layout = QVBoxLayout(controls)
@@ -4008,8 +4140,9 @@ class LoggerWindow(QMainWindow):
         self.inventory_table.setRowHeight(row, 62)
         self._set_currency_review(controls, "pending" if controls.property("requiresApproval") else "approved")
 
-    def _set_currency_review(self, controls, state):
+    def _set_currency_review(self, controls, state, *, unnamed=False):
         controls.setProperty("reviewStatus", state)
+        controls.setProperty("unnamedRejected", bool(unnamed and state == "rejected"))
         status = controls.findChild(QLabel, "currencyReviewStatus")
         status.setText({"pending": "Confirm name / count", "approved": "Approved", "rejected": "Rejected"}[state])
         status.setStyleSheet("color:#F5C364;" if state != "rejected" else "color:#BCB7AE;")
@@ -4020,6 +4153,10 @@ class LoggerWindow(QMainWindow):
         if item.column() not in (1, 2):
             return
         controls = self.inventory_table.cellWidget(item.row(), 3)
+        if controls and controls.property("unnamedRejected") and item.column() == 1 and item.text().strip():
+            controls.setProperty("requiresApproval", True)
+            self._set_currency_review(controls, "pending")
+            return
         if controls and controls.property("requiresApproval") and controls.property("reviewStatus") != "rejected":
             self._set_currency_review(controls, "pending")
 
@@ -4028,13 +4165,18 @@ class LoggerWindow(QMainWindow):
                     if self.inventory_table.cellWidget(r, 3) is controls), None)
         if row is None:
             return
+        unnamed = False
         if approve:
             name = self.inventory_table.item(row, 1).text().strip()
             quantity = self.inventory_table.item(row, 2).text().strip()
-            if name.lower() not in {n.lower() for n in logger.inventory_names()}:
-                raise ValueError("Enter a name from the Currency or Item database before approving this row.")
-            logger._integer(quantity, name + " stack count", 0, 1000000)
-        self._set_currency_review(controls, "approved" if approve else "rejected")
+            if not name:
+                approve = False
+                unnamed = True
+            else:
+                omen_names = {entry.casefold() for entry in logger.ritual_names()}
+                review_learning.validate_name(name, "Omen" if name.casefold() in omen_names else "Currency")
+                logger._integer(quantity, name + " stack count", 0, 1000000)
+        self._set_currency_review(controls, "approved" if approve else "rejected", unnamed=unnamed)
         if self.pending_review_kind == "currency":
             states = [self.inventory_table.cellWidget(i, 3).property("reviewStatus")
                       for i in range(self.inventory_table.rowCount())]
@@ -4071,7 +4213,9 @@ class LoggerWindow(QMainWindow):
         if not selected:
             raise ValueError("Select an icon example to remove.")
         kind, number = selected.data(Qt.ItemDataRole.UserRole)
-        if kind == "item":
+        if kind == "review":
+            logger.delete_review_icon(number)
+        elif kind == "item":
             logger.delete_item_icon(number)
         else:
             logger.delete_currency_icon(number)
@@ -4089,8 +4233,9 @@ class LoggerWindow(QMainWindow):
         from PySide6.QtWidgets import QListWidgetItem
         for reference in logger.inventory_icons():
             entry = QListWidgetItem(f"#{reference['id']} · {reference['name']}")
-            entry.setData(Qt.ItemDataRole.UserRole, (reference["kind"], reference["id"]))
+            entry.setData(Qt.ItemDataRole.UserRole, ("review" if reference.get("reviewed") else reference["kind"], reference["id"]))
             self.icon_list.addItem(entry)
+        self.refresh_session_currency(force_icons=True)
 
     def save_inventory(self):
         reviewing = self.pending_review_kind == "currency"
@@ -4102,27 +4247,60 @@ class LoggerWindow(QMainWindow):
             logger.validate_scan_context(self._inventory_capture_context["context"])
         phase = self._pending_currency_phase if reviewing else value(self.inventory_phase)
         phase = phase or value(self.inventory_phase)
-        rows = []
+        rows, examples = [], []
+        item_names = {name.casefold() for name in logger.item_names()}
         for row in range(self.inventory_table.rowCount()):
             controls = self.inventory_table.cellWidget(row, 3)
             if controls and controls.property("reviewStatus") == "rejected":
                 continue
+            name = self.inventory_table.item(row, 1)
+            text = name.text().strip() if name else ""
+            if not text:
+                if controls:
+                    self._set_currency_review(controls, "rejected", unnamed=True)
+                continue
             if controls and controls.property("reviewStatus") == "pending":
                 raise ValueError(f"Inventory row {row + 1}: edit the name/count and approve it, or reject it before saving.")
-            name = self.inventory_table.item(row, 1)
             amount = self.inventory_table.item(row, 2)
-            rows.append({"name": name.text().strip() if name else "",
+            rows.append({"name": text,
                          "quantity": amount.text().strip() if amount else ""})
+            metadata = name.data(Qt.ItemDataRole.UserRole) or {}
+            capture = self._inventory_capture_context if reviewing else None
+            if metadata.get("has_capture") and capture and logger._integer(
+                    rows[-1]["quantity"], text + " stack count", 0, 1000000) > 0:
+                example = review_learning.make_example(capture["image"], metadata.get("original", {}),
+                                                       text, "Item" if text.casefold() in item_names else "Currency",
+                                                       "currency")
+                if example:
+                    examples.append(example)
         saved = logger.save_currency_snapshot(phase, rows,
-                                             self._pending_currency_map if reviewing else None)
+                                             self._pending_currency_map if reviewing else None,
+                                             register_names=True, icon_examples=examples)
         self.state = logger.get_state()
         self._set_commit_badge(self.state["scan_commit_count"])
         self._review_saved("currency", self.state["scan_commit_count"])
         self.refresh_currency_summary()
+        self.refresh_currency_references()
+        self.refresh_reference_examples()
         self.note(f"{phase.title()} inventory saved to {saved['map_id']} · {len(rows)} stacks.", True)
         return saved
 
+    def refresh_session_currency(self, *, force_icons=False):
+        data = logger.session_currency_totals()
+        key = (logger.session_generation(), tuple((item["name"], item["kind"], item["quantity"])
+                                                  for item in data["items"]),
+               data["maps_counted"], data["maps_pending_baseline"], data["maps_pending_end"])
+        if key == self._session_currency_key and not force_icons:
+            return
+        if self._session_currency_key is not None and key[0] != self._session_currency_key[0]:
+            self.session_currency.search.clear()
+        references = logger.ritual_icons() if data["items"] else ()
+        icons = {item["name"]: icon_png(item["name"], references) for item in data["items"]}
+        self.session_currency.set_totals(data, icons)
+        self._session_currency_key = key
+
     def refresh_currency_summary(self):
+        self.refresh_session_currency()
         try:
             map_id = logger.currency_target_map(value(self.inventory_phase))
         except ValueError:
@@ -4167,7 +4345,7 @@ class LoggerWindow(QMainWindow):
         self.ritual_raw.clear()
         self._review_pending("ritual", "Reading Ritual rewards…", False)
         names = logger.ritual_names()
-        references = logger.omen_icons()
+        references = logger.ritual_icons()
         self._submit_scan("Reading Ritual rewards…",
                      lambda: item_ocr.scan_ritual_page(image, names, references) if capture is self._ritual_reading else None,
                      lambda result: self._ritual_read(result, live, map_id, capture), "ritual", capture)
@@ -4195,7 +4373,7 @@ class LoggerWindow(QMainWindow):
         review_count = sum(self.ritual_table.item(row, 6).text().split(": ")[-1] != "Ready"
                            for row in range(self.ritual_table.rowCount()))
         summary = (f"{len(result['items'])} Ritual rewards · {review_count} need review. "
-                   "Check the icons and confirm missing names, types and counts before Approve.")
+                   "Enter names, types and counts to include rewards. Unnamed rows are rejected when you Approve.")
         if result.get("coverage_uncertain"):
             summary = ("The complete reward grid could not be verified. " + summary +
                        " Check for missing rewards or capture the full grid again.")
@@ -4269,6 +4447,16 @@ class LoggerWindow(QMainWindow):
         self._refresh_ritual_row_review(row)
 
     def _ritual_row_changed(self, item):
+        if item.column() == 1 and item.text().strip():
+            category = self.ritual_table.item(item.row(), 0)
+            if category:
+                with QSignalBlocker(self.ritual_table):
+                    category.setData(Qt.ItemDataRole.UserRole + 2, False)
+            if category and not category.text().strip():
+                name = item.text().strip().casefold()
+                kind = "Omen" if name in {entry.casefold() for entry in logger.ritual_names()} or name.startswith("omen of ") else "Item"
+                with QSignalBlocker(self.ritual_table):
+                    category.setText(kind)
         if item.column() < 6:
             self._refresh_ritual_row_review(item.row())
 
@@ -4280,6 +4468,7 @@ class LoggerWindow(QMainWindow):
         metadata = cell.data(Qt.ItemDataRole.UserRole) if cell else {}
         metadata = metadata or {}
         saved = bool(cell and cell.data(Qt.ItemDataRole.UserRole + 1))
+        rejected = bool(cell and cell.data(Qt.ItemDataRole.UserRole + 2))
         missing = []
         if field(0).title() not in ("Omen", "Item"):
             missing.append("type")
@@ -4296,9 +4485,9 @@ class LoggerWindow(QMainWindow):
         deferred = self.ritual_table.item(row, 5)
         if deferred and deferred.checkState() == Qt.CheckState.PartiallyChecked:
             missing.append("Deferred")
-        status = "Saved" if saved else ("Confirm " + " / ".join(missing) if missing else (
+        status = "Rejected: no name" if rejected else ("Saved" if saved else ("Confirm " + " / ".join(missing) if missing else (
             "Check reading" if metadata.get("needs_review") or (
-                "tribute" in metadata and metadata["tribute"] is None and not field(3)) else "Ready"))
+                "tribute" in metadata and metadata["tribute"] is None and not field(3)) else "Ready")))
         slots = metadata.get("grid_slots") or []
         if slots:
             status = "Slot " + ", ".join(str(slot) for slot in slots) + ": " + status
@@ -4323,11 +4512,16 @@ class LoggerWindow(QMainWindow):
             raise ValueError("Wait for the Ritual scan to finish before saving.")
         if self.pending_review_kind == "ritual" and self._ritual_capture_context is not None:
             logger.validate_scan_context(self._ritual_capture_context["context"])
-        rows = []
+        rows, examples, accepted_rows = [], [], []
         for row in range(self.ritual_table.rowCount()):
             def field(col, row=row):
                 cell = self.ritual_table.item(row, col)
                 return cell.text().strip() if cell else ""
+            if not field(1):
+                with QSignalBlocker(self.ritual_table):
+                    self.ritual_table.item(row, 0).setData(Qt.ItemDataRole.UserRole + 2, True)
+                self._refresh_ritual_row_review(row)
+                continue
             if field(0).title() not in ("Omen", "Item"):
                 raise ValueError(f"Ritual row {row + 1}: confirm whether the reward is an Item or Omen.")
             if unresolved_ritual_name(field(1)):
@@ -4339,17 +4533,31 @@ class LoggerWindow(QMainWindow):
             rows.append({"category": field(0), "name": field(1), "quantity": field(2),
                          "tribute": field(3), "source": field(4),
                          "deferred": self.ritual_table.item(row, 5).checkState() == Qt.CheckState.Checked})
+            accepted_rows.append(row)
+            capture = self._ritual_capture_context if self.pending_review_kind == "ritual" else None
+            if capture:
+                original = self.ritual_table.item(row, 0).data(Qt.ItemDataRole.UserRole) or {}
+                example = review_learning.make_example(capture["image"], original, field(1), field(0).title(), "ritual")
+                if example:
+                    examples.append(example)
+        if not rows and self.pending_review_kind == "ritual":
+            self.reject_review()
+            return None
         saved = logger.save_ritual_page(rows, self.ritual_raw.toPlainText(), self._ritual_hash,
                                        self._pending_ritual_map if self.pending_review_kind == "ritual" else None,
-                                       value(self.ritual_tribute), value(self.ritual_rerolls))
+                                       value(self.ritual_tribute), value(self.ritual_rerolls),
+                                       register_names=True, icon_examples=examples)
         self.state = logger.get_state()
         self._set_commit_badge(saved["scan_commit_number"])
-        for row in range(self.ritual_table.rowCount()):
+        for row in accepted_rows:
             with QSignalBlocker(self.ritual_table):
+                self.ritual_table.item(row, 0).setData(Qt.ItemDataRole.UserRole + 2, False)
                 self.ritual_table.item(row, 0).setData(Qt.ItemDataRole.UserRole + 1, True)
             self._refresh_ritual_row_review(row)
         self._review_saved("ritual", saved["scan_commit_number"])
         self.refresh_ritual_summary()
+        self.refresh_currency_references()
+        self.refresh_reference_examples()
         self.note(f"{saved['map_id']} Ritual page {saved['page_number']} "
                   f"{'updated' if saved['updated'] else 'saved'} · {saved['count']} rewards.", True)
         return saved
@@ -4637,6 +4845,7 @@ def main(smoke_test=False):
         if lock is None:
             return 0
         logger.initialize()
+        ocr_runtime.active_threads()
         if smoke_test:
             import numpy as np
             from PIL import ImageDraw, ImageFont

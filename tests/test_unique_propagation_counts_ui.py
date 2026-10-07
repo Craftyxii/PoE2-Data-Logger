@@ -230,19 +230,19 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.assert_current_detonated(None)
         self.assertEqual([field.text() for field in self.window.rune_inputs], before)
 
-    def test_pending_remnant_blocks_scan_without_incrementing_existing_total(self):
+    def test_pending_remnant_allows_propagation_count_and_keeps_binding(self):
         self.scan(["Death"])
         self.window.show_result("opened", {"mode": "opened", "status": "Review needed.",
                                            "can_use": False, "first_recipe": None,
                                            "opened_recipes": [], **logger.scan_context()}, self.raw)
         pending = logger.get_state()["ocr_pending"]
-        with self.assertRaisesRegex(ValueError, r"(?i)save.*reject"):
-            self.scan(["Opulent"])
-        self.assert_current_detonated(1)
+        self.scan(["Opulent"])
+        self.assert_current_detonated(2)
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
-        self.assertEqual(self.window._chain_steps(), [{"rune1": "Death", "rune2": ""}])
+        self.assertEqual(self.window._chain_steps(), [{"rune1": "Death", "rune2": ""},
+                                                   {"rune1": "Opulent", "rune2": ""}])
         self.window.reject_review()
-        self.assert_current_detonated(1)
+        self.assert_current_detonated(2)
 
     def test_stale_scan_after_chain_commit_and_new_map_does_not_count(self):
         context = logger.scan_context()

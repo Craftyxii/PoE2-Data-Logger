@@ -18,8 +18,21 @@ def _result(status, **values):
 
 
 def _panel(image):
+    if image.width < 160 or image.height < 120:
+        return None
     width = image.width
     if image.width > image.height * 1.3:
+        # A cropped recipe list can be wider than it is tall. Preserve it
+        # when its actual cursor and marked borders already have the expected
+        # scale, rather than trimming away the right-hand reward text.
+        candidate = image.resize((575, max(1, round(image.height * 575 / image.width))),
+                                 Image.Resampling.LANCZOS)
+        mask = _gold_mask(candidate)
+        cursors = _cursors(mask)
+        if len(cursors) == 1:
+            tiles, uncertain = _marked_tiles(mask, cursors[0]["y"])
+            if not uncertain and 1 <= len(tiles) <= 2:
+                return candidate
         width = min(width, round(image.height * .85))
     window = image.crop((0, 0, width, image.height))
     gray = cv2.cvtColor(np.asarray(window), cv2.COLOR_RGB2GRAY)
@@ -179,7 +192,8 @@ def scan_propagation(image: Image.Image | Path):
     mask = _gold_mask(panel)
     cursors = _cursors(mask)
     if len(cursors) != 1:
-        return _result("Selected recipe cursor was not clear — capture the cursor beside the recipe row.")
+        return _result("Selected recipe cursor was not clear — widen the Propagation scan region "
+                       "to include the gold arrow beside the recipe row.")
     cursor_y = cursors[0]["y"]
     detections, title = _read_panel_rows(panel)
     if title is None:

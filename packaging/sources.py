@@ -10,6 +10,10 @@ CORE_SOURCES = (
     "core/workbook_export.py",
     "core/atlas_catalog.py",
     "core/export_files.py",
+    "core/catalog_repairs.py",
+    "core/currency_display.py",
+    "core/ocr_runtime.py",
+    "core/review_learning.py",
 )
 
 OCR_SOURCES = (
@@ -32,6 +36,7 @@ UI_SOURCES = (
     "ui/native_desktop.py",
     "ui/region_select.py",
     "ui/atlas_settings.py",
+    "ui/currency_counter.py",
 )
 
 PLATFORM_SOURCES = (

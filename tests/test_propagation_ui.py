@@ -12,9 +12,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PIL import Image
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QFileDialog
 
 from PoE2_Data_Logger.core import logger_store as logger, service, store
+from PoE2_Data_Logger.platform.hotkey import HotkeyManager
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
@@ -80,6 +81,13 @@ class PropagationUITests(unittest.TestCase):
             "propagation": copy.deepcopy(window._propagation_reading),
             "overlay_token": window._overlay_review_token,
         }
+
+    def assert_remnant_review_preserved(self, before):
+        after = self.review_state()
+        for key in ("runes", "chain_rows", "chain_drafts"):
+            before.pop(key, None)
+            after.pop(key, None)
+        self.assertEqual(after, before)
 
     def test_scans_append_in_scan_order_with_left_to_right_pairs(self):
         before = logger.get_state()["scan_commit_count"]
@@ -197,7 +205,100 @@ class PropagationUITests(unittest.TestCase):
         self.assertIsNone(self.window.pending_review_kind)
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
-    def test_pending_opened_remnant_blocks_propagation_without_losing_review_or_chain(self):
+    def test_review_reject_remnant_button_keeps_inflight_propagation_result(self):
+        self.window.manual_remnant_button.click()
+        self.assertEqual(self.window.pending_review_kind, "remnant")
+
+        def read(image):
+            self.assertEqual(manager._active_capture_mode, "propagation")
+            self.window.reject_scan_button.click()
+            self.assertIsNone(logger.get_state()["ocr_pending"])
+            return {"runes": ["Death", "Rebirth"], "positions": [1, 2],
+                    "selected_recipe": "Medved's Saga", "can_use": True}
+
+        manager = HotkeyManager(readers={"propagation": read}, supported=False,
+                               grabber=lambda **kwargs: Image.new("RGB", (580, 730), "tan"))
+        with patch.object(service, "HOTKEY", manager):
+            manager.capture("propagation")
+            event = manager.status()["latest"]
+            self.assertIsNotNone(event)
+            self.assertEqual(event["mode"], "propagation")
+            self.window.poll()
+        self.assertEqual(self.draft(), [("1", "Death"), ("1", "Rebirth")])
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.assertIsNone(logger.get_state()["ocr_pending"])
+
+    def test_review_reject_propagation_button_keeps_inflight_opened_result(self):
+        self.scan([], clear=False)
+        self.assertEqual(self.window.pending_review_kind, "propagation")
+
+        def read(path):
+            self.assertEqual(manager._active_capture_mode, "opened")
+            self.window.reject_scan_button.click()
+            self.assertIsNone(self.window.pending_review_kind)
+            return {"status": "Reward needs review.", "can_use": False,
+                    "first_recipe": None, "opened_recipes": []}
+
+        manager = HotkeyManager(readers={"opened": read}, supported=False,
+                               grabber=lambda **kwargs: Image.new("RGB", (580, 730), "tan"))
+        with patch.object(service, "HOTKEY", manager):
+            manager.capture("remnant")
+            event = manager.status()["latest"]
+            self.assertIsNotNone(event)
+            self.assertEqual(event["mode"], "opened")
+            self.window.poll()
+        self.assertEqual(self.window.pending_review_kind, "remnant")
+        self.assertEqual(logger.get_state()["ocr_pending"]["remnant_id"], "R0001")
+        self.assertEqual(self.draft(), [])
+
+    def test_starting_remnant_file_review_keeps_inflight_propagation_result(self):
+        path = Path(self.tmp.name) / "remnant.png"
+        path.write_bytes(self.raw.getvalue())
+        self.window.mode = "opened"
+        jobs = []
+
+        def read(image):
+            self.assertEqual(manager._active_capture_mode, "propagation")
+            self.window.scan_file()
+            self.assertEqual(self.window.pending_review_kind, "remnant")
+            self.assertIsNotNone(self.window._remnant_reading)
+            return {"runes": ["Rage"], "positions": [1],
+                    "selected_recipe": "Medved's Saga", "can_use": True}
+
+        manager = HotkeyManager(readers={"propagation": read}, supported=False,
+                               grabber=lambda **kwargs: Image.new("RGB", (580, 730), "tan"))
+        with patch.object(service, "HOTKEY", manager), patch.object(
+                QFileDialog, "getOpenFileName", return_value=(str(path), "Images")), patch.object(
+                self.window, "_submit", side_effect=lambda label, work, done: jobs.append((work, done))):
+            manager.capture("propagation")
+            self.assertIsNotNone(manager.status()["latest"])
+            pending_capture = self.window._remnant_reading
+            self.window.poll()
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(self.draft(), [("1", "Rage")])
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.assertEqual(self.window.pending_review_kind, "remnant")
+        self.assertIs(self.window._remnant_reading, pending_capture)
+
+    def test_propagation_restores_hidden_hud_with_pending_remnant_review(self):
+        self.window._overlay_enabled = True
+        for clear in (True, False):
+            with self.subTest(clear=clear):
+                self.window.manual_remnant_button.click()
+                self.window.first_recipe.setText("A reward being corrected")
+                self.app.processEvents()
+                self.assertTrue(self.window.isVisible())
+                # Hotkey capture hides the HUD before freezing its screenshot.
+                self.window.hide()
+                self.app.processEvents()
+                self.assertFalse(self.window.isVisible())
+                self.scan(["Rage"] if clear else [], clear=clear)
+                self.app.processEvents()
+                self.assertTrue(self.window.isVisible())
+                self.assertEqual(self.window.pending_review_kind, "remnant")
+                self.assertEqual(self.window.first_recipe.text(), "A reward being corrected")
+
+    def test_pending_opened_remnant_allows_propagation_without_losing_review_or_chain(self):
         self.scan(["Death", "Power"], "Divine Orb x2")
         result = {"mode": "opened", "status": "The first reward needs review.",
                   "can_use": False, "first_recipe": None,
@@ -219,67 +320,165 @@ class PropagationUITests(unittest.TestCase):
         self.assertGreater(self.window.recipe_table.rowCount(), 0)
         before = self.review_state()
 
-        with self.assertRaisesRegex(ValueError, r"(?i)save.*reject"):
-            self.scan(["Opulent"], "Greater Regal Orb x3")
-
-        self.assertEqual(self.review_state(), before)
+        self.scan(["Opulent"], "Greater Regal Orb x3")
+        self.assert_remnant_review_preserved(before)
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
-        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
+        self.assertEqual(logger.get_state()["scan_commit_count"], 2)
+        self.assertEqual(logger.get_state()["detonated"], 2)
+        self.assertEqual(self.draft(), [("1", "Death"), ("1", "Power"), ("2", "Opulent")])
+        self.window.commit_chain()
+        self.assertEqual(logger.get_state()["ocr_pending"], pending)
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertEqual(self.draft(), [])
+        self.scan(["Rage"], "Greater Regal Orb x3")
         self.window.reject_scan_button.click()
         self.assertIsNone(self.window.pending_review_kind)
         self.assertIsNone(logger.get_state()["ocr_pending"])
-        self.assertEqual(self.draft(), [("1", "Death"), ("1", "Power")])
-        self.scan(["Opulent"], "Greater Regal Orb x3")
-        self.assertEqual(self.draft(), [("1", "Death"), ("1", "Power"), ("2", "Opulent")])
+        self.assertEqual(self.draft(), [("1", "Rage")])
         self.window.review_commit_chain_button.click()
-        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E03")
         self.assertEqual(self.draft(), [])
         self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(1))
         self.assertEqual([(row["rune1"], row["rune2"]) for row in logger.get_state()["chain"]],
                          [("Death", "Power"), ("Opulent", "")])
 
-    def test_manual_remnant_without_database_token_blocks_propagation_and_preserves_controls(self):
+    def test_manual_remnant_keeps_original_expedition_while_propagation_advances(self):
         self.scan(["Rage", "Time"])
         self.window.manual_remnant_button.click()
         self.window.first_recipe.setText("Reward being corrected")
         self.window.next_recipe.setText("Next reward being corrected")
         self.assertEqual(self.window.pending_review_kind, "remnant")
-        self.assertIsNone(logger.get_state()["ocr_pending"])
+        pending = logger.get_state()["ocr_pending"]
+        self.assertEqual(pending["expedition_id"], "M0001-E01")
         self.assertFalse(self.window.approve_scan_button.isHidden())
         self.assertFalse(self.window.reject_scan_button.isHidden())
         before = self.review_state()
 
-        with self.assertRaisesRegex(ValueError, r"(?i)save.*reject"):
-            self.scan(["Death"])
+        self.scan(["Death"])
+        self.assert_remnant_review_preserved(before)
+        self.assertEqual(logger.get_state()["ocr_pending"], pending)
+        self.assertEqual(logger.get_state()["scan_commit_count"], 2)
+        self.assertEqual(self.draft(), [("1", "Rage"), ("1", "Time"), ("2", "Death")])
+        self.window.commit_chain()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertEqual(logger.get_state()["ocr_pending"], pending)
+        self.assertEqual(self.window.first_recipe.text(), "Reward being corrected")
+        self.assertEqual(self.window.pending_review_kind, "remnant")
+        self.window.first_recipe.setText("Perfect Chaos Orb x3")
+        self.window.next_recipe.setText("Perfect Exalted Orb x3")
+        self.window.resolve_recipe(preserve_review=True)
+        self.window.approve_review()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        with logger._connect() as db:
+            self.assertEqual(db.execute("SELECT expedition_id FROM commits WHERE kind='Remnant'").fetchone()[0],
+                             "M0001-E01")
 
-        self.assertEqual(self.review_state(), before)
-        self.assertIsNone(logger.get_state()["ocr_pending"])
-        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
-
-    def test_pending_seed_review_without_database_token_blocks_propagation(self):
+    def test_pending_seed_review_without_database_token_allows_propagation(self):
         self.scan(["Rage"])
         self.window._review_pending("seed", "Visible remnant still needs review.", False)
         self.assertIsNone(logger.get_state()["ocr_pending"])
         before = self.review_state()
 
-        with self.assertRaisesRegex(ValueError, r"(?i)save.*reject"):
-            self.scan(["Time"])
-
-        self.assertEqual(self.review_state(), before)
+        self.scan(["Time"])
+        self.assert_remnant_review_preserved(before)
         self.assertIsNone(logger.get_state()["ocr_pending"])
+        self.assertEqual(self.draft(), [("1", "Rage"), ("2", "Time")])
 
-    def test_orphan_database_remnant_token_blocks_propagation_without_chain_mutation(self):
+    def test_same_chain_orphan_database_remnant_token_is_preserved_during_propagation(self):
         self.scan(["Death", "Power"])
         pending = logger.assign_ocr_id("opened")
         self.assertIsNone(self.window.pending_review_kind)
         before = self.review_state()
 
-        with self.assertRaisesRegex(ValueError, r"(?i)save.*reject"):
-            self.scan(["Opulent"])
-
-        self.assertEqual(self.review_state(), before)
+        self.scan(["Opulent"])
+        self.assert_remnant_review_preserved(before)
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
-        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
+        self.assertEqual(logger.get_state()["scan_commit_count"], 2)
+        self.assertEqual(self.draft(), [("1", "Death"), ("1", "Power"), ("2", "Opulent")])
+
+    def test_unclear_propagation_keeps_pending_remnant_edits_and_reports_problem(self):
+        self.window.manual_remnant_button.click()
+        self.window.first_recipe.setText("A reward being corrected")
+        before = self.review_state()
+        self.scan([], clear=False)
+        self.assertEqual(self.review_state(), before)
+        self.assertIn("pending remnant remains open", self.window.chain_review_status.text())
+        self.assertIn("pending remnant remains open", self.window.statusBar().currentMessage())
+        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+
+    def test_pending_opened_remnant_can_still_save_after_propagation(self):
+        result = {"mode": "opened", "status": "Reward needs review.", "can_use": False,
+                  "first_recipe": None, "opened_recipes": [], **logger.scan_context()}
+        self.window.show_result("opened", result, self.raw.getvalue())
+        pending = logger.get_state()["ocr_pending"]
+        self.window.first_recipe.setText("Perfect Chaos Orb x3")
+        self.window.next_recipe.setText("Perfect Exalted Orb x3")
+        self.window.resolve_recipe(preserve_review=True)
+        self.scan(["Rage", "Time"])
+        self.window.approve_review()
+        self.assertIsNone(logger.get_state()["ocr_pending"])
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.assertEqual(self.draft(), [("1", "Rage"), ("1", "Time")])
+        rows = list(csv.DictReader(io.StringIO(logger.export_csv().decode("utf-8-sig"))))
+        self.assertTrue(any(pending["remnant_id"] in row.values() for row in rows))
+        self.window.commit_chain()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+
+    def test_pending_opened_review_survives_chain_commit_and_next_chain_scan(self):
+        result = {"mode": "opened", "status": "Reward needs review.", "can_use": False,
+                  "first_recipe": None, "opened_recipes": [], **logger.scan_context()}
+        self.window.show_result("opened", result, self.raw.getvalue())
+        pending = logger.get_state()["ocr_pending"]
+        self.window.first_recipe.setText("Farrul's Rune of Grace")
+        self.window.next_recipe.setText("Farrul's Rune of the Hunt")
+        self.window.resolve_recipe(preserve_review=True)
+        self.scan(["Death", "Rebirth"])
+        self.window.commit_chain()
+        self.assertEqual(logger.get_state()["ocr_pending"], pending)
+        self.assertEqual(self.window.pending_review_kind, "remnant")
+        self.assertEqual(self.window.first_recipe.text(), "Farrul's Rune of Grace")
+        self.scan(["Power"])
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.window.approve_review()
+        self.assertEqual(self.draft(), [("1", "Power")])
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertIsNone(logger.get_state()["ocr_pending"])
+        with logger._connect() as db:
+            self.assertEqual(db.execute("SELECT expedition_id FROM commits WHERE kind='Remnant'").fetchone()[0],
+                             "M0001-E01")
+            self.assertEqual([tuple(row) for row in db.execute(
+                "SELECT expedition_id,detonated FROM expeditions ORDER BY expedition_id")],
+                [("M0001-E01", 1), ("M0001-E02", 1)])
+
+    def test_delayed_remnant_result_arrives_after_chain_advance(self):
+        capture = object()
+        context = logger.scan_context()
+        self.window._remnant_reading = capture
+        self.window._review_pending("remnant", "Reading remnant image…", False)
+        self.scan(["Rage"])
+        self.window.commit_chain()
+        self.assertIs(self.window._remnant_reading, capture)
+        result = {"mode": "opened", "status": "Reward needs review.", "can_use": False,
+                  "first_recipe": None, "opened_recipes": [], "_target_map_id": "M0001", **context}
+        self.window._scan_done("opened", result, self.raw.getvalue(), capture)
+        self.assertEqual(result["expedition_id"], "M0001-E01")
+        self.assertEqual(self.window.pending_review_kind, "remnant")
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+
+    def test_remnant_file_scan_can_finish_while_service_chain_advances(self):
+        context = logger.scan_context()
+
+        def slow_read(path):
+            logger.commit_chain_draft([{"rune1": "Rage"}], context)
+            return {"status": "Reward needs review.", "opened_recipes": [], "first_recipe": None}
+
+        import base64
+        with patch.object(service, "scan_opened", side_effect=slow_read):
+            result = service.dispatch("/api/scan?mode=opened", {
+                "image": base64.b64encode(self.raw.getvalue()).decode("ascii"),
+                "map_id": "M0001", "scan_context": context})
+        self.assertEqual(result["expedition_id"], "M0001-E01")
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
 
     def test_manual_runes_and_scans_keep_existing_order(self):
         self.window.rune_inputs[0].setText("Death")

@@ -215,7 +215,8 @@ class CurrencyReader:
                                (top["score"] > -3200 and margin > 1500))
                 if top["name"] in self.inventory_ignored and (clear_match or count_digits is None):
                     return {"family": None, "members": [], "score": 0,
-                            "margin": margin, "all": [], "ignored": True}
+                            "margin": margin, "all": [], "ignored": True,
+                            "shared_icon": len(self.inventory_members[top["name"]]) > 1}
                 if clear_match:
                     return {"family": top["name"], "members": self.inventory_members[top["name"]],
                             "score": max(0, 1 + top["score"] / 8000), "margin": margin,

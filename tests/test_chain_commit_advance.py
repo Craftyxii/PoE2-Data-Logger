@@ -138,16 +138,11 @@ class ChainCommitAdvanceTests(unittest.TestCase):
         with logger._connect() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM new_export").fetchone()[0], 1)
 
-    def test_pending_remnant_must_be_resolved_before_advancing(self):
+    def test_pending_remnant_keeps_its_expedition_when_independent_chain_advances(self):
         pending = logger.assign_ocr_id("opened")
-        before = self.records()
-        with self.assertRaisesRegex(ValueError, "Save or discard the scanned remnant"):
-            logger.commit_chain_draft([{"rune1": "Death"}], logger.scan_context())
-        self.assertEqual(self.records(), before)
-        self.assertEqual(logger.get_state()["ocr_pending"], pending)
-        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
-        logger.discard_ocr_id()
         logger.commit_chain_draft([{"rune1": "Death"}], logger.scan_context())
+        self.assertEqual(logger.get_state()["ocr_pending"], pending)
+        self.assertEqual(pending["expedition_id"], "M0001-E01")
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
 
     def test_existing_step_apis_keep_their_expedition_and_sequence(self):

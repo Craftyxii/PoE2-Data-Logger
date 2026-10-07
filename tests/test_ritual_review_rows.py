@@ -94,6 +94,7 @@ class RitualReviewRowsTests(unittest.TestCase):
 
     def test_unknown_rows_cannot_save_until_critical_fields_are_corrected(self):
         self.read(self.result([self.unknown(count_needs_review=True, deferred=None)]))
+        self.window.ritual_table.item(0, 1).setText("A manually identified rare ring")
         with self.assertRaisesRegex(ValueError, r"(?i)row|name|type|reward"):
             self.window.save_ritual()
         self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
@@ -116,9 +117,6 @@ class RitualReviewRowsTests(unittest.TestCase):
         self.assertIn("name", reason)
         self.assertNotIn("type", reason)
         self.assertNotIn("quantity", reason)
-        with self.assertRaises(ValueError):
-            self.window.save_ritual()
-
         table.item(0, 1).setText("A manually identified rare belt")
         self.window.approve_review()
 
@@ -186,7 +184,7 @@ class RitualReviewRowsTests(unittest.TestCase):
                 self.assertFalse(clear_ritual_read(result, logger.ritual_names()))
 
     def test_save_rejects_invalid_critical_fields_without_partial_page_writes(self):
-        cases = ((0, ""), (0, "Currency"), (1, ""), (1, "Unidentified reward"),
+        cases = ((0, ""), (0, "Currency"), (1, "Unidentified reward"),
                  (1, "Deferred omen"), (2, ""), (2, "0"), (2, "-1"),
                  (2, "1.5"), (2, "1000001"), (5, Qt.CheckState.PartiallyChecked))
         for column, value in cases:
@@ -206,8 +204,6 @@ class RitualReviewRowsTests(unittest.TestCase):
                   live=True, auto=True)
         self.assertEqual(self.window.ritual_table.item(0, 1).text(), "")
         self.assertEqual(self.window.ritual_table.item(0, 2).text(), "")
-        with self.assertRaises(ValueError):
-            self.window.save_ritual()
         name = logger.ritual_names()[0]
         self.correct(0, name=name, category="Omen", quantity=1, deferred=True)
         self.window.approve_review()

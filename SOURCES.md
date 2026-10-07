@@ -14,6 +14,10 @@
 | [auto_commit.py](PoE2_Data_Logger/core/auto_commit.py) | Accepting clear remnant readings |
 | [reference_pack.py](PoE2_Data_Logger/core/reference_pack.py) | Reference database import and export |
 | [ritual_catalog.py](PoE2_Data_Logger/core/ritual_catalog.py) | Ritual reward catalog helpers |
+| [catalog_repairs.py](PoE2_Data_Logger/core/catalog_repairs.py) | Guarded repairs for known legacy remnant family data |
+| [ocr_runtime.py](PoE2_Data_Logger/core/ocr_runtime.py) | OCR CPU thread preference and runtime configuration |
+| [review_learning.py](PoE2_Data_Logger/core/review_learning.py) | Validated local icon examples learned from accepted review corrections |
+| [currency_display.py](PoE2_Data_Logger/core/currency_display.py) | Currency counter artwork from bundled and local references |
 | [workbook_export.py](PoE2_Data_Logger/core/workbook_export.py) | Excel workbook export |
 | [atlas_catalog.py](PoE2_Data_Logger/core/atlas_catalog.py) | Offline, versioned PoE2 atlas nodes, effects and choice options |
 | [export_files.py](PoE2_Data_Logger/core/export_files.py) | Writes paired exports and restores earlier files if a write fails |
@@ -31,6 +35,7 @@
 | [item_text.py](PoE2_Data_Logger/ocr/item_text.py) | Tooltip text parsing |
 | [ritual_grid.py](PoE2_Data_Logger/ocr/ritual_grid.py) | Ritual reward-grid geometry and item footprints |
 | [opened_scan.py](PoE2_Data_Logger/ocr/opened_scan.py) | Opened remnant scanning and OCR model checks |
+| [propagation_scan.py](PoE2_Data_Logger/ocr/propagation_scan.py) | Selected recipe and propagated rune marker recognition |
 | [runehelper_ocr.py](PoE2_Data_Logger/ocr/runehelper_ocr.py) | RuneHelper OCR adapter |
 | [scan.py](PoE2_Data_Logger/ocr/scan.py) | Visible remnant seed scanning |
 | [prototype.py](PoE2_Data_Logger/ocr/prototype.py) | Rune-bar geometry and template matching |
@@ -44,6 +49,7 @@
 | File | Purpose |
 | --- | --- |
 | [native_desktop.py](PoE2_Data_Logger/ui/native_desktop.py) | Main desktop interface and review overlay |
+| [currency_counter.py](PoE2_Data_Logger/ui/currency_counter.py) | Responsive session currency totals and item icons |
 | [hotkey.py](PoE2_Data_Logger/platform/hotkey.py) | Global hotkeys and scan capture |
 | [hover_copy.py](PoE2_Data_Logger/platform/hover_copy.py) | Hovered tooltip copy helpers |
 | [live_watch.py](PoE2_Data_Logger/platform/live_watch.py) | Game-window checks used during capture |

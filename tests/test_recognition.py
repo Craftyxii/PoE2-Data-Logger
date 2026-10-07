@@ -139,6 +139,68 @@ class RecognitionTests(unittest.TestCase):
             logged = json.loads(db.execute("SELECT details_json FROM commits WHERE kind='Remnant'").fetchone()[0])
         self.assertEqual([row["recipe"] for row in logged["recipes"]], expected)
 
+    def fresh_auto_capture(self):
+        logger.clear_export_and_reset_ids()
+        logger.start_map()
+        logger.save_settings({"auto_commit": True})
+        return {**self.partial(), **logger.scan_context(), **logger.assign_ocr_id("opened")}
+
+    def auto_commit_records(self):
+        with logger._connect() as db:
+            return {table: [tuple(row) for row in db.execute(f"SELECT * FROM {table} ORDER BY rowid")]
+                    for table in ("meta", "maps", "expeditions", "new_export", "commits")}
+
+    def test_old_auto_commit_cannot_consume_reused_ids_after_session_reset(self):
+        old = self.fresh_auto_capture()
+        current = self.fresh_auto_capture()
+        self.assertTrue(all(old[key] == current[key] for key in
+                            ("remnant_id", "map_id", "expedition_id")))
+        self.assertNotEqual(old["_scan_generation"], current["_scan_generation"])
+        before = self.auto_commit_records()
+        saved = auto_commit.commit(old)
+        self.assertFalse(saved["committed"])
+        self.assertIn("previous session", saved["reason"])
+        self.assertEqual(self.auto_commit_records(), before)
+        self.assertEqual(logger.get_state()["ocr_pending"]["remnant_id"], current["remnant_id"])
+
+    def test_reset_during_auto_commit_resolution_is_rechecked_inside_commit_transaction(self):
+        old = self.fresh_auto_capture()
+        original_candidate = auto_commit.candidate
+        after_reset = {}
+        def reset_after_resolution(opened, seed=None):
+            result = original_candidate(opened, seed)
+            self.assertTrue(result["ready"])
+            current = self.fresh_auto_capture()
+            self.assertTrue(all(old[key] == current[key] for key in
+                                ("remnant_id", "map_id", "expedition_id")))
+            after_reset["records"] = self.auto_commit_records()
+            return result
+        with patch.object(auto_commit, "candidate", side_effect=reset_after_resolution):
+            saved = auto_commit.commit(old)
+        self.assertFalse(saved["committed"])
+        self.assertIn("previous session", saved["reason"])
+        self.assertEqual(self.auto_commit_records(), after_reset["records"])
+
+    def test_old_seed_context_cannot_confirm_fresh_opened_capture_with_reused_ids(self):
+        old_seed = self.fresh_auto_capture()
+        current = self.fresh_auto_capture()
+        before = self.auto_commit_records()
+        saved = auto_commit.commit(current, old_seed)
+        self.assertFalse(saved["committed"])
+        self.assertIn("previous session", saved["reason"])
+        self.assertEqual(self.auto_commit_records(), before)
+
+    def test_current_session_auto_commit_preserves_original_chain_after_propagation_advance(self):
+        opened = self.fresh_auto_capture()
+        logger.increment_propagation_detonated(logger.scan_context(), runes=["Death", "Rebirth"])
+        logger.commit_chain_draft([{"rune1": "Death", "rune2": "Rebirth"}], logger.scan_context())
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        saved = auto_commit.commit(opened)
+        self.assertTrue(saved["committed"])
+        self.assertEqual((saved["remnant_id"], saved["expedition_id"]), ("R0001", "M0001-E01"))
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertIsNone(logger.get_state()["ocr_pending"])
+
     def test_partial_family_ambiguity_and_socket_conflict_require_review(self):
         opened = self.partial()
         opened["candidates"] = [3, 5]
@@ -160,6 +222,33 @@ class RecognitionTests(unittest.TestCase):
         self.assertTrue(auto_commit.candidate(good)["ready"], good)
         self.assertFalse(auto_commit.candidate(bad)["ready"])
         self.assertFalse(bad["can_use"] if "can_use" in bad else False)
+
+    def test_opened_explicit_gem_level_cannot_be_fuzzily_changed_or_inferred(self):
+        with logger._connect() as db:
+            names = [row[0] for row in db.execute("SELECT name FROM recipes")]
+            for kind in ("Spirit", "Skill"):
+                with self.subTest(kind=kind):
+                    matched, _ = opened_scan._match(db, f"Uncut {kind} Gem (Level 18)", 1, names)
+                    self.assertIsNone(matched)
+                expected = f"Uncut {kind} Gem (Level 19)"
+                self.assertEqual(opened_scan._match(db, expected, 1, names), (expected, 1.0))
+                self.assertIsNone(opened_scan._match(db, f"Uncut {kind} Gern", 1, [expected])[0])
+                self.assertEqual(opened_scan._match(db, f"Uncut {kind} Gem", 1, names)[0], f"Uncut {kind} Gem")
+                # Typo correction may preserve a clearly read level, but must not change it.
+                self.assertEqual(opened_scan._match(db, f"Uncut {kind} Gern (Level 19)", 1, names)[0], expected)
+
+    def test_opened_wrong_gem_level_cannot_automatically_commit_level_19_family(self):
+        image = Image.new("RGB", (600, 500), (190, 190, 190))
+        rows = [self.row("Runeshape Combinations", x=0, y=80, right=500),
+                self.row("1x Uncut Spirit Gem (Level 18)", x=160, y=160, right=490)]
+        with patch.object(opened_scan, "_icon_count", return_value=5), patch.object(
+                opened_scan, "_list_complete", return_value=True):
+            result = opened_scan.scan_opened(image, ocr_rows=rows)
+        self.assertEqual(result["opened_recipes"][0]["raw"], "1x Uncut Spirit Gem (Level 18)")
+        self.assertIsNone(result["first_recipe"])
+        self.assertIsNone(result["family"])
+        self.assertFalse(result["can_use"])
+        self.assertFalse(auto_commit.candidate(result)["ready"])
 
     def native_opened_rows(self):
         return [{"text": "Unrelated caption", "score": .99,

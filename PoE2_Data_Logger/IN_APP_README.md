@@ -8,6 +8,8 @@ Auto-commit saves scans that don’t need review. If Overlay is turned on, items
 
 Each scan needs a hotkey press. Scanning pauses when PoE2 is not the active window.
 
+**CPU OCR threads** in Scan settings offers 1, 2, 4 or 6 threads. Restart the app to apply a changed value. Two is the default; higher counts can help large scans but use more CPU.
+
 ## Map / Tablet Setup
 
 Choose Biome and City Type, or toggle Ocean, Irradiated, Deli and Wisp, from the top row. These changes save immediately.
@@ -22,9 +24,15 @@ On **Review**, correct anything held for review, then **Approve** to save it. **
 
 **Chains:** the dedicated **Propagation scan** key reads the selected recipe and adds its marked runes from left to right. The general key cannot activate it. Each accepted scan adds one remnant detonation, even with two runes; uncertain or rejected scans add none. Review shows each chain part in scan order. **Commit chain** saves the chain and advances the expedition number for this map without counting its scans again. You can also enter runes manually.
 
+The three peaks above each propagated rune identify its mark. Include the gold arrow beside the selected recipe in the capture. Remnant review and propagation remain separate: a pending remnant can be reviewed later and still saves to the expedition it was captured for.
+
 **Counts:** enter Normal, Magic, Rare and Unique kills per map. Propagation counts remnants detonated per expedition automatically. **+ New map** saves kill totals for the map you’re leaving.
 
 **Currency/items:** select **Start of map** or **End of map** before scanning the inventory. These snapshots measure the change in item quantities.
+
+**Kills / Currency** shows session gains as icon, name and count cards. Every approved end scan updates the positive end-minus-start gains across maps. Rescans replace that map's contribution; maps without a start baseline wait for it. Only items with positive gains appear. Use the search to find a type. Resetting IDs clears the totals. Manual inventory icon-reference tools are under **Data export → Developer Mode**.
+
+Double-click an item name in Currency or Ritual review to correct it. Approving a changed name saves its captured artwork as a local recognition example for later scans and adds its item-count column to exports. Rows left unnamed are rejected. Confirm other critical fields before approval. Local recognition examples can be exported in an OCR reference pack.
 
 **Ritual:** deferred rewards are marked **Deferred** and contribute zero new finds. Available tribute and remaining rerolls are saved with the scan.
 

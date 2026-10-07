@@ -1,0 +1,46 @@
+[
+  {
+    "image": "header_04.png",
+    "bounds": [
+      39,
+      131,
+      671,
+      658
+    ],
+    "tribute": 35297,
+    "rerolls": 4
+  },
+  {
+    "image": "header_00.png",
+    "bounds": [
+      47,
+      152,
+      679,
+      679
+    ],
+    "tribute": 14697,
+    "rerolls": 0
+  },
+  {
+    "image": "header_36.png",
+    "bounds": [
+      28,
+      131,
+      660,
+      657
+    ],
+    "tribute": 46797,
+    "rerolls": 36
+  },
+  {
+    "image": "header_35.png",
+    "bounds": [
+      18,
+      134,
+      650,
+      661
+    ],
+    "tribute": 45797,
+    "rerolls": 35
+  }
+]

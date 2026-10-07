@@ -45,6 +45,53 @@ def _reference_image(raw, maximum):
         return None
 
 
+def _reviewed_pixels(image):
+    pixels = np.asarray(image.convert("RGB").resize((40, 40), Image.Resampling.LANCZOS),
+                        dtype=np.uint8).copy()
+    # Stack counts can change between scans. Keep the lower-right tier badge:
+    # shared essence artwork must not teach every tier the same name.
+    pixels[:15, :26] = [26, 26, 40]
+    return Image.fromarray(pixels)
+
+
+def _reviewed_bank(reader, references, shape=(1, 1)):
+    examples, kinds = [], {}
+    for reference in references:
+        if (not reference.get("reviewed") or
+                (reference.get("columns", 1), reference.get("rows", 1)) != shape):
+            continue
+        name = reference.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        sample = _reference_image(reference.get("image"), 384)
+        if sample is not None:
+            if shape == (1, 1):
+                sample = _reviewed_pixels(sample)
+            examples.append({"name": name, "image": sample})
+            kinds[name] = reference.get("kind", "item")
+    if examples and hasattr(reader, "prepare_examples"):
+        examples = reader.prepare_examples(examples)
+    return examples, kinds, shape
+
+
+def _reviewed_match(reader, image, bank, catalog=None):
+    examples, kinds, shape = bank
+    if not examples or (catalog and (catalog.get("shared_icon") or len(catalog.get("members") or []) > 1)):
+        # A labelled Chaos/Exalted/etc. picture cannot replace the existing
+        # badge resolver: several tiers deliberately share that artwork.
+        return None
+    ranked = reader.examples(_reviewed_pixels(image) if shape == (1, 1) else image, examples)
+    if not ranked:
+        return None
+    top = ranked[0]
+    runner = next((row["score"] for row in ranked[1:] if row["name"] != top["name"]), float("-inf"))
+    # Only a close, unambiguous captured match overrides a bundled label.
+    # We retain the legacy fallback threshold for existing manual references.
+    if top["score"] > -450 and top["score"] - runner > 250:
+        return top["name"], max(0, 1 + top["score"] / 8000), kinds[top["name"]]
+    return None
+
+
 def is_ritual_page(lines):
     text = " ".join(str(row.get("text", "")) for row in lines
                     if isinstance(row, dict) and row.get("score", 0) >= .75).casefold()
@@ -380,8 +427,13 @@ def scan_inventory_grid(image, references=(), read=None):
     labels = _inventory_labels(image) if read is None else None
     read = read or ocr_lines
     reader = currency_ocr.get_reader()
+    references = list(references)
+    reviewed = _reviewed_bank(reader, references)
     examples = []
     for reference in references:
+        if (reference.get("reviewed") or
+                (reference.get("columns", 1), reference.get("rows", 1)) != (1, 1)):
+            continue
         raw = _reference_image(reference.get("image"), 96)
         if raw is not None:
             examples.append({"name": reference["name"], "image": raw})
@@ -397,9 +449,12 @@ def scan_inventory_grid(image, references=(), read=None):
         # A saved reference must not turn a confirmed empty cell into a reward.
         if icon.get("empty"):
             continue
-        name = None
+        correction = _reviewed_match(reader, cell, reviewed, catalog=icon) if slot not in equipment else None
+        name = correction[0] if correction else None
         score = icon.get("score", 0)
-        if icon.get("family"):
+        if correction:
+            score = correction[1]
+        elif icon.get("family"):
             if labels is not None:
                 tier = labels[slot].get("tier", "")
                 if len(icon["members"]) > 1 and labels[slot].get("tier_present") and not tier:
@@ -635,7 +690,61 @@ def _ritual_grid_rerolls(image, grid):
         read = _engine().text_rec(TextRecInput(img=patches, return_word_box=False))
     numbers = [int(text) for text, score in zip(read.txts, read.scores)
                if re.fullmatch(r"\d{1,2}", text) and score >= .97]
+    if len(numbers) == 2 and numbers[0] == numbers[1]:
+        return numbers[0]
+    # Smaller captures can break an outlined digit into several components.
+    # Read the entire fixed counter field at two scales rather than accepting
+    # a partial glyph mask; both complete readings must still agree.
+    raw_crop = image.crop((box[0], round(top - pitch * .85), box[2], box[3])).convert("RGB")
+    patches = [np.asarray(ImageOps.expand(raw_crop.resize((raw_crop.width * factor, raw_crop.height * factor)),
+                                          border=15, fill="black")) for factor in (3, 6)]
+    with OCR_LOCK:
+        read = _engine().text_rec(TextRecInput(img=patches, return_word_box=False))
+    numbers = [int(text) for text, score in zip(read.txts, read.scores)
+               if re.fullmatch(r"\d{1,2}", text) and score >= .97]
     return numbers[0] if len(numbers) == 2 and numbers[0] == numbers[1] else None
+
+
+def _ritual_grid_tribute(parts, image, grid):
+    """Read available Tribute only from the bar above a verified reward grid.
+
+    The ornamental Favours title need not be recognised. Spatially anchoring
+    this field also prevents a hovered reward's price becoming the available
+    Tribute when the whole-page OCR misses or merges the title.
+    """
+    left, top, right, _ = grid["bounds"]
+    pitch = (right - left) / 12
+    box = (round(left + pitch * 2.65), round(top - pitch * 1.25),
+           round(left + pitch * 9.5), round(top - pitch * .10))
+    if (pitch < 10 or box[0] < 0 or box[1] < 0 or box[2] > image.width or box[3] > image.height or
+            box[2] <= box[0] or box[3] <= box[1]):
+        return None
+
+    def amount(row):
+        if float(row.get("score", 0)) < .94:
+            return None
+        match = re.fullmatch(r"(\d{1,3}(?:,\d{3})+|\d{1,9})\s*Tribute", row.get("text", "").strip(), re.I)
+        return int(match.group(1).replace(",", "")) if match else None
+
+    values = set()
+    for row in parts:
+        if not all(key in row for key in ("x", "y", "right", "bottom")):
+            continue
+        if (box[0] - 2 <= row["x"] < row["right"] <= box[2] + 2 and
+                box[1] - 2 <= row["y"] < row["bottom"] <= box[3] + 2):
+            value = amount(row)
+            if value is not None:
+                values.add(value)
+    if values:
+        return next(iter(values)) if len(values) == 1 else None
+    crop = image.crop(box).convert("RGB")
+    if float(np.asarray(crop).std()) < 5:
+        return None
+    if pitch < 45:
+        factor = min(3, 54 / pitch)
+        crop = crop.resize((round(crop.width * factor), round(crop.height * factor)), Image.Resampling.LANCZOS)
+    values = {value for row in ocr_lines(crop) if (value := amount(row)) is not None}
+    return next(iter(values)) if len(values) == 1 else None
 
 
 def ritual_totals(lines, image=None, grid=None):
@@ -645,6 +754,9 @@ def ritual_totals(lines, image=None, grid=None):
     # Individual OCR parts keep the counter separate when a row is merged with
     # the Tribute heading or unrelated text elsewhere on a full-screen capture.
     parts = [part for row in lines for part in (row.get("parts") or [row])]
+    if grid is not None and image is not None:
+        return {"tribute_available": _ritual_grid_tribute(parts + list(lines), image, grid),
+                "rerolls_remaining": _ritual_grid_rerolls(image, grid)}
     header_index = _ritual_header_index(parts)
     candidates = ([parts[header_index]] if header_index is not None else
                   parts if image is None else [])
@@ -656,9 +768,7 @@ def ritual_totals(lines, image=None, grid=None):
             tribute = int(match.group(1).replace(",", ""))
             header = row
             break
-    if header and grid is not None and image is not None:
-        rerolls = _ritual_grid_rerolls(image, grid)
-    elif header:
+    if header:
         for row in parts:
             if (re.fullmatch(r"\d{1,2}", row["text"].strip()) and row.get("score", 0) >= .85 and
                     row.get("right", 0) < header.get("x", 0) and
@@ -743,10 +853,10 @@ def _ritual_cell_labels(cells):
     return labels
 
 
-def _ritual_reward_icon(reader, cell, label, examples):
+def _ritual_reward_icon(reader, cell, label, examples, icon=None):
     count = label.get("count") or label.get("count_candidate")
     count_digits = len(str(count)) if count is not None else None
-    icon = reader.icon(cell, count_digits=count_digits)
+    icon = reader.icon(cell, count_digits=count_digits) if icon is None else icon
     candidates = []
     # Maps, tablets and runes are excluded from currency inventories, but they
     # are legitimate Ritual rewards. Keep the same weighted match thresholds.
@@ -785,7 +895,10 @@ def _ritual_reward_icon(reader, cell, label, examples):
 
 
 def _ritual_grid_items(image, grid, parsed, markers, omen_names, references):
+    from PoE2_Data_Logger.core.review_learning import footprint
     reader = currency_ocr.get_reader()
+    references = list(references)
+    reviewed = {}
     cells = {}
     for index, reward in enumerate(grid["rewards"]):
         if len(reward["slots"]) == 1:
@@ -794,8 +907,10 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references):
             cells[index] = image.crop((left + 1, top + 1, right, bottom)).convert("RGB")
     labels = _ritual_cell_labels(cells)
     examples = []
-    for reference in list(references)[:128]:
-        if reference.get("name") not in omen_names:
+    for reference in references:
+        if (reference.get("reviewed") or
+                (reference.get("columns", 1), reference.get("rows", 1)) != (1, 1) or
+                not reference.get("name")):
             continue
         sample = _reference_image(reference.get("image"), 96)
         if sample is not None:
@@ -819,11 +934,28 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references):
         box = tuple(reward["box"])
         multiple = len(reward["slots"]) > 1
         label = labels.get(index, {})
-        name, score, candidates = (None, 0.0, []) if multiple else _ritual_reward_icon(
-            reader, cells[index], label, examples)
+        shape = footprint(reward["slots"])
+        correction = None
+        catalog_icon = None
+        if not multiple:
+            count = label.get("count") or label.get("count_candidate")
+            catalog_icon = reader.icon(cells[index], count_digits=len(str(count)) if count is not None else None)
+        if shape is not None:
+            if shape not in reviewed:
+                reviewed[shape] = _reviewed_bank(reader, references, shape)
+            shown = (image.crop((box[0] + 1, box[1] + 1, box[2], box[3])).convert("RGB")
+                     if multiple else cells[index])
+            correction = _reviewed_match(reader, shown, reviewed[shape], catalog=catalog_icon)
+        if correction:
+            name, score, kind = correction
+            candidates = []
+        else:
+            name, score, candidates = (None, 0.0, []) if multiple else _ritual_reward_icon(
+                reader, cells[index], label, examples, icon=catalog_icon)
+            kind = "omen" if name in omen_names else "item"
         quantity = 1 if multiple else label.get("count") or label.get("count_candidate") or 1
         deferred = index in deferred_rewards
-        item = {"category": "Omen" if name in omen_names else "Item", "name": name or "",
+        item = {"category": "Omen" if kind == "omen" else "Item", "name": name or "",
                 "quantity": quantity, "tribute": None,
                 "source": "icon reference: Ritual reward grid" if name else "Occupied Ritual reward; name unresolved",
                 "score": round(score, 3), "name_match": 1.0 if name in omen_names else 0.0,

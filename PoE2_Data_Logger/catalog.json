@@ -563,16 +563,6 @@
       "status": "calculator"
     },
     {
-      "family": 47,
-      "sockets": 4,
-      "seed_slot": "P2",
-      "seed_rune": "Unresolved",
-      "rewards": [
-        "Rune of the Hunt"
-      ],
-      "status": "calculator"
-    },
-    {
       "family": 70,
       "sockets": 4,
       "seed_slot": "P2",
@@ -914,7 +904,7 @@
       "seed_rune": "Unresolved",
       "rewards": [
         "Farrul's Rune of Grace",
-        "Rune of the Hunt"
+        "Farrul's Rune of the Hunt"
       ],
       "status": "calculator"
     },

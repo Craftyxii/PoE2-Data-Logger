@@ -138,6 +138,14 @@ class PropagationOCRTests(unittest.TestCase):
         result = self.scan(image, rows)
         self.assertFalse(result["can_use"])
         self.assertEqual(result["selected_recipe"], None)
+        self.assertIn("widen the Propagation scan region", result["status"])
+
+    def test_crop_that_omits_outside_cursor_does_not_guess_selected_recipe(self):
+        image, rows = self.panel(["Medved's Saga"], marks={0: [1]})
+        result = self.scan(image.crop((46, 0, image.width, image.height)), rows)
+        self.assertFalse(result["can_use"])
+        self.assertIsNone(result["selected_recipe"])
+        self.assertEqual(result["runes"], [])
 
     def test_multiple_cursors_are_ambiguous(self):
         image, rows = self.panel(["Medved's Saga", "Greater Regal Orb x3"], 0, {0: [1]})
@@ -187,6 +195,35 @@ class PropagationOCRTests(unittest.TestCase):
             self.assertTrue(result["can_use"], (scale, result))
             self.assertEqual(result["runes"], ["Prismatic", "Celestial"])
 
+    def test_short_wide_panel_preserves_reward_text_and_marked_positions_at_multiple_scales(self):
+        recipes = ["Lesser Jeweller's Orb", "Regal Orb x3", "Exalted Orb x2"]
+        for scale in (.7, 1, 1.5, 2, 3):
+            with self.subTest(scale=scale):
+                image, rows = self.panel(recipes, 1, {0: [3], 1: [2], 2: [3]})
+                image = image.crop((0, 0, 575, 300)).resize((round(575 * scale), round(300 * scale)),
+                                                        Image.Resampling.LANCZOS)
+                prepared = propagation_scan._panel(image)
+                self.assertEqual(prepared.size, (575, 300))
+                result = self.scan(image, rows)
+                self.assertTrue(result["can_use"], result)
+                self.assertEqual(result["selected_recipe"], "Regal Orb x3")
+                self.assertEqual(result["runes"], ["Arcane"])
+                self.assertEqual(result["positions"], [2])
+
+    def test_short_wide_panel_without_cursor_still_cannot_select_a_recipe(self):
+        image, rows = self.panel(["Medved's Saga"], selected=None, marks={0: [1, 5]})
+        result = self.scan(image.crop((0, 0, 575, 300)), rows)
+        self.assertFalse(result["can_use"])
+        self.assertIsNone(result["selected_recipe"])
+        self.assertEqual(result["runes"], [])
+
+    def test_short_wide_geometry_does_not_bypass_minimum_capture_size(self):
+        image, rows = self.panel(["Medved's Saga"], marks={0: [1, 5]})
+        result = self.scan(image.crop((0, 0, 575, 300)).resize((115, 60)), rows)
+        self.assertFalse(result["can_use"])
+        self.assertIn("too small", result["status"])
+        self.assertEqual(result["runes"], [])
+
     def test_scan_does_not_create_remnants_or_commit_records(self):
         image, rows = self.panel(["Medved's Saga"], marks={0: [1, 5]})
         with logger._connect() as db:
@@ -199,6 +236,27 @@ class PropagationOCRTests(unittest.TestCase):
     def test_real_bundled_ocr_and_marks_with_controlled_cursor(self):
         self.cursor(self.source, 167)
         result = propagation_scan.scan_propagation(self.source)
+        self.assertTrue(result["can_use"], result)
+        self.assertEqual(result["selected_recipe"], "Regal Orb x3")
+        self.assertEqual(result["runes"], ["Tidal"])
+
+    def test_real_bundled_ocr_reads_short_wide_panel_with_controlled_cursor(self):
+        self.cursor(self.source, 167)
+        image = self.source.crop((0, 0, self.source.width, 300))
+        result = propagation_scan.scan_propagation(image)
+        self.assertTrue(result["can_use"], result)
+        self.assertEqual(result["selected_recipe"], "Regal Orb x3")
+        self.assertEqual(result["runes"], ["Tidal"])
+
+    def test_full_screen_panel_search_still_keeps_controlled_cursor_and_reward(self):
+        with Image.open(ROOT / "PoE2_Data_Logger/region_examples/opened.jpg") as source:
+            image = source.convert("RGB")
+        window = image.crop((0, 0, round(image.height * .70), image.height))
+        gray = propagation_scan.cv2.cvtColor(propagation_scan.np.asarray(window),
+                                            propagation_scan.cv2.COLOR_RGB2GRAY)
+        _, top, _, _ = runehelper_ocr._find_panel(gray)
+        self.cursor(image, top + 167)
+        result = propagation_scan.scan_propagation(image)
         self.assertTrue(result["can_use"], result)
         self.assertEqual(result["selected_recipe"], "Regal Orb x3")
         self.assertEqual(result["runes"], ["Tidal"])
