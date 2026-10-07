@@ -16,7 +16,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QGraphicsObject,
     QGraphicsScene, QGraphicsView, QHBoxLayout, QLabel, QPushButton,
-    QSizePolicy, QTextBrowser, QVBoxLayout, QWidget,
+    QSizePolicy, QTextBrowser, QToolTip, QVBoxLayout, QWidget,
 )
 
 from PoE2_Data_Logger.core.atlas_catalog import catalog
@@ -38,6 +38,14 @@ def _asset_pixmap(relative_path):
     return QPixmap(str(path))
 
 
+def _selected_choice(choices, choice_id):
+    """Keep the game's option number tied to catalog order, not variant IDs."""
+    for number, option in enumerate(choices, 1):
+        if str(option["id"]) == choice_id:
+            return number, option
+    return None, None
+
+
 class AtlasNodeItem(QGraphicsObject):
     clicked = Signal(str)
 
@@ -46,6 +54,7 @@ class AtlasNodeItem(QGraphicsObject):
         self.node = node
         self.node_id = str(node["id"])
         self.allocated = False
+        self.choice_number = None
         self.selected = False
         self.hovered = False
         self.radius = {"small": 30, "notable": 43, "keystone": 52,
@@ -116,6 +125,24 @@ class AtlasNodeItem(QGraphicsObject):
             y = radius + 7
             painter.drawLine(QPointF(-6, y - 3), QPointF(0, y + 3))
             painter.drawLine(QPointF(0, y + 3), QPointF(6, y - 3))
+            if self.allocated and self.choice_number is not None:
+                # Paint on the node itself so the badge retains the existing
+                # hover/click target. Its number is an option, never a rank.
+                painter.save()
+                badge_radius = min(16, radius * .32)
+                badge = QRectF(-badge_radius, radius * .4 - badge_radius,
+                               badge_radius * 2, badge_radius * 2)
+                painter.setPen(QPen(GOLD, 1.5))
+                painter.setBrush(QColor("#16130e"))
+                painter.drawEllipse(badge)
+                font = painter.font()
+                font.setBold(True)
+                font.setPixelSize(round(badge_radius * 1.45))
+                painter.setFont(font)
+                painter.setPen(QColor("#fff5d2"))
+                painter.drawText(badge, Qt.AlignmentFlag.AlignCenter,
+                                 str(self.choice_number))
+                painter.restore()
         if self.selected:
             painter.setPen(QPen(QColor("#ded4bd"), 1))
             painter.drawEllipse(QRectF(-radius - 8, -radius - 8,
@@ -125,13 +152,17 @@ class AtlasNodeItem(QGraphicsObject):
         self.hovered = True
         self.update()
         super().hoverEnterEvent(event)
+        if self.toolTip():
+            QToolTip.showText(event.screenPos(), self.toolTip(), event.widget())
 
     def hoverLeaveEvent(self, event):
         self.hovered = False
         self.update()
+        QToolTip.hideText()
         super().hoverLeaveEvent(event)
 
     def mousePressEvent(self, event):
+        QToolTip.hideText()
         self._pressed_at = event.screenPos()
         event.accept()
 
@@ -152,6 +183,8 @@ class AtlasTreeView(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setBackgroundBrush(QColor("#0b0d0e"))
         self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setStyleSheet("QToolTip { background:#1c1c1e; color:#eeeae3; "
+                          "border:1px solid #6b5639; padding:8px; }")
         self.setMinimumHeight(460)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -168,6 +201,10 @@ class AtlasTreeView(QGraphicsView):
             event.accept()
         else:
             super().wheelEvent(event)
+
+    def hideEvent(self, event):
+        QToolTip.hideText()
+        super().hideEvent(event)
 
 
 class GearRaritySpinBox(QDoubleSpinBox):
@@ -263,7 +300,7 @@ class AtlasSettingsPage(QWidget):
         self.node_effects.setOpenExternalLinks(False)
         self.node_effects.setStyleSheet("QTextBrowser { background:#121412; border:1px solid #443a29; padding:6px; }")
         details.addWidget(self.node_effects, 1)
-        self._node_hint = QLabel("Drag the background to move the tree. Scroll to zoom.")
+        self._node_hint = QLabel("Hover a node to read its effects. Drag the background to move the tree. Scroll to zoom.")
         self._node_hint.setWordWrap(True)
         self._node_hint.setProperty("role", "note")
         details.addWidget(self._node_hint)
@@ -518,8 +555,8 @@ class AtlasSettingsPage(QWidget):
         with QSignalBlocker(self.choice_combo):
             self.choice_combo.clear()
             self.choice_combo.addItem("Choose effect…", None)
-            for option in choices:
-                self.choice_combo.addItem(option.get("name") or "Effect", str(option["id"]))
+            for number, option in enumerate(choices, 1):
+                self.choice_combo.addItem(f"{number}. {option.get('name') or 'Effect'}", str(option["id"]))
                 effects = "\n".join(option.get("effects") or [])
                 self.choice_combo.setItemData(self.choice_combo.count() - 1, effects, Qt.ItemDataRole.ToolTipRole)
             choice = self._choices.get(self._selected_node)
@@ -528,31 +565,61 @@ class AtlasSettingsPage(QWidget):
         self.choice_label.setVisible(bool(choices))
         self.choice_combo.setVisible(bool(choices))
         effects = list(node.get("effects") or [])
-        chosen = next((option for option in choices if str(option["id"]) == self._choices.get(self._selected_node)), None)
+        number, chosen = _selected_choice(choices, self._choices.get(self._selected_node))
         text = "".join(f"<p>{html.escape(str(effect)).replace(chr(10), '<br>')}</p>" for effect in effects)
         if choices:
             if chosen:
-                text += f"<p><b>{html.escape(chosen.get('name') or 'Selected effect')}</b></p>"
+                text += f"<p><b>{number}. {html.escape(chosen.get('name') or 'Selected effect')}</b></p>"
                 text += "".join(f"<p>{html.escape(str(effect)).replace(chr(10), '<br>')}</p>" for effect in chosen.get("effects", []))
             else:
                 text += "<p style='color:#e5b660'>Choose one effect from the dropdown.</p>"
         self.node_effects.setHtml(text or "<p>No effect description is provided for this node.</p>")
 
+    def _node_tooltip(self, node_id):
+        node = self._nodes[node_id]
+
+        def escaped(value):
+            return html.escape(str(value)).replace("\n", "<br>")
+
+        def effects_text(effects):
+            return "".join(f"<p>{escaped(effect)}</p>" for effect in effects)
+
+        if self._allocatable(node):
+            state = "Allocated" if node_id in self._allocated else "Not allocated"
+            name = node.get("name") or "Atlas node"
+        else:
+            state = "Activity starting point" if node.get("kind") == "root" else "Atlas decoration"
+            name = node.get("name") or state
+        text = (f"<p><b>{escaped(name)}</b><br>"
+                f"{escaped(node.get('activity', 'Main Atlas'))} · {state}</p>")
+        choices = node.get("choices") or []
+        number, chosen = _selected_choice(choices, self._choices.get(node_id))
+        if chosen:
+            label = "Selected effect" if node_id in self._allocated else "Saved choice (inactive)"
+            text += f"<p><b>{label}: {number}. {escaped(chosen.get('name') or 'Effect')}</b></p>"
+        text += effects_text(node.get("effects") or [])
+        if chosen:
+            text += effects_text(chosen.get("effects") or [])
+        elif choices:
+            text += "<p><b>Choose one effect:</b></p>"
+            for number, option in enumerate(choices, 1):
+                text += f"<p><b>{number}. {escaped(option.get('name') or 'Effect')}</b><br>"
+                text += "<br>".join(escaped(effect) for effect in option.get("effects") or []) + "</p>"
+        elif not node.get("effects"):
+            description = ("No Atlas bonuses." if not self._allocatable(node)
+                           else "No effect description is provided for this node.")
+            text += f"<p>{description}</p>"
+        # A table gives Qt's rich-text tooltip a stable wrapping width, so long
+        # conditional effects remain readable instead of spanning the screen.
+        return f'<table width="360"><tr><td>{text}</td></tr></table>'
+
     def _update_visuals(self):
         for node_id, item in self.node_items.items():
             item.allocated = node_id in self._allocated
+            item.choice_number, _ = _selected_choice(item.node.get("choices") or [],
+                                                     self._choices.get(node_id))
             item.selected = node_id == self._selected_node
-            node = self._nodes[node_id]
-            name = html.escape(node.get("name") or "Atlas node")
-            effects = "<br>".join(html.escape(str(effect)) for effect in node.get("effects", []))
-            state = "Allocated" if item.allocated else "Not allocated"
-            extra = ""
-            if node.get("choices"):
-                choice = next((option for option in node["choices"] if str(option["id"]) == self._choices.get(node_id)), None)
-                extra = "<br><b>" + html.escape(choice["name"] if choice else "Choose effect") + "</b>"
-                if choice:
-                    extra += "<br>" + "<br>".join(html.escape(str(effect)) for effect in choice.get("effects", []))
-            item.setToolTip(f"<b>{name}</b><br>{state}<br>{effects}{extra}")
+            item.setToolTip(self._node_tooltip(node_id))
             item.update()
         for left, right, item in self.edge_items:
             illuminated = left in self._allocated and right in self._allocated

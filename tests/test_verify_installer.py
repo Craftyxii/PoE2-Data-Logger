@@ -49,7 +49,7 @@ class InstallerReleaseTests(unittest.TestCase):
                 launch.assert_not_called()
 
     def test_stable_and_beta_versions_with_or_without_patch_reach_metadata_check(self):
-        for version in ("1.1", "33.3", "33.34", "33.34.1"):
+        for version in ("1.2", "1.1", "33.3", "33.34", "33.34.1"):
             for beta in (False, True):
                 with self.subTest(version=version, beta=beta):
                     name = f"PoE2-Data-Logger-Setup-v{version}{'-beta' if beta else ''}.exe"
@@ -99,7 +99,7 @@ class ReleasePackagingTests(unittest.TestCase):
         workflow = (self.root / ".github/workflows/release.yml").read_text(encoding="utf-8")
         pattern = next(line.split("-Pattern '", 1)[1].rsplit("'", 1)[0]
                        for line in workflow.splitlines() if "$match = Select-String" in line)
-        for version in ("1.1", "33.3", "33.34", "33.34.1"):
+        for version in ("1.2", "1.1", "33.3", "33.34", "33.34.1"):
             with self.subTest(version=version):
                 match = re.fullmatch(pattern, f'!define APP_VERSION "{version}"')
                 self.assertIsNotNone(match)

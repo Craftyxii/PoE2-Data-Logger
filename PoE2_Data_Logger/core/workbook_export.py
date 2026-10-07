@@ -90,18 +90,19 @@ class Sheet:
 
 
 def _numeric_column(name):
-    return (name.startswith("Item: ") or name in {"Socket Count", "Tier", "Area Level", "Base Map Mods", "Map Mods", "# +2 Mod Tablets",
+    return (name.startswith(("Item: ", "Stat: ", "Applied Stat: ")) or name in {"Socket Count", "Tier", "Area Level", "Base Map Mods", "Map Mods", "# +2 Mod Tablets",
         "Tablet Mods", "Total Mods", "Master +Mods", "Waystone %", "Tablets Used", "Item Rarity %",
         "Monster Rarity %", "Pack Size %", "Effectiveness %", "Source Row", "Chain Step #", "Expedition #",
-        "Normal Kills (Map)", "Magic Kills (Map)", "Rare Kills (Map)", "Remnants Detonated (Expedition)",
+        "Normal Kills (Map)", "Magic Kills (Map)", "Rare Kills (Map)", "Unique Kills (Map)", "Remnants Detonated (Expedition)",
+        "Remnants Detonated (Scan)",
         "Scan Commit #", "Family ID", "Quantity", "Ritual Page", "Tribute", "Tablet Slot Capacity",
-        "Start Count", "End Count", "Net Change", "Normal Kills", "Magic Kills", "Rare Kills", "Total Kills",
+        "Start Count", "End Count", "Net Change", "Normal Kills", "Magic Kills", "Rare Kills", "Unique Kills", "Total Kills",
         "New Find Quantity", "Ritual Tribute Available", "Ritual Rerolls Remaining", "Visible Seed Sockets",
         "Page", "Currency Commit #", "Ritual Commit #", "Start Scan Commit #", "End Scan Commit #",
         "Gear Item Rarity %", "Points"}
         or re.fullmatch(r"Tablet \d Mod \d (?:%|Value)", name)
         or re.fullmatch(r"Tablet \d Random Modifiers", name)
-        or re.fullmatch(r"Expedition \d Detonated", name)
+        or re.fullmatch(r"Expedition \d+ Detonated", name)
         or (name.startswith(("Start ", "End ")) and _numeric_column(name.split(" ", 1)[1])))
 
 

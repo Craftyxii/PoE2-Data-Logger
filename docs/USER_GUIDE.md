@@ -2,7 +2,7 @@
 
 ## Map setup and scanning
 
-Set Biome and City Type and toggle Ocean or Irradiated from the top row. Choose your Atlas Master and perks where applicable. Scan a waystone or tablet tooltip, or enter its modifiers manually. Accepted tablet readings fill slots 1–4 in order. **Clear tablet config** clears those slots and restarts the sequence.
+Set Biome and City Type and toggle Ocean, Irradiated, Deli or Wisp from the top row. Choose your Atlas Master and perks where applicable. Scan a waystone or tablet tooltip, or enter its modifiers manually. Accepted tablet readings fill slots 1–4 in order. **Clear tablet config** clears those slots and restarts the sequence.
 
 Choose hotkeys under **Scan settings** and adjust capture areas under **Scan regions**. Every scan starts with a key press while **Path of Exile 2** is the active window. Default regions can be moved or resized on the reference image, selected in game, or edited using your own screenshot. Saved regions persist between launches.
 
@@ -16,11 +16,15 @@ The optional **HUD overlay** shows held reviews over a borderless or windowed ga
 
 For inventory tracking, select **Start of map** or **End of map** before scanning. Exported records include starting counts, ending counts and net changes. Ritual records include readable tribute and reroll values. Deferred rewards keep their appearance record and contribute zero new finds.
 
-Enter an Expedition chain's runes in order, then use **Commit chain**. Set **Expedition #** to **2** for the second City expedition. Kills are per map; **Remnants Detonated** is per expedition.
+Use the dedicated **Propagation scan** key to read the selected recipe and append its marked runes from left to right. The general scan key does not activate propagation. Each accepted scan adds **one remnant detonation**, including scans with two runes. Unclear or rejected readings add none. The Review page shows the chain in scan order. **Commit chain** saves it and advances the Expedition ID for the same map; it does not count those scans again. You can also enter chain runes manually and select an expedition from the header.
+
+Enter Normal, Magic, Rare and Unique monster kills under **Kills / Currency**. Each has its own export column and belongs to its Map ID. The propagation detonation total belongs to its Expedition ID.
 
 Finish pending reviews and chains before using **+ New map**. New maps clear waystone settings and carry forward tablets, Atlas Master and general map options. Clear tablets when your tablet setup changes. Existing entries keep the map information and settings saved with them.
 
-Choose an export folder under **Data export**. Excel contains one **Export** sheet; CSV contains the same combined records and columns. Both can be imported into Google Sheets.
+The separate **Atlas / Character Settings** tab shows the PoE2 atlas. Click nodes to turn them on or off and hover for their effects. Multiple-choice nodes show the selected option's number; their dropdown uses matching numbers. **Autofill** maximizes allocations while retaining existing choices. Unselected choice effects remain unset. Save gear item rarity alongside the atlas setup.
+
+Choose an export folder under **Data export**. Excel contains **Export** and **Atlas Character Settings** sheets. Map ID and Atlas Setup ID link the log to its saved atlas and gear settings; click a setup ID in the main sheet to open its atlas rows. CSV saves the same combined records plus a companion atlas CSV. Both can be imported into Google Sheets. Numeric atlas stats have separate columns, including their applied values.
 
 **Start fresh session / reset IDs** clears recorded activities after confirmation and restarts at **M0001**, while keeping settings and reference databases. Export first if you want to keep the session's records.
 

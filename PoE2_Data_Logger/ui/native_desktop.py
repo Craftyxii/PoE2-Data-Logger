@@ -34,7 +34,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.1 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.2 Beta"
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
                             if getattr(sys, "frozen", False) else
@@ -302,6 +302,9 @@ class LoggerWindow(QMainWindow):
         self._pending_ritual_map = None
         self.tablet_raw_mods = [[] for _ in range(4)]
         self._extra_waystone_mods = []
+        self._form_map_context = None
+        self._waystone_form_baseline = self._counts_form_baseline = None
+        self._tablet_form_baseline = self._active_master_baseline = self._perk_form_baseline = None
         for font in ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf"):
             QFontDatabase.addApplicationFont(str(HERE / "fonts" / font))
         self.setWindowTitle(WINDOW_TITLE)
@@ -727,6 +730,8 @@ class LoggerWindow(QMainWindow):
         self.tabs.addTab(page, "Disclaimer")
 
     def _review_pending(self, kind, summary, can_commit=True, rows=None):
+        if kind not in ("remnant", "seed"):
+            self._require_remnant_review_finished()
         self._failed_review = False
         if kind == "remnant" and self.recipe_table.property("savedRemnant"):
             self._render_recipe_rows([])
@@ -867,6 +872,10 @@ class LoggerWindow(QMainWindow):
             return self.reject_remnant_scan()
         if kind is None:
             return
+        if kind == "waystone":
+            self._waystone_form_baseline = None
+        elif kind == "tablet":
+            self._clear_tablet_form_dirty(self._pending_tablet_slot, clear_capacity=True)
         self.pending_review_kind = None
         self._pending_currency_map = self._pending_ritual_map = self._pending_tablet_slot = None
         self._pending_currency_phase = None
@@ -1121,7 +1130,8 @@ class LoggerWindow(QMainWindow):
             keys.addWidget(button("Clear", lambda checked=False, target=kind:
                                   self.run(lambda: self.clear_hotkey(target))), index, 3)
         hotkey.addLayout(keys)
-        propagation_help = QLabel("Propagation uses only its own key. Clear reads add runes to the chain draft; "
+        propagation_help = QLabel("Propagation uses only its own key. Each accepted scan counts one detonated remnant "
+                                  "and adds its runes to the chain draft; "
                                   "Commit chain saves the draft and advances the expedition number.")
         propagation_help.setWordWrap(True)
         hotkey.addWidget(propagation_help)
@@ -1554,16 +1564,15 @@ class LoggerWindow(QMainWindow):
         self.chain_list.hide()
 
     def _build_kill_controls(self, content):
-        kills = self._group("MAP KILLS & EXPEDITION DETONATIONS", content)
+        kills = self._group("MAP KILLS", content)
         grid = QGridLayout()
         grid.setHorizontalSpacing(16)
         self.normal = line("Normal kills")
         self.magic = line("Magic kills")
         self.rare = line("Rare kills")
-        self.detonated = line("Remnants detonated")
+        self.unique = line("Unique kills")
         for i, (label, widget) in enumerate((("Normal kills", self.normal), ("Magic kills", self.magic),
-                                            ("Rare kills", self.rare),
-                                            ("Remnants detonated · expedition", self.detonated))):
+                                            ("Rare kills", self.rare), ("Unique kills", self.unique))):
             column = QVBoxLayout()
             column.addWidget(QLabel(label))
             column.addWidget(widget)
@@ -1716,13 +1725,75 @@ class LoggerWindow(QMainWindow):
             self.rune_inputs.append(field)
             field.textChanged.connect(self._chain_fields_changed)
 
+    def _waystone_form(self):
+        fields = (self.waystone, self.map_mods, self.item_rarity, self.monster_rarity,
+                  self.pack_size, self.effectiveness, self.waystone_name, *self.waystone_mod_fields)
+        return (value(self.tier), value(self.aldur), tuple(field.text() for field in fields),
+                tuple(self._extra_waystone_mods))
+
+    def _restore_waystone_form(self, draft):
+        tier, aldur, texts, extra_mods = draft
+        select(self.tier, tier)
+        select(self.aldur, aldur)
+        fields = (self.waystone, self.map_mods, self.item_rarity, self.monster_rarity,
+                  self.pack_size, self.effectiveness, self.waystone_name, *self.waystone_mod_fields)
+        for field, text in zip(fields, texts):
+            field.setText(text)
+        self._extra_waystone_mods = list(extra_mods)
+        self.waystone_name.setVisible(bool(self.waystone_name.text()))
+        self.update_area()
+
+    def _tablet_form(self):
+        slots = []
+        for number in range(4):
+            start = number * 4
+            entries = tuple((value(affix), amount.text(),
+                amount.property("unit") if amount.property("affix") == value(affix) else affix_unit(value(affix)))
+                for affix, amount in zip(self.tablet_affixes[start:start + 4], self.tablet_values[start:start + 4]))
+            slots.append((entries, tuple(self.tablet_raw_mods[number])))
+        return value(self.tablets_used), tuple(slots)
+
+    def _clear_tablet_form_dirty(self, number=None, clear_capacity=False):
+        if number is None or self._tablet_form_baseline is None:
+            self._tablet_form_baseline = None
+        else:
+            slots = list(self._tablet_form_baseline[1])
+            slots[number - 1] = None
+            self._tablet_form_baseline = (None if clear_capacity else self._tablet_form_baseline[0], tuple(slots))
+
+    def _require_remnant_review_finished(self):
+        if self.pending_review_kind in ("remnant", "seed") or logger.get_state()["ocr_pending"]:
+            raise ValueError("Save or reject the pending remnant scan before scanning another activity.")
+
     def refresh(self):
-        waystone_draft = None
-        if self.pending_review_kind == "waystone":
-            waystone_draft = (value(self.tier), [(field, field.text()) for field in
-                (self.waystone, self.map_mods, self.item_rarity, self.monster_rarity,
-                 self.pack_size, self.effectiveness, self.waystone_name, *self.waystone_mod_fields)],
-                list(self._extra_waystone_mods))
+        waystone_values = self._waystone_form()
+        count_values = tuple(field.text() for field in (self.normal, self.magic, self.rare, self.unique))
+        tablet_values = self._tablet_form()
+        active_master_value = value(self.master)
+        perk_values = (value(self.perk_master), tuple(value(field) for field in self.perk_boxes))
+        state = logger.get_state()
+        map_context = (logger.session_generation(), state["current_map_id"])
+        same_map = map_context == self._form_map_context
+        waystone_draft = waystone_values if (
+            self.pending_review_kind == "waystone" or same_map and
+            self._waystone_form_baseline is not None and
+            waystone_values != self._waystone_form_baseline) else None
+        count_drafts = {index: text for index, text in enumerate(count_values)
+                        if same_map and self._counts_form_baseline is not None and
+                        text != self._counts_form_baseline[index]}
+        tablet_drafts = {number: slot for number, slot in enumerate(tablet_values[1], 1)
+                         if same_map and self._tablet_form_baseline is not None and
+                         self._tablet_form_baseline[1][number - 1] is not None and
+                         slot != self._tablet_form_baseline[1][number - 1]}
+        tablet_capacity_draft = tablet_values[0] if (
+            same_map and self._tablet_form_baseline is not None and
+            self._tablet_form_baseline[0] is not None and
+            tablet_values[0] != self._tablet_form_baseline[0]) else None
+        active_master_draft = active_master_value if (
+            same_map and self._active_master_baseline is not None and
+            active_master_value != self._active_master_baseline) else None
+        perk_draft = perk_values if (same_map and self._perk_form_baseline is not None and
+                                    perk_values != self._perk_form_baseline) else None
         tablet_draft = None
         if self.pending_review_kind == "tablet" and self._pending_tablet_slot is not None:
             number = self._pending_tablet_slot
@@ -1731,8 +1802,7 @@ class LoggerWindow(QMainWindow):
                         "unit": v.property("unit") if v.property("affix") == value(a) else affix_unit(value(a))}
                        for a, v in zip(self.tablet_affixes[start:start + 4], self.tablet_values[start:start + 4])]
             tablet_draft = (number, entries, list(self.tablet_raw_mods[number - 1]), int(value(self.tablets_used)))
-        self.state = logger.get_state()
-        state = self.state
+        self.state = state
         config = state["settings"]
         target = state.get("atlas_settings_target_map_id", "")
         self.atlas_settings_page.set_settings(config.get("atlas_settings"),
@@ -1787,9 +1857,16 @@ class LoggerWindow(QMainWindow):
         self.tablet_raw_mods = [list(mods) for mods in config.get("tablet_raw_mods", [[] for _ in range(4)])]
         self.show_tablet_raw()
         select(self.master, config["atlas_master"])
+        self._active_master_baseline = value(self.master)
+        if active_master_draft is not None:
+            select(self.master, active_master_draft)
         self.update_area()
-        select(self.perk_master, config["atlas_master"] if config["atlas_master"] != "None" else "Jado")
+        select(self.perk_master, perk_values[0] if same_map else
+               config["atlas_master"] if config["atlas_master"] != "None" else "Jado")
         self.render_perks()
+        if perk_draft is not None:
+            for field, selected in zip(self.perk_boxes, perk_draft[1]):
+                select(field, selected)
         select(self.tablets_used, config["tablets_used"])
         for i, (affix, amount) in enumerate(zip(self.tablet_affixes, self.tablet_values)):
             current = config["tablet_affixes"][i]
@@ -1802,21 +1879,30 @@ class LoggerWindow(QMainWindow):
             amount.setText("" if current["value"] is None else str(current["value"]))
             amount.setProperty("affix", current["affix"])
             amount.setProperty("unit", current.get("unit") or affix_unit(current["affix"]))
+        self._tablet_form_baseline = self._tablet_form()
+        for number, (slot, raw) in tablet_drafts.items():
+            self._fill_tablet_slot(number,
+                [{"affix": affix, "value": amount, "unit": unit} for affix, amount, unit in slot], raw)
+        if tablet_capacity_draft is not None:
+            select(self.tablets_used, tablet_capacity_draft)
         if tablet_draft is not None:
             number, entries, raw, capacity = tablet_draft
             self._fill_tablet_slot(number, entries, raw)
             select(self.tablets_used, max(capacity, number))
         self.tablet_active()
+        self.show_tablet_raw()
         self._sync_header_ids(state)
         self._load_chain_context()
-        self.chain_note.setText(f"Commit the entire chain to {state['current_expedition_id'] or 'the first map'} in order.")
         self.chain_list.clear()
         for entry in state["chain"]:
             self.chain_list.addItem(f"#{entry['step']}  " + " · ".join(filter(None, (entry['rune1'], entry['rune2']))))
         self.chain_list.setVisible(bool(state["chain"]))
-        for index, widget in enumerate((self.normal, self.magic, self.rare)):
-            widget.setText("" if state["kills"][index] is None else str(state["kills"][index]))
-        self.detonated.setText("" if state["detonated"] is None else str(state["detonated"]))
+        kill_values = (*state["kills"], state.get("unique_kills"))
+        for widget, count in zip((self.normal, self.magic, self.rare, self.unique), kill_values):
+            widget.setText("" if count is None else str(count))
+        self._counts_form_baseline = tuple(field.text() for field in (self.normal, self.magic, self.rare, self.unique))
+        for index, text in count_drafts.items():
+            (self.normal, self.magic, self.rare, self.unique)[index].setText(text)
         self.export_folder.setText(state["export_folder"])
         counts = state["counts"]
         set_message(self.counts, f"{counts['historical_rows']} imported rows · {counts['new_rows']} new rows · "
@@ -1861,14 +1947,10 @@ class LoggerWindow(QMainWindow):
             self._currency_catalog_loaded = True
         self.refresh_currency_summary()
         self.refresh_ritual_summary()
+        self._waystone_form_baseline = self._waystone_form()
+        self._form_map_context = map_context
         if waystone_draft is not None:
-            tier, fields, extra_mods = waystone_draft
-            select(self.tier, tier)
-            for field, text in fields:
-                field.setText(text)
-            self._extra_waystone_mods = extra_mods
-            self.waystone_name.setVisible(bool(self.waystone_name.text()))
-            self.update_area()
+            self._restore_waystone_form(waystone_draft)
 
     def save_atlas_settings(self, data):
         state = logger.save_atlas_settings(data)
@@ -1984,6 +2066,7 @@ class LoggerWindow(QMainWindow):
                 for name in choices:
                     widget.addItem(name, name)
             select(widget, saved[i])
+        self._perk_form_baseline = (master, tuple(value(field) for field in self.perk_boxes))
 
     def save_map_settings(self):
         logger.save_settings({"waystone": value(self.waystone), "tier": value(self.tier),
@@ -1999,15 +2082,17 @@ class LoggerWindow(QMainWindow):
                               "waystone_mods": [value(field) for field in self.waystone_mod_fields]
                                                 + self._extra_waystone_mods})
         commit_number = logger.record_commit("Map settings")
+        self._waystone_form_baseline = None
+        self._review_saved("waystone", commit_number)
         self.refresh()
         self._set_commit_badge(commit_number)
-        self._review_saved("waystone", commit_number)
         self.note("Map settings saved.")
         return commit_number
 
     def save_active_master(self):
         logger.save_settings({"atlas_master": value(self.master)})
         commit_number = logger.record_commit("Atlas Master")
+        self._active_master_baseline = None
         self.refresh()
         self._set_commit_badge(commit_number)
         self.note("Active Atlas Master saved.", True)
@@ -2018,6 +2103,7 @@ class LoggerWindow(QMainWindow):
         selections[master] = [value(item) for item in self.perk_boxes]
         logger.save_settings({"master_selections": selections})
         commit_number = logger.record_commit("Master perks", master)
+        self._perk_form_baseline = None
         self.refresh()
         self._set_commit_badge(commit_number)
         self.note(f"{master} perks saved.")
@@ -2052,6 +2138,7 @@ class LoggerWindow(QMainWindow):
                              confirmed_affixes=sorted({item["affix"] for item in entries
                                                        if item["affix"] and item["affix"] not in self.state["affixes"]}))
         commit_number = logger.record_commit("Tablet config")
+        self._clear_tablet_form_dirty(reviewed)
         if reviewed == next_slot:
             logger.advance_tablet_slot(next_slot)
         self._review_saved("tablet", commit_number)
@@ -2063,6 +2150,7 @@ class LoggerWindow(QMainWindow):
     def clear_tablets(self):
         service.HOTKEY.cancel_capture()
         logger.clear_tablets()
+        self._clear_tablet_form_dirty()
         self._pending_tablet_slot = None
         self.refresh()
         if self.pending_review_kind == "tablet":
@@ -2085,7 +2173,7 @@ class LoggerWindow(QMainWindow):
 
     def counts_data(self):
         return {"normal": value(self.normal), "magic": value(self.magic),
-                "rare": value(self.rare), "detonated": value(self.detonated)}
+                "rare": value(self.rare), "unique": value(self.unique)}
 
     def finish_map(self):
         service.HOTKEY.cancel_capture()
@@ -2106,6 +2194,8 @@ class LoggerWindow(QMainWindow):
                   + (" Previous map totals saved." if previous else ""), True)
 
     def _clear_map_review(self):
+        self._waystone_form_baseline = self._counts_form_baseline = None
+        self._tablet_form_baseline = self._active_master_baseline = self._perk_form_baseline = None
         self.pending_review_kind = None
         self._failed_review = False
         self._remnant_reading = None
@@ -2179,9 +2269,15 @@ class LoggerWindow(QMainWindow):
                 field.setProperty("chainPart", None)
                 field.setProperty("chainRecipe", None)
         if self._chain_context is not None:
-            self._chain_drafts[self._chain_key(self._chain_context)] = [
-                {"rune": value(field), "part": field.property("chainPart"),
-                 "recipe": field.property("chainRecipe") or ""} for field in self.rune_inputs]
+            key = self._chain_key(self._chain_context)
+            if any(value(field) for field in self.rune_inputs):
+                self._chain_drafts[key] = [
+                    {"rune": value(field), "part": field.property("chainPart"),
+                     "recipe": field.property("chainRecipe") or ""} for field in self.rune_inputs]
+            else:
+                # Completed and cleared chains need no draft. Retaining their
+                # empty field lists would grow memory with every expedition.
+                self._chain_drafts.pop(key, None)
         self._refresh_chain_review()
 
     def _load_chain_context(self):
@@ -2245,12 +2341,18 @@ class LoggerWindow(QMainWindow):
         self.chain_review_group.setVisible(table.rowCount() > 0)
         self.review_commit_chain_button.setEnabled(table.rowCount() > 0)
         expedition_id = self.state.get("current_expedition_id") or "the active expedition"
+        detonated = self.state.get("detonated") or 0
+        self.chain_note.setText(f"{expedition_id} · {detonated} remnants detonated. "
+                               "Commit the entire chain in order.")
         set_message(self.chain_review_status,
-                    f"{expedition_id} · {part_number} chain parts · {table.rowCount()} runes in scan order. "
+                    f"{expedition_id} · {detonated} remnants detonated · {part_number} chain parts · "
+                    f"{table.rowCount()} runes in scan order. "
+                    "Each propagation scan counts one remnant. "
                     "Commit chain saves these parts and advances the expedition number.")
 
     def _propagation_read(self, result, raw=None):
         logger.validate_scan_context(result)
+        self._require_remnant_review_finished()
         self._load_chain_context()
         self._propagation_reading = dict(result)
         self._show_image(raw)
@@ -2274,6 +2376,8 @@ class LoggerWindow(QMainWindow):
         start = occupied[-1] + 1 if occupied else 0
         if start + len(runes) > 96:
             raise ValueError("This chain draft already has the maximum of 96 runes.")
+        saved = logger.increment_propagation_detonated(self._chain_context,
+            runes=runes, recipe=result.get("selected_recipe") or "")
         if start + len(runes) > len(self.rune_inputs):
             self.add_runes(start + len(runes) - len(self.rune_inputs))
         self._chain_scan_number += 1
@@ -2283,6 +2387,9 @@ class LoggerWindow(QMainWindow):
                 field.setProperty("chainPart", f"scan-{self._chain_scan_number}")
                 field.setProperty("chainRecipe", result.get("selected_recipe") or "")
                 field.setText(rune.strip())
+        self.state["detonated"] = saved["detonated"]
+        self.state["scan_commit_count"] = saved["scan_commit_number"]
+        self._set_commit_badge(saved["scan_commit_number"])
         self._chain_fields_changed()
         self._propagation_reading = None
         self.pending_review_kind = None
@@ -2292,7 +2399,8 @@ class LoggerWindow(QMainWindow):
         self.found_label.hide()
         set_message(self.review_summary,
                     f"{result.get('selected_recipe') or 'Selected recipe'} · " + " → ".join(runes)
-                    + " added to the chain draft. Use Commit chain when the chain is complete.", "success")
+                    + f" added to the chain draft. {saved['expedition_id']} · {saved['detonated']} remnants detonated. "
+                    "Use Commit chain when the chain is complete.", "success")
         self._overlay_review_token += 1
         token = self._overlay_review_token
         QTimer.singleShot(0, lambda: self.show_overlay() if self._overlay_enabled and
@@ -2322,10 +2430,11 @@ class LoggerWindow(QMainWindow):
 
     def save_counts(self):
         data = self.counts_data()
-        saved = logger.save_counts(data["normal"], data["magic"], data["rare"], data["detonated"])
+        saved = logger.save_counts(data["normal"], data["magic"], data["rare"], unique=data["unique"])
+        self._counts_form_baseline = None
         self.refresh()
         self._set_commit_badge(saved["scan_commit_number"])
-        self.note("Map kills and expedition detonations updated.", True)
+        self.note("Map kill counts saved.", True)
 
     def edit_region(self):
         self.choose_scan_region("live_region")
@@ -3393,6 +3502,14 @@ class LoggerWindow(QMainWindow):
         if self._overlay_auto_review and not self.pending_review_kind:
             self.hide_overlay()
         hotkey = service.HOTKEY.status()
+        if (self._overlay_enabled and not self._closed and not self.isVisible() and
+                not (hotkey["supported"] and hotkey["registered"] and
+                     hotkey["combos"].get("overlay"))):
+            # A listener can stop after the HUD has already hidden. Keep a
+            # taskbar entry available even when its restoration key is lost.
+            self.showMinimized()
+            self.statusBar().showMessage(
+                "HUD shortcut unavailable. Restore the logger from the taskbar to set it again.", 8000)
         event = hotkey["latest"]
         if event and event["id"] != self._latest_hotkey:
             self._latest_hotkey = event["id"]
@@ -3428,6 +3545,7 @@ class LoggerWindow(QMainWindow):
 
     def _hover_item_read(self, result, raw=None):
         logger.validate_scan_context(result)
+        self._require_remnant_review_finished()
         self.tabs.setCurrentIndex(2)
         if raw:
             self._show_image(raw)
@@ -3592,6 +3710,7 @@ class LoggerWindow(QMainWindow):
 
     def _tablet_read(self, number, result):
         logger.validate_scan_context(result)
+        self._require_remnant_review_finished()
         auto = self.auto_tablet_checkbox.isChecked()
         next_slot = logger.tablet_next_slot()
         if next_slot > 4:
@@ -3639,11 +3758,6 @@ class LoggerWindow(QMainWindow):
                              if item["raw"] in original_mods else len(original_mods))
         preview_matches = preview_matches[:4]
         if preview_matches:
-            if auto and number == 1:
-                for affix, amount in zip(self.tablet_affixes, self.tablet_values):
-                    select(affix, "")
-                    amount.clear()
-                self.tablet_raw_mods = [[] for _ in range(4)]
             select(self.tablets_used, max(int(value(self.tablets_used)), number))
             select(self.tablet_scan_number, number)
         if preview_matches:
@@ -3664,10 +3778,11 @@ class LoggerWindow(QMainWindow):
         if auto and result["status"] == "ready" and all(
                 item["score"] >= .94 for item in result["matches"]):
             saved_number = logger.save_scanned_tablet(result["matches"], original_mods)
+            self._clear_tablet_form_dirty(saved_number)
             self.state = logger.get_state()
             self._set_commit_badge(self.state["scan_commit_count"])
             self._review_saved("tablet", self.state["scan_commit_count"])
-            select(self.tablets_used, self.state["settings"]["tablets_used"])
+            select(self.tablets_used, max(int(value(self.tablets_used)), self.state["settings"]["tablets_used"]))
             next_slot = logger.tablet_next_slot()
             self.auto_tablet_next.setText(
                 f"Next tablet: {next_slot} of 4" if next_slot <= 4 else
@@ -3711,6 +3826,7 @@ class LoggerWindow(QMainWindow):
         self.refresh_currency_summary()
 
     def _inventory_captured(self, image, live=True, expected_map_id=None, expected_phase=None):
+        self._require_remnant_review_finished()
         service.HOTKEY.cancel_capture()
         phase = expected_phase or value(self.inventory_phase)
         map_id = logger.currency_target_map(phase)
@@ -3761,6 +3877,7 @@ class LoggerWindow(QMainWindow):
             return
         if capture is not None:
             logger.validate_scan_context(capture["context"])
+        self._require_remnant_review_finished()
         phase = capture["phase"] if capture is not None else value(self.inventory_phase)
         map_id = logger.currency_target_map(phase)
         if expected_map_id is not None and expected_map_id != map_id:
@@ -3981,6 +4098,7 @@ class LoggerWindow(QMainWindow):
             self._ritual_captured(image, live=False)
 
     def _ritual_captured(self, image, live=True, expected_map_id=None):
+        self._require_remnant_review_finished()
         service.HOTKEY.cancel_capture()
         map_id = logger.get_state()["current_map_id"]
         if expected_map_id is not None and expected_map_id != map_id:
@@ -4010,6 +4128,7 @@ class LoggerWindow(QMainWindow):
             return
         if capture is not None:
             logger.validate_scan_context(capture["context"])
+        self._require_remnant_review_finished()
         map_id = logger.get_state()["current_map_id"]
         if expected_map_id is not None and expected_map_id != map_id:
             raise ValueError(f"The Ritual scan belongs to {expected_map_id}. Scan {map_id} again.")
@@ -4120,10 +4239,21 @@ class LoggerWindow(QMainWindow):
             "backup": ("PoE2_Data_Backup.sqlite3", "SQLite database (*.sqlite3)", logger.backup_bytes),
         }
         name, extension, produce = choices[kind]
-        path, _ = QFileDialog.getSaveFileName(self, "Save file", str(Path.home() / name), extension)
+        title = "Save CSV and Atlas companion" if kind == "csv" else "Save file"
+        path, _ = QFileDialog.getSaveFileName(self, title, str(Path.home() / name), extension)
         if path:
+            destination = Path(path)
+            atlas_path = destination.with_name(destination.stem + "_Atlas.csv")
+            if kind == "csv" and (atlas_path.exists() or atlas_path.is_symlink()):
+                answer = QMessageBox.question(
+                    self, "Replace Atlas companion?",
+                    "This CSV export also saves its Atlas settings to:\n\n"
+                    f"{atlas_path}\n\nThat file already exists. Replace it?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No)
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
             def write():
-                destination = Path(path)
                 atlas_data = None
                 if kind == "csv":
                     with logger._connect() as db:
@@ -4132,7 +4262,6 @@ class LoggerWindow(QMainWindow):
                         atlas_data = logger.export_atlas_csv(_db=db)
                 else:
                     data = produce()
-                atlas_path = destination.with_name(destination.stem + "_Atlas.csv")
                 if atlas_data is not None:
                     write_export_files({destination: data, atlas_path: atlas_data})
                 else:
@@ -4290,6 +4419,7 @@ class LoggerWindow(QMainWindow):
         self.note(f"Family {saved['family']} · {saved['sockets']}-socket visible seed saved.", True)
 
     def load_saved_scan(self, item):
+        self._require_remnant_review_finished()
         scan_id = item.data(Qt.ItemDataRole.UserRole)
         path = store.image_for(scan_id)
         if not path or not path.exists():
@@ -4297,6 +4427,7 @@ class LoggerWindow(QMainWindow):
         self.mode = "seed"
         select(self.mode_select, "seed")
         self.images["seed"] = path.read_bytes()
+        service.HOTKEY.set_mode("seed")
         self.current_file["seed"] = path.name
         self._show_image(self.images["seed"])
         self.tabs.setCurrentIndex(0)

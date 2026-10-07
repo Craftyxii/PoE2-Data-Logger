@@ -5,6 +5,7 @@ import tempfile
 import threading
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import numpy as np
 from PIL import Image
@@ -44,6 +45,45 @@ class RecognitionTests(unittest.TestCase):
         result = item_ocr.parse_ritual([self.row(name), self.row("4,000", y=70, score=.1, right=110)], [name])
         self.assertEqual(result["items"][0]["tribute"], 4000)
         self.assertFalse(clear_ritual_read(result, [name]))
+
+    def test_ritual_available_tribute_header_does_not_block_clear_rewards(self):
+        name = "Omen of Whittling"
+        for header in ("5,430 Tribute", "2 5,430 Tribute"):
+            with self.subTest(header=header):
+                result = item_ocr.parse_ritual([
+                    self.row("Favours", y=10), self.row("2", y=35),
+                    self.row(header, y=40), self.row(name + " 4,000", y=160)], [name])
+                self.assertEqual(result["unmatched"], [])
+                self.assertEqual(result["items"][0]["tribute"], 4000)
+                self.assertTrue(clear_ritual_read(result, [name]))
+
+    def test_ritual_reward_tribute_price_remains_attached_to_its_reward(self):
+        name = "Omen of Whittling"
+        result = item_ocr.parse_ritual([
+            self.row("Favours", y=10), self.row(name, y=80),
+            self.row("4,000 Tribute", y=110, right=110)], [name])
+        self.assertEqual(result["items"][0]["tribute"], 4000)
+        self.assertTrue(clear_ritual_read(result, [name]))
+
+    def test_ritual_unknown_reward_still_blocks_automatic_approval(self):
+        name = "Omen of Whittling"
+        result = item_ocr.parse_ritual([
+            self.row("Favours", y=10), self.row("5,430 Tribute", y=40),
+            self.row(name + " 4,000", y=160), self.row("Unreadable ??? reward", y=210)], [name])
+        self.assertEqual(result["unmatched"], ["Unreadable ??? reward"])
+        self.assertFalse(clear_ritual_read(result, [name]))
+
+    def test_ritual_ambiguous_or_weak_header_is_not_silently_discarded(self):
+        name = "Omen of Whittling"
+        for rows in ([self.row("Favours", y=10), self.row("5,430 Tribute", y=40, score=.6)],
+                     [self.row("Favours", y=10), self.row("5,430 Tribute", y=40, score=.85)],
+                     [self.row("Favours", y=10), self.row("Unreadable ??? reward", y=30),
+                      self.row("5,430 Tribute", y=40)],
+                     [self.row("5,430 Tribute", y=40)]):
+            with self.subTest(rows=rows):
+                result = item_ocr.parse_ritual([*rows, self.row(name + " 4,000", y=160)], [name])
+                self.assertIn("5,430 Tribute", result["unmatched"])
+                self.assertFalse(clear_ritual_read(result, [name]))
 
     def test_prices_stay_in_their_own_column(self):
         names = ["Omen of Whittling", "Omen of Sinistral Erasure"]
@@ -120,6 +160,61 @@ class RecognitionTests(unittest.TestCase):
         self.assertTrue(auto_commit.candidate(good)["ready"], good)
         self.assertFalse(auto_commit.candidate(bad)["ready"])
         self.assertFalse(bad["can_use"] if "can_use" in bad else False)
+
+    def native_opened_rows(self):
+        return [{"text": "Unrelated caption", "score": .99,
+                 "x1": 20, "y1": 115, "x2": 200, "y2": 133},
+                {"text": "3x Perfect Chaos Orb", "score": .99,
+                 "x1": 200, "y1": 175, "x2": 400, "y2": 195},
+                {"text": "3x Perfect Exalted Orb", "score": .99,
+                 "x1": 200, "y1": 245, "x2": 400, "y2": 265}]
+
+    def native_opened(self, header, verify_header=True):
+        image = Image.new("RGB", (600, 500), (190, 190, 190))
+        with patch.object(opened_scan.runehelper_ocr, "recognize",
+                          return_value=self.native_opened_rows()), patch.object(
+                opened_scan, "_engine", return_value=lambda unused: header), patch.object(
+                opened_scan, "_icon_count", return_value=self.partial()["sockets"]), patch.object(
+                opened_scan, "_list_complete", return_value=False):
+            return opened_scan.scan_opened(image, allow_fallback=False,
+                                            verify_header=verify_header)
+
+    def test_native_missing_heading_preserves_recipes_but_cannot_auto_commit(self):
+        result = self.native_opened(SimpleNamespace(boxes=None))
+        self.assertEqual(result["first_recipe"], "Perfect Chaos Orb x3")
+        self.assertEqual(result["next_recipe"], "Perfect Exalted Orb x3")
+        self.assertEqual(result["family"], "Family 3")
+        self.assertFalse(result["header_verified"])
+        self.assertIsNone(result["first_line_gap"])
+        self.assertFalse(result["can_use"])
+        self.assertFalse(auto_commit.candidate(result)["ready"])
+        self.assertIn("heading not found", result["status"])
+
+    def test_native_low_confidence_or_wrong_heading_requires_review(self):
+        box = [[170, 90], [450, 90], [450, 105], [170, 105]]
+        for text, confidence in (("Runeshape Combinations", .1), ("Other heading", .99)):
+            with self.subTest(text=text, confidence=confidence):
+                result = self.native_opened(SimpleNamespace(boxes=[box], txts=[text],
+                                                            scores=[confidence]))
+                self.assertFalse(result["header_verified"])
+                self.assertFalse(result["can_use"])
+                self.assertFalse(auto_commit.candidate(result)["ready"])
+
+    def test_native_verified_heading_still_allows_automatic_approval(self):
+        result = self.native_opened(SimpleNamespace(
+            boxes=[[[170, 90], [450, 90], [450, 105], [170, 105]]],
+            txts=["Runeshape Combinations"], scores=[.99]))
+        self.assertTrue(result["header_verified"])
+        self.assertEqual(result["first_line_gap"], 70)
+        self.assertTrue(result["can_use"])
+        self.assertTrue(auto_commit.candidate(result)["ready"])
+
+    def test_explicit_heading_bypass_preserves_propagation_recipe_context(self):
+        result = self.native_opened(SimpleNamespace(boxes=None), verify_header=False)
+        self.assertFalse(result["header_verified"])
+        self.assertEqual(result["first_recipe"], "Perfect Chaos Orb x3")
+        self.assertEqual(result["family"], "Family 3")
+        self.assertTrue(result["can_use"])
 
     def test_rank_cache_preserves_results_and_count_mask(self):
         reader = currency_ocr.CurrencyReader()

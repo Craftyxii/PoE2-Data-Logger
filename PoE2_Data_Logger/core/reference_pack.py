@@ -81,6 +81,7 @@ def _recipe_name(db, raw):
 def export_pack():
     assets = {}
     with logger._connect() as db:
+        db.execute("BEGIN")
         tables = {}
         for table, query in {
             "families": "SELECT id,top_socket,valid,recipes_json FROM families ORDER BY id",

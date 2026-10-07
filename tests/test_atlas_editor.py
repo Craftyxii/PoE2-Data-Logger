@@ -4,10 +4,10 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QValidator
+from PySide6.QtWidgets import QApplication, QToolTip
+from PySide6.QtGui import QTextDocument, QValidator
 
 from PoE2_Data_Logger.core.atlas_catalog import catalog as bundled_catalog
 from PoE2_Data_Logger.ui.atlas_settings import AtlasSettingsPage
@@ -18,7 +18,8 @@ def fixture_catalog():
         return {"id": node_id, "hash": node_id, "name": node_id.title(),
                 "activity": activity, "x": x, "y": y, "kind": kind,
                 "allocatable": kind not in ("root", "decorative"),
-                "effects": [f"Effect for {node_id}"], "stats": {},
+                "effects": [f"Effect for {node_id}"] if kind not in ("root", "decorative") else [],
+                "stats": {},
                 "choices": choices or []}
     choices = [{"id": "desert", "name": "Desert", "effects": ["10% rarity in Desert"], "stats": {}},
                {"id": "swamp", "name": "Swamp", "effects": ["10% rarity in Swamp"], "stats": {}}]
@@ -46,6 +47,7 @@ class AtlasEditorTests(unittest.TestCase):
         self.app.processEvents()
 
     def tearDown(self):
+        QToolTip.hideText()
         self.page.choice_combo.hidePopup()
         self.page.close()
         self.page.deleteLater()
@@ -57,6 +59,18 @@ class AtlasEditorTests(unittest.TestCase):
         point = self.page.view.mapFromScene(item.pos())
         QTest.mouseClick(self.page.view.viewport(), Qt.MouseButton.LeftButton, pos=point)
         self.app.processEvents()
+
+    def hover_node(self, node_id):
+        viewport = self.page.view.viewport()
+        QTest.mouseMove(viewport, QPoint(5, 5))
+        self.app.processEvents()
+        point = self.page.view.mapFromScene(self.page.node_items[node_id].pos())
+        QTest.mouseMove(viewport, point)
+        self.app.processEvents()
+        self.assertTrue(QToolTip.isVisible(), "Node hover should display the effects popup immediately")
+        document = QTextDocument()
+        document.setHtml(QToolTip.text())
+        return document.toPlainText()
 
     def test_click_allocates_lights_node_and_click_again_removes(self):
         self.click_node("rarity")
@@ -192,6 +206,97 @@ class AtlasEditorTests(unittest.TestCase):
         finally:
             page.close()
             page.deleteLater()
+
+    def test_hover_shows_effects_without_allocating_or_selecting_node(self):
+        before = self.page.settings()
+        text = self.hover_node("maps")
+        self.assertIn("Maps", text)
+        self.assertIn("Main Atlas", text)
+        self.assertIn("Not allocated", text)
+        self.assertIn("Effect for maps", text)
+        self.assertEqual(self.page.settings(), before)
+        self.assertIsNone(self.page._selected_node)
+        self.assertEqual(self.page.node_title.text(), "Select an Atlas node")
+        self.assertFalse(self.page.dirty)
+
+    def test_hover_does_not_replace_selection_or_existing_unsaved_draft(self):
+        self.click_node("rarity")
+        self.page.gear_rarity.setValue(150)
+        before = self.page.settings()
+        self.assertTrue(self.page.dirty)
+        self.hover_node("maps")
+        self.assertEqual(self.page.settings(), before)
+        self.assertEqual(self.page._selected_node, "rarity")
+        self.assertEqual(self.page.node_title.text(), "Rarity")
+        self.assertTrue(self.page.dirty)
+
+    def test_unset_choice_hover_lists_all_available_effects(self):
+        text = self.hover_node("choice")
+        self.assertIn("Effect for choice", text)
+        self.assertIn("Choose one effect", text)
+        self.assertIn("Desert", text)
+        self.assertIn("10% rarity in Desert", text)
+        self.assertIn("Swamp", text)
+        self.assertIn("10% rarity in Swamp", text)
+        self.assertEqual(self.page.settings()["choices"], {})
+        self.assertFalse(self.page.choice_combo.isVisible())
+
+    def test_selected_choice_hover_shows_only_selected_effect(self):
+        self.page.set_settings({"allocated": ["choice"], "choices": {"choice": "swamp"}})
+        text = self.hover_node("choice")
+        self.assertIn("Allocated", text)
+        self.assertIn("Effect for choice", text)
+        self.assertIn("Swamp", text)
+        self.assertIn("10% rarity in Swamp", text)
+        self.assertNotIn("10% rarity in Desert", text)
+        self.assertEqual(self.page.settings()["choices"], {"choice": "swamp"})
+        self.assertFalse(self.page.dirty)
+
+    def test_off_node_hover_labels_saved_choice_as_inactive(self):
+        self.page.set_settings({"allocated": [], "choices": {"choice": "swamp"}})
+        text = self.hover_node("choice")
+        self.assertIn("Saved choice (inactive)", text)
+        self.assertIn("10% rarity in Swamp", text)
+        self.assertNotIn("Selected effect", text)
+        self.assertEqual(self.page.settings()["allocated"], [])
+
+    def test_hover_popup_disappears_when_mouse_leaves_or_tree_hides(self):
+        self.hover_node("maps")
+        QTest.mouseMove(self.page.view.viewport(), QPoint(5, 5))
+        QTest.qWait(350)
+        self.assertFalse(QToolTip.isVisible())
+        self.hover_node("maps")
+        self.page.view.hide()
+        QTest.qWait(350)
+        self.assertFalse(QToolTip.isVisible())
+
+    def test_hover_renders_multiline_effect_safely(self):
+        self.page.node_items["maps"].node["effects"] = ["First line\nSecond line <tag> & details"]
+        self.page._update_visuals()
+        text = self.hover_node("maps")
+        self.assertIn("First line\nSecond line <tag> & details", text)
+        self.assertIn("&lt;tag&gt;", QToolTip.text())
+
+    def test_clicking_node_dismisses_effects_popup(self):
+        self.hover_node("maps")
+        self.click_node("maps")
+        QTest.qWait(350)
+        self.assertFalse(QToolTip.isVisible())
+        self.assertEqual(self.page.settings()["allocated"], ["maps"])
+
+    def test_root_hover_identifies_starting_point_without_allocation_label(self):
+        text = self.hover_node("root")
+        self.assertIn("Activity starting point", text)
+        self.assertIn("No Atlas bonuses", text)
+        self.assertNotIn("Not allocated", text)
+        self.assertEqual(self.page.settings()["allocated"], [])
+
+    def test_decoration_hover_identifies_nonallocatable_art(self):
+        text = self.hover_node("decoration")
+        self.assertIn("Atlas decoration", text)
+        self.assertIn("No Atlas bonuses", text)
+        self.assertNotIn("Not allocated", text)
+        self.assertEqual(self.page.settings()["allocated"], [])
 
 
 if __name__ == "__main__":

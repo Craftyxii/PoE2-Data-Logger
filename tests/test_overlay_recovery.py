@@ -105,6 +105,20 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.escape()
         self.assert_taskbar_recovery()
 
+    def test_listener_stopping_after_hiding_restores_taskbar_recovery(self):
+        self.window.hide_overlay()
+        self.assertFalse(self.window.isVisible())
+        self.manager._unregister()
+        self.window.poll()
+        self.assert_taskbar_recovery()
+
+    def test_hud_key_lost_after_hiding_restores_taskbar_recovery(self):
+        self.window.hide_overlay()
+        self.assertFalse(self.window.isVisible())
+        self.manager.configure_for("overlay", "")
+        self.window.poll()
+        self.assert_taskbar_recovery()
+
     def test_hiding_while_assigning_a_key_resumes_hud_shortcut(self):
         self.window.tabs.setCurrentIndex(6)
         self.window.arm_hotkey("waystone")

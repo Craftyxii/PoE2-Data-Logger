@@ -181,7 +181,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual((row["End Deli"], row["End Wisp"]), expected)
         export = list(csv.reader(io.StringIO(logger.export_csv().decode("utf-8-sig"))))
         self.assertEqual(export[0].index("Scan Commit #"), 90)
-        self.assertEqual(export[0][-2:], ["Deli", "Wisp"])
+        self.assertEqual([export[0].index(name) for name in ("Deli", "Wisp")], [129, 130])
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
             self.assertIsNone(archive.testzip())
             ns = {"s": workbook_export.NS}
@@ -237,17 +237,18 @@ class WorkflowTests(unittest.TestCase):
         positions = {
             logger.export_currency_csv: {"End Tier": 117},
             logger.export_record_history_csv: {"Tablet Slot Capacity": 149, "Jado Configured Perk 1": 150,
-                                               "Hilda Configured Perk 4": 161},
+                                               "Hilda Configured Perk 4": 161, "Deli": 164, "Wisp": 165},
             logger.export_all_csv: {"Type": 127, "Tablet Slot Capacity": 156, "Jado Configured Perk 1": 157,
-                                    "Hilda Configured Perk 4": 168, "Item: Example reward": 169},
+                                    "Hilda Configured Perk 4": 168, "Item: Example reward": 169,
+                                    "Deli": 172, "Wisp": 173},
         }
         for exporter, fields in positions.items():
             with self.subTest(exporter=exporter.__name__):
                 headers = next(csv.reader(io.StringIO(exporter().decode("utf-8-sig"))))
                 for name, index in fields.items():
                     self.assertEqual(headers.index(name), index)
-                flags = ["Start Deli", "Start Wisp", "End Deli", "End Wisp"] if exporter == logger.export_currency_csv else ["Deli", "Wisp"]
-                self.assertEqual(headers[-len(flags):], flags)
+                if exporter == logger.export_currency_csv:
+                    self.assertEqual(headers[-4:], ["Start Deli", "Start Wisp", "End Deli", "End Wisp"])
 
     def test_reset_preserves_settings_references_and_backup(self):
         logger.save_settings({"tier": 16, "waystone": 87})

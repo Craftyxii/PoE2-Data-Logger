@@ -447,12 +447,39 @@ def scan_inventory_grid(image, references=(), read=None):
     return {"items": found, "unknown": unknown, "status": "review"}
 
 
+def _ritual_header_index(lines):
+    """Identify available Tribute immediately under the recognised Favours title.
+
+    Reward prices can also end in "Tribute", so only the header sequence may be
+    skipped. An intervening reward or unknown label ends that sequence.
+    """
+    title = False
+    for index, line in enumerate(lines):
+        text = line.get("text", "") if isinstance(line, dict) else str(line)
+        text = re.sub(r"\s+", " ", text).strip()
+        score = float(line.get("score", 1)) if isinstance(line, dict) else 1.0
+        if re.fullmatch(r"favou?rs", text, re.I) and score >= .75:
+            title = True
+            continue
+        if not title or not text:
+            continue
+        if re.fullmatch(r"(?:\d{1,2}\s+)?\d[\d,]*\s*Tribute", text, re.I) and score >= .94:
+            return index
+        if re.fullmatch(r"\d{1,2}", text) and score >= .85:
+            continue  # Reroll counter can be a separate OCR row.
+        title = False
+    return None
+
+
 def parse_ritual(lines, omen_names):
     proposals, unmatched, anchors = [], [], []
     excluded = re.compile(r"^(?:ritual|favou?rs?|defer|reroll|tribute|purchase|refresh|remaining|"
                           r"items?|rewards?|cost|cancel|close|\d[\d, ]*)$", re.I)
     known = [(name, _key(name)) for name in omen_names]
-    for line in lines:
+    header_index = _ritual_header_index(lines)
+    for line_index, line in enumerate(lines):
+        if line_index == header_index:
+            continue
         raw = line["text"] if isinstance(line, dict) else str(line)
         raw = re.sub(r"\s+", " ", raw).strip()
         if not raw:

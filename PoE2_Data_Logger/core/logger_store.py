@@ -23,6 +23,7 @@ from PoE2_Data_Logger.ocr.affix_capture import affix_catalog, affix_key, affix_u
 HERE = Path(__file__).resolve().parent.parent
 _INIT_LOCK = threading.Lock()
 _READY = False
+_UNSET = object()
 BIOMES = ("None", "Water", "Mountain", "Grass", "Forest", "Swamp", "Desert", "Ocean", "Island")
 CITY_TYPES = ("None", "Faridun", "Ezomyte", "Vaal")
 ALDUR_AFFIXES = ("None", "All +5", "All +6", "All +7", "Lucky",
@@ -30,6 +31,7 @@ ALDUR_AFFIXES = ("None", "All +5", "All +6", "All +7", "Lucky",
 WAYSTONE_DEFAULTS = {"tier": 15, "waystone": 0, "map_mods": 0, "waystone_name": "",
                      "waystone_mods": [], "item_rarity": None, "monster_rarity": None,
                      "pack_size": None, "effectiveness": None}
+WAYSTONE_SETUP_FIELDS = frozenset(("tier", "waystone", "map_mods"))
 BASE_EXTRA_HEADERS = ("Item Rarity %", "Monster Rarity %", "Pack Size %",
                         "Effectiveness %", "Waystone Name", "Biome", "City Type", "Ocean Map",
                         "Waystone Modifiers", *(f"Map Mod {n}" for n in range(1, 11)),
@@ -233,6 +235,35 @@ def _waystone_settings(config):
     return settings
 
 
+def _prepared_waystone(db, map_id):
+    prepared = _meta(db, "prepared_waystone_setup")
+    if (isinstance(prepared, dict) and prepared.get("map_id") == map_id and
+            prepared.get("session_generation") == _meta(db, "session_generation", 0)):
+        return prepared
+    return None
+
+
+def _map_context_settings(db, config, map_id):
+    """Upcoming-map records never inherit the completed map's waystone fields."""
+    match = re.fullmatch(r"M(\d+)", str(map_id or ""))
+    if match and int(match[1]) > _meta(db, "current_map_number", 0):
+        prepared = _prepared_waystone(db, map_id)
+        result = dict(config)
+        result.update(_waystone_settings(prepared["settings"] if prepared else {}))
+        return result
+    return config
+
+
+def _cancel_prepared_waystone(db):
+    number = _meta(db, "current_map_number", 0) + 1
+    prepared = _prepared_waystone(db, _map_id(number))
+    if prepared:
+        config = _meta(db, "settings")
+        config.update(_waystone_settings(prepared["previous_settings"]))
+        _set_meta(db, "settings", config)
+    _set_meta(db, "prepared_waystone_setup", None)
+
+
 def initialize():
     global _READY
     if _READY:
@@ -275,6 +306,8 @@ def initialize():
                 CREATE TABLE IF NOT EXISTS maps(
                     map_id TEXT PRIMARY KEY,snapshot_json TEXT NOT NULL,kills_json TEXT NOT NULL,
                     recorded_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS map_unique_kills(
+                    map_id TEXT PRIMARY KEY,unique_kills INTEGER);
                 CREATE TABLE IF NOT EXISTS expeditions(
                     expedition_id TEXT PRIMARY KEY,map_id TEXT NOT NULL,number INTEGER NOT NULL,
                     detonated INTEGER);
@@ -616,17 +649,46 @@ def _save_settings(db, data, *, confirmed_affixes=()):
             raise ValueError("Review the tablet affix name before saving.")
         db.execute("INSERT OR IGNORE INTO affixes(name) VALUES(?)", (name.strip(),))
     c = _validate_settings(db, data)
+    source = _meta(db, "settings")
     pending = _meta(db, "ocr_pending")
-    if pending and c["expedition"] != _meta(db, "settings")["expedition"]:
+    if pending and c["expedition"] != source["expedition"]:
         raise ValueError("Save or discard the scanned remnant before switching expeditions.")
+    current = _meta(db, "current_map_number", 0)
+    next_map = bool(_meta(db, "pending_new_map"))
+    waystone_fields = WAYSTONE_DEFAULTS.keys() & data.keys()
+    if waystone_fields and (not current or next_map):
+        target = _map_id(current + 1)
+        previous = _prepared_waystone(db, target)
+        prepared_values = _waystone_settings(previous["settings"] if previous else {})
+        prepared_values.update({key: c[key] for key in waystone_fields})
+        fields = set(previous.get("fields", [])) if previous else set()
+        fields.update(waystone_fields)
+        c.update(prepared_values)
+        _set_meta(db, "prepared_waystone_setup", {
+            "map_id": target, "session_generation": _meta(db, "session_generation", 0),
+            "settings": prepared_values, "fields": sorted(fields),
+            "previous_settings": previous["previous_settings"] if previous else _waystone_settings(source),
+        })
     _set_meta(db, "settings", c)
     _register_atlas_snapshot(db, _atlas_snapshot(c))
-    current = _meta(db, "current_map_number", 0)
-    if current and not _meta(db, "pending_new_map") and not _map_has_activity(db, _map_id(current)):
-        context = _snapshot(c)
-        _register_atlas_snapshot(db, context)
-        db.execute("UPDATE maps SET snapshot_json=? WHERE map_id=?",
-                   (_dump(context), _map_id(current)))
+    if current and not next_map:
+        mid = _map_id(current)
+        saved = db.execute("SELECT snapshot_json FROM maps WHERE map_id=?", (mid,)).fetchone()
+        prior = _load(saved[0]) if saved else {}
+        waystone_save = bool(waystone_fields)
+        first_setup = (waystone_save and prior.get("waystone_setup_saved") is False and
+                       _map_has_only_start_inventory(db, mid))
+        if not _map_has_activity(db, mid) or first_setup:
+            context = _snapshot(c)
+            if first_setup:
+                context = _bind_atlas_context(db, mid, context)
+            if "waystone_setup_saved" in prior:
+                fields = set(prior.get("waystone_setup_fields", [])) | waystone_fields
+                context["waystone_setup_fields"] = sorted(fields)
+                context["waystone_setup_saved"] = bool(prior["waystone_setup_saved"] or
+                                                         WAYSTONE_SETUP_FIELDS <= fields)
+            _register_atlas_snapshot(db, context)
+            db.execute("UPDATE maps SET snapshot_json=? WHERE map_id=?", (_dump(context), mid))
 
 
 def save_settings(data, *, confirmed_affixes=()):
@@ -648,7 +710,7 @@ def save_atlas_settings(data):
         config = _meta(db, "settings")
         expedition = 1 if target != current else config["expedition"]
         _record_commit(db, "Atlas settings", mid, _exp_id(mid, expedition),
-                       context=_snapshot(config))
+                       context=_snapshot(_map_context_settings(db, config, mid)))
     return get_state()
 
 
@@ -917,8 +979,25 @@ def _map_has_activity(db, map_id):
     for table in ("legacy_export", "new_export", "currency_snapshots", "ritual_pages"):
         if db.execute(f"SELECT 1 FROM {table} WHERE map_id=? LIMIT 1", (map_id,)).fetchone():
             return True
+    if _unique_kills_for_map(db, map_id) is not None:
+        return True
     return bool(db.execute("SELECT 1 FROM commits WHERE map_id=? AND kind IN "
-                           "('Map kills','Map totals','Detonated') LIMIT 1", (map_id,)).fetchone())
+                           "('Map kills','Map totals','Detonated','Propagation') LIMIT 1", (map_id,)).fetchone())
+
+
+def _map_has_only_start_inventory(db, map_id):
+    """Start inventory is preparation, so an unconfigured map can receive its first waystone."""
+    phases = [row[0] for row in db.execute("SELECT phase FROM currency_snapshots WHERE map_id=?", (map_id,))]
+    if phases != ["start"]:
+        return False
+    if any(db.execute(f"SELECT 1 FROM {table} WHERE map_id=? LIMIT 1", (map_id,)).fetchone()
+           for table in ("legacy_export", "new_export", "ritual_pages")):
+        return False
+    if _unique_kills_for_map(db, map_id) is not None:
+        return False
+    return not db.execute("SELECT 1 FROM commits WHERE map_id=? AND kind IN "
+                          "('Map kills','Map totals','Detonated','Propagation','Remnant','Chain','Ritual') LIMIT 1",
+                          (map_id,)).fetchone()
 
 
 def _atlas_settings_target(db):
@@ -993,8 +1072,8 @@ def _record_commit(db, kind, map_id="", expedition_id="", reference="", *, conte
         db.execute("BEGIN IMMEDIATE")
     number = _meta(db, "scan_commit_count", 0) + 1
     if context is None:
-        context = _snapshot(_meta(db, "settings"))
-        if kind in ("Map kills", "Map totals", "Detonated"):
+        context = _snapshot(_map_context_settings(db, _meta(db, "settings"), map_id))
+        if kind in ("Map kills", "Map totals", "Detonated", "Propagation"):
             saved = db.execute("SELECT snapshot_json FROM maps WHERE map_id=?", (map_id,)).fetchone()
             if saved:
                 context = _load(saved[0])
@@ -1122,10 +1201,13 @@ def _commit_remnant(db, first, next_recipe=None, family=None, scan_id=None, visi
     config = _validate_settings(db, {})
     current = _meta(db, "current_map_number")
     new_map = current == 0 or _meta(db, "pending_new_map")
-    if current and new_map:
-        config.update(WAYSTONE_DEFAULTS)
     number = current + 1 if new_map else current
     mid = _map_id(number)
+    prepared = _prepared_waystone(db, mid) if new_map else None
+    if prepared:
+        config.update(_waystone_settings(prepared["settings"]))
+    elif current and new_map:
+        config.update(WAYSTONE_DEFAULTS)
     expedition = 1 if new_map else config["expedition"]
     eid = _exp_id(mid, expedition)
     remnant_number = _meta(db, "next_remnant_number")
@@ -1135,6 +1217,10 @@ def _commit_remnant(db, first, next_recipe=None, family=None, scan_id=None, visi
         raise ValueError("Scanned remnant belongs to another map or chain. Save or discard it first.")
     occurrence = str(uuid.uuid4())
     context = _bind_atlas_context(db, mid, _snapshot({**config, "expedition": expedition}))
+    if new_map:
+        fields = set(prepared["fields"]) if prepared else set()
+        context["waystone_setup_fields"] = sorted(fields)
+        context["waystone_setup_saved"] = WAYSTONE_SETUP_FIELDS <= fields
     details = {"family": result["family"], "recipes": result["rows"]}
     if visible_seed:
         details["visible_seed"] = visible_seed
@@ -1186,6 +1272,7 @@ def _commit_remnant(db, first, next_recipe=None, family=None, scan_id=None, visi
     if new_map:
         config["expedition"] = 1
         _set_meta(db, "settings", config)
+        _set_meta(db, "prepared_waystone_setup", None)
     return {"remnant_id": rid, "map_id": mid, "expedition_id": eid,
             "recipes": len(result["rows"]), "family": result["family"],
             "scan_commit_number": commit_number}
@@ -1356,7 +1443,7 @@ def commit_chain_steps(steps, *, advance_expedition=False, expected_context=None
         det = db.execute("SELECT detonated FROM expeditions WHERE expedition_id=?", (eid,)).fetchone()
         context = _bind_atlas_context(db, mid, _snapshot(config))
         commit_number = _record_commit(db, "Chain", mid, eid, f"Steps {step}–{step + len(cleaned) - 1}",
-                                       context=context, details={"steps": [
+                                       context=context, details={"detonated": det[0] if det else None, "steps": [
                                            {"step": step + offset, "rune1": rune1, "rune2": rune2}
                                            for offset, (rune1, rune2) in enumerate(cleaned)]})
         for offset, (rune1, rune2) in enumerate(cleaned):
@@ -1380,18 +1467,79 @@ def commit_chain_steps(steps, *, advance_expedition=False, expected_context=None
         return result
 
 
-def save_kills(normal, magic, rare):
+def _unique_kills_for_map(db, map_id):
+    row = db.execute("SELECT unique_kills FROM map_unique_kills WHERE map_id=?", (map_id,)).fetchone()
+    return row[0] if row else None
+
+
+def _save_unique_kills(db, map_id, unique):
+    if unique is _UNSET:
+        return _unique_kills_for_map(db, map_id)
+    value = _integer(unique, "Unique kills", 0, blank=True)
+    db.execute("INSERT INTO map_unique_kills VALUES(?,?) ON CONFLICT(map_id) "
+               "DO UPDATE SET unique_kills=excluded.unique_kills", (map_id, value))
+    return value
+
+
+def _detonated_value(db, expedition_id, value):
+    if value is _UNSET:
+        row = db.execute("SELECT detonated FROM expeditions WHERE expedition_id=?", (expedition_id,)).fetchone()
+        return row[0] if row else None
+    return _integer(value, "Remnants Detonated", 0, blank=True)
+
+
+def increment_propagation_detonated(expected_context, *, current_value=_UNSET, runes=None, recipe=""):
+    """Persist one accepted propagation scan, independently of its one or two runes."""
+    if not isinstance(runes, list) or not 1 <= len(runes) <= 2:
+        raise ValueError("A propagation scan must contain one or two detected runes.")
+    if any(not isinstance(rune, str) or not rune.strip() for rune in runes):
+        raise ValueError("A propagation scan must contain one or two detected runes.")
+    cleaned = [_rune(rune, "Rune 1") for rune in runes]
+    if not isinstance(recipe, str) or len(recipe) > 200:
+        raise ValueError("The propagation recipe must be under 200 characters.")
+    with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        number = _meta(db, "current_map_number", 0)
+        if not number:
+            raise ValueError("Start a map before accepting a propagation scan.")
+        if _meta(db, "pending_new_map", False):
+            raise ValueError("Start the next map before accepting a propagation scan.")
+        if not isinstance(expected_context, dict):
+            raise ValueError("The propagation capture context is invalid. Scan again.")
+        expedition = _meta(db, "settings")["expedition"]
+        mid = _map_id(number)
+        current = {"_scan_generation": _meta(db, "session_generation", 0),
+                   "_capture_map_id": mid, "_capture_map_pending": False,
+                   "_capture_expedition": expedition}
+        if any(expected_context.get(key) != value for key, value in current.items()):
+            raise ValueError("The map, expedition or session changed. Scan propagation again.")
+        if _meta(db, "ocr_pending"):
+            raise ValueError("Save or discard the scanned remnant before accepting propagation.")
+        eid = _exp_id(mid, expedition)
+        count = (_detonated_value(db, eid, current_value) or 0) + 1
+        db.execute("INSERT INTO expeditions VALUES(?,?,?,?) ON CONFLICT(expedition_id) "
+                   "DO UPDATE SET detonated=excluded.detonated", (eid, mid, expedition, count))
+        _patch_first(db, "expedition_id", eid, {33: count})
+        commit_number = _record_commit(db, "Propagation", mid, eid, recipe.strip(),
+                                       details={"detonated": count, "runes": cleaned, "recipe": recipe.strip()})
+        return {"map_id": mid, "expedition_id": eid, "detonated": count,
+                "scan_commit_number": commit_number}
+
+
+def save_kills(normal, magic, rare, *, unique=_UNSET):
     values = [_integer(v, label, 0, blank=True) for v, label in
               zip((normal, magic, rare), ("Normal kills", "Magic kills", "Rare kills"))]
     with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
         number = _meta(db, "current_map_number")
         if number == 0:
             raise ValueError("Start a map before saving map kills.")
         mid = _map_id(number)
+        unique_count = _save_unique_kills(db, mid, unique)
         db.execute("UPDATE maps SET kills_json=? WHERE map_id=?", (_dump(values), mid))
         _patch_first(db, "map_id", mid, {28+i: "" if v is None else v for i, v in enumerate(values)})
-        commit_number = _record_commit(db, "Map kills", mid, details={"kills": values})
-        return {"map_id": mid, "kills": values, "scan_commit_number": commit_number}
+        commit_number = _record_commit(db, "Map kills", mid, details={"kills": values, "unique_kills": unique_count})
+        return {"map_id": mid, "kills": values, "unique_kills": unique_count, "scan_commit_number": commit_number}
 
 
 def save_detonated(value):
@@ -1410,32 +1558,35 @@ def save_detonated(value):
         return {"expedition_id": eid, "detonated": count, "scan_commit_number": commit_number}
 
 
-def save_counts(normal, magic, rare, detonated):
+def save_counts(normal, magic, rare, detonated=_UNSET, *, unique=_UNSET):
     values = [_integer(v, label, 0, blank=True) for v, label in
               zip((normal, magic, rare), ("Normal kills", "Magic kills", "Rare kills"))]
-    count = _integer(detonated, "Remnants Detonated", 0, blank=True)
     with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
         number = _meta(db, "current_map_number")
         if not number:
             raise ValueError("Start a map before saving counts.")
         mid = _map_id(number)
         expedition = _meta(db, "settings")["expedition"]
         eid = _exp_id(mid, expedition)
+        count = _detonated_value(db, eid, detonated)
+        unique_count = _save_unique_kills(db, mid, unique)
         db.execute("UPDATE maps SET kills_json=? WHERE map_id=?", (_dump(values), mid))
         _patch_first(db, "map_id", mid, {28+i: "" if v is None else v for i, v in enumerate(values)})
         db.execute("INSERT INTO expeditions VALUES(?,?,?,?) ON CONFLICT(expedition_id) DO UPDATE SET detonated=excluded.detonated",
                    (eid, mid, expedition, count))
         _patch_first(db, "expedition_id", eid, {33: "" if count is None else count})
-        commit_number = _record_commit(db, "Map totals", mid, eid, details={"kills": values, "detonated": count})
-        return {"map_id": mid, "expedition_id": eid, "kills": values,
+        commit_number = _record_commit(db, "Map totals", mid, eid, details={"kills": values,
+                                       "unique_kills": unique_count, "detonated": count})
+        return {"map_id": mid, "expedition_id": eid, "kills": values, "unique_kills": unique_count,
                 "detonated": count, "scan_commit_number": commit_number}
 
 
-def finish_map(normal, magic, rare, detonated):
+def finish_map(normal, magic, rare, detonated=_UNSET, *, unique=_UNSET):
     values = [_integer(v, label, 0, blank=True) for v, label in
               zip((normal, magic, rare), ("Normal kills", "Magic kills", "Rare kills"))]
-    count = _integer(detonated, "Remnants Detonated", 0, blank=True)
     with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
         _set_meta(db, "ocr_pending", None)
         _set_meta(db, "ocr_pending_mode", None)
         number = _meta(db, "current_map_number")
@@ -1444,13 +1595,16 @@ def finish_map(normal, magic, rare, detonated):
         mid = _map_id(number)
         expedition = _meta(db, "settings")["expedition"]
         eid = _exp_id(mid, expedition)
+        count = _detonated_value(db, eid, detonated)
+        unique_count = _save_unique_kills(db, mid, unique)
         db.execute("UPDATE maps SET kills_json=? WHERE map_id=?", (_dump(values), mid))
         _patch_first(db, "map_id", mid, {28+i: "" if v is None else v for i, v in enumerate(values)})
         db.execute("INSERT INTO expeditions VALUES(?,?,?,?) ON CONFLICT(expedition_id) DO UPDATE SET detonated=excluded.detonated",
                    (eid, mid, expedition, count))
         _patch_first(db, "expedition_id", eid, {33: "" if count is None else count})
         _set_meta(db, "pending_new_map", True)
-        _record_commit(db, "Map totals", mid, eid, details={"kills": values, "detonated": count})
+        _record_commit(db, "Map totals", mid, eid, details={"kills": values,
+                       "unique_kills": unique_count, "detonated": count})
     return get_state()
 
 
@@ -1460,6 +1614,8 @@ def mark_next_map(pending):
             raise ValueError("Save or discard the scanned remnant before changing the map marker.")
         if not _meta(db, "current_map_number"):
             raise ValueError("Log a remnant before marking the next map.")
+        if not pending:
+            _cancel_prepared_waystone(db)
         _set_meta(db, "pending_new_map", bool(pending))
     return get_state()
 
@@ -1475,12 +1631,19 @@ def start_map():
         number = current + 1
         mid = _map_id(number)
         config = _meta(db, "settings")
+        prepared = _prepared_waystone(db, mid)
         _set_meta(db, "previous_expedition", config["expedition"])
-        _set_meta(db, "previous_waystone_settings", _waystone_settings(config))
-        if current:
+        _set_meta(db, "previous_waystone_settings", _waystone_settings(
+            prepared["previous_settings"] if prepared and current else config))
+        if prepared:
+            config.update(_waystone_settings(prepared["settings"]))
+        elif current:
             config.update(_waystone_settings({}))
         config["expedition"] = 1
         context = _bind_atlas_context(db, mid, _snapshot(config))
+        fields = set(prepared["fields"]) if prepared else set()
+        context["waystone_setup_fields"] = sorted(fields)
+        context["waystone_setup_saved"] = WAYSTONE_SETUP_FIELDS <= fields
         db.execute("INSERT INTO maps VALUES(?,?,?,?)",
                    (mid, _dump(context), _dump([None, None, None]), _now()))
         db.execute("INSERT INTO expeditions VALUES(?,?,?,?)",
@@ -1488,6 +1651,7 @@ def start_map():
         _set_meta(db, "settings", config)
         _set_meta(db, "current_map_number", number)
         _set_meta(db, "pending_new_map", False)
+        _set_meta(db, "prepared_waystone_setup", None)
     return get_state()
 
 
@@ -1500,17 +1664,21 @@ def undo_empty_map():
         if not number:
             raise ValueError("There is no active map to undo.")
         if _meta(db, "pending_new_map"):
+            _cancel_prepared_waystone(db)
             _set_meta(db, "pending_new_map", False)
         else:
             mid = _map_id(number)
             if (any(db.execute(f"SELECT 1 FROM {table} WHERE map_id=? LIMIT 1", (mid,)).fetchone()
                     for table in ("legacy_export", "new_export", "currency_snapshots", "ritual_pages"))
                     or db.execute("SELECT 1 FROM maps WHERE map_id=? AND kills_json!=?", (mid, _dump([None]*3))).fetchone()
+                    or _unique_kills_for_map(db, mid) is not None
                     or db.execute("SELECT 1 FROM expeditions WHERE map_id=? AND detonated IS NOT NULL", (mid,)).fetchone()
                     or db.execute("SELECT 1 FROM commits WHERE map_id=? LIMIT 1", (mid,)).fetchone()):
                 raise ValueError("This map has saved activity. It cannot be undone.")
             db.execute("DELETE FROM expeditions WHERE map_id=?", (mid,))
+            db.execute("DELETE FROM map_unique_kills WHERE map_id=?", (mid,))
             db.execute("DELETE FROM maps WHERE map_id=?", (mid,))
+            _set_meta(db, "prepared_waystone_setup", None)
             _set_meta(db, "current_map_number", number - 1)
             config = _meta(db, "settings")
             config["expedition"] = _meta(db, "previous_expedition", 1) if number > 1 else 1
@@ -1525,7 +1693,7 @@ def clear_export_and_reset_ids():
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
         _set_meta(db, "session_generation", _meta(db, "session_generation", 0) + 1)
-        for table in ("legacy_export", "new_export", "maps", "expeditions", "scan_links",
+        for table in ("legacy_export", "new_export", "maps", "map_unique_kills", "expeditions", "scan_links",
                       "currency_snapshots", "ritual_pages", "commits"):
             db.execute(f"DELETE FROM {table}")
         db.execute("DELETE FROM sqlite_sequence WHERE name IN ('new_export','ritual_pages')")
@@ -1536,6 +1704,7 @@ def clear_export_and_reset_ids():
         _set_meta(db, "ocr_pending_mode", None)
         _set_meta(db, "previous_expedition", 1)
         _set_meta(db, "previous_waystone_settings", None)
+        _set_meta(db, "prepared_waystone_setup", None)
         _set_meta(db, "scan_commit_count", 0)
         config = _meta(db, "settings")
         config["expedition"] = 1
@@ -1732,11 +1901,12 @@ def save_currency_snapshot(phase, items, expected_map_id=None):
         current = _map_id(_meta(db, "current_map_number", 0))
         previous = db.execute("SELECT snapshot_json FROM maps WHERE map_id=?", (map_id,)).fetchone()
         context = (_load(previous[0]) if map_id == current and _meta(db, "pending_new_map") and previous
-                   else _snapshot(settings))
+                   else _snapshot(_map_context_settings(db, settings, map_id)))
         context = _bind_atlas_context(db, map_id, context)
         db.execute("INSERT INTO currency_snapshots(map_id,phase,items_json,recorded_at,snapshot_json) "
                    "VALUES(?,?,?,?,?) ON CONFLICT(map_id,phase) DO UPDATE SET "
-                   "items_json=excluded.items_json,recorded_at=excluded.recorded_at",
+                   "items_json=excluded.items_json,recorded_at=excluded.recorded_at,"
+                   "snapshot_json=excluded.snapshot_json",
                    (map_id, phase, _dump(totals), _now(), _dump(context)))
         _record_commit(db, "Currency", map_id, reference=phase.title() + " inventory", context=context,
                        details={"phase": phase, "items": totals,
@@ -1861,8 +2031,8 @@ def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
         old = (db.execute("SELECT id,page_number FROM ritual_pages WHERE map_id=? AND scan_hash=?",
                           (map_id, scan_hash)).fetchone() if scan_hash else None)
         if old:
-            db.execute("UPDATE ritual_pages SET items_json=?,raw_text=?,recorded_at=? WHERE id=?",
-                       (_dump(cleaned), raw_text, _now(), old["id"]))
+            db.execute("UPDATE ritual_pages SET items_json=?,raw_text=?,recorded_at=?,snapshot_json=? WHERE id=?",
+                       (_dump(cleaned), raw_text, _now(), _dump(context), old["id"]))
             page = old["page_number"]
         else:
             page = db.execute("SELECT COALESCE(MAX(page_number),0)+1 FROM ritual_pages WHERE map_id=?",
@@ -1906,10 +2076,15 @@ def export_ritual_csv():
     return output.getvalue().encode("utf-8-sig")
 
 
+def _total_kills(kills, unique=None):
+    known = [value for value in [*(kills or []), unique] if value is not None and value != ""]
+    return sum(known) if known else ""
+
+
 def export_maps_csv():
     output = io.StringIO(newline="")
     writer = csv.writer(output)
-    writer.writerow(["Map ID", "Tier", "Area Level", "Waystone %", "Map Mods",
+    headers = ["Map ID", "Tier", "Area Level", "Waystone %", "Map Mods",
                      "+2 Tablet Mods", "Total Mods", "Irradiated", "Atlas Master",
                      "Aldur's Saga", "Normal Kills", "Magic Kills", "Rare Kills",
                      "Expedition 1 Detonated", "Expedition 2 Detonated", "Map Recorded UTC",
@@ -1920,8 +2095,13 @@ def export_maps_csv():
                      *[f"Map Mod {n}" for n in range(1, 11)], "Last Commit #",
                      "Perk 1", "Perk 2", "Perk 3", "Perk 4", "Master +Mods", "Base Map Mods",
                      "# +2 Mod Tablets", "Tablets Used", *TABLET_EXPORT_HEADERS, *TABLET_DETAIL_HEADERS,
-                     *ATLAS_EXPORT_HEADERS, "Deli", "Wisp"])
+                     *ATLAS_EXPORT_HEADERS, "Deli", "Wisp"]
     with _connect() as db:
+        db.execute("BEGIN")
+        extra_expeditions = [row[0] for row in db.execute(
+            "SELECT DISTINCT number FROM expeditions WHERE number>2 ORDER BY number")]
+        writer.writerow([*headers, *(f"Expedition {number} Detonated" for number in extra_expeditions),
+                         "Unique Kills", "Total Kills"])
         commits = {row["map_id"]: row["number"] for row in db.execute(
             "SELECT number,map_id FROM commits WHERE map_id!='' ORDER BY number")}
         for row in db.execute("SELECT map_id,snapshot_json,kills_json,recorded_at FROM maps ORDER BY map_id"):
@@ -1944,6 +2124,7 @@ def export_maps_csv():
                                "tablets_used": values[34] if len(values) > 34 else "",
                                "tablet_values": values[35:67]}
             kills = _load(row["kills_json"])
+            unique = _unique_kills_for_map(db, row["map_id"])
             detonated = {r["number"]: r["detonated"] for r in db.execute(
                 "SELECT number,detonated FROM expeditions WHERE map_id=?", (row["map_id"],))}
             values = [row["map_id"], context.get("tier", ""),
@@ -1972,7 +2153,10 @@ def export_maps_csv():
                                      *(list(context.get("tablet_values") or [])[:32] +
                                        [""] * max(0, 32 - len(context.get("tablet_values") or []))),
                                      *_tablet_detail_values(context), *_atlas_export_values(context),
-                                     context.get("deli", ""), context.get("wisp", "")]
+                                     context.get("deli", ""), context.get("wisp", ""),
+                                     *(detonated.get(number) if detonated.get(number) is not None else ""
+                                       for number in extra_expeditions),
+                                     unique if unique is not None else "", _total_kills(kills, unique)]
             writer.writerow(_csv_row([int(v) if isinstance(v, float) and v.is_integer() else v
                                      for v in values]))
     return output.getvalue().encode("utf-8-sig")
@@ -2039,6 +2223,7 @@ def get_state():
             "ocr_pending": pending,
             "pending_new_map": _meta(db, "pending_new_map"),
             "kills": _load(k[0]) if k else [None, None, None],
+            "unique_kills": _unique_kills_for_map(db, mid),
             "detonated": d[0] if d else None,
             "affixes": [r[0] for r in db.execute("SELECT name FROM affixes ORDER BY rowid")],
             "masters": masters, "families": families, "seed_states": seed_states,
@@ -2086,9 +2271,10 @@ def export_csv(*, _db=None):
     writer = csv.writer(out)
     with (nullcontext(_db) if _db is not None else _connect()) as db:
         writer.writerow([*_meta(db, "export_headers"), *EXPORT_EXTRA_HEADERS[:-2],
-                         *ATLAS_EXPORT_HEADERS, *EXPORT_EXTRA_HEADERS[-2:]])
+                         *ATLAS_EXPORT_HEADERS, *EXPORT_EXTRA_HEADERS[-2:], *KILL_EXPORT_HEADERS])
         atlas_contexts = {row["number"]: _load(row["snapshot_json"])
                           for row in db.execute("SELECT number,snapshot_json FROM commits")}
+        seen_maps = set()
         for table in ("legacy_export", "new_export"):
             for item in db.execute(f"SELECT row_json FROM {table} ORDER BY position"):
                 values = _load(item[0])
@@ -2098,7 +2284,14 @@ def export_csv(*, _db=None):
                     raise ValueError("Saved Export row has an invalid width.")
                 # Atlas fields are projected on export; fixed spreadsheet row positions remain intact.
                 context = atlas_contexts.get(values[67 + len(BASE_EXTRA_HEADERS) - 1], {})
-                writer.writerow(_csv_row([*values[:-2], *_atlas_export_values(context), *values[-2:]]))
+                map_id = values[22]
+                if map_id and map_id not in seen_maps:
+                    unique = _unique_kills_for_map(db, map_id)
+                    kill_values = [unique if unique is not None else "", _total_kills(values[28:31], unique)]
+                    seen_maps.add(map_id)
+                else:
+                    kill_values = ["", ""]
+                writer.writerow(_csv_row([*values[:-2], *_atlas_export_values(context), *values[-2:], *kill_values]))
     return out.getvalue().encode("utf-8-sig")
 
 
@@ -2122,6 +2315,8 @@ HISTORY_DETAIL_HEADERS = ("Inventory Phase", "Currency", "Quantity", "Ritual Pag
                           "Item Name", "Item Source", "Start Count", "End Count", "Net Change",
                           "Start Recorded UTC", "End Recorded UTC", "Deferred", "New Find Quantity",
                           "Ritual Tribute Available", "Ritual Rerolls Remaining")
+KILL_EXPORT_HEADERS = ("Unique Kills (Map)", "Total Kills")
+HISTORY_APPEND_HEADERS = (*KILL_EXPORT_HEADERS, "Remnants Detonated (Scan)")
 
 
 def export_record_history_csv(*, _db=None):
@@ -2130,7 +2325,7 @@ def export_record_history_csv(*, _db=None):
     writer.writerow(["Scan Commit #", "Type", "Map ID", "Expedition ID", "Reference", "Recorded UTC",
                      *HISTORY_DETAIL_HEADERS, *CONFIG_EXPORT_HEADERS[:-4], "Tablet Slot Capacity",
                      *(f"{master} Configured Perk {n}" for master in ("Jado", "Doryani", "Hilda")
-                       for n in range(1, 5)), *ATLAS_EXPORT_HEADERS, "Deli", "Wisp"])
+                       for n in range(1, 5)), *ATLAS_EXPORT_HEADERS, "Deli", "Wisp", *HISTORY_APPEND_HEADERS])
     starts = {}
     with (nullcontext(_db) if _db is not None else _connect()) as db:
         for commit in db.execute("SELECT * FROM commits ORDER BY number"):
@@ -2186,6 +2381,11 @@ def export_record_history_csv(*, _db=None):
             elif commit["kind"] == "Chain":
                 entries = [{"Chain Step #": item["step"], "Propagation Rune 1": item["rune1"],
                             "Propagation Rune 2": item["rune2"]} for item in details.get("steps", [])]
+            elif commit["kind"] == "Propagation":
+                runes = details.get("runes") or []
+                entries = [{"Recipe": details.get("recipe", ""),
+                            "Propagation Rune 1": runes[0] if runes else "",
+                            "Propagation Rune 2": runes[1] if len(runes) > 1 else ""}]
             kills = details.get("kills", [])
             shared.update({name: amount for name, amount in zip(HISTORY_DETAIL_HEADERS[16:19], kills)})
             if "detonated" in details:
@@ -2202,7 +2402,10 @@ def export_record_history_csv(*, _db=None):
                 if commit["kind"] == "Currency" and entry.get("Item Name"):
                     entry_base[1] = "Item"
                 writer.writerow(_csv_row([*entry_base, *(values.get(name, "") for name in HISTORY_DETAIL_HEADERS),
-                                           *config_values]))
+                                           *config_values,
+                                           details.get("unique_kills") if details.get("unique_kills") is not None else "",
+                                           _total_kills(kills, details.get("unique_kills")),
+                                           1 if commit["kind"] == "Propagation" else ""]))
     return output.getvalue().encode("utf-8-sig")
 
 
@@ -2216,14 +2419,14 @@ def export_all_csv(*, _db=None):
                         for row in db.execute("SELECT name FROM item_names ORDER BY name")}
     remnant_reader = csv.DictReader(io.StringIO(remnant_data.decode("utf-8-sig")))
     remnant_headers = [name for name in remnant_reader.fieldnames
-                       if name not in (*ATLAS_EXPORT_HEADERS, "Deli", "Wisp")]
+                       if name not in (*ATLAS_EXPORT_HEADERS, "Deli", "Wisp", *HISTORY_APPEND_HEADERS)]
     remnants = list(remnant_reader)
     history_reader = csv.DictReader(io.StringIO(history_data.decode("utf-8-sig")))
     headers = remnant_headers + [name for name in history_reader.fieldnames
                                 if name not in remnant_headers and
-                                name not in ("Recipe", *ATLAS_EXPORT_HEADERS, "Deli", "Wisp")]
+                                name not in ("Recipe", *ATLAS_EXPORT_HEADERS, "Deli", "Wisp", *HISTORY_APPEND_HEADERS)]
     headers.extend(item_columns.values())
-    headers.extend([*ATLAS_EXPORT_HEADERS, "Deli", "Wisp"])
+    headers.extend([*ATLAS_EXPORT_HEADERS, "Deli", "Wisp", *HISTORY_APPEND_HEADERS])
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=headers, extrasaction="ignore")
     writer.writeheader()
@@ -2270,7 +2473,6 @@ def export_atlas_csv(*, _db=None):
     """Export each referenced setup once, resolving effects against its frozen dataset."""
     output = io.StringIO(newline="")
     writer = csv.writer(output)
-    writer.writerow(ATLAS_SHEET_HEADERS)
     with (nullcontext(_db) if _db is not None else _connect()) as db:
         if _db is None:
             db.execute("BEGIN")
@@ -2284,7 +2486,19 @@ def export_atlas_csv(*, _db=None):
                     referenced.add(setup_id)
                     if row["map_id"]:
                         map_ids.setdefault(setup_id, set()).add(row["map_id"])
-        catalogs = {}
+        catalogs = {row["catalog_id"]: _load(row["catalog_json"])
+                    for row in db.execute("SELECT catalog_id,catalog_json FROM atlas_catalogs")}
+        stat_ids = set()
+        for catalog in [*catalogs.values(), _atlas_catalog_data()]:
+            for node in catalog["nodes"].values():
+                if not node.get("allocatable"):
+                    continue
+                stat_ids.update(node.get("stats", {}))
+                for option in node.get("choices", []):
+                    stat_ids.update(option.get("stats", {}))
+        stat_ids = sorted(stat_ids)
+        writer.writerow([*ATLAS_SHEET_HEADERS, *(f"Stat: {name}" for name in stat_ids),
+                         *(f"Applied Stat: {name}" for name in stat_ids)])
         for setup_id in sorted(referenced):
             saved = db.execute("SELECT catalog_id,settings_json FROM atlas_setups WHERE setup_id=?",
                                (setup_id,)).fetchone()
@@ -2293,11 +2507,7 @@ def export_atlas_csv(*, _db=None):
             settings = _load(saved["settings_json"])
             catalog_id = saved["catalog_id"]
             if catalog_id not in catalogs:
-                row = db.execute("SELECT catalog_json FROM atlas_catalogs WHERE catalog_id=?",
-                                 (catalog_id,)).fetchone()
-                if row is None:
-                    raise ValueError("A saved Atlas dataset is missing from the local database.")
-                catalogs[catalog_id] = _load(row[0])
+                raise ValueError("A saved Atlas dataset is missing from the local database.")
             allocated = set(settings["allocated"])
             for node_id, node in sorted(catalogs[catalog_id]["nodes"].items(),
                                          key=lambda pair: (pair[1]["activity"], pair[0])):
@@ -2320,7 +2530,9 @@ def export_atlas_csv(*, _db=None):
                     "Yes" if active else "No", 1 if active else 0, option_id,
                     option["name"] if option else "", "\n".join(effects),
                     _dump(stats) if stats else "", "\n".join(effects) if active else "",
-                    _dump(stats) if active and stats else ""]))
+                    _dump(stats) if active and stats else "",
+                    *(stats.get(name, "") for name in stat_ids),
+                    *(stats.get(name, "") if active else "" for name in stat_ids)]))
     return output.getvalue().encode("utf-8-sig")
 
 

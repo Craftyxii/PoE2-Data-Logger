@@ -197,6 +197,7 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
         with Image.open(path) as source:
             image = source.convert("RGB")
     detections = runehelper_ocr.recognize(image) if ocr_rows is None else []
+    header_verified = False
     reward = re.compile(r"^\s*(\d{1,3}|[Il])\s*[xX×]\s+(.+?)\s*$")
     skill = re.compile(r"^Skill Level\s*(\d{1,2})\s*:\s*(.+?)\s*$", re.I)
     if detections and any(reward.match(row["text"]) or skill.match(row["text"]) for row in detections):
@@ -215,6 +216,7 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
                     if "runeshapecombinations" in _key(text) and float(confidence) >= .8:
                         xs, ys = [float(p[0]) for p in box], [float(p[1]) + top for p in box]
                         title = {"x1": min(xs), "x2": max(xs), "y1": min(ys), "y2": max(ys)}
+                        header_verified = True
                         break
         right = image.width
     else:
@@ -234,6 +236,7 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
                                        "x1": min(xs), "y1": min(ys), "x2": max(xs), "y2": max(ys)})
         title = next((line for line in detections
                       if "runeshapecombinations" in _key(line["text"]) and line["score"] >= .8), None)
+        header_verified = title is not None
         right = min(image.width, (title["x1"] + title["x2"]) + 20) if title else image.width
     if title is None:
         return {"mode": "opened", "status": "Opened remnant panel not found — review manually.",
@@ -271,7 +274,8 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
         family, candidates, complete = _families(db, lines, list_complete)
         sockets = db.execute("SELECT sockets FROM recipes WHERE name=?", (first,)).fetchone() if first else None
     visible_sockets = _icon_count(image, lines[0]["y"], sockets[0] if sockets else None) if lines else None
-    first_line_gap = round(lines[0]["y"] - title["y2"]) if lines else None
+    first_line_gap = (round(lines[0]["y"] - title["y2"])
+                      if lines and (header_verified or not verify_header) else None)
     recipe_sockets = sockets[0] if sockets else None
     socket_conflict = bool(visible_sockets and recipe_sockets and visible_sockets != recipe_sockets)
     for line in lines:
@@ -280,6 +284,8 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
         line.pop("y")
     if not lines:
         status = "No reward lines found in the opened panel — review manually."
+    elif verify_header and not header_verified:
+        status = "Opened remnant heading not found — review manually."
     elif not first:
         status = "Top reward was unclear — review the OCR text before logging."
     elif any(line["recipe"] is None for line in lines):
@@ -298,9 +304,11 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
             "sockets": visible_sockets or recipe_sockets, "recipe_sockets": recipe_sockets,
             "socket_source": "opened icons" if visible_sockets else "Recipe DB",
             "first_line_gap": first_line_gap,
+            "header_verified": header_verified,
             "list_complete": list_complete,
             "family": f"Family {family}" if family else None,
-            "candidates": candidates, "can_use": complete and not socket_conflict,
+            "candidates": candidates,
+            "can_use": complete and not socket_conflict and (header_verified or not verify_header),
             "bar_bounds": {"x": 0, "y": max(0, int(title["y1"])-20),
                            "width": int(right),
                            "height": max(120, min(image.height, bottom) - max(0, int(title["y1"])-20))}}
