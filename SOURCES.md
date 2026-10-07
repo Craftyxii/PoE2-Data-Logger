@@ -15,6 +15,8 @@
 | [reference_pack.py](PoE2_Data_Logger/core/reference_pack.py) | Reference database import and export |
 | [ritual_catalog.py](PoE2_Data_Logger/core/ritual_catalog.py) | Ritual reward catalog helpers |
 | [workbook_export.py](PoE2_Data_Logger/core/workbook_export.py) | Excel workbook export |
+| [atlas_catalog.py](PoE2_Data_Logger/core/atlas_catalog.py) | Offline, versioned PoE2 atlas nodes, effects and choice options |
+| [export_files.py](PoE2_Data_Logger/core/export_files.py) | Writes paired exports and restores earlier files if a write fails |
 
 ## Scanners and item readers
 
@@ -45,6 +47,7 @@
 | [hover_copy.py](PoE2_Data_Logger/platform/hover_copy.py) | Hovered tooltip copy helpers |
 | [live_watch.py](PoE2_Data_Logger/platform/live_watch.py) | Game-window checks used during capture |
 | [region_select.py](PoE2_Data_Logger/ui/region_select.py) | Capture-region selection and reference screenshots |
+| [atlas_settings.py](PoE2_Data_Logger/ui/atlas_settings.py) | Interactive atlas tree and gear item rarity settings |
 
 ## Resources and third-party code
 
@@ -55,6 +58,7 @@
 | [third_party/currency_overlay/](PoE2_Data_Logger/third_party/currency_overlay/) | Currency and inventory JavaScript readers and icon data |
 | [fonts/](PoE2_Data_Logger/fonts/) | DejaVu fonts and their license |
 | [region_examples/](PoE2_Data_Logger/region_examples/) | Capture-region reference images used by the app |
+| [atlas/](PoE2_Data_Logger/atlas/) | PoE2 atlas catalog, rebuild inputs, node artwork and provenance notices |
 
 ## Build files
 
@@ -64,5 +68,6 @@
 - [packaging/PoE2-Data-Logger.spec](packaging/PoE2-Data-Logger.spec) packages the app and libraries.
 - [packaging/installer.nsi](packaging/installer.nsi) defines the Windows installer.
 - [tools/verify_build.py](tools/verify_build.py) checks the packaged Windows runtime.
+- [tools/build_atlas_catalog.py](tools/build_atlas_catalog.py) rebuilds the bundled atlas from its versioned source data.
 
 The library list is in [DEPENDENCIES.md](DEPENDENCIES.md).

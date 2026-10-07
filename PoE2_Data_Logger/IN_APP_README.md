@@ -30,9 +30,19 @@ On **Review**, correct anything held for review, then **Approve** to save it. **
 
 Finish pending reviews and chains before clicking **+ New map**.
 
+## Atlas / Character Settings
+
+The separate **Atlas / Character Settings** page shows the PoE2 atlas. Click a node to light it up; click it again to turn it off. Choice nodes open a dropdown for their effect. Choose an activity to focus its tree, scroll to zoom, or drag the background to pan.
+
+**Autofill** turns on every allocatable node and keeps your selected choices. Unselected choice effects remain unset. **Clear all** turns nodes off. Enter only the character's **Gear Item Rarity %**, then use **Save settings** to save the setup.
+
+The page shows which Map ID will receive your saved settings. Once a map has recorded activity, atlas and gear rarity changes apply to the next map. Earlier maps keep their saved setup.
+
 ## Export and Reset
 
 Choose an export folder in **Data export**. Saved entries keep their original settings.
+
+Excel exports contain **Export** and **Atlas Character Settings** sheets. The shared **Atlas Setup ID** links each Map ID to its saved allocations, choice effects and gear item rarity. Click that setup ID in the main sheet to open its atlas rows. CSV export saves a companion atlas CSV alongside the main CSV.
 
 **Start fresh session / reset IDs** clears logs and restarts IDs. Settings and databases are kept. Export first to keep your recorded data.
 

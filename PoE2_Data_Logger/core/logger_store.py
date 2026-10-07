@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import gzip
+import hashlib
 import io
 import json
 import os
@@ -12,6 +13,7 @@ import threading
 import uuid
 from contextlib import nullcontext
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 from PoE2_Data_Logger.core import store
@@ -36,13 +38,14 @@ TABLET_DETAIL_HEADERS = (*(label for tablet in range(1, 5) for slot in range(1, 
                            for label in (f"Tablet {tablet} Mod {slot} Value", f"Tablet {tablet} Mod {slot} Unit")),
                         *(f"Tablet {tablet} Random Modifiers" for tablet in range(1, 5)))
 EXPORT_EXTRA_HEADERS = (*BASE_EXTRA_HEADERS, *TABLET_DETAIL_HEADERS, "Deli", "Wisp")
+ATLAS_EXPORT_HEADERS = ("Atlas Setup ID", "Gear Item Rarity %")
 TABLET_EXPORT_HEADERS = tuple(label for tablet in range(1, 5) for slot in range(1, 5)
                              for label in (f"Tablet {tablet} Mod {slot} Affix", f"Tablet {tablet} Mod {slot} %"))
 CONFIG_EXPORT_HEADERS = ("Tier", "Area Level", "Base Map Mods", "Map Mods", "# +2 Mod Tablets",
                          "Tablet Mods", "Total Mods", "Aldur's Saga Affix", "Atlas Master",
                          "Perk 1", "Perk 2", "Perk 3", "Perk 4", "Master +Mods", "Irradiated",
                          "Waystone %", "Tablets Used", *BASE_EXTRA_HEADERS[:-1], *TABLET_EXPORT_HEADERS,
-                         *TABLET_DETAIL_HEADERS, "Deli", "Wisp")
+                         *TABLET_DETAIL_HEADERS, *ATLAS_EXPORT_HEADERS, "Deli", "Wisp")
 
 
 def _tablet_detail_values(context):
@@ -65,7 +68,13 @@ def _config_export_values(context):
             *[context.get(key, "") for key in ("master_adds_mod", "irradiated", "waystone", "tablets_used")],
             *_extra_export_values(context)[:len(BASE_EXTRA_HEADERS) - 1],
             *(tablets[:32] + [""] * max(0, 32 - len(tablets))), *_tablet_detail_values(context),
+            *_atlas_export_values(context),
             context.get("deli", ""), context.get("wisp", "")]
+
+
+def _atlas_export_values(context):
+    rarity = context.get("gear_item_rarity")
+    return [context.get("atlas_setup_id", ""), "" if rarity is None else rarity]
 
 
 def _extra_export_values(context):
@@ -87,6 +96,109 @@ def _dump(value):
 
 def _load(value):
     return json.loads(value)
+
+
+@lru_cache(maxsize=1)
+def _atlas_catalog_data():
+    from PoE2_Data_Logger.core.atlas_catalog import catalog
+    return catalog()
+
+
+@lru_cache(maxsize=1)
+def _atlas_catalog_identity():
+    data = _atlas_catalog_data()
+    encoded = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest(), encoded
+
+
+def _atlas_defaults():
+    return {"catalog_version": _atlas_catalog_data()["version"],
+            "catalog_id": _atlas_catalog_identity()[0], "allocated": [], "choices": {},
+            "gear_item_rarity": None}
+
+
+def _validate_atlas_settings(data):
+    if not isinstance(data, dict):
+        raise ValueError("Atlas settings are invalid.")
+    catalog = _atlas_catalog_data()
+    if data.get("catalog_version", catalog["version"]) != catalog["version"]:
+        raise ValueError("The Atlas data changed. Reload the Atlas editor before saving.")
+    nodes = catalog["nodes"]
+    allocated = data.get("allocated", [])
+    choices = data.get("choices", {})
+    if (not isinstance(allocated, list) or not isinstance(choices, dict) or
+            len(allocated) > len(nodes) or len(choices) > len(nodes)):
+        raise ValueError("Atlas allocations are invalid.")
+    if any(not isinstance(node_id, str) or node_id not in nodes or
+           not nodes[node_id].get("allocatable") for node_id in allocated):
+        raise ValueError("Choose allocatable nodes from the Atlas tree.")
+    if len(allocated) != len(set(allocated)):
+        raise ValueError("An Atlas node cannot be allocated more than once.")
+    clean_choices = {}
+    for node_id, option_id in choices.items():
+        node = nodes.get(node_id) if isinstance(node_id, str) else None
+        if (not node or not node.get("allocatable") or not isinstance(option_id, str) or
+                option_id not in {item["id"] for item in node.get("choices", [])}):
+            raise ValueError("Choose an effect from that Atlas node's dropdown.")
+        clean_choices[node_id] = option_id
+    rarity = data.get("gear_item_rarity")
+    if isinstance(rarity, bool):
+        raise ValueError("Gear Item Rarity % must be a number.")
+    return {"catalog_version": catalog["version"], "catalog_id": _atlas_catalog_identity()[0],
+            "allocated": sorted(allocated), "choices": dict(sorted(clean_choices.items())),
+            "gear_item_rarity": _number(rarity, "Gear Item Rarity %", 0, 9999)
+                                if rarity not in (None, "") else None}
+
+
+def _atlas_snapshot(config):
+    settings = config.get("atlas_settings")
+    if settings is None:
+        return {}
+    # Include the dataset fingerprint, even if its human-readable version stays unchanged.
+    frozen = {"catalog_version": settings["catalog_version"],
+              "catalog_id": settings["catalog_id"], "allocated": sorted(settings["allocated"]),
+              "choices": dict(sorted(settings["choices"].items())),
+              "gear_item_rarity": settings.get("gear_item_rarity")}
+    encoded = json.dumps(frozen, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return {"atlas_setup_id": "A" + hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+            "atlas_catalog_id": frozen["catalog_id"], "atlas_settings": frozen,
+            "gear_item_rarity": frozen["gear_item_rarity"]}
+
+
+def _register_atlas_snapshot(db, context):
+    setup_id = context.get("atlas_setup_id")
+    if not setup_id or db.execute("SELECT 1 FROM atlas_setups WHERE setup_id=?", (setup_id,)).fetchone():
+        return
+    settings = context["atlas_settings"]
+    catalog_id = settings["catalog_id"]
+    if not db.execute("SELECT 1 FROM atlas_catalogs WHERE catalog_id=?", (catalog_id,)).fetchone():
+        current_id, encoded = _atlas_catalog_identity()
+        if catalog_id != current_id:
+            raise ValueError("The saved Atlas dataset is missing. Reload the Atlas editor before saving.")
+        db.execute("INSERT INTO atlas_catalogs(catalog_id,version,catalog_json) VALUES(?,?,?)",
+                   (catalog_id, settings["catalog_version"], encoded))
+    db.execute("INSERT INTO atlas_setups(setup_id,catalog_id,settings_json) VALUES(?,?,?)",
+               (setup_id, catalog_id, _dump(settings)))
+
+
+def _bind_atlas_context(db, map_id, context):
+    """Bind only Atlas fields; leave the existing waystone/tablet behavior untouched."""
+    saved = db.execute("SELECT snapshot_json FROM maps WHERE map_id=?", (map_id,)).fetchone()
+    if saved is None:
+        # Start inventory can be saved before the map itself is created.
+        saved = db.execute("SELECT snapshot_json FROM commits WHERE map_id=? AND kind IN "
+                           "('Currency','Remnant','Chain','Ritual') ORDER BY number LIMIT 1",
+                           (map_id,)).fetchone()
+    result = dict(context)
+    if saved is not None:
+        prior = _load(saved[0])
+        for key in ("atlas_setup_id", "atlas_catalog_id", "atlas_settings", "gear_item_rarity"):
+            if key in prior:
+                result[key] = prior[key]
+            else:
+                result.pop(key, None)
+    _register_atlas_snapshot(db, result)
+    return result
 
 
 def _now():
@@ -201,6 +313,10 @@ def initialize():
                 CREATE TABLE IF NOT EXISTS commits(
                     number INTEGER PRIMARY KEY,kind TEXT NOT NULL,map_id TEXT,
                     expedition_id TEXT,reference TEXT,recorded_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS atlas_catalogs(
+                    catalog_id TEXT PRIMARY KEY,version TEXT NOT NULL,catalog_json TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS atlas_setups(
+                    setup_id TEXT PRIMARY KEY,catalog_id TEXT NOT NULL,settings_json TEXT NOT NULL);
             """)
             for table in ("currency_snapshots", "ritual_pages"):
                 columns = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
@@ -360,6 +476,10 @@ def initialize():
                 config.setdefault("deli", False)
                 config.setdefault("wisp", False)
                 _set_meta(db, "settings", config)
+            if "atlas_settings" not in config:
+                config["atlas_settings"] = _atlas_defaults()
+                _set_meta(db, "settings", config)
+            _register_atlas_snapshot(db, _atlas_snapshot(config))
         _READY = True
 
 
@@ -402,6 +522,8 @@ def _validate_settings(db, data):
     source = _meta(db, "settings")
     c = dict(source)
     c.update(data)
+    if "atlas_settings" in data:
+        c["atlas_settings"] = _validate_atlas_settings(data["atlas_settings"])
     c["waystone"] = _number(c["waystone"], "Waystone %", 0, 999)
     c["tier"] = _integer(c["tier"], "Tier", 15, 16)
     c["map_mods"] = _integer(c["map_mods"], "Map Mods", 0, 100)
@@ -498,16 +620,35 @@ def _save_settings(db, data, *, confirmed_affixes=()):
     if pending and c["expedition"] != _meta(db, "settings")["expedition"]:
         raise ValueError("Save or discard the scanned remnant before switching expeditions.")
     _set_meta(db, "settings", c)
+    _register_atlas_snapshot(db, _atlas_snapshot(c))
     current = _meta(db, "current_map_number", 0)
     if current and not _meta(db, "pending_new_map") and not _map_has_activity(db, _map_id(current)):
+        context = _snapshot(c)
+        _register_atlas_snapshot(db, context)
         db.execute("UPDATE maps SET snapshot_json=? WHERE map_id=?",
-                   (_dump(_snapshot(c)), _map_id(current)))
+                   (_dump(context), _map_id(current)))
 
 
 def save_settings(data, *, confirmed_affixes=()):
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
         _save_settings(db, data, confirmed_affixes=confirmed_affixes)
+    return get_state()
+
+
+def save_atlas_settings(data):
+    """Save the editable setup without changing Atlas data already attached to activity."""
+    with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        settings = _validate_atlas_settings(data)
+        _save_settings(db, {"atlas_settings": settings})
+        current = _meta(db, "current_map_number", 0)
+        target = _atlas_settings_target(db)
+        mid = _map_id(target)
+        config = _meta(db, "settings")
+        expedition = 1 if target != current else config["expedition"]
+        _record_commit(db, "Atlas settings", mid, _exp_id(mid, expedition),
+                       context=_snapshot(config))
     return get_state()
 
 
@@ -780,6 +921,16 @@ def _map_has_activity(db, map_id):
                            "('Map kills','Map totals','Detonated') LIMIT 1", (map_id,)).fetchone())
 
 
+def _atlas_settings_target(db):
+    number = _meta(db, "current_map_number", 0)
+    if not number or _meta(db, "pending_new_map", False):
+        number += 1
+    # Start inventory may already freeze a map before its first remnant/waystone.
+    if _map_has_activity(db, _map_id(number)):
+        number += 1
+    return number
+
+
 def _patch_first(db, field, value, replacements):
     hit = _first_row(db, field, value)
     if hit:
@@ -828,6 +979,7 @@ def _snapshot(config):
         "biome": config.get("biome", "None"), "city_type": config.get("city_type", "None"),
         "tablet_raw_mods": [mods if i < config["tablets_used"] else [] for i, mods in enumerate(
             config.get("tablet_raw_mods", [[] for _ in range(4)]))],
+        **_atlas_snapshot(config),
     }
 
 
@@ -846,6 +998,8 @@ def _record_commit(db, kind, map_id="", expedition_id="", reference="", *, conte
             saved = db.execute("SELECT snapshot_json FROM maps WHERE map_id=?", (map_id,)).fetchone()
             if saved:
                 context = _load(saved[0])
+        context = _bind_atlas_context(db, map_id, context)
+    _register_atlas_snapshot(db, context)
     db.execute("INSERT INTO commits(number,kind,map_id,expedition_id,reference,recorded_at,snapshot_json,details_json) "
                "VALUES(?,?,?,?,?,?,?,?)",
                (number, kind, map_id, expedition_id, str(reference or ""), _now(),
@@ -980,7 +1134,7 @@ def _commit_remnant(db, first, next_recipe=None, family=None, scan_id=None, visi
     if pending and (pending["remnant_id"], pending["map_id"], pending["expedition_id"]) != (rid, mid, eid):
         raise ValueError("Scanned remnant belongs to another map or chain. Save or discard it first.")
     occurrence = str(uuid.uuid4())
-    context = _snapshot({**config, "expedition": expedition})
+    context = _bind_atlas_context(db, mid, _snapshot({**config, "expedition": expedition}))
     details = {"family": result["family"], "recipes": result["rows"]}
     if visible_seed:
         details["visible_seed"] = visible_seed
@@ -1200,7 +1354,7 @@ def commit_chain_steps(steps, *, advance_expedition=False, expected_context=None
                                           (eid,))] or [0]) + 1
         existing = _first_row(db, "expedition_id", eid)
         det = db.execute("SELECT detonated FROM expeditions WHERE expedition_id=?", (eid,)).fetchone()
-        context = _snapshot(config)
+        context = _bind_atlas_context(db, mid, _snapshot(config))
         commit_number = _record_commit(db, "Chain", mid, eid, f"Steps {step}–{step + len(cleaned) - 1}",
                                        context=context, details={"steps": [
                                            {"step": step + offset, "rune1": rune1, "rune2": rune2}
@@ -1326,8 +1480,9 @@ def start_map():
         if current:
             config.update(_waystone_settings({}))
         config["expedition"] = 1
+        context = _bind_atlas_context(db, mid, _snapshot(config))
         db.execute("INSERT INTO maps VALUES(?,?,?,?)",
-                   (mid, _dump(_snapshot(config)), _dump([None, None, None]), _now()))
+                   (mid, _dump(context), _dump([None, None, None]), _now()))
         db.execute("INSERT INTO expeditions VALUES(?,?,?,?)",
                    (_exp_id(mid, 1), mid, 1, None))
         _set_meta(db, "settings", config)
@@ -1578,6 +1733,7 @@ def save_currency_snapshot(phase, items, expected_map_id=None):
         previous = db.execute("SELECT snapshot_json FROM maps WHERE map_id=?", (map_id,)).fetchone()
         context = (_load(previous[0]) if map_id == current and _meta(db, "pending_new_map") and previous
                    else _snapshot(settings))
+        context = _bind_atlas_context(db, map_id, context)
         db.execute("INSERT INTO currency_snapshots(map_id,phase,items_json,recorded_at,snapshot_json) "
                    "VALUES(?,?,?,?,?) ON CONFLICT(map_id,phase) DO UPDATE SET "
                    "items_json=excluded.items_json,recorded_at=excluded.recorded_at",
@@ -1615,8 +1771,10 @@ def export_currency_csv():
     writer = csv.writer(output)
     writer.writerow(["Map ID", "Currency", "Start Count", "End Count", "Net Change",
                      "Start Recorded UTC", "End Recorded UTC", "Start Commit #", "End Commit #",
-                     *(f"Start {header}" for header in CONFIG_EXPORT_HEADERS[:-2]),
-                     *(f"End {header}" for header in CONFIG_EXPORT_HEADERS[:-2]),
+                     *(f"Start {header}" for header in CONFIG_EXPORT_HEADERS[:-4]),
+                     *(f"End {header}" for header in CONFIG_EXPORT_HEADERS[:-4]),
+                     *(f"Start {header}" for header in ATLAS_EXPORT_HEADERS),
+                     *(f"End {header}" for header in ATLAS_EXPORT_HEADERS),
                      "Start Deli", "Start Wisp", "End Deli", "End Wisp"])
     for map_id, phases in sorted(snapshots.items()):
         start = _load(phases["start"]["items_json"]) if "start" in phases else {}
@@ -1632,7 +1790,9 @@ def export_currency_csv():
                              phases["end"]["recorded_at"] if "end" in phases else "",
                              commits.get((map_id, "start"), "") if "start" in phases else "",
                              commits.get((map_id, "end"), "") if "end" in phases else "",
-                             *start_config[:-2], *end_config[:-2], *start_config[-2:], *end_config[-2:]]))
+                             *start_config[:-4], *end_config[:-4],
+                             *start_config[-4:-2], *end_config[-4:-2],
+                             *start_config[-2:], *end_config[-2:]]))
     return output.getvalue().encode("utf-8-sig")
 
 
@@ -1697,6 +1857,7 @@ def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
         map_id = _map_id(number)
         if expected_map_id is not None and map_id != expected_map_id:
             raise ValueError(f"This Ritual scan belongs to {expected_map_id}. Scan {map_id} before saving.")
+        context = _bind_atlas_context(db, map_id, _snapshot(_meta(db, "settings")))
         old = (db.execute("SELECT id,page_number FROM ritual_pages WHERE map_id=? AND scan_hash=?",
                           (map_id, scan_hash)).fetchone() if scan_hash else None)
         if old:
@@ -1708,8 +1869,9 @@ def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
                               (map_id,)).fetchone()[0]
             db.execute("INSERT INTO ritual_pages(map_id,page_number,scan_hash,raw_text,items_json,recorded_at,snapshot_json) "
                        "VALUES(?,?,?,?,?,?,?)", (map_id, page, scan_hash, raw_text, _dump(cleaned), _now(),
-                                               _dump(_snapshot(_meta(db, "settings")))))
+                                               _dump(context)))
         commit_number = _record_commit(db, "Ritual", map_id, reference=f"Page {page}",
+                                       context=context,
                                        details={"page": page, "items": cleaned, "raw_text": raw_text,
                                                 "tribute_available": tribute_available,
                                                 "rerolls_remaining": rerolls_remaining})
@@ -1758,7 +1920,7 @@ def export_maps_csv():
                      *[f"Map Mod {n}" for n in range(1, 11)], "Last Commit #",
                      "Perk 1", "Perk 2", "Perk 3", "Perk 4", "Master +Mods", "Base Map Mods",
                      "# +2 Mod Tablets", "Tablets Used", *TABLET_EXPORT_HEADERS, *TABLET_DETAIL_HEADERS,
-                     "Deli", "Wisp"])
+                     *ATLAS_EXPORT_HEADERS, "Deli", "Wisp"])
     with _connect() as db:
         commits = {row["map_id"]: row["number"] for row in db.execute(
             "SELECT number,map_id FROM commits WHERE map_id!='' ORDER BY number")}
@@ -1809,7 +1971,8 @@ def export_maps_csv():
                                      context.get("tablets", ""), context.get("tablets_used", ""),
                                      *(list(context.get("tablet_values") or [])[:32] +
                                        [""] * max(0, 32 - len(context.get("tablet_values") or []))),
-                                     *_tablet_detail_values(context), context.get("deli", ""), context.get("wisp", "")]
+                                     *_tablet_detail_values(context), *_atlas_export_values(context),
+                                     context.get("deli", ""), context.get("wisp", "")]
             writer.writerow(_csv_row([int(v) if isinstance(v, float) and v.is_integer() else v
                                      for v in values]))
     return output.getvalue().encode("utf-8-sig")
@@ -1868,6 +2031,7 @@ def get_state():
         chain.sort(key=lambda item: item["step"])
         return {
             "settings": config, "area_level": area_level(config),
+            "atlas_settings_target_map_id": _map_id(_atlas_settings_target(db)),
             "current_map_id": mid, "current_expedition_id": eid,
             "current_remnant_id": rid,
             "next_remnant_id": f"R{_meta(db, 'next_remnant_number'):04d}",
@@ -1921,7 +2085,10 @@ def export_csv(*, _db=None):
     out = io.StringIO(newline="")
     writer = csv.writer(out)
     with (nullcontext(_db) if _db is not None else _connect()) as db:
-        writer.writerow([*_meta(db, "export_headers"), *EXPORT_EXTRA_HEADERS])
+        writer.writerow([*_meta(db, "export_headers"), *EXPORT_EXTRA_HEADERS[:-2],
+                         *ATLAS_EXPORT_HEADERS, *EXPORT_EXTRA_HEADERS[-2:]])
+        atlas_contexts = {row["number"]: _load(row["snapshot_json"])
+                          for row in db.execute("SELECT number,snapshot_json FROM commits")}
         for table in ("legacy_export", "new_export"):
             for item in db.execute(f"SELECT row_json FROM {table} ORDER BY position"):
                 values = _load(item[0])
@@ -1929,7 +2096,9 @@ def export_csv(*, _db=None):
                     values.extend([""] * (67 + len(EXPORT_EXTRA_HEADERS) - len(values)))
                 if len(values) != 67 + len(EXPORT_EXTRA_HEADERS):
                     raise ValueError("Saved Export row has an invalid width.")
-                writer.writerow(_csv_row(values))
+                # Atlas fields are projected on export; fixed spreadsheet row positions remain intact.
+                context = atlas_contexts.get(values[67 + len(BASE_EXTRA_HEADERS) - 1], {})
+                writer.writerow(_csv_row([*values[:-2], *_atlas_export_values(context), *values[-2:]]))
     return out.getvalue().encode("utf-8-sig")
 
 
@@ -1959,9 +2128,9 @@ def export_record_history_csv(*, _db=None):
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     writer.writerow(["Scan Commit #", "Type", "Map ID", "Expedition ID", "Reference", "Recorded UTC",
-                     *HISTORY_DETAIL_HEADERS, *CONFIG_EXPORT_HEADERS[:-2], "Tablet Slot Capacity",
+                     *HISTORY_DETAIL_HEADERS, *CONFIG_EXPORT_HEADERS[:-4], "Tablet Slot Capacity",
                      *(f"{master} Configured Perk {n}" for master in ("Jado", "Doryani", "Hilda")
-                       for n in range(1, 5)), "Deli", "Wisp"])
+                       for n in range(1, 5)), *ATLAS_EXPORT_HEADERS, "Deli", "Wisp"])
     starts = {}
     with (nullcontext(_db) if _db is not None else _connect()) as db:
         for commit in db.execute("SELECT * FROM commits ORDER BY number"):
@@ -2025,7 +2194,8 @@ def export_record_history_csv(*, _db=None):
             configured = [selections.get(master, [""] * 4)[n]
                           for master in ("Jado", "Doryani", "Hilda") for n in range(4)]
             config = _config_export_values(context)
-            config_values = [*config[:-2], context.get("tablet_capacity", ""), *configured, *config[-2:]]
+            config_values = [*config[:-4], context.get("tablet_capacity", ""), *configured,
+                             *config[-4:-2], *config[-2:]]
             for entry in entries or [{}]:
                 values = {**shared, **entry}
                 entry_base = [*base]
@@ -2036,21 +2206,24 @@ def export_record_history_csv(*, _db=None):
     return output.getvalue().encode("utf-8-sig")
 
 
-def export_all_csv():
-    with _connect() as db:
-        db.execute("BEGIN")
+def export_all_csv(*, _db=None):
+    with (nullcontext(_db) if _db is not None else _connect()) as db:
+        if _db is None:
+            db.execute("BEGIN")
         remnant_data = export_csv(_db=db)
         history_data = export_record_history_csv(_db=db)
         item_columns = {row[0].casefold(): f"Item: {row[0]}"
                         for row in db.execute("SELECT name FROM item_names ORDER BY name")}
     remnant_reader = csv.DictReader(io.StringIO(remnant_data.decode("utf-8-sig")))
-    remnant_headers = [name for name in remnant_reader.fieldnames if name not in ("Deli", "Wisp")]
+    remnant_headers = [name for name in remnant_reader.fieldnames
+                       if name not in (*ATLAS_EXPORT_HEADERS, "Deli", "Wisp")]
     remnants = list(remnant_reader)
     history_reader = csv.DictReader(io.StringIO(history_data.decode("utf-8-sig")))
     headers = remnant_headers + [name for name in history_reader.fieldnames
-                                if name not in remnant_headers and name not in ("Recipe", "Deli", "Wisp")]
+                                if name not in remnant_headers and
+                                name not in ("Recipe", *ATLAS_EXPORT_HEADERS, "Deli", "Wisp")]
     headers.extend(item_columns.values())
-    headers.extend(["Deli", "Wisp"])
+    headers.extend([*ATLAS_EXPORT_HEADERS, "Deli", "Wisp"])
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=headers, extrasaction="ignore")
     writer.writeheader()
@@ -2085,6 +2258,69 @@ def export_all_csv():
         for row in matching[offsets.get(number, 0):]:
             row["Type"] = "Chain" if row.get("Chain Step #") else "Remnant" if row.get("Remnant ID") else "Map totals"
             writer.writerow(row)
+    return output.getvalue().encode("utf-8-sig")
+
+
+ATLAS_SHEET_HEADERS = ("Atlas Setup ID", "Map IDs", "Atlas Data Version", "Gear Item Rarity %", "Activity",
+                       "Node ID", "Node Name", "Allocated", "Points", "Selected Option ID",
+                       "Selected Option", "Effects", "Stats", "Applied Effects", "Applied Stats")
+
+
+def export_atlas_csv(*, _db=None):
+    """Export each referenced setup once, resolving effects against its frozen dataset."""
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(ATLAS_SHEET_HEADERS)
+    with (nullcontext(_db) if _db is not None else _connect()) as db:
+        if _db is None:
+            db.execute("BEGIN")
+        current = _atlas_snapshot(_meta(db, "settings"))
+        referenced = {current["atlas_setup_id"]} if current else set()
+        map_ids = {}
+        for table in ("maps", "commits", "currency_snapshots", "ritual_pages"):
+            for row in db.execute(f"SELECT map_id,snapshot_json FROM {table}"):
+                setup_id = _load(row["snapshot_json"]).get("atlas_setup_id")
+                if setup_id:
+                    referenced.add(setup_id)
+                    if row["map_id"]:
+                        map_ids.setdefault(setup_id, set()).add(row["map_id"])
+        catalogs = {}
+        for setup_id in sorted(referenced):
+            saved = db.execute("SELECT catalog_id,settings_json FROM atlas_setups WHERE setup_id=?",
+                               (setup_id,)).fetchone()
+            if saved is None:
+                raise ValueError("A saved Atlas setup is missing from the local database.")
+            settings = _load(saved["settings_json"])
+            catalog_id = saved["catalog_id"]
+            if catalog_id not in catalogs:
+                row = db.execute("SELECT catalog_json FROM atlas_catalogs WHERE catalog_id=?",
+                                 (catalog_id,)).fetchone()
+                if row is None:
+                    raise ValueError("A saved Atlas dataset is missing from the local database.")
+                catalogs[catalog_id] = _load(row[0])
+            allocated = set(settings["allocated"])
+            for node_id, node in sorted(catalogs[catalog_id]["nodes"].items(),
+                                         key=lambda pair: (pair[1]["activity"], pair[0])):
+                if not node.get("allocatable"):
+                    continue
+                active = node_id in allocated
+                option_id = settings["choices"].get(node_id, "")
+                option = next((choice for choice in node.get("choices", [])
+                               if choice["id"] == option_id), None)
+                effects = list(node.get("effects", []))
+                stats = dict(node.get("stats", {}))
+                if option:
+                    effects.extend(option.get("effects", []))
+                    for key, amount in option.get("stats", {}).items():
+                        stats[key] = stats.get(key, 0) + amount
+                rarity = settings.get("gear_item_rarity")
+                writer.writerow(_csv_row([setup_id, ", ".join(sorted(map_ids.get(setup_id, set()))),
+                    settings["catalog_version"],
+                    "" if rarity is None else rarity, node["activity"], node_id, node["name"],
+                    "Yes" if active else "No", 1 if active else 0, option_id,
+                    option["name"] if option else "", "\n".join(effects),
+                    _dump(stats) if stats else "", "\n".join(effects) if active else "",
+                    _dump(stats) if active and stats else ""]))
     return output.getvalue().encode("utf-8-sig")
 
 
@@ -2130,11 +2366,21 @@ def save_export_file(kind="xlsx"):
         data = export_xlsx()
         filename = "PoE2_Export.xlsx"
     else:
-        data = export_all_csv()
+        with _connect() as db:
+            db.execute("BEGIN")
+            data = export_all_csv(_db=db)
+            atlas_data = export_atlas_csv(_db=db)
         filename = "PoE2_Export.csv"
     destination = directory / filename
-    _write_export_bytes(destination, data)
-    return {"path": str(destination), "bytes": len(data)}
+    result = {"path": str(destination), "bytes": len(data)}
+    if kind == "csv":
+        from PoE2_Data_Logger.core.export_files import write_export_files
+        atlas_destination = directory / "PoE2_Atlas.csv"
+        write_export_files({destination: data, atlas_destination: atlas_data})
+        result.update(atlas_path=str(atlas_destination), atlas_bytes=len(atlas_data))
+    else:
+        _write_export_bytes(destination, data)
+    return result
 
 
 def _write_export_bytes(destination, data):

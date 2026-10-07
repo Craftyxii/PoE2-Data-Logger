@@ -1,0 +1,22 @@
+Path of Exile 2 Atlas data and artwork
+
+Path of Exile and Path of Exile 2 are trademarks of Grinding Gear Games.
+The exported game data and artwork remain copyright Grinding Gear Games.
+PoE2 Data Logger is not affiliated with or endorsed by Grinding Gear Games.
+
+Atlas layout, passive effects and stat descriptions come from the RePoE PoE2
+export (https://github.com/repoe-fork/poe2). Choice options and their numeric
+stats come from the RePoE raw PoE2 passive tables
+(https://github.com/repoe-fork/dat-export).
+
+The bundled node icons, backgrounds and passive frames are game artwork
+distributed with Sweet Vision's PoE2 build converter
+(https://github.com/PraedythXIV/poe2-build-converter). Its original source-code
+license and third-party notices are included in UPSTREAM-LICENSE.txt and
+UPSTREAM-NOTICES.md. These upstream documents describe that project's code
+and dependencies; those dependencies are not added to PoE2 Data Logger.
+
+SOURCES.md records the pinned source revisions, export dates, rebuild steps
+and artwork limitations. art-provenance.json records the artwork sources and
+hashes. The exported internal game build is 4.5.5.2; this is not a claim about
+the user's installed public game patch.

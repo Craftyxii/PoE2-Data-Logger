@@ -1,0 +1,1261 @@
+{
+  "repository": "PraedythXIV/poe2-build-converter",
+  "commit": "27f5dad0d0979aa23a604defd11fcf7ae4668444",
+  "license": "Game data and art copyright Grinding Gear Games. Code MIT, copyright PraedythXIV 2026. See downloaded THIRD-PARTY-NOTICES.md.",
+  "assets": [
+    {
+      "upstream_path": "src/data/atlasIcons.json",
+      "url": "https://raw.githubusercontent.com/PraedythXIV/poe2-build-converter/27f5dad0d0979aa23a604defd11fcf7ae4668444/src/data/atlasIcons.json",
+      "bytes": 12749,
+      "sha256": "7d35ee1f769f82fcf7bffc28e7aada3ec32fdefaf61fdbf194d981176be10917"
+    },
+    {
+      "upstream_path": "src/data/atlasBg.json",
+      "url": "https://raw.githubusercontent.com/PraedythXIV/poe2-build-converter/27f5dad0d0979aa23a604defd11fcf7ae4668444/src/data/atlasBg.json",
+      "bytes": 986,
+      "sha256": "9f4a8f5448bc5f17793a2b93bb9142eee73010e8e05bd7019b295fc6781b1956"
+    },
+    {
+      "upstream_path": "src/assets/tree/atlas-icons.webp",
+      "url": "https://raw.githubusercontent.com/PraedythXIV/poe2-build-converter/27f5dad0d0979aa23a604defd11fcf7ae4668444/src/assets/tree/atlas-icons.webp",
+      "bytes": 483596,
+      "sha256": "a0e2b47ec71edac2b5bc45fd5cbb0a29a7409099f4585855861a3736e9ad8798"
+    },
+    {
+      "upstream_path": "src/assets/tree/atlas-bg.webp",
+      "url": "https://raw.githubusercontent.com/PraedythXIV/poe2-build-converter/27f5dad0d0979aa23a604defd11fcf7ae4668444/src/assets/tree/atlas-bg.webp",
+      "bytes": 409676,
+      "sha256": "f30ecd8e35defe062dd9cfa097cda288d98ffb72d065d88e9a4c42fe4ef73dcc"
+    },
+    {
+      "upstream_path": "src/assets/tree/atlas-bg-general.webp",
+      "url": "https://raw.githubusercontent.com/PraedythXIV/poe2-build-converter/27f5dad0d0979aa23a604defd11fcf7ae4668444/src/assets/tree/atlas-bg-general.webp",
+      "bytes": 1694860,
+      "sha256": "7f94f24bf7b024ce633fa4597cb66fe8e17eda4568bbc5ee2440e08ce4da23ad"
+    },
+    {
+      "upstream_path": "src/assets/tree/frame.webp",
+      "url": "https://raw.githubusercontent.com/PraedythXIV/poe2-build-converter/27f5dad0d0979aa23a604defd11fcf7ae4668444/src/assets/tree/frame.webp",
+      "bytes": 87612,
+      "sha256": "a87c8460ec7b5ef46f2741c3314fdd5bb6183ca03d9b9eec6ef545bd1b177b60"
+    },
+    {
+      "upstream_path": "src/assets/tree/frame.json",
+      "url": "https://raw.githubusercontent.com/PraedythXIV/poe2-build-converter/27f5dad0d0979aa23a604defd11fcf7ae4668444/src/assets/tree/frame.json",
+      "bytes": 7804,
+      "sha256": "7c66c0060eba66b8a12407a4de52b82e4d107e359f7abe33aed0ef178b4eeced"
+    },
+    {
+      "upstream_path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/PraedythXIV/poe2-build-converter/27f5dad0d0979aa23a604defd11fcf7ae4668444/LICENSE",
+      "bytes": 1462,
+      "sha256": "bae19acb1cffa95f99b5881e89a1aa8a48a6222ef556e7497c9deeb771cb382b"
+    },
+    {
+      "upstream_path": "THIRD-PARTY-NOTICES.md",
+      "url": "https://raw.githubusercontent.com/PraedythXIV/poe2-build-converter/27f5dad0d0979aa23a604defd11fcf7ae4668444/THIRD-PARTY-NOTICES.md",
+      "bytes": 7262,
+      "sha256": "8189f135599989fea1a03a1122f06eae4e9cbe5066144addabc4b87e90dbfaed"
+    }
+  ],
+  "icon_coverage": {
+    "requested_unique": 126,
+    "present": 126,
+    "missing": []
+  },
+  "icon_crops": {
+    "_provenance": {
+      "source": "GGG PoE2 game data via pathofexile-dat (PassiveSkills.Icon_DDSFile, BC1/DXT1 art)",
+      "patch": "4.5.4.3",
+      "captured": "2026-07-04",
+      "counts": {
+        "icons": 126,
+        "decodeMisses": 0
+      },
+      "note": "Atlas icon art \u00a9 Grinding Gear Games. Not affiliated with or endorsed by GGG."
+    },
+    "_atlas": {
+      "w": 2048,
+      "h": 1162,
+      "tile": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AbyssCrack.dds": {
+      "x": 1420,
+      "y": 130,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AbyssMonstersSpawn.dds": {
+      "x": 1291,
+      "y": 646,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AbyssNotable.dds": {
+      "x": 1549,
+      "y": 775,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AbyssNotable1.dds": {
+      "x": 775,
+      "y": 1,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AbyssNotable2.dds": {
+      "x": 517,
+      "y": 1033,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AbyssNotable3.dds": {
+      "x": 1420,
+      "y": 259,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AbyssNotable4.dds": {
+      "x": 1162,
+      "y": 130,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AbyssNotable5.dds": {
+      "x": 1549,
+      "y": 646,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AbyssNotable6.dds": {
+      "x": 259,
+      "y": 904,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AbyssTo4.dds": {
+      "x": 1162,
+      "y": 904,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AlvaNode.dds": {
+      "x": 646,
+      "y": 517,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AlvaNode2.dds": {
+      "x": 517,
+      "y": 388,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AlvaNotable1.dds": {
+      "x": 1162,
+      "y": 259,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AlvaNotable2.dds": {
+      "x": 1,
+      "y": 517,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AlvaNotable3.dds": {
+      "x": 1033,
+      "y": 259,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AlvaNotable4.dds": {
+      "x": 1,
+      "y": 130,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AnarchyNotable1.dds": {
+      "x": 1420,
+      "y": 517,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AnarchyNotable3.dds": {
+      "x": 1291,
+      "y": 1,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AtlasMasteryAzmeriSpirits.dds": {
+      "x": 517,
+      "y": 646,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AtlasMasteryBiome.dds": {
+      "x": 1,
+      "y": 259,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AtlasMasteryEssence.dds": {
+      "x": 517,
+      "y": 130,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AtlasMasteryGeneric.dds": {
+      "x": 259,
+      "y": 1,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AtlasMasteryRogueExile.dds": {
+      "x": 130,
+      "y": 646,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AtlasMasteryShrine.dds": {
+      "x": 388,
+      "y": 775,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AtlasMasteryStoneCircles.dds": {
+      "x": 1678,
+      "y": 517,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AtlasMasteryStrongbox.dds": {
+      "x": 259,
+      "y": 646,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AtlassAbyssalNode.dds": {
+      "x": 775,
+      "y": 130,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/AzmeriSpiritsNode.dds": {
+      "x": 1678,
+      "y": 130,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BossMapDrops.dds": {
+      "x": 646,
+      "y": 130,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BossNotableDropMoreItems.dds": {
+      "x": 1291,
+      "y": 259,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BossNotableDropMoreWaystone.dds": {
+      "x": 646,
+      "y": 1033,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BossNotableDropRarerItems.dds": {
+      "x": 1291,
+      "y": 775,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BossNotableGrantMoreExperience.dds": {
+      "x": 904,
+      "y": 775,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BossNotableSpawnBeyondMonsters.dds": {
+      "x": 388,
+      "y": 646,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BreachBossClaspedHands.dds": {
+      "x": 1807,
+      "y": 130,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BreachNode2.dds": {
+      "x": 1162,
+      "y": 1,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BreachNodeChaos.dds": {
+      "x": 1291,
+      "y": 130,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BreachNotable1.dds": {
+      "x": 1033,
+      "y": 904,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BreachNotable2.dds": {
+      "x": 1033,
+      "y": 775,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BreachNotable3.dds": {
+      "x": 904,
+      "y": 646,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BreachNotable4.dds": {
+      "x": 1549,
+      "y": 259,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BreachNotable5.dds": {
+      "x": 388,
+      "y": 1033,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BreachNotable6.dds": {
+      "x": 130,
+      "y": 904,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BreachNotable7.dds": {
+      "x": 130,
+      "y": 775,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/BreachNotable8.dds": {
+      "x": 259,
+      "y": 1033,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/CityBiome.dds": {
+      "x": 130,
+      "y": 259,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/CityBiomeNode.dds": {
+      "x": 1162,
+      "y": 388,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/DeliriumNode1.dds": {
+      "x": 130,
+      "y": 1,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/DeliriumNotable1.dds": {
+      "x": 1678,
+      "y": 904,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/DeliriumNotable2.dds": {
+      "x": 1,
+      "y": 1033,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/DeliriumNotable3.dds": {
+      "x": 130,
+      "y": 130,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/DeliriumNotable4.dds": {
+      "x": 1291,
+      "y": 904,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/DeliriumNotable5.dds": {
+      "x": 1807,
+      "y": 517,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/DeliriumNotable6.dds": {
+      "x": 904,
+      "y": 388,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/DeliriumNotable7.dds": {
+      "x": 1420,
+      "y": 646,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/DeliriumNotable8.dds": {
+      "x": 1807,
+      "y": 775,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/DesertBiome.dds": {
+      "x": 1420,
+      "y": 388,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/DesertBiomeNode.dds": {
+      "x": 1807,
+      "y": 388,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/DisablingMasterAlva.dds": {
+      "x": 904,
+      "y": 1,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/EssenceNode1.dds": {
+      "x": 904,
+      "y": 130,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/EssenceNotable3.dds": {
+      "x": 775,
+      "y": 517,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ExceptionalItemsBodyArmour.dds": {
+      "x": 1549,
+      "y": 388,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ExceptionalItemsBoots.dds": {
+      "x": 388,
+      "y": 130,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ExceptionalItemsGloves.dds": {
+      "x": 517,
+      "y": 259,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ExceptionalItemsHelmets.dds": {
+      "x": 1,
+      "y": 904,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ExceptionalItemsWeaponsShields.dds": {
+      "x": 646,
+      "y": 904,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ExpeditionDannig.dds": {
+      "x": 517,
+      "y": 775,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ExpeditionNode1.dds": {
+      "x": 646,
+      "y": 259,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ExpeditionNotable1.dds": {
+      "x": 1291,
+      "y": 388,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ExpeditionNotable2.dds": {
+      "x": 1033,
+      "y": 388,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ExpeditionNotable3.dds": {
+      "x": 388,
+      "y": 1,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ExpeditionNotable4.dds": {
+      "x": 775,
+      "y": 904,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ExpeditionNotable5.dds": {
+      "x": 1,
+      "y": 1,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ExpeditionSpawnMissingLife.dds": {
+      "x": 517,
+      "y": 517,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ExtremeArchaeology.dds": {
+      "x": 904,
+      "y": 904,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ForestBiome.dds": {
+      "x": 1033,
+      "y": 130,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ForestBiomeNode.dds": {
+      "x": 130,
+      "y": 388,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/GrassBiome.dds": {
+      "x": 1807,
+      "y": 646,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/GrassBiomeNode.dds": {
+      "x": 904,
+      "y": 517,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/HarvestNotable4.dds": {
+      "x": 259,
+      "y": 388,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/HybridEssenceRogueExile.dds": {
+      "x": 646,
+      "y": 646,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/HybridEssenceStoneCircle.dds": {
+      "x": 775,
+      "y": 775,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/HybridRogueExileStoneCircle.dds": {
+      "x": 1678,
+      "y": 775,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/HybridShrineAzmeriSpirit.dds": {
+      "x": 904,
+      "y": 259,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/HybridStrongboxAzmeriSpirit.dds": {
+      "x": 775,
+      "y": 388,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/HybridStrongboxShrines.dds": {
+      "x": 1162,
+      "y": 646,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ItemQuantityandRarity.dds": {
+      "x": 1807,
+      "y": 1,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/KiracNotable4.dds": {
+      "x": 1807,
+      "y": 259,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/MapsAdditionalBreaches.dds": {
+      "x": 1420,
+      "y": 904,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ModifierTier.dds": {
+      "x": 130,
+      "y": 517,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/MountainBiome.dds": {
+      "x": 1162,
+      "y": 517,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/MountainBiomeNode.dds": {
+      "x": 646,
+      "y": 775,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/RareBreachMonsterBlessing.dds": {
+      "x": 1033,
+      "y": 517,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/RareMonstersnode.dds": {
+      "x": 1420,
+      "y": 1,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/RareMonstersnotable.dds": {
+      "x": 388,
+      "y": 517,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/Ritual.dds": {
+      "x": 1549,
+      "y": 904,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/RitualChanceBloodFilledVessel.dds": {
+      "x": 130,
+      "y": 1033,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/RitualNode1.dds": {
+      "x": 775,
+      "y": 259,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/RitualNotable.dds": {
+      "x": 1807,
+      "y": 904,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/RitualNotable1.dds": {
+      "x": 1,
+      "y": 775,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/RitualNotable2.dds": {
+      "x": 259,
+      "y": 517,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/RitualNotable3.dds": {
+      "x": 1420,
+      "y": 775,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/RitualNotable4.dds": {
+      "x": 1549,
+      "y": 517,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/RitualReduceRerollCost.dds": {
+      "x": 517,
+      "y": 904,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/RitualReducedCostDeferRewards.dds": {
+      "x": 1678,
+      "y": 646,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/Shrines.dds": {
+      "x": 259,
+      "y": 259,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/ShrinesNode.dds": {
+      "x": 1033,
+      "y": 1,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/StoneCircles.dds": {
+      "x": 775,
+      "y": 646,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/StoneCirclesNode.dds": {
+      "x": 1678,
+      "y": 1,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/StrongboxNode1.dds": {
+      "x": 259,
+      "y": 775,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/StrongboxNotable1.dds": {
+      "x": 646,
+      "y": 1,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/StrongboxNotable3.dds": {
+      "x": 259,
+      "y": 130,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/SwampBiome.dds": {
+      "x": 388,
+      "y": 388,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/SwampBiomeNode.dds": {
+      "x": 517,
+      "y": 1,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/VividPrimalWildWisps.dds": {
+      "x": 1162,
+      "y": 775,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/Watchstonenotable1.dds": {
+      "x": 1,
+      "y": 388,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/WaterBiome.dds": {
+      "x": 1678,
+      "y": 259,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/WaterBiomeNode.dds": {
+      "x": 1291,
+      "y": 517,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/WheelofDisablingBreach.dds": {
+      "x": 1033,
+      "y": 646,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/AtlasTrees/WheelofDisablingRitual.dds": {
+      "x": 388,
+      "y": 904,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/Blood2.dds": {
+      "x": 646,
+      "y": 388,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/Gemling/4k/GemlingLevelAllSkillGems.dds": {
+      "x": 1,
+      "y": 646,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/Gemling/GemlingSkillsAdditionalSupport.dds": {
+      "x": 1678,
+      "y": 388,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/LightningDamagenode.dds": {
+      "x": 1549,
+      "y": 1,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/MasteryBlank.dds": {
+      "x": 388,
+      "y": 259,
+      "w": 128,
+      "h": 128
+    },
+    "Art/2DArt/SkillIcons/passives/StreamOfConsciousnessKeystone.dds": {
+      "x": 1549,
+      "y": 130,
+      "w": 128,
+      "h": 128
+    }
+  },
+  "background_crops": {
+    "_provenance": {
+      "source": "GGG PoE2 game data via pathofexile-dat (AtlasScreen precursortheme subtree/facade art, BC7)",
+      "patch": "4.5.4.3",
+      "captured": "2026-07-04",
+      "counts": {
+        "panels": 6,
+        "decodeMisses": 0
+      },
+      "note": "Atlas background art \u00a9 Grinding Gear Games. Not affiliated with or endorsed by GGG."
+    },
+    "_atlas": {
+      "w": 2048,
+      "h": 1203,
+      "tile": 600
+    },
+    "_native": {
+      "breach": {
+        "w": 600,
+        "h": 600,
+        "ax": 0.49948,
+        "ay": 0.49972
+      },
+      "expedition": {
+        "w": 600,
+        "h": 600,
+        "ax": 0.49949,
+        "ay": 0.49964
+      },
+      "delirium": {
+        "w": 600,
+        "h": 600,
+        "ax": 0.49952,
+        "ay": 0.49956
+      },
+      "ritual": {
+        "w": 600,
+        "h": 600,
+        "ax": 0.49945,
+        "ay": 0.49963
+      },
+      "abyss": {
+        "w": 600,
+        "h": 600,
+        "ax": 0.4995,
+        "ay": 0.49958
+      },
+      "incursion": {
+        "w": 600,
+        "h": 600,
+        "ax": 0.49954,
+        "ay": 0.49967
+      },
+      "general": {
+        "w": 3840,
+        "h": 3840,
+        "ax": 0.50016,
+        "ay": 0.52188
+      }
+    },
+    "abyss": {
+      "x": 602,
+      "y": 602,
+      "w": 600,
+      "h": 600
+    },
+    "breach": {
+      "x": 1,
+      "y": 1,
+      "w": 600,
+      "h": 600
+    },
+    "delirium": {
+      "x": 1203,
+      "y": 1,
+      "w": 600,
+      "h": 600
+    },
+    "expedition": {
+      "x": 602,
+      "y": 1,
+      "w": 600,
+      "h": 600
+    },
+    "incursion": {
+      "x": 1203,
+      "y": 602,
+      "w": 600,
+      "h": 600
+    },
+    "ritual": {
+      "x": 1,
+      "y": 602,
+      "w": 600,
+      "h": 600
+    }
+  },
+  "frame_crops": {
+    "frames": {
+      "frame:KeystoneFrameUnallocated": {
+        "frame": {
+          "x": 0,
+          "y": 0,
+          "w": 109,
+          "h": 111
+        }
+      },
+      "frame:KeystoneFrameCanAllocate": {
+        "frame": {
+          "x": 109,
+          "y": 0,
+          "w": 109,
+          "h": 111
+        }
+      },
+      "frame:KeystoneFrameAllocated": {
+        "frame": {
+          "x": 218,
+          "y": 0,
+          "w": 109,
+          "h": 111
+        }
+      },
+      "frame:AscendancyFrameNotableUnallocated": {
+        "frame": {
+          "x": 0,
+          "y": 111,
+          "w": 103,
+          "h": 102
+        }
+      },
+      "frame:AscendancyFrameNotableCanAllocate": {
+        "frame": {
+          "x": 103,
+          "y": 111,
+          "w": 103,
+          "h": 102
+        }
+      },
+      "frame:AscendancyFrameNotableBacking": {
+        "frame": {
+          "x": 206,
+          "y": 111,
+          "w": 103,
+          "h": 102
+        }
+      },
+      "frame:AscendancyFrameNotableAllocated": {
+        "frame": {
+          "x": 0,
+          "y": 213,
+          "w": 103,
+          "h": 102
+        }
+      },
+      "frame:JewelSocketClusterAltNormal1Small": {
+        "frame": {
+          "x": 103,
+          "y": 213,
+          "w": 100,
+          "h": 100
+        }
+      },
+      "frame:JewelSocketClusterAltNormal1Medium": {
+        "frame": {
+          "x": 203,
+          "y": 213,
+          "w": 100,
+          "h": 100
+        }
+      },
+      "frame:JewelSocketClusterAltNormal1Large": {
+        "frame": {
+          "x": 327,
+          "y": 0,
+          "w": 100,
+          "h": 100
+        }
+      },
+      "frame:JewelSocketClusterAltCanAllocate1Small": {
+        "frame": {
+          "x": 327,
+          "y": 100,
+          "w": 100,
+          "h": 100
+        }
+      },
+      "frame:JewelSocketClusterAltCanAllocate1Medium": {
+        "frame": {
+          "x": 327,
+          "y": 200,
+          "w": 100,
+          "h": 100
+        }
+      },
+      "frame:JewelSocketClusterAltCanAllocate1Large": {
+        "frame": {
+          "x": 0,
+          "y": 315,
+          "w": 100,
+          "h": 100
+        }
+      },
+      "frame:JewelSocketAltNormal": {
+        "frame": {
+          "x": 100,
+          "y": 315,
+          "w": 100,
+          "h": 100
+        }
+      },
+      "frame:JewelSocketAltCanAllocate": {
+        "frame": {
+          "x": 200,
+          "y": 315,
+          "w": 100,
+          "h": 100
+        }
+      },
+      "frame:JewelSocketAltActive": {
+        "frame": {
+          "x": 300,
+          "y": 315,
+          "w": 100,
+          "h": 100
+        }
+      },
+      "frame:AscendancyFrameNormalUnallocated": {
+        "frame": {
+          "x": 427,
+          "y": 0,
+          "w": 80,
+          "h": 80
+        }
+      },
+      "frame:AscendancyFrameNormalCanAllocate": {
+        "frame": {
+          "x": 427,
+          "y": 80,
+          "w": 80,
+          "h": 80
+        }
+      },
+      "frame:AscendancyFrameNormalBacking": {
+        "frame": {
+          "x": 427,
+          "y": 160,
+          "w": 80,
+          "h": 80
+        }
+      },
+      "frame:AscendancyFrameNormalAllocated": {
+        "frame": {
+          "x": 427,
+          "y": 240,
+          "w": 80,
+          "h": 80
+        }
+      },
+      "frame:OracleFrameNotableUnallocated": {
+        "frame": {
+          "x": 427,
+          "y": 320,
+          "w": 76,
+          "h": 76
+        }
+      },
+      "frame:OracleFrameNotableCanAllocate": {
+        "frame": {
+          "x": 0,
+          "y": 415,
+          "w": 76,
+          "h": 76
+        }
+      },
+      "frame:OracleFrameNotableAllocated": {
+        "frame": {
+          "x": 76,
+          "y": 415,
+          "w": 76,
+          "h": 76
+        }
+      },
+      "frame:NotableFrameUnallocated": {
+        "frame": {
+          "x": 152,
+          "y": 415,
+          "w": 76,
+          "h": 76
+        }
+      },
+      "frame:NotableFrameCanAllocate": {
+        "frame": {
+          "x": 228,
+          "y": 415,
+          "w": 76,
+          "h": 76
+        }
+      },
+      "frame:NotableFrameAllocated": {
+        "frame": {
+          "x": 304,
+          "y": 415,
+          "w": 76,
+          "h": 76
+        }
+      },
+      "frame:JewelFrameUnallocated": {
+        "frame": {
+          "x": 380,
+          "y": 415,
+          "w": 76,
+          "h": 76
+        }
+      },
+      "frame:JewelFrameCanAllocate": {
+        "frame": {
+          "x": 507,
+          "y": 0,
+          "w": 76,
+          "h": 76
+        }
+      },
+      "frame:JewelFrameAllocated": {
+        "frame": {
+          "x": 507,
+          "y": 76,
+          "w": 76,
+          "h": 76
+        }
+      },
+      "frame:BlightedNotableFrameUnallocated": {
+        "frame": {
+          "x": 507,
+          "y": 152,
+          "w": 76,
+          "h": 76
+        }
+      },
+      "frame:BlightedNotableFrameCanAllocate": {
+        "frame": {
+          "x": 507,
+          "y": 228,
+          "w": 76,
+          "h": 76
+        }
+      },
+      "frame:BlightedNotableFrameAllocated": {
+        "frame": {
+          "x": 507,
+          "y": 304,
+          "w": 76,
+          "h": 76
+        }
+      },
+      "frame:PSSkillFrameHighlighted": {
+        "frame": {
+          "x": 507,
+          "y": 380,
+          "w": 51,
+          "h": 51
+        }
+      },
+      "frame:PSSkillFrameActive": {
+        "frame": {
+          "x": 507,
+          "y": 431,
+          "w": 51,
+          "h": 51
+        }
+      },
+      "frame:PSSkillFrame": {
+        "frame": {
+          "x": 456,
+          "y": 415,
+          "w": 51,
+          "h": 51
+        }
+      },
+      "frame:OracleFrameUnallocated": {
+        "frame": {
+          "x": 0,
+          "y": 491,
+          "w": 51,
+          "h": 51
+        }
+      },
+      "frame:OracleFrameCanAllocate": {
+        "frame": {
+          "x": 51,
+          "y": 491,
+          "w": 51,
+          "h": 51
+        }
+      },
+      "frame:OracleFrameAllocated": {
+        "frame": {
+          "x": 102,
+          "y": 491,
+          "w": 51,
+          "h": 51
+        }
+      },
+      "frame:AscendancyStartNode": {
+        "frame": {
+          "x": 153,
+          "y": 491,
+          "w": 45,
+          "h": 45
+        }
+      }
+    },
+    "meta": {
+      "image": "frame.webp",
+      "scale": "0.5",
+      "size": {
+        "w": 583,
+        "h": 542
+      }
+    }
+  },
+  "frame_note": "These frames are generic GGG passive-tree frames, not the exact AtlasScreen art paths. Atlas export provides its own frame path names but no matching artwork in inspected repositories. All icons and backgrounds are exact Atlas paths/data; use custom Qt rings if strict Atlas visual style is preferred."
+}

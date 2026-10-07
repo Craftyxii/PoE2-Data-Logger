@@ -12,7 +12,9 @@ Scans and records are processed and stored locally. **The app does not upload yo
 
 ## Download
 
-Download **PoE2-Data-Logger-Setup-v33.34.1-beta.exe** from the [33.34.1 Beta release page](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v33.34.1-beta). The installer includes the libraries and resources needed to run the app.
+Download **PoE2-Data-Logger-Setup-v1.1-beta.exe** from the [1.1 Beta release page](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.1-beta). The installer includes the libraries and resources needed to run the app.
+
+The separate **Atlas / Character Settings** tab provides a clickable PoE2 atlas with effect dropdowns, Autofill and gear item rarity. Excel exports include a companion atlas worksheet linked to each map through its saved Atlas Setup ID.
 
 See the [user guide](docs/USER_GUIDE.md) for map setup, hotkeys, scans, reviews and exporting your data.
 
@@ -51,12 +53,12 @@ py -3.12 -m PoE2_Data_Logger
 
 ## Build on Windows
 
-Install Python 3.12 and NSIS, add `makensis` to PATH, then run **Build.bat** from the repository folder. It installs the build dependencies, packages the app, checks the bundled runtime and OCR models, and creates **PoE2-Data-Logger-Setup-v33.34.1-beta.exe**.
+Install Python 3.12 and NSIS, add `makensis` to PATH, then run **Build.bat** from the repository folder. It installs the build dependencies, packages the app, checks the bundled runtime and OCR models, and creates **PoE2-Data-Logger-Setup-v1.1-beta.exe**.
 
 The source groups in [packaging/sources.py](packaging/sources.py) feed the PyInstaller specification. Add a new app module or resource there when changing the build.
 
 ## Credits and licenses
 
-The app incorporates RuneHelper OCR material, currency-overlay / Exiled Exchange 2 material, and DejaVu fonts. Their original notices and provenance are included beside those files. See [DEPENDENCIES.md](DEPENDENCIES.md) and [the branding notice](PoE2_Data_Logger/CRAFTYXII_ASSETS_LICENSE.txt).
+The app incorporates RuneHelper OCR material, currency-overlay / Exiled Exchange 2 material, DejaVu fonts, and game-derived atlas data and artwork. Their original notices and provenance are included beside those files. See [DEPENDENCIES.md](DEPENDENCIES.md) and [the branding notice](PoE2_Data_Logger/CRAFTYXII_ASSETS_LICENSE.txt).
 
 PoE2 Data Logger is an independent tool and is not affiliated with or endorsed by Grinding Gear Games.

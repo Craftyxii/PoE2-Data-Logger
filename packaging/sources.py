@@ -8,6 +8,8 @@ CORE_SOURCES = (
     "core/reference_pack.py",
     "core/ritual_catalog.py",
     "core/workbook_export.py",
+    "core/atlas_catalog.py",
+    "core/export_files.py",
 )
 
 OCR_SOURCES = (
@@ -28,6 +30,7 @@ OCR_SOURCES = (
 UI_SOURCES = (
     "ui/native_desktop.py",
     "ui/region_select.py",
+    "ui/atlas_settings.py",
 )
 
 PLATFORM_SOURCES = (
@@ -70,4 +73,4 @@ DESKTOP_RESOURCES = (
 )
 
 FILE_RESOURCES = DATABASE_RESOURCES + SCANNER_RESOURCES + DESKTOP_RESOURCES
-DIRECTORY_RESOURCES = ("fonts", "region_examples", "third_party")
+DIRECTORY_RESOURCES = ("fonts", "region_examples", "third_party", "atlas")

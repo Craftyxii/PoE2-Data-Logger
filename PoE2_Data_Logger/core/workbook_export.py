@@ -97,14 +97,42 @@ def _numeric_column(name):
         "Scan Commit #", "Family ID", "Quantity", "Ritual Page", "Tribute", "Tablet Slot Capacity",
         "Start Count", "End Count", "Net Change", "Normal Kills", "Magic Kills", "Rare Kills", "Total Kills",
         "New Find Quantity", "Ritual Tribute Available", "Ritual Rerolls Remaining", "Visible Seed Sockets",
-        "Page", "Currency Commit #", "Ritual Commit #", "Start Scan Commit #", "End Scan Commit #"}
+        "Page", "Currency Commit #", "Ritual Commit #", "Start Scan Commit #", "End Scan Commit #",
+        "Gear Item Rarity %", "Points"}
         or re.fullmatch(r"Tablet \d Mod \d (?:%|Value)", name)
         or re.fullmatch(r"Tablet \d Random Modifiers", name)
         or re.fullmatch(r"Expedition \d Detonated", name)
         or (name.startswith(("Start ", "End ")) and _numeric_column(name.split(" ", 1)[1])))
 
 
-def _data_sheet(data):
+def _atlas_setup_hyperlinks(data, atlas_data, target_sheet):
+    atlas_rows = csv.reader(io.StringIO(atlas_data.decode("utf-8-sig")))
+    atlas_headers = next(atlas_rows)
+    rows = csv.reader(io.StringIO(data.decode("utf-8-sig")))
+    headers = next(rows)
+    if "Atlas Setup ID" not in atlas_headers or "Atlas Setup ID" not in headers:
+        return {}
+    atlas_column = atlas_headers.index("Atlas Setup ID")
+    column = headers.index("Atlas Setup ID")
+    locations = {}
+    sheet_reference = "'" + target_sheet.replace("'", "''") + "'!"
+    for number, values in enumerate(atlas_rows, 2):
+        if len(values) != len(atlas_headers):
+            raise ValueError(f"Export row {number} has an invalid width.")
+        setup_id = values[atlas_column]
+        if setup_id:
+            locations.setdefault(setup_id, f"{sheet_reference}{_column(atlas_column + 1)}{number}")
+    hyperlinks = {}
+    for number, values in enumerate(rows, 2):
+        if len(values) != len(headers):
+            raise ValueError(f"Export row {number} has an invalid width.")
+        location = locations.get(values[column])
+        if location:
+            hyperlinks[f"{_column(column + 1)}{number}"] = location
+    return hyperlinks
+
+
+def _data_sheet(data, *, hyperlinks=None):
     rows = csv.reader(io.StringIO(data.decode("utf-8-sig")))
     headers = next(rows)
     root = ET.Element(f"{{{NS}}}worksheet")
@@ -116,7 +144,7 @@ def _data_sheet(data):
     ET.SubElement(root, f"{{{NS}}}sheetFormatPr", {"defaultRowHeight": "15"})
     cols = ET.SubElement(root, f"{{{NS}}}cols")
     for col, header in enumerate(headers, 1):
-        width = 38 if any(word in header for word in ("Recipe", "Affix", "Modifiers", "Name", "Perk", "Combo")) else 19
+        width = 38 if any(word in header for word in ("Recipe", "Affix", "Modifiers", "Name", "Perk", "Combo", "Effects", "Stats")) else 19
         ET.SubElement(cols, f"{{{NS}}}col", {"min": str(col), "max": str(col), "width": str(width), "customWidth": "1"})
     ET.SubElement(root, f"{{{NS}}}sheetData")
     sheet = Sheet(ET.tostring(root))
@@ -131,15 +159,27 @@ def _data_sheet(data):
                 continue
             if _numeric_column(headers[column - 1]) and value and re.fullmatch(r"-?\d+(?:\.\d+)?", value):
                 value = float(value) if "." in value else int(value)
-            sheet.set(last, column, value)
+            address = f"{_column(column)}{last}"
+            sheet.set(last, column, value, style="2" if hyperlinks and address in hyperlinks else None)
     bounds = f"A1:{_column(len(headers))}{last}"
     sheet.root.find(f"{{{NS}}}dimension").set("ref", bounds)
     ET.SubElement(sheet.root, f"{{{NS}}}autoFilter", {"ref": bounds})
+    if hyperlinks:
+        links = ET.SubElement(sheet.root, f"{{{NS}}}hyperlinks")
+        for address, location in hyperlinks.items():
+            ET.SubElement(links, f"{{{NS}}}hyperlink", {"ref": address, "location": location,
+                "tooltip": "View saved Atlas / Character Settings"})
     return sheet.bytes()
 
 
 def export_xlsx():
-    data_sheets = [("Export", logger.export_all_csv)]
+    # Both worksheets describe one database snapshot, including a concurrent
+    # atlas edit or scan commit that happens while the workbook is generated.
+    with logger._connect() as db:
+        db.execute("BEGIN")
+        data_sheets = [("Export", logger.export_all_csv(_db=db)),
+                       ("Atlas Character Settings", logger.export_atlas_csv(_db=db))]
+    setup_links = _atlas_setup_hyperlinks(data_sheets[0][1], data_sheets[1][1], data_sheets[1][0])
     content = ET.Element(f"{{{TYPES}}}Types")
     for extension, kind in (("rels", "application/vnd.openxmlformats-package.relationships+xml"), ("xml", "application/xml")):
         ET.SubElement(content, f"{{{TYPES}}}Default", {"Extension": extension, "ContentType": kind})
@@ -152,9 +192,9 @@ def export_xlsx():
     sheets = ET.SubElement(workbook, f"{{{NS}}}sheets")
     rels = ET.Element(f"{{{PKG_REL}}}Relationships")
     parts = {}
-    for number, (name, produce) in enumerate(data_sheets, 1):
+    for number, (name, data) in enumerate(data_sheets, 1):
         path = f"xl/worksheets/sheet{number}.xml"
-        parts[path] = _data_sheet(produce())
+        parts[path] = _data_sheet(data, hyperlinks=setup_links if number == 1 else None)
         ET.SubElement(content, f"{{{TYPES}}}Override", {"PartName": "/" + path,
             "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"})
         ET.SubElement(sheets, f"{{{NS}}}sheet", {"name": name, "sheetId": str(number), f"{{{DOC_REL}}}id": f"rId{number}"})
@@ -167,13 +207,15 @@ def export_xlsx():
                   "_rels/.rels": ET.tostring(roots, encoding="utf-8", xml_declaration=True),
                   "xl/workbook.xml": ET.tostring(workbook, encoding="utf-8", xml_declaration=True),
                   "xl/_rels/workbook.xml.rels": ET.tostring(rels, encoding="utf-8", xml_declaration=True)})
-    parts["xl/styles.xml"] = (f'<styleSheet xmlns="{NS}"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font>'
-        '<font><b/><sz val="11"/><name val="Calibri"/><color rgb="FF191919"/></font></fonts>'
+    parts["xl/styles.xml"] = (f'<styleSheet xmlns="{NS}"><fonts count="3"><font><sz val="11"/><name val="Calibri"/></font>'
+        '<font><b/><sz val="11"/><name val="Calibri"/><color rgb="FF191919"/></font>'
+        '<font><u/><sz val="11"/><name val="Calibri"/><color rgb="FF0563C1"/></font></fonts>'
         '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
         '<fill><patternFill patternType="solid"><fgColor rgb="FFE2AA2B"/><bgColor indexed="64"/></patternFill></fill></fills>'
         '<borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-        '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
-        '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>'
+        '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+        '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>'
+        '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>'
         '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>').encode()
     out = io.BytesIO()
     with ZipFile(out, "w", compression=ZIP_DEFLATED) as destination:

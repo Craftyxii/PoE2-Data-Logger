@@ -28,11 +28,13 @@ from PoE2_Data_Logger.ocr import item_ocr
 from PoE2_Data_Logger.core import service
 from PoE2_Data_Logger.core import store
 from PoE2_Data_Logger.ui.region_select import RegionEditor, ScanRegionsPage
+from PoE2_Data_Logger.ui.atlas_settings import AtlasSettingsPage
 from PoE2_Data_Logger.core.workbook_export import export_xlsx
+from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 33.34.1 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.1 Beta"
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
                             if getattr(sys, "frozen", False) else
@@ -508,6 +510,10 @@ class LoggerWindow(QMainWindow):
         database_nav = button("Database Import/Export", lambda: self.tabs.setCurrentIndex(8), "nav")
         self.nav_buttons.append(database_nav)
         nav.addWidget(database_nav)
+        atlas_nav = button("Atlas / Character Settings", lambda: self.tabs.setCurrentIndex(12), "nav")
+        atlas_nav.setProperty("page_index", 12)
+        self.nav_buttons.append(atlas_nav)
+        nav.addWidget(atlas_nav)
         root.addWidget(sidebar)
         main = QWidget()
         main_layout = QVBoxLayout(main)
@@ -603,6 +609,9 @@ class LoggerWindow(QMainWindow):
         self._build_readme()
         self._build_license()
         self._build_disclaimer()
+        self.atlas_settings_page = AtlasSettingsPage(self)
+        self.atlas_settings_page.saved.connect(lambda data: self.run(lambda: self.save_atlas_settings(data)))
+        self.tabs.addTab(self.atlas_settings_page, "Atlas / Character Settings")
         self.header_expedition.currentIndexChanged.connect(
             lambda: self.run(lambda: self.set_expedition(self.header_expedition)))
         for key, widgets in self._map_tag_controls().items():
@@ -637,7 +646,8 @@ class LoggerWindow(QMainWindow):
                 self._editing_regions = False
                 service.HOTKEY.start()
         titles = ("Review", "Expedition", "Map / Tablets", "Atlas Masters", "Kills / Currency",
-                  "Data export", "Scan settings", "Scan regions", "Database Import/Export", "README", "Licenses", "Disclaimer")
+                  "Data export", "Scan settings", "Scan regions", "Database Import/Export", "README", "Licenses", "Disclaimer",
+                  "Atlas / Character Settings")
         subtitles = ("Check the latest scan, then Approve to save it.",
                      "Set the expedition and log its propagation chain.",
                      "Read a waystone or tablet, then review and save the map setup.",
@@ -647,12 +657,13 @@ class LoggerWindow(QMainWindow):
                      "Set the hotkeys and scan behaviour.",
                      "Adjust the labelled capture boxes on a game screenshot.",
                      "Label examples and share your OCR reference database.",
-                     "", "", "")
+                     "", "", "", "Set atlas passives, choose their effects and enter gear item rarity.")
         self.page_title.setText(titles[index])
         self.page_subtitle.setText(subtitles[index])
         self.page_subtitle.setVisible(bool(subtitles[index]))
         for i, item in enumerate(self.nav_buttons):
-            item.setProperty("active", "true" if i == index else "false")
+            target = item.property("page_index")
+            item.setProperty("active", "true" if (i if target is None else target) == index else "false")
             item.style().unpolish(item)
             item.style().polish(item)
 
@@ -682,6 +693,7 @@ class LoggerWindow(QMainWindow):
             ("third_party/currency_overlay/EXILED-EXCHANGE-2-LICENSE.txt", "Exiled Exchange 2"),
             ("fonts/LICENSE.txt", "Fonts"),
             ("AFFIX_CATALOG_NOTICE.txt", "Affix catalog"),
+            ("atlas/NOTICE.txt", "PoE2 atlas data and artwork"),
         ])
         self.license_view = QTextBrowser()
         self.license_view.setObjectName("licenseView")
@@ -1722,6 +1734,10 @@ class LoggerWindow(QMainWindow):
         self.state = logger.get_state()
         state = self.state
         config = state["settings"]
+        target = state.get("atlas_settings_target_map_id", "")
+        self.atlas_settings_page.set_settings(config.get("atlas_settings"),
+            status=f"Saved settings apply to {target}." if target else
+                   "Saved atlas settings carry forward to your next map.")
         all_scans = bool(config.get("ocr_auto_commit"))
         with QSignalBlocker(self.auto_all_checkbox):
             self.auto_all_checkbox.setChecked(all_scans)
@@ -1853,6 +1869,13 @@ class LoggerWindow(QMainWindow):
             self._extra_waystone_mods = extra_mods
             self.waystone_name.setVisible(bool(self.waystone_name.text()))
             self.update_area()
+
+    def save_atlas_settings(self, data):
+        state = logger.save_atlas_settings(data)
+        self.atlas_settings_page.set_settings(state["settings"]["atlas_settings"], force=True)
+        self.refresh()
+        self._set_commit_badge(self.state["scan_commit_count"])
+        self.note("Atlas / character settings saved.", True)
 
     def refresh_hotkey(self):
         status = service.HOTKEY.status()
@@ -4085,7 +4108,10 @@ class LoggerWindow(QMainWindow):
 
     def _export_saved(self, result):
         self.refresh()
-        self.note(f"Export saved: {result['path']}", True)
+        paths = [result["path"]]
+        if result.get("atlas_path"):
+            paths.append(result["atlas_path"])
+        self.note("Export saved: " + " and ".join(paths), True)
 
     def save_as(self, kind):
         choices = {
@@ -4097,10 +4123,24 @@ class LoggerWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "Save file", str(Path.home() / name), extension)
         if path:
             def write():
-                data = produce()
                 destination = Path(path)
-                logger._write_export_bytes(destination, data)
-                return {"path": str(destination), "bytes": len(data)}
+                atlas_data = None
+                if kind == "csv":
+                    with logger._connect() as db:
+                        db.execute("BEGIN")
+                        data = logger.export_all_csv(_db=db)
+                        atlas_data = logger.export_atlas_csv(_db=db)
+                else:
+                    data = produce()
+                atlas_path = destination.with_name(destination.stem + "_Atlas.csv")
+                if atlas_data is not None:
+                    write_export_files({destination: data, atlas_path: atlas_data})
+                else:
+                    logger._write_export_bytes(destination, data)
+                result = {"path": str(destination), "bytes": len(data)}
+                if atlas_data is not None:
+                    result["atlas_path"] = str(atlas_path)
+                return result
             self._submit(f"Writing {kind.upper()}…", write, self._export_saved)
 
     def reset_logger(self):
@@ -4302,6 +4342,7 @@ def instance_lock():
         user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
         user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
         window = (user32.FindWindowW(None, WINDOW_TITLE)
+                  or user32.FindWindowW(None, "PoE2 Data Logger 33.34.1 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 33.34 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger"))
         if window:
