@@ -29,6 +29,7 @@
 | [inventory_labels.py](PoE2_Data_Logger/ocr/inventory_labels.py) | Inventory item-label helpers |
 | [item_ocr.py](PoE2_Data_Logger/ocr/item_ocr.py) | Item and Ritual reward readings |
 | [item_text.py](PoE2_Data_Logger/ocr/item_text.py) | Tooltip text parsing |
+| [ritual_grid.py](PoE2_Data_Logger/ocr/ritual_grid.py) | Ritual reward-grid geometry and item footprints |
 | [opened_scan.py](PoE2_Data_Logger/ocr/opened_scan.py) | Opened remnant scanning and OCR model checks |
 | [runehelper_ocr.py](PoE2_Data_Logger/ocr/runehelper_ocr.py) | RuneHelper OCR adapter |
 | [scan.py](PoE2_Data_Logger/ocr/scan.py) | Visible remnant seed scanning |

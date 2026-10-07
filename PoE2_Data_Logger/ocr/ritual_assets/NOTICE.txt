@@ -1,0 +1,7 @@
+Path of Exile 2 Ritual reward-frame corner references.
+
+Two 8 x 8 pixel crops of the in-game reward frame, captured in a user-provided
+Ritual screenshot (2026-10-07). Used only to distinguish item frame geometry
+from similarly coloured equipment artwork. No item identities are encoded.
+
+Game UI artwork is copyright Grinding Gear Games.

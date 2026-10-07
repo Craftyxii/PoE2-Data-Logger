@@ -18,6 +18,7 @@ OCR_SOURCES = (
     "ocr/inventory_labels.py",
     "ocr/item_ocr.py",
     "ocr/item_text.py",
+    "ocr/ritual_grid.py",
     "ocr/opened_scan.py",
     "ocr/propagation_scan.py",
     "ocr/runehelper_ocr.py",
@@ -73,4 +74,4 @@ DESKTOP_RESOURCES = (
 )
 
 FILE_RESOURCES = DATABASE_RESOURCES + SCANNER_RESOURCES + DESKTOP_RESOURCES
-DIRECTORY_RESOURCES = ("fonts", "region_examples", "third_party", "atlas")
+DIRECTORY_RESOURCES = ("fonts", "region_examples", "third_party", "atlas", "ocr/ritual_assets")

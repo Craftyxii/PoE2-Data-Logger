@@ -1,0 +1,64 @@
+import json
+from pathlib import Path
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+from PIL import Image
+
+from PoE2_Data_Logger.ocr import item_ocr
+
+
+class RitualTotalsTests(unittest.TestCase):
+    def test_actual_counter_pixels_preserve_zero_and_two_digit_values(self):
+        folder = Path(__file__).parent / "fixtures/ritual_counters"
+        cases = json.loads((folder / "expected.json").read_text())
+        for case in cases:
+            with self.subTest(rerolls=case["rerolls"]), Image.open(folder / case["image"]) as image:
+                result = item_ocr._ritual_grid_rerolls(image, {"bounds": case["bounds"]})
+                self.assertEqual(result, case["rerolls"])
+
+    def test_inconsistent_counter_reads_are_held_instead_of_clipping_second_digit(self):
+        folder = Path(__file__).parent / "fixtures/ritual_counters"
+        case = next(case for case in json.loads((folder / "expected.json").read_text()) if case["rerolls"] == 35)
+        with Image.open(folder / case["image"]) as source:
+            image = source.convert("RGB")
+        grid = {"bounds": case["bounds"]}
+        for texts, scores in ((["3", "35"], [.999, .999]), (["35", "35"], [.99, .8]),
+                              (["", "35"], [0, .999])):
+            with self.subTest(texts=texts, scores=scores), patch.object(item_ocr, "_engine", return_value=SimpleNamespace(
+                    text_rec=lambda value: SimpleNamespace(txts=texts, scores=scores))):
+                self.assertIsNone(item_ocr._ritual_grid_rerolls(image, grid))
+
+    def test_grid_without_visible_header_cannot_read_numbers_outside_capture(self):
+        with patch.object(item_ocr, "_engine") as engine:
+            self.assertIsNone(item_ocr._ritual_grid_rerolls(
+                Image.new("RGB", (640, 530)), {"bounds": (2, 2, 634, 529)}))
+            engine.assert_not_called()
+
+    def test_available_tribute_is_separate_from_hovered_reward_price(self):
+        rows = [{"text": "20,237 Tribute", "score": .999, "x": 900, "y": 10, "right": 1100, "bottom": 30},
+                {"text": "Favours", "score": .999, "x": 380, "y": 110, "right": 490, "bottom": 140},
+                {"text": "25,205 Tribute", "score": .999, "x": 382, "y": 185, "right": 555, "bottom": 212}]
+        image = Image.new("RGB", (1200, 900))
+        with patch.object(item_ocr, "_ritual_grid_rerolls", return_value=5):
+            result = item_ocr.ritual_totals(rows, image, grid={"bounds": (121, 237, 753, 763)})
+        self.assertEqual(result, {"tribute_available": 25205, "rerolls_remaining": 5})
+
+    def test_tooltip_cost_without_favours_header_is_not_available_tribute(self):
+        rows = [{"text": "20,237 Tribute", "score": .999, "x": 900, "y": 400, "right": 1100, "bottom": 430}]
+        with patch.object(item_ocr, "_engine") as engine:
+            result = item_ocr.ritual_totals(rows, Image.new("RGB", (1200, 900)))
+            self.assertEqual(result, {"tribute_available": None, "rerolls_remaining": None})
+            engine.assert_not_called()
+
+    def test_merged_ocr_row_uses_individual_header_and_counter_parts(self):
+        rows = [{"text": "Favours", "score": .999, "x": 100, "y": 10, "right": 200, "bottom": 30},
+                {"text": "36 46,797 Tribute", "score": .999, "x": 20, "y": 60, "right": 260, "bottom": 85,
+                 "parts": [{"text": "36", "score": .999, "x": 20, "y": 60, "right": 45, "bottom": 85},
+                           {"text": "46,797 Tribute", "score": .999, "x": 100, "y": 60, "right": 260, "bottom": 85}]}]
+        self.assertEqual(item_ocr.ritual_totals(rows), {"tribute_available": 46797, "rerolls_remaining": 36})
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -32,6 +32,7 @@ WAYSTONE_DEFAULTS = {"tier": 15, "waystone": 0, "map_mods": 0, "waystone_name": 
                      "waystone_mods": [], "item_rarity": None, "monster_rarity": None,
                      "pack_size": None, "effectiveness": None}
 WAYSTONE_SETUP_FIELDS = frozenset(("tier", "waystone", "map_mods"))
+MAX_RITUAL_REWARDS = 120
 BASE_EXTRA_HEADERS = ("Item Rarity %", "Monster Rarity %", "Pack Size %",
                         "Effectiveness %", "Waystone Name", "Biome", "City Type", "Ocean Map",
                         "Waystone Modifiers", *(f"Map Mod {n}" for n in range(1, 11)),
@@ -1990,8 +1991,8 @@ def ritual_pages_for_map(map_id):
 
 def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
                      tribute_available=None, rerolls_remaining=None):
-    if not isinstance(items, list) or len(items) > 100:
-        raise ValueError("Review up to 100 Ritual rewards on a page.")
+    if not isinstance(items, list) or len(items) > MAX_RITUAL_REWARDS:
+        raise ValueError(f"Review up to {MAX_RITUAL_REWARDS} Ritual rewards on a page.")
     raw_text = str(raw_text or "")
     if len(raw_text) > 25000:
         raise ValueError("The Ritual OCR text is too long.")

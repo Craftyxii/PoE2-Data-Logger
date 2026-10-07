@@ -1,0 +1,3 @@
+Exact-pixel Ritual counter-button crops from user-provided Path of Exile 2
+screenshots (2026-10-07), used to verify zero and two-digit OCR readings.
+Game UI artwork copyright Grinding Gear Games.

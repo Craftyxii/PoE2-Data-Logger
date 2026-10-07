@@ -34,7 +34,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.2 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.2.1 Beta"
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
                             if getattr(sys, "frozen", False) else
@@ -167,17 +167,49 @@ def clear_currency_read(result):
         item["quantity"] >= 1 and not item.get("count_needs_review") for item in items)
 
 
+def unresolved_ritual_name(name):
+    return str(name or "").strip().casefold() in {
+        "", "unknown", "unidentified", "unresolved", "deferred omen", "deferred item", "deferred reward",
+        "unidentified reward", "unknown reward", "unresolved reward",
+        "unknown item", "unidentified item", "unknown omen", "unidentified omen"}
+
+
 def clear_ritual_read(result, omen_names):
     items = result.get("items") or []
-    return bool(items) and not result.get("unmatched") and all(
-        item.get("category") in ("Omen", "Item") and
-        (item["category"] != "Omen" or item.get("name") in omen_names) and
-        (item["category"] != "Omen" or float(item.get("name_match", 0)) >= .9) and
-        float(item.get("score", 0)) >= .94 and item.get("tribute") is not None and
-        not item.get("needs_review") and
-        not str(item.get("source", "")).startswith("icon reference") and
-        not re.search(r"\b[x×]\s*\d+\b", str(item.get("source", "")), re.I)
-        for item in items)
+    if (not items or any(result.get(flag) for flag in
+            ("unmatched", "unknown", "coverage_uncertain", "needs_review", "unresolved_count",
+             "tribute_needs_review", "rerolls_needs_review", "totals_needs_review"))):
+        return False
+    if result.get("reward_count") is not None and result["reward_count"] != len(items):
+        return False
+    if result.get("grid_detected"):
+        if type(result.get("grid_reward_count")) is not int:
+            return False
+        footprints = [tuple(item.get("grid_slots") or []) for item in items if item.get("grid_slots")]
+        slots = [slot for footprint in footprints for slot in footprint]
+        if (any(type(slot) is not int or not 1 <= slot <= 120 for slot in slots) or
+                len(set(footprints)) != result["grid_reward_count"] or len(slots) != len(set(slots))):
+            return False
+    for item in items:
+        try:
+            score = float(item.get("score", 0))
+            name_match = float(item.get("name_match", 0))
+        except (TypeError, ValueError):
+            return False
+        if (item.get("category") not in ("Omen", "Item") or not isinstance(item.get("name"), str) or
+                unresolved_ritual_name(item.get("name")) or
+                len(str(item["name"])) > 200 or
+                (item["category"] == "Omen" and (item["name"] not in omen_names or not .9 <= name_match <= 1)) or
+                not .94 <= score <= 1 or
+                type(item.get("quantity")) is not int or not 1 <= item["quantity"] <= 1000000 or
+                type(item.get("tribute")) is not int or not 0 <= item["tribute"] <= 1000000000 or
+                type(item.get("deferred", False)) is not bool or
+                any(item.get(flag) for flag in ("needs_review", "unresolved", "name_needs_review",
+                    "count_needs_review", "deferred_needs_review", "deferred_uncertain")) or
+                str(item.get("source", "")).startswith("icon reference") or
+                re.search(r"\b[x×]\s*\d+\b", str(item.get("source", "")), re.I)):
+            return False
+    return True
 
 
 class IconCropCanvas(QWidget):
@@ -1446,9 +1478,10 @@ class LoggerWindow(QMainWindow):
         phase.addStretch()
         review.addLayout(phase)
         self.inventory_table = QTableWidget(0, 4)
-        self.inventory_table.setHorizontalHeaderLabels(["Slot", "Currency / Item", "Count", "Review"])
+        self.inventory_table.setHorizontalHeaderLabels(["Icon", "Currency / Item", "Count", "Review"])
         self.inventory_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.inventory_table.setColumnWidth(0, 55)
+        self.inventory_table.setColumnWidth(0, 60)
+        self.inventory_table.setIconSize(QSize(48, 48))
         self.inventory_table.setColumnWidth(2, 75)
         self.inventory_table.setColumnWidth(3, 205)
         self.inventory_table.itemChanged.connect(self._inventory_row_changed)
@@ -1503,14 +1536,17 @@ class LoggerWindow(QMainWindow):
         totals.addWidget(QLabel("Rerolls remaining"))
         totals.addWidget(self.ritual_rerolls)
         review.addLayout(totals)
-        self.ritual_table = QTableWidget(0, 6)
-        self.ritual_table.setHorizontalHeaderLabels(["Type", "Omen / item name", "Quantity", "Tribute", "OCR source", "Deferred"])
+        self.ritual_table = QTableWidget(0, 7)
+        self.ritual_table.setHorizontalHeaderLabels(["Type", "Omen / item name", "Quantity", "Tribute", "OCR source", "Deferred", "Review"])
         self.ritual_table.setColumnWidth(0, 90)
         self.ritual_table.setColumnWidth(2, 80)
         self.ritual_table.setColumnWidth(3, 90)
         self.ritual_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.ritual_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self.ritual_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        self.ritual_table.setIconSize(QSize(48, 48))
         self.ritual_table.verticalHeader().setDefaultSectionSize(38)
+        self.ritual_table.itemChanged.connect(self._ritual_row_changed)
         self.ritual_table.setMinimumHeight(300)
         self.ritual_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         review.addWidget(self.ritual_table)
@@ -3891,14 +3927,14 @@ class LoggerWindow(QMainWindow):
             self._show_inventory_preview(capture["image"])
         self.inventory_table.setRowCount(0)
         for item in result["items"]:
-            self.add_inventory_row(item)
+            self.add_inventory_row(item, image=capture["image"] if capture is not None else None)
         unknown = result["unknown"]
         for item in unknown:
             candidate = item.get("candidate", "")
             self.add_inventory_row({"slot": item["slot"],
                                     "name": "",
                                     "quantity": "", "count_needs_review": True,
-                                    "candidate": candidate})
+                                    "candidate": candidate}, image=capture["image"] if capture is not None else None)
         if unknown:
             self.icon_slot.setValue(unknown[0]["slot"])
         set_message(self.inventory_status,
@@ -3919,7 +3955,7 @@ class LoggerWindow(QMainWindow):
                 set_message(self.inventory_status,
                             "Auto-commit held: approve or reject the uncertain rows to save the snapshot.")
 
-    def add_inventory_row(self, item=None):
+    def add_inventory_row(self, item=None, *, image=None):
         item = item if isinstance(item, dict) else {}
         row = self.inventory_table.rowCount()
         self.inventory_table.insertRow(row)
@@ -3929,6 +3965,19 @@ class LoggerWindow(QMainWindow):
             cell = QTableWidgetItem(str(text))
             if column == 0:
                 cell.setFlags(cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                slot = item.get("slot")
+                cell.setData(Qt.ItemDataRole.UserRole, slot)
+                if slot is not None:
+                    cell.setToolTip(f"Inventory slot {slot}")
+                if isinstance(image, Image.Image) and type(slot) is int and 1 <= slot <= 60:
+                    crop = item_ocr.inventory_cell(image, slot)
+                    crop.thumbnail((48, 48))
+                    raw = io.BytesIO()
+                    crop.save(raw, format="PNG")
+                    icon = QPixmap()
+                    icon.loadFromData(raw.getvalue())
+                    cell.setText("")
+                    cell.setIcon(QIcon(icon))
             else:
                 cell.setToolTip("Double-click to edit the currency or item name." if column == 1 else
                                 "Double-click to edit the whole-number count, then approve the row.")
@@ -4143,11 +4192,16 @@ class LoggerWindow(QMainWindow):
         for item in result["items"]:
             self.add_ritual_row(item)
         self.ritual_raw.setPlainText(result["raw_text"])
+        review_count = sum(self.ritual_table.item(row, 6).text().split(": ")[-1] != "Ready"
+                           for row in range(self.ritual_table.rowCount()))
+        summary = (f"{len(result['items'])} Ritual rewards · {review_count} need review. "
+                   "Check the icons and confirm missing names, types and counts before Approve.")
+        if result.get("coverage_uncertain"):
+            summary = ("The complete reward grid could not be verified. " + summary +
+                       " Check for missing rewards or capture the full grid again.")
         set_message(self.ritual_status,
-                    f"{len(result['items'])} rewards found. Check names and amounts, add anything missed, "
-                    "then Approve.")
-        self._review_pending("ritual", f"{len(result['items'])} Ritual rewards. "
-                             "Review the editable list below.")
+                    summary)
+        self._review_pending("ritual", summary)
         if live and self.state["settings"].get("ocr_auto_commit"):
             if clear_ritual_read(result, logger.ritual_names()):
                 self.save_ritual()
@@ -4161,17 +4215,98 @@ class LoggerWindow(QMainWindow):
     def add_ritual_row(self, item=None):
         item = item if isinstance(item, dict) else {}
         row = self.ritual_table.rowCount()
-        self.ritual_table.insertRow(row)
+        unresolved = bool(item.get("unresolved") or unresolved_ritual_name(item.get("name")))
+        legacy_placeholder = bool(item.get("name") and unresolved_ritual_name(item["name"]))
+        name = "" if unresolved else item.get("name", "")
+        category = "" if item and unresolved and not item.get("category_verified") else item.get("category", "Item")
+        quantity = None if item.get("count_needs_review") or legacy_placeholder else item.get("quantity", 1)
+        slots = item.get("grid_slots") or []
+        evidence = ("Grid slots: " + ", ".join(str(slot) for slot in slots) + ". " if slots else "")
+        if item.get("box"):
+            evidence += "Screenshot bounds: " + ", ".join(str(point) for point in item["box"]) + ". "
+        if item.get("source"):
+            evidence += str(item["source"])
+        with QSignalBlocker(self.ritual_table):
+            self.ritual_table.insertRow(row)
+            fields = (category, name, quantity, item.get("tribute", ""), item.get("source", "manual"))
+            for column, field in enumerate(fields):
+                cell = QTableWidgetItem("" if field is None else str(field))
+                cell.setToolTip(evidence + (" Confirm the reward's name before saving." if column == 1 and unresolved else ""))
+                self.ritual_table.setItem(row, column, cell)
+            self.ritual_table.item(row, 0).setData(Qt.ItemDataRole.UserRole, dict(item))
+            capture = self._ritual_capture_context
+            image = capture.get("image") if capture else None
+            box = item.get("box")
+            if isinstance(image, Image.Image) and box and len(box) == 4:
+                try:
+                    left, top, right, bottom = (int(point) for point in box)
+                    left, top = max(0, left), max(0, top)
+                    right, bottom = min(image.width, right), min(image.height, bottom)
+                    if right > left and bottom > top:
+                        crop = image.crop((left, top, right, bottom)).convert("RGB")
+                        crop.thumbnail((48, 48))
+                        raw = io.BytesIO()
+                        crop.save(raw, format="PNG")
+                        icon = QPixmap()
+                        icon.loadFromData(raw.getvalue())
+                        self.ritual_table.item(row, 1).setIcon(QIcon(icon))
+                        self.ritual_table.setRowHeight(row, 56)
+                except (TypeError, ValueError):
+                    pass
+            deferred = QTableWidgetItem()
+            deferred.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
+            unknown_deferred = (item.get("deferred_needs_review") or item.get("deferred_uncertain") or
+                                type(item.get("deferred", False)) is not bool)
+            if unknown_deferred:
+                deferred.setFlags(deferred.flags() | Qt.ItemFlag.ItemIsUserTristate)
+                deferred.setCheckState(Qt.CheckState.PartiallyChecked)
+                deferred.setToolTip("Deferred status could not be read. Check or uncheck it to confirm.")
+            else:
+                deferred.setCheckState(Qt.CheckState.Checked if item.get("deferred") else Qt.CheckState.Unchecked)
+                deferred.setToolTip(evidence)
+            self.ritual_table.setItem(row, 5, deferred)
         self.ritual_table.show()
-        fields = (item.get("category", "Item"), item.get("name", ""),
-                  item.get("quantity", 1), item.get("tribute", ""), item.get("source", "manual"))
-        for column, field in enumerate(fields):
-            self.ritual_table.setItem(row, column, QTableWidgetItem(
-                "" if field is None else str(field)))
-        deferred = QTableWidgetItem()
-        deferred.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
-        deferred.setCheckState(Qt.CheckState.Checked if item.get("deferred") else Qt.CheckState.Unchecked)
-        self.ritual_table.setItem(row, 5, deferred)
+        self._refresh_ritual_row_review(row)
+
+    def _ritual_row_changed(self, item):
+        if item.column() < 6:
+            self._refresh_ritual_row_review(item.row())
+
+    def _refresh_ritual_row_review(self, row):
+        def field(column):
+            cell = self.ritual_table.item(row, column)
+            return cell.text().strip() if cell else ""
+        cell = self.ritual_table.item(row, 0)
+        metadata = cell.data(Qt.ItemDataRole.UserRole) if cell else {}
+        metadata = metadata or {}
+        saved = bool(cell and cell.data(Qt.ItemDataRole.UserRole + 1))
+        missing = []
+        if field(0).title() not in ("Omen", "Item"):
+            missing.append("type")
+        if unresolved_ritual_name(field(1)):
+            missing.append("name")
+        try:
+            logger._integer(field(2), "Ritual quantity", 1, 1000000)
+        except ValueError:
+            missing.append("quantity")
+        try:
+            logger._integer(field(3), "Tribute", 0, 1000000000, blank=True)
+        except ValueError:
+            missing.append("Tribute")
+        deferred = self.ritual_table.item(row, 5)
+        if deferred and deferred.checkState() == Qt.CheckState.PartiallyChecked:
+            missing.append("Deferred")
+        status = "Saved" if saved else ("Confirm " + " / ".join(missing) if missing else (
+            "Check reading" if metadata.get("needs_review") or (
+                "tribute" in metadata and metadata["tribute"] is None and not field(3)) else "Ready"))
+        slots = metadata.get("grid_slots") or []
+        if slots:
+            status = "Slot " + ", ".join(str(slot) for slot in slots) + ": " + status
+        with QSignalBlocker(self.ritual_table):
+            review = QTableWidgetItem(status)
+            review.setFlags(review.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            review.setForeground(QColor("#F5C364") if status.split(": ")[-1] not in ("Ready", "Saved") else QColor("#BCB7AE"))
+            self.ritual_table.setItem(row, 6, review)
 
     def remove_ritual_row(self):
         row = self.ritual_table.currentRow()
@@ -4193,6 +4328,14 @@ class LoggerWindow(QMainWindow):
             def field(col, row=row):
                 cell = self.ritual_table.item(row, col)
                 return cell.text().strip() if cell else ""
+            if field(0).title() not in ("Omen", "Item"):
+                raise ValueError(f"Ritual row {row + 1}: confirm whether the reward is an Item or Omen.")
+            if unresolved_ritual_name(field(1)):
+                raise ValueError(f"Ritual row {row + 1}: confirm the unidentified reward's name before saving.")
+            logger._integer(field(2), f"Ritual row {row + 1} quantity", 1, 1000000)
+            logger._integer(field(3), f"Ritual row {row + 1} Tribute", 0, 1000000000, blank=True)
+            if self.ritual_table.item(row, 5).checkState() == Qt.CheckState.PartiallyChecked:
+                raise ValueError(f"Ritual row {row + 1}: check or uncheck Deferred to confirm its status.")
             rows.append({"category": field(0), "name": field(1), "quantity": field(2),
                          "tribute": field(3), "source": field(4),
                          "deferred": self.ritual_table.item(row, 5).checkState() == Qt.CheckState.Checked})
@@ -4201,6 +4344,10 @@ class LoggerWindow(QMainWindow):
                                        value(self.ritual_tribute), value(self.ritual_rerolls))
         self.state = logger.get_state()
         self._set_commit_badge(saved["scan_commit_number"])
+        for row in range(self.ritual_table.rowCount()):
+            with QSignalBlocker(self.ritual_table):
+                self.ritual_table.item(row, 0).setData(Qt.ItemDataRole.UserRole + 1, True)
+            self._refresh_ritual_row_review(row)
         self._review_saved("ritual", saved["scan_commit_number"])
         self.refresh_ritual_summary()
         self.note(f"{saved['map_id']} Ritual page {saved['page_number']} "

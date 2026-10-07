@@ -37,5 +37,6 @@ The application also uses Python 3.12's standard library, including SQLite, CSV,
 | Currency overlay / Exiled Exchange 2 | Currency and inventory readers, icon matching and reference data | [README](PoE2_Data_Logger/third_party/currency_overlay/README.txt), [currency-overlay license](PoE2_Data_Logger/third_party/currency_overlay/LICENSE), [Exiled Exchange 2 license](PoE2_Data_Logger/third_party/currency_overlay/EXILED-EXCHANGE-2-LICENSE.txt) |
 | DejaVu fonts | Regular and bold fonts used by the app | [Font license](PoE2_Data_Logger/fonts/LICENSE.txt) |
 | RePoE / Path of Exile 2 atlas | Exported atlas layout, passive effects, variant choices and game artwork | [Atlas notice](PoE2_Data_Logger/atlas/NOTICE.txt) |
+| Path of Exile 2 Ritual frames | Two small captured reward-frame corners used for item grouping | [Ritual frame notice](PoE2_Data_Logger/ocr/ritual_assets/NOTICE.txt) |
 
 Each component's README records its source revision.

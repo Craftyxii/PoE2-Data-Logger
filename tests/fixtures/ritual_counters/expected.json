@@ -1,0 +1,112 @@
+[
+  {
+    "image": "counter_04.png",
+    "rerolls": 4,
+    "bounds": [
+      -47,
+      68,
+      585,
+      595
+    ]
+  },
+  {
+    "image": "counter_06.png",
+    "rerolls": 6,
+    "bounds": [
+      -47,
+      68,
+      585,
+      595
+    ]
+  },
+  {
+    "image": "counter_05.png",
+    "rerolls": 5,
+    "bounds": [
+      -47,
+      68,
+      585,
+      594
+    ]
+  },
+  {
+    "image": "counter_02.png",
+    "rerolls": 2,
+    "bounds": [
+      -47,
+      68,
+      585,
+      595
+    ]
+  },
+  {
+    "image": "counter_01.png",
+    "rerolls": 1,
+    "bounds": [
+      -47,
+      68,
+      585,
+      595
+    ]
+  },
+  {
+    "image": "counter_00.png",
+    "rerolls": 0,
+    "bounds": [
+      -47,
+      68,
+      585,
+      595
+    ]
+  },
+  {
+    "image": "counter_08.png",
+    "rerolls": 8,
+    "bounds": [
+      -47,
+      68,
+      585,
+      595
+    ]
+  },
+  {
+    "image": "counter_07.png",
+    "rerolls": 7,
+    "bounds": [
+      -47,
+      68,
+      585,
+      595
+    ]
+  },
+  {
+    "image": "counter_10.png",
+    "rerolls": 10,
+    "bounds": [
+      -47,
+      68,
+      585,
+      595
+    ]
+  },
+  {
+    "image": "counter_36.png",
+    "rerolls": 36,
+    "bounds": [
+      -47,
+      68,
+      585,
+      594
+    ]
+  },
+  {
+    "image": "counter_35.png",
+    "rerolls": 35,
+    "bounds": [
+      -47,
+      68,
+      585,
+      595
+    ]
+  }
+]

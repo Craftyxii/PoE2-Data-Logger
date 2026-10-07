@@ -1,0 +1,3 @@
+Exact-pixel Ritual reward-grid crops from user-provided Path of Exile 2
+screenshots (2026-10-07), used as regression fixtures for occupancy and
+multi-cell item geometry. Game UI artwork copyright Grinding Gear Games.

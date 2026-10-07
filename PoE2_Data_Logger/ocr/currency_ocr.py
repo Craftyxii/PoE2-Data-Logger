@@ -204,7 +204,8 @@ class CurrencyReader:
         dx, dy = max(1, round(image.width * .18)), max(1, round(image.height * .18))
         inside = pixels[dy:-dy, dx:-dx] if min(image.size) > 12 else pixels
         if float(np.percentile(inside, 95)) < 32:
-            return {"family": None, "members": [], "score": 0, "margin": 0, "all": []}
+            return {"family": None, "members": [], "score": 0, "margin": 0, "all": [],
+                    "empty": True}
         if self.inventory_match:
             ranked = self.inventory_ranked(image, calibrated=True, count_digits=count_digits)
             if ranked:
