@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -85,7 +86,7 @@ class LearnedReferencePackTests(unittest.TestCase):
             self.assertEqual(len(manifest["data"]["review_icon_examples"]), 3)
         backup_path = Path(self.tmp.name) / "backup.sqlite3"
         backup_path.write_bytes(logger.backup_bytes())
-        with sqlite3.connect(backup_path) as backup:
+        with closing(sqlite3.connect(backup_path)) as backup:
             self.assertEqual(backup.execute("SELECT COUNT(*) FROM review_icon_examples").fetchone()[0], 3)
         path = Path(self.tmp.name) / "roundtrip.zip"
         path.write_bytes(contents)
