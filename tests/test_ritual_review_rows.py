@@ -234,6 +234,37 @@ class RitualReviewRowsTests(unittest.TestCase):
         self.assertTrue(self.window.approve_scan_button.isHidden())
         self.assertFalse(self.window.ritual_add_row_button.isEnabled())
 
+    def test_raw_ocr_stays_in_debug_and_is_saved_when_developer_mode_is_off(self):
+        """Keep raw scan text off the review HUD while retaining evidence through approval."""
+        raw_text = "FAVOURS\n6146 TRIBUTE\nChaos Orb"
+        self.window.show()
+        self.read(self.result([self.known()], raw_text=raw_text))
+        review = self.window.tabs.widget(0).widget()
+        debug = self.window.tabs.widget(5).widget()
+        self.assertFalse(review.isAncestorOf(self.window.ritual_raw))
+        self.assertTrue(debug.isAncestorOf(self.window.ritual_raw))
+        self.assertTrue(self.window.ritual_raw.isReadOnly())
+        for enabled in (False, True):
+            with self.subTest(developer_mode=enabled):
+                self.window.developer_mode.setChecked(enabled)
+                self.window.tabs.setCurrentIndex(0)
+                self.app.processEvents()
+                self.assertTrue(self.window.ritual_table.isVisible())
+                self.assertFalse(self.window.ritual_raw.isVisible())
+                self.window.tabs.setCurrentIndex(5)
+                self.app.processEvents()
+                self.assertEqual(self.window.ritual_raw.isVisible(), enabled)
+                self.assertEqual(self.window.ritual_raw.toPlainText(), raw_text)
+        self.window.developer_mode.setChecked(False)
+        self.window.tabs.setCurrentIndex(0)
+        self.window.approve_scan_button.click()
+        self.assertEqual(self.saved_items()[0]["name"], "Chaos Orb")
+        with logger._connect() as db:
+            self.assertEqual(db.execute("SELECT raw_text FROM ritual_pages WHERE map_id=?",
+                                        ("M0001",)).fetchone()[0], raw_text)
+        exported = list(csv.DictReader(io.StringIO(logger.export_ritual_csv().decode("utf-8-sig"))))
+        self.assertEqual(exported[0]["Page OCR Text"], raw_text)
+
     def test_saved_corrected_row_is_readonly_with_evidence_and_new_scan_resets_saved_status(self):
         self.read(self.result([self.unknown(count_needs_review=True)]))
         self.correct(0, quantity=3)

@@ -1746,7 +1746,7 @@ class LoggerWindow(QMainWindow):
         examples.addWidget(button("Remove selected icon example", lambda: self.run(self.remove_icon_example)))
 
     def _build_ritual(self):
-        """Attach Ritual reward and total correction controls to the shared Review page."""
+        """Attach Ritual reward and total correction controls to Review, keeping raw OCR in debug."""
         self.ritual_status = message("")
         self.ritual_status.setParent(self)
         self.ritual_status.hide()
@@ -1792,11 +1792,6 @@ class LoggerWindow(QMainWindow):
         review.addWidget(QLabel("Type is Omen or Item. Correct quantity and Tribute if visible; "
                                 "leave Tribute blank if unreadable. Unnamed rows are rejected when you Approve. "
                                 "Approved name corrections teach future icon scans."))
-        self.ritual_raw = QTextEdit()
-        self.ritual_raw.setReadOnly(True)
-        self.ritual_raw.setPlaceholderText("Full OCR text appears here so missing items can be added manually.")
-        self.ritual_raw.setMaximumHeight(150)
-        review.addWidget(self.ritual_raw)
         self.new_ritual_name = line("New Omen name")
         self.new_ritual_name.setParent(self)
         self.new_ritual_name.hide()
@@ -1882,7 +1877,7 @@ class LoggerWindow(QMainWindow):
         kills.addLayout(grid)
 
     def _build_data(self):
-        """Build local exports, session reset and developer database/reference editors."""
+        """Build exports, reset and developer tools; own raw Ritual evidence outside the review HUD."""
         page, content = self._page()
         self.tabs.addTab(page, "Data & export")
         exports = self._group("LOCAL EXPORT & BACKUP", content)
@@ -1922,6 +1917,16 @@ class LoggerWindow(QMainWindow):
             column.addWidget(self.stat_values[index])
             fields.addLayout(column, 1)
         diagnostics.addLayout(fields)
+        raw = self._group("RITUAL OCR TEXT", content)
+        self.ritual_raw_group = raw.parentWidget()
+        # Keep this read-only evidence buffer available to save/reset paths while
+        # its debug-page parent prevents Developer Mode exposing it on Review.
+        self.ritual_raw = QTextEdit()
+        self.ritual_raw.setReadOnly(True)
+        self.ritual_raw.setAccessibleName("Latest Ritual raw OCR text")
+        self.ritual_raw.setPlaceholderText("Raw text from the latest Ritual scan appears here.")
+        self.ritual_raw.setMaximumHeight(150)
+        raw.addWidget(self.ritual_raw)
         recent = self._group("RECENT REMNANTS", content)
         self.recent_group = recent.parentWidget()
         self.recent = QListWidget()
@@ -2005,18 +2010,17 @@ class LoggerWindow(QMainWindow):
         self._apply_developer_mode()
 
     def _apply_developer_mode(self):
-        """Show OCR detail, guidance and local database editors according to developer mode."""
+        """Toggle diagnostic controls, with raw Ritual evidence confined to the data/debug page."""
         enabled = self.developer_mode.isChecked()
         self.map_ocr_overrides.setVisible(enabled)
         for label in self.findChildren(QLabel):
             if label.property("guidance"):
                 label.setVisible(enabled)
         self.ritual_table.setColumnHidden(4, not enabled)
-        self.ritual_raw.setVisible(enabled)
         self.show_tablet_raw()
         self.counts.setVisible(enabled)
         for group in (self.diagnostics_group, self.catalog_group, self.editors_group, self.scans_group,
-                      self.inventory_reference_group):
+                      self.inventory_reference_group, self.ritual_raw_group):
             group.setVisible(enabled)
 
     def add_runes(self, count):
