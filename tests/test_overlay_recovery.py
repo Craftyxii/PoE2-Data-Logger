@@ -3,6 +3,7 @@ from pathlib import Path
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -42,6 +43,17 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.native_patch.start()
         self.manager_patch = patch.object(service, "HOTKEY", self.manager)
         self.manager_patch.start()
+        # The listener's WinDLL mock has no real foreground-window HWND.
+        # Supply the external display bounds separately so capture reaches
+        # the injected grabber on Windows, and exercise that same branch on
+        # other hosts without changing Qt's or PIL's platform detection.
+        bounds_patch = patch("PoE2_Data_Logger.platform.hover_copy._tooltip_bounds",
+                             return_value=(100, 150, 2020, 1230))
+        self.capture_bounds = bounds_patch.start()
+        self.addCleanup(bounds_patch.stop)
+        platform_patch = patch("PoE2_Data_Logger.platform.hotkey.sys", SimpleNamespace(platform="win32"))
+        platform_patch.start()
+        self.addCleanup(platform_patch.stop)
         self.manager.configure("F8")
         self.manager.configure_for("overlay", "Ctrl+Shift+H")
         self.window = LoggerWindow()
@@ -172,6 +184,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.window.poll()
         self.app.processEvents()
         self.assertEqual(visible_at_capture, [False])
+        self.capture_bounds.assert_called_once_with()
         self.assertEqual(ticks, [True])
         self.assertFalse(self.manager._capture_lock.locked())
         self.assertEqual(self.window.pending_review_kind, "propagation")
@@ -186,6 +199,8 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertTrue(self.window.isVisible())
         self.assertFalse(self.window.isMinimized())
         self.assertIn("Capture unavailable", self.window.scan_status.text())
+        self.capture_bounds.assert_called_once_with()
+        self.manager.grabber.assert_called_once()
         self.assertFalse(self.manager._capture_lock.locked())
         self.assertIsNone(self.window.pending_review_kind)
         self.window.poll()
@@ -206,6 +221,8 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertEqual(self.window.first_recipe.text(), "Reward being corrected")
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
         self.assertIn("Capture unavailable", self.window.scan_status.text())
+        self.capture_bounds.assert_called_once_with()
+        self.manager.grabber.assert_called_once()
 
     def test_capture_failure_does_not_reopen_previously_hidden_hud(self):
         self.window.hide_overlay()
