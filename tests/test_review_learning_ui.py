@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QPushButton
 
 from PoE2_Data_Logger.core import logger_store as logger, store
+from PoE2_Data_Logger.ocr import item_ocr
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
@@ -68,12 +69,18 @@ class ReviewLearningUITests(unittest.TestCase):
     def export_rows(self):
         return list(csv.DictReader(io.StringIO(logger.export_all_csv().decode("utf-8-sig"))))
 
+    def approve_currency_row(self, row=0):
+        controls = self.window.inventory_table.cellWidget(row, 3)
+        controls.findChild(QPushButton, "approveCurrency").click()
+        self.assertEqual(controls.property("reviewStatus"), "approved")
+
     def test_currency_new_name_approval_learns_and_exports_the_captured_item(self):
         self.inventory()
         self.window.inventory_table.item(0, 1).setText("My newly identified token")
         self.window.inventory_table.item(0, 2).setText("5")
         self.assertNotIn("My newly identified token", logger.inventory_names())
         self.assertEqual(logger.review_icons(), [])
+        self.approve_currency_row()
         self.window.approve_review()
         self.assertEqual(logger.currency_for_map("M0001")["start"], {"My newly identified token": 5})
         self.assertEqual([(ref["name"], ref["kind"]) for ref in logger.review_icons()],
@@ -101,30 +108,32 @@ class ReviewLearningUITests(unittest.TestCase):
         self.assertNotIn("A rejected token", logger.inventory_names())
         self.assertEqual(logger.review_icons(), [])
 
-    def test_failed_count_validation_has_no_partial_learning_then_corrected_save_works(self):
+    def test_failed_row_count_validation_has_no_partial_learning_then_corrected_save_works(self):
         self.inventory()
         self.window.inventory_table.item(0, 1).setText("A validated token")
         self.window.inventory_table.item(0, 2).setText("-1")
+        controls = self.window.inventory_table.cellWidget(0, 3)
         with self.assertRaises(ValueError):
-            self.window.approve_review()
+            self.window.review_currency_row(controls, True)
+        self.assertEqual(controls.property("reviewStatus"), "pending")
         self.assertNotIn("A validated token", logger.inventory_names())
         self.assertEqual(logger.review_icons(), [])
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
         self.window.inventory_table.item(0, 2).setText("4")
+        self.approve_currency_row()
         self.window.approve_review()
         self.assertEqual(logger.currency_for_map("M0001")["start"], {"A validated token": 4})
 
-    def test_naming_a_row_after_failed_approval_recovers_automatic_blank_rejection(self):
+    def test_naming_a_row_after_unnamed_row_approval_recovers_rejection(self):
         self.inventory()
-        self.window.add_inventory_row({"name": "Second reviewed token", "quantity": -1})
-        with self.assertRaises(ValueError):
-            self.window.approve_review()
         controls = self.window.inventory_table.cellWidget(0, 3)
+        self.window.review_currency_row(controls, True)
         self.assertEqual(controls.property("reviewStatus"), "rejected")
+        self.window.add_inventory_row({"name": "Second reviewed token", "quantity": 2})
         self.window.inventory_table.item(0, 1).setText("First reviewed token")
         self.window.inventory_table.item(0, 2).setText("1")
         self.assertEqual(controls.property("reviewStatus"), "pending")
-        self.window.inventory_table.item(1, 2).setText("2")
+        self.approve_currency_row()
         self.window.approve_review()
         self.assertEqual(logger.currency_for_map("M0001")["start"],
                          {"First reviewed token": 1, "Second reviewed token": 2})
@@ -177,14 +186,88 @@ class ReviewLearningUITests(unittest.TestCase):
         self.window.inventory_table.item(0, 2).setText("4")
         self.assertEqual(controls.property("reviewStatus"), "pending")
         self.assertTrue(controls.findChild(QPushButton, "approveCurrency").isEnabled())
-        with self.assertRaisesRegex(ValueError, "approve it"):
-            self.window.save_inventory()
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
-        controls.findChild(QPushButton, "approveCurrency").click()
+        self.approve_currency_row()
         self.window.inventory_table.item(0, 1).setText("Renamed matched token")
         self.assertEqual(controls.property("reviewStatus"), "pending")
+        self.approve_currency_row()
         self.window.approve_scan_button.click()
         self.assertEqual(logger.currency_for_map("M0001")["start"], {"Renamed matched token": 4})
+
+    def test_final_approval_rejects_edited_match_without_fresh_row_approval(self):
+        self.inventory(unknown=False)
+        table = self.window.inventory_table
+        controls = table.cellWidget(0, 3)
+        self.assertEqual(controls.property("reviewStatus"), "approved")
+        table.item(0, 1).setText("Unconfirmed renamed token")
+        table.item(0, 2).setText("4")
+        self.assertEqual(controls.property("reviewStatus"), "pending")
+        self.window.approve_scan_button.click()
+        self.assertEqual(controls.property("reviewStatus"), "rejected")
+        self.assertEqual(logger.currency_for_map("M0001")["start"], {})
+        self.assertNotIn("Unconfirmed renamed token", logger.inventory_names())
+        self.assertEqual(logger.review_icons(), [])
+
+    def test_final_approval_and_direct_save_reject_pending_invalid_rows_without_learning(self):
+        for direct_save in (False, True):
+            with self.subTest(direct_save=direct_save):
+                self.window._inventory_captured(self.grid, live=False)
+                self.jobs[-1][1]({"items": [
+                    {"slot": 9, "name": "Chaos Orb", "quantity": 7},
+                    {"slot": 4, "name": "Unconfirmed count token", "quantity": "bad count",
+                     "count_needs_review": True}],
+                    "unknown": [{"slot": 1, "candidate": "Regal Orb"}, {"slot": 2}]})
+                table = self.window.inventory_table
+                table.item(1, 1).setText("Invalid\nreview label")
+                table.item(1, 2).setText("not a count")
+                table.item(2, 1).setText("Unconfirmed named token")
+                table.item(2, 2).setText("5")
+                table.item(3, 2).setText("not a count")
+                self.assertEqual([table.cellWidget(row, 3).property("reviewStatus")
+                                  for row in range(4)], ["approved", "pending", "pending", "pending"])
+                if direct_save:
+                    self.window.save_inventory()
+                else:
+                    self.window.approve_scan_button.click()
+                self.assertIsNone(self.window.pending_review_kind)
+                self.assertEqual(logger.currency_for_map("M0001")["start"], {"Chaos Orb": 7})
+                self.assertEqual([table.cellWidget(row, 3).property("reviewStatus")
+                                  for row in range(4)], ["approved", "rejected", "rejected", "rejected"])
+                self.assertNotIn("Unconfirmed named token", logger.inventory_names())
+                self.assertNotIn("Unconfirmed count token", logger.inventory_names())
+                self.assertEqual(logger.review_icons(), [])
+                self.assertNotIn("Currency: Unconfirmed named token", self.export_rows()[0])
+
+    def test_approved_reordered_candidate_learns_its_original_slot_only(self):
+        slot = 14
+        self.grid.paste(self.tile, (54, 54))
+        other = Image.fromarray(np.random.default_rng(99).integers(
+            25, 230, (54, 54, 3), dtype=np.uint8))
+        self.grid.paste(other, (0, 0))
+        self.window._inventory_captured(self.grid, live=False)
+        self.jobs[-1][1]({"items": [
+            {"slot": 8, "name": "Chaos Orb", "quantity": 7}],
+            "unknown": [{"slot": 1}, {"slot": slot, "candidate": "Regal Orb",
+                                          "score": .68, "reason": "shared icon; check tier"}]})
+        table = self.window.inventory_table
+        self.assertEqual([table.item(row, 0).data(Qt.ItemDataRole.UserRole) for row in range(3)],
+                         [8, slot, 1])
+        table.item(1, 1).setText("Approved original-slot token")
+        table.item(1, 2).setText("3")
+        table.item(2, 1).setText("Unconfirmed other-slot token")
+        table.item(2, 2).setText("2")
+        self.approve_currency_row(1)
+        self.assertEqual(logger.review_icons(), [])
+        self.window.approve_scan_button.click()
+        self.assertEqual(logger.currency_for_map("M0001")["start"],
+                         {"Chaos Orb": 7, "Approved original-slot token": 3})
+        references = logger.review_icons()
+        self.assertEqual([reference["name"] for reference in references], ["Approved original-slot token"])
+        expected = item_ocr.inventory_cell(self.grid, slot).resize((96, 96), Image.Resampling.LANCZOS)
+        with Image.open(io.BytesIO(references[0]["image"])) as learned:
+            self.assertEqual(learned.convert("RGB").tobytes(), expected.tobytes())
+        self.assertEqual(table.cellWidget(2, 3).property("reviewStatus"), "rejected")
+        self.assertNotIn("Unconfirmed other-slot token", logger.inventory_names())
 
     def test_uncertain_summary_includes_named_count_uncertainty_and_unknown_icons(self):
         self.window._inventory_captured(self.grid, live=False)
@@ -281,6 +364,7 @@ class ReviewLearningUITests(unittest.TestCase):
         self.inventory()
         self.window.inventory_table.item(0, 1).setText("A removable learned token")
         self.window.inventory_table.item(0, 2).setText("1")
+        self.approve_currency_row()
         self.window.approve_review()
         listing = self.window.reference_list
         for index in range(listing.count()):

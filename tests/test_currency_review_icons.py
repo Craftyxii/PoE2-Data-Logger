@@ -1,5 +1,6 @@
 """Qt inventory-review checks attaching each row to its captured slot without borrowing unrelated image evidence."""
 
+import copy
 import os
 from pathlib import Path
 import tempfile
@@ -10,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image, ImageDraw
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QTableWidget
+from PySide6.QtWidgets import QApplication, QLabel, QTableWidget
 
 from PoE2_Data_Logger.core import logger_store as logger, store
 from PoE2_Data_Logger.ocr import item_ocr
@@ -97,6 +98,48 @@ class CurrencyReviewIconsTests(unittest.TestCase):
         self.assertEqual(table.item(2, 2).text(), "")
         self.assertEqual(table.cellWidget(2, 3).property("reviewStatus"), "pending")
         self.assertEqual((image.tobytes(), dict(image.info)), before)
+
+    def test_rows_group_certainty_then_named_candidates_then_unknown_with_original_slot_evidence(self):
+        image = self.grid()
+        result = {"items": [
+            {"slot": 60, "name": "Chaos Orb", "quantity": 7, "score": .1},
+            {"slot": 25, "name": "Exalted Orb", "quantity": 9,
+             "score": .99, "count_needs_review": True},
+            {"slot": 3, "name": "Regal Orb", "quantity": 2, "score": -900}],
+            "unknown": [
+                {"slot": 11, "candidate": "Transmutation Orb / Greater Transmutation Orb",
+                 "score": .7, "reason": "shared icon; check tier", "margin": 410},
+                {"slot": 2, "candidate": "Unrecognized item", "score": .98},
+                {"slot": 4, "candidate": "Alchemy Orb", "score": .6,
+                 "reason": "shared reference; check name"},
+                {"slot": 1, "candidate": "", "score": .9}]}
+        before = copy.deepcopy(result)
+        self.capture(image)(result)
+
+        table = self.window.inventory_table
+        slots = [table.item(row, 0).data(Qt.ItemDataRole.UserRole) for row in range(table.rowCount())]
+        self.assertEqual(slots, [3, 60, 4, 11, 25, 1, 2])
+        self.assertEqual([table.cellWidget(row, 3).property("reviewStatus") for row in range(7)],
+                         ["approved", "approved", "pending", "pending", "pending", "pending", "pending"])
+        for row, slot in enumerate(slots):
+            self.assert_icon(row, slot, image)
+
+        originals = {item["slot"]: item for item in result["unknown"]}
+        for row in (2, 3, 5, 6):
+            self.assertEqual(table.item(row, 1).text(), "")
+            self.assertEqual(table.item(row, 2).text(), "")
+            metadata = table.item(row, 1).data(Qt.ItemDataRole.UserRole)
+            self.assertTrue(metadata["has_capture"])
+            for key, expected in originals[slots[row]].items():
+                self.assertEqual(metadata["original"].get(key), expected)
+        for row in (2, 3):
+            status = table.cellWidget(row, 3).findChild(QLabel, "currencyReviewStatus")
+            self.assertIn("Likely match", status.text())
+            self.assertIn(originals[slots[row]]["candidate"], table.item(row, 1).toolTip())
+        for row in (5, 6):
+            status = table.cellWidget(row, 3).findChild(QLabel, "currencyReviewStatus")
+            self.assertNotIn("Likely match", status.text())
+        self.assertEqual(result, before)
 
     def test_manual_and_captureless_rows_keep_slot_text_without_reusing_old_screenshot(self):
         self.window.add_inventory_row({"slot": 23, "name": "Chaos Orb", "quantity": 2})

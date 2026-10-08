@@ -190,6 +190,16 @@ def clear_currency_read(result):
         item["quantity"] >= 1 and not item.get("count_needs_review") for item in items)
 
 
+def currency_review_rank(item):
+    """Group accepted names/counts, held named or candidate matches, then unidentified slots."""
+    if str(item.get("name") or "").strip():
+        return 1 if item.get("count_needs_review") else 0
+    candidate = str(item.get("candidate") or "").strip()
+    return 1 if candidate.casefold() not in {
+        "", "unknown", "unidentified", "unresolved", "unknown item", "unidentified item", "unrecognized item"
+    } else 2
+
+
 def unresolved_ritual_name(name):
     """Recognize blank and placeholder reward names that still need identification."""
     return str(name or "").strip().casefold() in {
@@ -975,31 +985,10 @@ class LoggerWindow(QMainWindow):
         self.tabs.setCurrentIndex(2)
 
     def approve_review(self):
-        """Approve the active review, validating currency rows before dispatching its save
-        action.
-        """
+        """Dispatch review approval without promoting pending currency rows to accepted items."""
         kind = self.pending_review_kind
         if kind in ("seed", "remnant"):
             return self.approve_remnant_scan()
-        if kind == "currency":
-            omen_names = {name.casefold() for name in logger.ritual_names()}
-            controls = []
-            for row in range(self.inventory_table.rowCount()):
-                review = self.inventory_table.cellWidget(row, 3)
-                if review and review.property("reviewStatus") == "rejected":
-                    continue
-                name = self.inventory_table.item(row, 1).text().strip()
-                quantity = self.inventory_table.item(row, 2).text().strip()
-                if not name:
-                    if review:
-                        self._set_currency_review(review, "rejected", unnamed=True)
-                    continue
-                review_learning.validate_name(name, "Omen" if name.casefold() in omen_names else "Currency")
-                logger._integer(quantity, name + " stack count", 0, 1000000)
-                if review:
-                    controls.append(review)
-            for review in controls:
-                self._set_currency_review(review, "approved")
         return self.commit_review()
 
     def reject_review(self):
@@ -5225,9 +5214,7 @@ class LoggerWindow(QMainWindow):
         self.inventory_preview.setFixedSize(picture.size())
 
     def _inventory_read(self, result, live=True, expected_map_id=None, capture=None):
-        """Ignore superseded captures and validate map ownership before filling editable
-        inventory rows. Automatically save only clear live readings.
-        """
+        """Show certainty groups in slot order with captured evidence; auto-save only clear live reads."""
         if capture is not None and capture is not self._inventory_reading:
             return
         if capture is not None:
@@ -5247,23 +5234,23 @@ class LoggerWindow(QMainWindow):
             self._show_review_capture(capture["image"])
             self._show_inventory_preview(capture["image"])
         self.inventory_table.setRowCount(0)
-        for item in result["items"]:
-            self.add_inventory_row(item, image=capture["image"] if capture is not None else None)
         unknown = result["unknown"]
         uncertain = len(unknown) + sum(bool(item.get("count_needs_review")) for item in result["items"])
-        for item in unknown:
-            candidate = item.get("candidate", "")
-            self.add_inventory_row({"slot": item["slot"],
-                                    "name": "",
-                                    "quantity": "", "count_needs_review": True,
-                                    "candidate": candidate}, image=capture["image"] if capture is not None else None)
+        rows = [*result["items"], *({**item, "name": "", "quantity": "", "count_needs_review": True}
+                                   for item in unknown)]
+        # Sort before creating widgets so row actions and icon-learning evidence
+        # stay attached to their original inventory slots, rather than row numbers.
+        rows.sort(key=lambda item: (currency_review_rank(item),
+                                   item["slot"] if type(item.get("slot")) is int else 61))
+        for item in rows:
+            self.add_inventory_row(item, image=capture["image"] if capture is not None else None)
         if unknown:
             self.icon_slot.setValue(unknown[0]["slot"])
         set_message(self.inventory_status,
                     f"{len(result['items'])} inventory stacks matched. "
-                    f"{uncertain} uncertain slots or shared-icon tiers. Enter names and counts, then Approve. "
-                    "Unnamed rows are rejected. Approved name corrections teach future icon scans. "
-                    "Approve saves the reviewed snapshot.",
+                    f"{uncertain} uncertain slots or shared-icon tiers. Confident matches appear first, "
+                    "then likely matches, then unknowns. Approve uncertain rows individually to include them. "
+                    "Final Approve rejects unapproved rows and saves the reviewed snapshot.",
                     "success" if result["items"] and not uncertain else "message")
         self._review_pending("currency",
                              f"{phase.title()} inventory · {len(result['items'])} stacks · {uncertain} uncertain slots. "
@@ -5321,6 +5308,7 @@ class LoggerWindow(QMainWindow):
         layout.setSpacing(2)
         status = QLabel()
         status.setObjectName("currencyReviewStatus")
+        status.setWordWrap(True)
         layout.addWidget(status)
         actions = QHBoxLayout()
         actions.setSpacing(5)
@@ -5335,16 +5323,20 @@ class LoggerWindow(QMainWindow):
             actions.addWidget(action)
         layout.addLayout(actions)
         controls.setProperty("requiresApproval", bool(item.get("count_needs_review") or not item.get("name")))
+        controls.setProperty("confidenceGroup", currency_review_rank(item))
         self.inventory_table.setCellWidget(row, 3, controls)
         self.inventory_table.setRowHeight(row, 62)
         self._set_currency_review(controls, "pending" if controls.property("requiresApproval") else "approved")
 
     def _set_currency_review(self, controls, state, *, unnamed=False):
-        """Update an inventory row's review flags, status label, and enabled approval actions."""
+        """Display candidate certainty and review state without changing a row's captured evidence."""
         controls.setProperty("reviewStatus", state)
         controls.setProperty("unnamedRejected", bool(unnamed and state == "rejected"))
         status = controls.findChild(QLabel, "currencyReviewStatus")
-        status.setText({"pending": "Confirm name / count", "approved": "Approved", "rejected": "Rejected"}[state])
+        pending = {0: "Confirm name / count", 1: "Likely match · Confirm name / count",
+                   2: "Unknown item · Confirm name / count"}.get(controls.property("confidenceGroup"),
+                                                                "Confirm name / count")
+        status.setText({"pending": pending, "approved": "Approved", "rejected": "Rejected"}[state])
         status.setStyleSheet("color:#F5C364;" if state != "rejected" else "color:#BCB7AE;")
         controls.findChild(QPushButton, "approveCurrency").setEnabled(state != "approved")
         controls.findChild(QPushButton, "rejectCurrency").setEnabled(state != "rejected")
@@ -5443,10 +5435,7 @@ class LoggerWindow(QMainWindow):
         self.refresh_session_currency(force_icons=True)
 
     def save_inventory(self):
-        """Validate held map/phase context and row approvals, then commit the inventory
-        snapshot with registered names and learned icons. Omit rejected or unnamed rows and
-        refresh the saved review state.
-        """
+        """Commit approved stacks only; reject pending rows without registering or learning their guesses."""
         reviewing = self.pending_review_kind == "currency"
         if reviewing and self._failed_review:
             raise ValueError("This scan failed. Scan again or reject this reading before saving.")
@@ -5461,19 +5450,22 @@ class LoggerWindow(QMainWindow):
                              "Select its start/end phase again before saving.")
         rows, examples = [], []
         item_names = {name.casefold() for name in logger.item_names()}
+        omen_names = {name.casefold() for name in logger.ritual_names()}
         for row in range(self.inventory_table.rowCount()):
             controls = self.inventory_table.cellWidget(row, 3)
-            if controls and controls.property("reviewStatus") == "rejected":
-                continue
             name = self.inventory_table.item(row, 1)
             text = name.text().strip() if name else ""
+            if not controls or controls.property("reviewStatus") != "approved":
+                if controls:
+                    self._set_currency_review(controls, "rejected", unnamed=not text)
+                continue
             if not text:
                 if controls:
                     self._set_currency_review(controls, "rejected", unnamed=True)
                 continue
-            if controls and controls.property("reviewStatus") == "pending":
-                raise ValueError(f"Inventory row {row + 1}: edit the name/count and approve it, or reject it before saving.")
             amount = self.inventory_table.item(row, 2)
+            review_learning.validate_name(text, "Omen" if text.casefold() in omen_names else "Currency")
+            logger._integer(amount.text().strip() if amount else "", text + " stack count", 0, 1000000)
             rows.append({"name": text,
                          "quantity": amount.text().strip() if amount else ""})
             metadata = name.data(Qt.ItemDataRole.UserRole) or {}
