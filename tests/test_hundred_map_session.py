@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 import copy
 import csv
+import faulthandler
 import hashlib
 import io
 import json
@@ -125,9 +126,22 @@ class HundredMapSession(unittest.TestCase):
         deadline = time.monotonic() + 90
         while self.w._pending_tasks and time.monotonic() < deadline:
             self.app.processEvents()
-            QTest.qWait(5)
+            # qWait's C++ event pump can retain the Python GIL while waiting,
+            # throttling the exporter and its Python completion callback.
+            # Keep Qt responsive, then explicitly yield to the worker.
+            time.sleep(.005)
         if self.w._pending_tasks:
-            raise RuntimeError("UI background task timed out")
+            details = {"map": self.current, "context": "background-task-timeout",
+                       "pending_tasks": list(self.w._pending_tasks),
+                       "status": self.w.statusBar().currentMessage()}
+            self.failures.append(details)
+            diagnostic = self.output / "ui-task-timeout.txt"
+            with diagnostic.open("w", encoding="utf-8") as stream:
+                stream.write(json.dumps(details, indent=2) + "\n\n")
+                stream.flush()
+                faulthandler.dump_traceback(file=stream, all_threads=True)
+            stack_details = diagnostic.read_text(encoding="utf-8", errors="replace")[:8000]
+            raise RuntimeError(f"UI background task timed out; thread stacks: {diagnostic}\n{stack_details}")
         self.app.processEvents()
 
     def choose(self, control, wanted):

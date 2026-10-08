@@ -50,11 +50,12 @@ jobs:
           python -m pip install --upgrade "pip>=26.2"
           if ($LASTEXITCODE -ne 0) { throw 'Build tool update failed.' }
           python -m pip install -r requirements-build.txt
-      - name: Run regression tests
+      - name: Verify 100-map user workflow
         env:
           POE2_RUN_HUNDRED_MAP_SESSION: '1'
           POE2_SESSION_ARTIFACTS: ${{ runner.temp }}/poe2-release-session
-        run: python tools/run_tests.py
+          RUNESHAPE_SCAN_DATA_DIR: ${{ runner.temp }}/poe2-release-bootstrap
+        run: python tools/run_tests.py --pattern test_hundred_map_session.py
       - name: Retain session verification artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -62,6 +63,8 @@ jobs:
           name: release-session-verification
           path: ${{ runner.temp }}/poe2-release-session
           if-no-files-found: ignore
+      - name: Run regression tests
+        run: python tools/run_tests.py
       - name: Prepare NSIS
         shell: pwsh
         run: |

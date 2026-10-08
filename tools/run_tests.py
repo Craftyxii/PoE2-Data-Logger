@@ -1,3 +1,4 @@
+import argparse
 import os
 from pathlib import Path
 import sys
@@ -12,7 +13,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 # Keep that initialization away from the user's saved application profile.
 test_data = tempfile.TemporaryDirectory(prefix="poe2-regression-data-", ignore_cleanup_errors=True)
 os.environ.setdefault("RUNESHAPE_SCAN_DATA_DIR", test_data.name)
-suite = unittest.defaultTestLoader.discover(str(root / "tests"))
+parser = argparse.ArgumentParser(description="Run isolated regression checks.")
+parser.add_argument("--pattern", default="test*.py", help="Test module filename pattern")
+args = parser.parse_args()
+suite = unittest.defaultTestLoader.discover(str(root / "tests"), pattern=args.pattern)
 result = unittest.TextTestRunner(verbosity=2).run(suite)
 if os.environ.get("GITHUB_ACTIONS") == "true":
     for test, trace in result.failures + result.errors:

@@ -4,7 +4,7 @@ The release gate exercises the application workflow and separately verifies reco
 
 ## 100-map workflow
 
-Run `POE2_RUN_HUNDRED_MAP_SESSION=1 python -m unittest tests.test_hundred_map_session` with `QT_QPA_PLATFORM=offscreen`. Set `POE2_SESSION_ARTIFACTS` to a new directory to retain the independent expected ledger, reopened exports, database backup and verification metrics. The Windows installer workflow also runs this gate and retains its artifacts.
+Run `POE2_RUN_HUNDRED_MAP_SESSION=1 python tools/run_tests.py --pattern test_hundred_map_session.py` with `QT_QPA_PLATFORM=offscreen`. Set `POE2_SESSION_ARTIFACTS` to a new directory to retain the independent expected ledger, reopened exports, database backup and verification metrics. The Windows installer workflow runs this gate in a separate process before the remaining regression suite and retains its artifacts.
 
 The local gate completed 100 maps and checked 1,672 commits against an independent ledger without mismatches. User actions go through the Qt controls and scan completion callbacks, including:
 
