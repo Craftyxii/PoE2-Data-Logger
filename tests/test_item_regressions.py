@@ -1,3 +1,5 @@
+"""Item text/OCR regressions for currency quantities, waystone/tablet modifiers and Ritual reading fields."""
+
 import io
 import unittest
 from unittest.mock import patch

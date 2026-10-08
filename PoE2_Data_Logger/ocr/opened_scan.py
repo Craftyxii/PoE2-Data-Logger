@@ -1,3 +1,9 @@
+"""Read opened Runeshape rewards and compare their order with stored families.
+
+Native row OCR precedes the RapidOCR fallback. Visible socket geometry is
+checked independently of recipe counts, and returned eligibility flags keep
+heading, sequence and socket conflicts available to callers for review."""
+
 from __future__ import annotations
 
 import re
@@ -23,6 +29,7 @@ MODEL_HASHES = {
 
 
 def verify_models(model_root):
+    """Reject missing or changed bundled RapidOCR models by their expected SHA-256 hashes."""
     for filename, expected in MODEL_HASHES.items():
         path = Path(model_root) / filename
         if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
@@ -30,6 +37,7 @@ def verify_models(model_root):
 
 
 def scan_both(path):
+    """Prefer native opened rewards, then seed bars, then opened OCR with fallback enabled."""
     from PoE2_Data_Logger.ocr.scan import scan
     opened = scan_opened(path, allow_fallback=False)
     if opened.get("first_recipe") or opened.get("opened_recipes"):
@@ -44,19 +52,26 @@ def scan_both(path):
 
 
 def _key(value):
+    """Normalize recipe or heading text to lowercase alphanumerics for comparison."""
     return re.sub(r"[^a-z0-9]", "", value.lower().replace("’", "'").replace("‘", "'"))
 
 
 def _quantity(name):
+    """Extract supported recipe quantity prefixes/suffixes, defaulting to one."""
     match = re.search(r"\s+x(\d+)$", name, flags=re.I) or re.match(r"^\s*(\d+)\s*[x×]\s*", name, flags=re.I)
     return int(match.group(1)) if match else 1
 
 
 def _levels(name):
+    """Collect explicit level numbers so fuzzy matches cannot change skill level."""
     return tuple(int(level) for level in re.findall(r"\blevel\s*(\d+)\b", name, flags=re.I))
 
 
 def _match(db, text, quantity, names):
+    """Prefer canonical recipe spelling, then require .82 similarity and a .025 lead.
+
+    Every candidate must preserve the requested quantity and explicit skill levels.
+    """
     target = f"{text} x{quantity}" if quantity > 1 else text
     levels = _levels(text)
     for spelling in (target, f"{quantity}x {text}"):
@@ -79,6 +94,11 @@ def _match(db, text, quantity, names):
 
 
 def _families(db, lines, list_complete=False):
+    """Compare recognized reward order against valid family sequences starting at any stage.
+
+    A blank-ended list can narrow candidates to exact suffixes; one fully
+    matched candidate yields a family without implying screenshot correctness.
+    """
     first = lines[0]["recipe"] if lines else None
     if not first:
         return None, [], False
@@ -105,8 +125,14 @@ def _families(db, lines, list_complete=False):
 
 
 def _list_complete(image, lines, right):
+    """Check unused list space within the panel rather than the surrounding game."""
     if not lines:
         return False
+    if image.width >= 900 and image.height >= 600 and image.width >= image.height * 1.25:
+        # Native OCR keeps reward coordinates in the full game window. Search
+        # the same narrow panel area as the socket reader, so blank parchment
+        # is not confused with the game scene to its right.
+        right = min(right, round(image.height * .70))
     panel = image.crop((0, 0, min(image.width, int(right)), image.height)).convert("RGB")
     import cv2
     gray = cv2.cvtColor(np.asarray(panel), cv2.COLOR_RGB2GRAY)
@@ -126,6 +152,10 @@ def _list_complete(image, lines, right):
 
 
 def _reference_icon_count(image, reward_y):
+    """Count contiguous high-variance icons at fixed panel coordinates as a contour fallback.
+
+    Require at least three and reject a later strong icon after a gap.
+    """
     center_x = 55 if image.width < 700 else 70
     center_y = int(reward_y - 27)
     strengths = []
@@ -143,6 +173,7 @@ def _reference_icon_count(image, reward_y):
 
 
 def _icon_count(image, reward_y, expected=None):
+    """Count visible sockets in normalized panel geometry without trusting database counts."""
     import cv2
     if image.width >= 900 and image.height >= 600 and image.width >= image.height * 1.25:
         window = image.crop((0, 0, min(image.width, round(image.height * .70)), image.height))
@@ -155,6 +186,14 @@ def _icon_count(image, reward_y, expected=None):
             scale = 575 / panel.width
             panel = panel.resize((575, round(panel.height * scale)), Image.Resampling.LANCZOS)
             return _icon_count(panel, (reward_y - top) * scale, expected)
+    elif image.width != 575:
+        # Cropped captures can arrive at any display scale, too. Small icon
+        # borders lose contours at their original size and the fixed reference
+        # sampler otherwise examines different positions. Count at the same
+        # reference width used for full-window captures, independently of DB.
+        scale = 575 / image.width
+        image = image.resize((575, max(1, round(image.height * scale))), Image.Resampling.LANCZOS)
+        reward_y *= scale
     reference = _reference_icon_count(image, reward_y)
     gray = cv2.cvtColor(np.asarray(image.convert("RGB")), cv2.COLOR_RGB2GRAY)
     left, _, right, _ = runehelper_ocr._find_panel(gray)
@@ -201,6 +240,10 @@ def _icon_count(image, reward_y, expected=None):
 
 @lru_cache(maxsize=1)
 def _engine():
+    """Cache a verified shared RapidOCR engine configured for the active OCR thread count.
+
+    Callers own OCR_LOCK while invoking this engine or its recognizer.
+    """
     try:
         import rapidocr
         from rapidocr import RapidOCR
@@ -217,6 +260,12 @@ def _engine():
 
 
 def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, verify_header=True):
+    """Read ordered opened rewards, match recipes/families and check visible socket counts.
+
+    Use native rows first, optionally verify the heading or run RapidOCR fallback,
+    and hold incomplete sequences or socket conflicts in the returned review status.
+    can_use expresses matched geometry/header constraints, not approval to log.
+    """
     if isinstance(path, Image.Image):
         image = path.convert("RGB")
     else:

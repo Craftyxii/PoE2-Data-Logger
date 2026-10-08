@@ -1,3 +1,5 @@
+"""Pixel geometry checks requiring the three propagation peaks rather than accepting a surrounding frame alone."""
+
 from pathlib import Path
 import unittest
 

@@ -1,3 +1,10 @@
+"""Build a three-sheet XLSX directly from the logger CSV exports.
+
+Export, Atlas Character Settings and Scan History use one SQLite read snapshot.
+Saved Atlas setup IDs link the summary/history rows to their exported settings;
+CSV columns determine worksheet order and recognized numeric cell types.
+"""
+
 from __future__ import annotations
 
 import io
@@ -18,6 +25,7 @@ TYPES = "http://schemas.openxmlformats.org/package/2006/content-types"
 
 
 def _column(number):
+    """Convert a positive one-based column number to its Excel letter address."""
     result = ""
     while number:
         number, digit = divmod(number - 1, 26)
@@ -26,6 +34,7 @@ def _column(number):
 
 
 def _col_number(address):
+    """Convert the uppercase column prefix of a cell address to its one-based number."""
     letters = re.match(r"[A-Z]+", address).group()
     number = 0
     for letter in letters:
@@ -34,7 +43,9 @@ def _col_number(address):
 
 
 class Sheet:
+    """Edit worksheet cells while retaining surrounding XML and existing cell styles."""
     def __init__(self, xml):
+        """Parse worksheet XML and index rows, deferring cell indexing until a row is used."""
         self.root = ET.fromstring(xml)
         self.data = self.root.find(f"{{{NS}}}sheetData")
         self.rows = {int(row.get("r")): row for row in self.data.findall(f"{{{NS}}}row")}
@@ -42,12 +53,14 @@ class Sheet:
         self._indexed_rows = set()
 
     def _row(self, number):
+        """Return an existing numbered row or append an empty row to sheetData."""
         if number not in self.rows:
             self.rows[number] = ET.Element(f"{{{NS}}}row", {"r": str(number)})
             self.data.append(self.rows[number])
         return self.rows[number]
 
     def _cell(self, row, col, style=None):
+        """Index the requested row and create a missing cell with its optional initial style."""
         key = row, col
         group = self._row(row)
         if row not in self._indexed_rows:
@@ -62,6 +75,11 @@ class Sheet:
         return self.cells[key]
 
     def set(self, row, col, value, style=None):
+        """Replace a cell value/formula with a typed scalar or sanitized inline string.
+
+        Empty values clear content; text stays text, including strings that resemble
+        spreadsheet formulas, and existing cell styling is retained.
+        """
         cell = self._cell(row, col, style)
         for child in list(cell):
             if child.tag in {f"{{{NS}}}f", f"{{{NS}}}v", f"{{{NS}}}is"}:
@@ -83,6 +101,7 @@ class Sheet:
                 text.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
 
     def bytes(self):
+        """Sort rows and cells into address order and serialize the worksheet XML."""
         self.data[:] = sorted(self.data, key=lambda row: int(row.get("r")))
         for row in self.data:
             row[:] = sorted(row, key=lambda cell: _col_number(cell.get("r")))
@@ -90,6 +109,7 @@ class Sheet:
 
 
 def _numeric_column(name):
+    """Identify logger count/stat columns, including prefixed start/end snapshots, for numeric cells."""
     return (name.startswith(("Item: ", "Currency: ", "Omen: ", "Stat: ", "Applied Stat: ", "Atlas Choice: ")) or name in {"Socket Count", "Tier", "Area Level", "Base Map Mods", "Map Mods", "# +2 Mod Tablets",
         "Tablet Mods", "Total Mods", "Master +Mods", "Waystone %", "Tablets Used", "Item Rarity %",
         "Monster Rarity %", "Pack Size %", "Effectiveness %", "Source Row", "Chain Step #", "Expedition #",
@@ -107,6 +127,7 @@ def _numeric_column(name):
 
 
 def _atlas_setup_hyperlinks(data, atlas_data, target_sheet):
+    """Map exported setup IDs to their first settings-sheet row and reject uneven CSV rows."""
     atlas_rows = csv.reader(io.StringIO(atlas_data.decode("utf-8-sig")))
     atlas_headers = next(atlas_rows)
     rows = csv.reader(io.StringIO(data.decode("utf-8-sig")))
@@ -134,6 +155,11 @@ def _atlas_setup_hyperlinks(data, atlas_data, target_sheet):
 
 
 def _data_sheet(data, *, hyperlinks=None, numeric_columns=()):
+    """Turn a CSV table into a filtered worksheet with a frozen header and optional setup links.
+
+    Recognized numeric columns become numbers only for matching decimal text;
+    other values remain inline strings and each row must match the header width.
+    """
     rows = csv.reader(io.StringIO(data.decode("utf-8-sig")))
     headers = next(rows)
     root = ET.Element(f"{{{NS}}}worksheet")
@@ -177,8 +203,13 @@ def _data_sheet(data, *, hyperlinks=None, numeric_columns=()):
 
 
 def export_xlsx():
-    # Both worksheets describe one database snapshot, including a concurrent
+    # All three worksheets describe one database snapshot, including a concurrent
     # atlas edit or scan commit that happens while the workbook is generated.
+    """Serialize the summary, saved Atlas settings and scan-history CSVs into one XLSX.
+
+    Read all three tables and dynamic item headers in one database transaction,
+    then add internal setup hyperlinks and worksheet styles to the ZIP package.
+    """
     with logger._connect() as db:
         db.execute("BEGIN")
         data_sheets = [("Export", logger.export_primary_csv(_db=db)),

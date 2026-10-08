@@ -1,3 +1,5 @@
+"""Storage checks restricting new-map undo and preserving prior recorded activity and counters."""
+
 import json
 from pathlib import Path
 import tempfile

@@ -1,3 +1,9 @@
+"""Gate automatic remnant logging on opened OCR evidence and pending scan context.
+
+Candidate checks resolve the observed reward order against the recipe catalog;
+the final write receives the pending, opened and optional seed context guards.
+"""
+
 from __future__ import annotations
 
 import re
@@ -7,11 +13,13 @@ from PoE2_Data_Logger.core import logger_store as logger
 
 
 def _family(label):
+    """Parse only a complete "Family N" label; return None for other labels."""
     match = re.fullmatch(r"Family (\d+)", str(label or ""))
     return int(match.group(1)) if match else None
 
 
 def _score(value):
+    """Coerce a confidence value to a finite fraction, using zero for invalid scores."""
     try:
         score = float(value)
         return score if math.isfinite(score) and 0 <= score <= 1 else 0.0
@@ -20,7 +28,13 @@ def _score(value):
 
 
 def candidate(opened, seed=None, resolver=logger.resolve):
+    """Require one family, icon-derived sockets and confident ordered opened rewards.
+
+    Reject contradictory seed evidence and require the catalog resolver to match
+    the observed reward prefix before returning commit arguments.
+    """
     def review(reason):
+        """Return the manual-review reason in the common non-ready result shape."""
         return {"ready": False, "reason": reason}
 
     if not isinstance(opened, dict):
@@ -69,6 +83,11 @@ def candidate(opened, seed=None, resolver=logger.resolve):
 
 
 def commit(opened, seed=None, scan_id=None):
+    """Check the auto-commit toggle and pending IDs before a guarded remnant write.
+
+    Pass the observed contexts to commit_remnant so its write can reject stale
+    evidence; return validation failures as reasons for manual review.
+    """
     with logger._connect() as db:
         enabled = bool(logger._meta(db, "settings").get("auto_commit", False))
         pending = logger._meta(db, "ocr_pending")

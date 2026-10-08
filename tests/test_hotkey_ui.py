@@ -1,3 +1,5 @@
+"""Qt key-assignment checks with controlled registration failures, preserving prior shortcuts after invalid edits."""
+
 import os
 from pathlib import Path
 import tempfile

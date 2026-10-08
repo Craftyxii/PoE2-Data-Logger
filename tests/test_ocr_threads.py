@@ -1,3 +1,5 @@
+"""OCR runtime preference checks for bounded CPU thread settings and engine/session configuration."""
+
 import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path

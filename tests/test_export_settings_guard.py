@@ -1,3 +1,5 @@
+"""Qt export checks requiring Atlas/rarity drafts to be saved before CSV/XLSX while allowing database backups."""
+
 import csv
 import os
 from pathlib import Path

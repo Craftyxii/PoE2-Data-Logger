@@ -1,3 +1,9 @@
+"""Dispatch desktop API actions to scanning, persistence, hotkeys and exports.
+
+Uploaded screenshots are bounded before OCR; remnant scans recheck their saved
+session context after OCR before assigning a pending scan ID.
+"""
+
 from __future__ import annotations
 
 import base64
@@ -22,6 +28,7 @@ HOTKEY = HotkeyManager()
 
 
 def _image(encoded):
+    """Decode bounded base64 PNG/JPEG data and verify screenshot dimensions and pixels."""
     if not isinstance(encoded, str) or len(encoded) > (MAX_UPLOAD + 2) * 4 // 3:
         raise ValueError("Screenshot is over 16 MB.")
     try:
@@ -46,6 +53,11 @@ def _image(encoded):
 
 
 def dispatch(path, data=None):
+    """Route desktop actions, staging OCR uploads and rechecking remnant context.
+
+    Read routes expose state, catalogs and saved images; mutation routes delegate
+    validation and writes to the matching logger or hotkey operation.
+    """
     data = data or {}
     target = urlsplit(path)
     q = parse_qs(target.query)

@@ -1,3 +1,5 @@
+"""Qt desktop regressions for review ownership, asynchronous callbacks, header synchronization and compact layouts."""
+
 import io
 import os
 from pathlib import Path
@@ -51,6 +53,7 @@ class UIRegressionTests(unittest.TestCase):
         return raw.getvalue()
 
     def test_chain_and_atlas_controls_fit_small_screen_after_completion(self):
+        """Keep chain, Atlas and scan-region actions inside a 1366-by-720 desktop window."""
         self.window.show()
         self.window.rune_inputs[0].setText("Death")
         self.window.commit_chain()
@@ -71,6 +74,14 @@ class UIRegressionTests(unittest.TestCase):
         self.window.tabs.setCurrentIndex(self.window.tabs.indexOf(self.window.atlas_settings_page))
         self.app.processEvents()
         for target in (self.window.atlas_settings_page.gear_rarity, self.window.atlas_settings_page.save_button):
+            rect = QRect(target.mapTo(self.window, QPoint()), target.size())
+            self.assertTrue(target.isVisible())
+            self.assertTrue(self.window.rect().contains(rect))
+        self.window.tabs.setCurrentIndex(self.window.tabs.indexOf(self.window.scan_regions))
+        self.app.processEvents()
+        save_regions = next(item for item in self.window.scan_regions.findChildren(native_desktop.QPushButton)
+                            if item.text() == "Save regions")
+        for target in (self.window.scan_regions.game_resolution, self.window.scan_regions.canvas, save_regions):
             rect = QRect(target.mapTo(self.window, QPoint()), target.size())
             self.assertTrue(target.isVisible())
             self.assertTrue(self.window.rect().contains(rect))

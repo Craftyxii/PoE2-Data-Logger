@@ -1,3 +1,5 @@
+"""Ritual panel/lattice checks retaining multi-cell equipment footprints and holding clipped or unsupported grids."""
+
 from pathlib import Path
 import json
 import unittest

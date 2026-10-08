@@ -1,3 +1,9 @@
+"""Turn item, inventory and Ritual captures into suggestions for review.
+
+Shared RapidOCR calls use OCR_LOCK; currency readers remain worker-local.
+Ritual grid geometry establishes occupied footprints, while labels, icon
+references and review flags separately describe identity and count evidence."""
+
 from __future__ import annotations
 
 import io
@@ -22,11 +28,14 @@ _RITUAL_MATCH_LOCK = threading.Lock()
 
 
 def _key(text):
+    """Normalize arbitrary item text to lowercase alphanumerics for name comparisons."""
     return re.sub(r"[^a-z0-9]", "", str(text).lower())
 
 
 def _reference_image(raw, maximum):
+    """Decode a supplied PIL image or bytes only within pixel/dimension bounds, then thumbnail it."""
     def bounded(source):
+        """Reject oversized source images and return a bounded RGB thumbnail."""
         if (min(source.size) < 1 or max(source.size) > 8192 or
                 source.width * source.height > 12_000_000):
             return None
@@ -46,6 +55,7 @@ def _reference_image(raw, maximum):
 
 
 def _reviewed_pixels(image):
+    """Normalize reviewed one-cell artwork while masking counts and retaining tier badges."""
     pixels = np.asarray(image.convert("RGB").resize((40, 40), Image.Resampling.LANCZOS),
                         dtype=np.uint8).copy()
     # Stack counts can change between scans. Keep the lower-right tier badge:
@@ -55,6 +65,7 @@ def _reviewed_pixels(image):
 
 
 def _reviewed_bank(reader, references, shape=(1, 1)):
+    """Prepare only reviewed references with the requested footprint and retain their item kinds."""
     examples, kinds = [], {}
     for reference in references:
         if (not reference.get("reviewed") or
@@ -75,6 +86,11 @@ def _reviewed_bank(reader, references, shape=(1, 1)):
 
 
 def _reviewed_match(reader, image, bank, catalog=None):
+    """Accept a reviewed-reference override only for an unambiguous score > -450 and lead > 250.
+
+    Shared catalog artwork still uses tier resolution, so a reviewed label cannot
+    replace the badge check for multiple currency variants.
+    """
     examples, kinds, shape = bank
     if not examples or (catalog and (catalog.get("shared_icon") or len(catalog.get("members") or []) > 1)):
         # A labelled Chaos/Exalted/etc. picture cannot replace the existing
@@ -93,6 +109,7 @@ def _reviewed_match(reader, image, bank, catalog=None):
 
 
 def is_ritual_page(lines):
+    """Recognize Ritual UI wording from .75+ rows without claiming reward-grid completeness."""
     text = " ".join(str(row.get("text", "")) for row in lines
                     if isinstance(row, dict) and row.get("score", 0) >= .75).casefold()
     title = bool(re.search(r"\bfavou?rs\b", text))
@@ -102,6 +119,11 @@ def is_ritual_page(lines):
 
 
 def ocr_lines(image):
+    """Read text under the shared engine lock, then merge nearby rows with their original parts.
+
+    Merged confidence is the weakest part, and part boxes remain available for
+    spatial parsing and local retries.
+    """
     if isinstance(image, (str, Path)):
         with Image.open(image) as source:
             image = source.convert("RGB")
@@ -134,6 +156,7 @@ def ocr_lines(image):
 
 
 def _affix_match(text, names):
+    """Resolve known aliases/exact affix keys, then require .96 fuzzy similarity and a .035 lead."""
     raw = affix_key(text)
     aliases = {
         "Monsters have increased Effectiveness": "Effectiveness",
@@ -170,6 +193,7 @@ def _affix_match(text, names):
 
 
 def merge_tablet_lines(lines):
+    """Join likely wrapped modifier continuations, preserving the weaker OCR score and final bottom."""
     merged = []
     for source in lines:
         row = dict(source) if isinstance(source, dict) else {"text": str(source)}
@@ -198,6 +222,11 @@ def merge_tablet_lines(lines):
 
 
 def parse_tablet(lines, affixes):
+    """Match extracted values to same-unit known affixes and return up to four unique proposals.
+
+    Unknown wording, unit conflicts and extra matches remain uncertain; ready
+    means the parsing constraints passed, not that OCR was manually approved.
+    """
     found, uncertain = [], []
     for line in merge_tablet_lines(lines):
         text = line["text"] if isinstance(line, dict) else str(line)
@@ -219,6 +248,7 @@ def parse_tablet(lines, affixes):
 
 
 def inventory_cell(image, slot):
+    """Crop a one-based slot from an aligned 12×5 grid, rejecting indices outside 1–60."""
     if slot < 1 or slot > 60:
         raise ValueError("Choose an inventory slot from 1 to 60.")
     column, row = (slot - 1) % 12, (slot - 1) // 12
@@ -230,6 +260,11 @@ def inventory_cell(image, slot):
 
 
 def inventory_grid(image):
+    """Fit the gold/navy divider lattice and crop to an aligned 12×5 grid when supported.
+
+    Require eight horizontal-profile and four vertical-profile hits; insufficient
+    evidence returns the supplied image for the caller’s existing workflow.
+    """
     if image.info.get("poe2_inventory_aligned"):
         return image
     pixels = np.asarray(image.convert("RGB"), dtype=np.float32)
@@ -241,6 +276,7 @@ def inventory_grid(image):
     horizontal, vertical = separators.mean(axis=0), separators.mean(axis=1)
 
     def fit(profile, count, pitches, required, max_padding=1):
+        """Search pitches and origins for regularly spaced divider hits, weighting interior evidence."""
         smooth = cv2.dilate(profile.astype(np.float32)[None, :],
                             np.ones((1, 3), np.uint8))[0]
         best = None
@@ -280,6 +316,7 @@ def inventory_grid(image):
 
 
 def _stack_count(cell, read):
+    """Read an enlarged upper-left count at .85 confidence, otherwise return an unverified one."""
     corner = cell.crop((0, 0, max(8, round(cell.width * .5)),
                         max(8, round(cell.height * .3))))
     enlarged = ImageOps.expand(corner.resize((corner.width * 6, corner.height * 6),
@@ -295,6 +332,7 @@ def _stack_count(cell, read):
 
 
 def _inventory_labels(image):
+    """Read full count and tier labels, holding clipped counts for review."""
     from rapidocr.ch_ppocr_rec.typings import TextRecInput
     from PoE2_Data_Logger.ocr.inventory_labels import count_crops, tier_crops, fallback_crops
 
@@ -304,7 +342,7 @@ def _inventory_labels(image):
     tiers = {slot: [] for slot in labels}
     for slot in labels:
         cell = inventory_cell(image, slot)
-        number_crops, possible_count = count_crops(cell)
+        number_crops, possible_count = count_crops(cell, complete_only=True)
         labels[slot]["count_present"] = possible_count
         for patch in number_crops:
             patches.append(np.asarray(patch)); positions.append((slot, "count"))
@@ -375,6 +413,11 @@ def _inventory_labels(image):
 
 
 def _inventory_equipment_slots(image):
+    """Find occupied rectangular multi-cell equipment from missing inventory dividers.
+
+    Only rectangles up to two columns by four rows with content across their
+    span are treated as equipment; this helps exclude partial gear icons.
+    """
     pixels = np.asarray(image.convert("RGB"), dtype=np.float32)
     groups = [{slot} for slot in range(1, 61)]
     occupied = set()
@@ -388,6 +431,7 @@ def _inventory_equipment_slots(image):
     def join(first, second):
         # Empty neighbouring cells can have the same flat background. They
         # are not evidence that a single stack spans several inventory slots.
+        """Merge neighbouring cell groups only when at least one has occupied content."""
         if first not in occupied and second not in occupied:
             return
         a = next(group for group in groups if first in group)
@@ -397,6 +441,7 @@ def _inventory_equipment_slots(image):
             groups.remove(b)
 
     def continuous(axis, at, start, end):
+        """Check for smooth artwork across a cell boundary while retaining navy divider evidence."""
         radius = max(1, round(min(image.width / 12, image.height / 5) * .04))
         strip = (pixels[start:end, at-radius:at+radius+1] if axis == 1
                  else pixels[at-radius:at+radius+1, start:end])
@@ -431,6 +476,7 @@ def _inventory_equipment_slots(image):
 
 
 def scan_inventory_grid(image, references=(), read=None):
+    """Match inventory stacks and hold incomplete or conflicting counts for review."""
     if not isinstance(image, Image.Image):
         with Image.open(image) as source:
             image = source.convert("RGB")
@@ -504,11 +550,20 @@ def scan_inventory_grid(image, references=(), read=None):
         if name:
             if labels is not None:
                 generic_count = labels[slot].get("count")
-                native_count = (reader.count(cell) if generic_count is None and
-                                labels[slot].get("count_candidate") is None else None)
+                verify_count = generic_count is not None and labels[slot]["count_present"]
+                # CurrencyReader.count returns only positive glyph readings
+                # meeting its native confidence threshold (currently .76).
+                native_count = (reader.count(cell) if verify_count or (generic_count is None and
+                                labels[slot].get("count_candidate") is None) else None)
                 quantity = (generic_count if generic_count is not None
                             else labels[slot].get("count_candidate") or native_count or 1)
                 guessed = generic_count is None
+                if verify_count and native_count is not None and native_count != generic_count:
+                    # A confident prefix can still omit trailing digits. An
+                    # independent glyph reader disagreeing keeps the row held.
+                    guessed = True
+                    if len(str(native_count)) > len(str(generic_count)):
+                        quantity = native_count
             else:
                 native_count = reader.count(cell)
                 generic_count, generic_unclear = (_stack_count(cell, read) if native_count is None
@@ -551,6 +606,11 @@ def _ritual_header_index(lines):
 
 
 def parse_ritual(lines, omen_names):
+    """Extract reviewable reward names, quantities and prices while excluding Ritual controls.
+
+    Separate prices attach only to nearby aligned proposals; fuzzy Omen names
+    need .75 similarity and a .035 lead, while unmatched text stays visible.
+    """
     proposals, unmatched, anchors = [], [], []
     excluded = re.compile(r"^(?:ritual|favou?rs?|defer|reroll|tribute|purchase|refresh|remaining|"
                           r"items?|rewards?|cost|cancel|close|\d[\d, ]*)$", re.I)
@@ -630,6 +690,11 @@ def parse_ritual(lines, omen_names):
 
 
 def deferred_markers(image, *, grid=None):
+    """Locate deferred badges at .86+ correlation and estimate their associated reward boxes.
+
+    A complete grid enables a local sampling-phase retry at reward corners;
+    matching marks alone does not identify the reward or prove page coverage.
+    """
     with Image.open(Path(__file__).resolve().parent.parent / "deferred_marker.png") as reference:
         marker = np.asarray(reference.convert("L"))
     gray = np.asarray(image.convert("L"))
@@ -787,6 +852,7 @@ def _ritual_grid_tribute(parts, image, grid):
         return None
 
     def amount(row):
+        """Accept one complete numeric Tribute label only when row confidence is at least .94."""
         if float(row.get("score", 0)) < .94:
             return None
         match = re.fullmatch(r"(\d{1,3}(?:,\d{3})+|\d{1,9})\s*Tribute", row.get("text", "").strip(), re.I)
@@ -814,6 +880,10 @@ def _ritual_grid_tribute(parts, image, grid):
 
 
 def ritual_totals(lines, image=None, grid=None):
+    """Read available Tribute and rerolls from grid-anchored fields or a verified text header.
+
+    With an image but no grid, unrelated Tribute text cannot substitute for the header.
+    """
     tribute = None
     rerolls = None
     header = None
@@ -844,6 +914,11 @@ def ritual_totals(lines, image=None, grid=None):
 
 
 def _ritual_icon_matches(shown, icon, scale, page_key):
+    """Cache .965+ icon correlation occurrences across three artwork scales.
+
+    The cache lock protects lookup/update only; expensive matching runs outside it
+    and returned boxes are converted back to capture coordinates.
+    """
     key = (page_key, icon.shape, hashlib.sha256(icon.tobytes()).digest(), scale)
     with _RITUAL_MATCH_LOCK:
         cached = _RITUAL_MATCH_CACHE.get(key)
@@ -879,13 +954,13 @@ def _ritual_icon_matches(shown, icon, scale, page_key):
 
 
 def _ritual_cell_labels(cells):
-    """Read the existing inventory count/tier crops for occupied Ritual cells."""
+    """Read complete count/tier crops for occupied Ritual cells."""
     from rapidocr.ch_ppocr_rec.typings import TextRecInput
     from PoE2_Data_Logger.ocr.inventory_labels import count_crops, tier_crops
 
     labels, patches, positions = {}, [], []
     for index, cell in cells.items():
-        number_crops, possible_count = count_crops(cell)
+        number_crops, possible_count = count_crops(cell, complete_only=True)
         roman_crops, possible_tier = tier_crops(cell)
         labels[index] = {"count_present": possible_count, "tier_present": possible_tier,
                          "count_verified": False}
@@ -920,6 +995,11 @@ def _ritual_cell_labels(cells):
 
 
 def _ritual_reward_icon(reader, cell, label, examples, icon=None):
+    """Resolve one-cell Ritual artwork with count masking, tier checks and local reference margins.
+
+    Inventory-ignored families remain eligible as Ritual rewards, and ambiguous
+    shared tiers or example names stay as candidates for review.
+    """
     count = label.get("count") or label.get("count_candidate")
     count_digits = len(str(count)) if count is not None else None
     icon = reader.icon(cell, count_digits=count_digits) if icon is None else icon
@@ -961,16 +1041,23 @@ def _ritual_reward_icon(reader, cell, label, examples, icon=None):
 
 
 def _ritual_grid_items(image, grid, parsed, markers, omen_names, references):
+    """Identify each verified reward footprint without including its frame.
+
+    The frame grows with the reward grid at higher game resolutions. Keeping
+    the same proportional inset avoids shrinking the icon artwork differently
+    between standard and 4K captures.
+    """
     from PoE2_Data_Logger.core.review_learning import footprint
     reader = currency_ocr.get_reader()
     references = list(references)
     reviewed = {}
     cells = {}
+    frame_inset = max(1, round(grid["pitch"] * .02))
     for index, reward in enumerate(grid["rewards"]):
         if len(reward["slots"]) == 1:
             left, top, right, bottom = reward["box"]
             # Keep the game icon's cell proportions, excluding the frame line.
-            cells[index] = image.crop((left + 1, top + 1, right, bottom)).convert("RGB")
+            cells[index] = image.crop((left + frame_inset, top + frame_inset, right, bottom)).convert("RGB")
     labels = _ritual_cell_labels(cells)
     examples = []
     for reference in references:
@@ -1009,7 +1096,7 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references):
         if shape is not None:
             if shape not in reviewed:
                 reviewed[shape] = _reviewed_bank(reader, references, shape)
-            shown = (image.crop((box[0] + 1, box[1] + 1, box[2], box[3])).convert("RGB")
+            shown = (image.crop((box[0] + frame_inset, box[1] + frame_inset, box[2], box[3])).convert("RGB")
                      if multiple else cells[index])
             correction = _reviewed_match(reader, shown, reviewed[shape], catalog=catalog_icon)
         if correction:
@@ -1048,6 +1135,12 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references):
 
 
 def scan_ritual_page(image, omen_names, references=()):
+    """Combine OCR metadata, grid footprints, icon references and deferred markers for review.
+
+    A complete grid limits rewards to occupied footprints; without one, text and
+    Omen occurrences form a fallback with partial-grid coverage uncertainty retained.
+    Identity, quantity and page coverage remain separate review evidence.
+    """
     if not isinstance(image, Image.Image):
         with Image.open(image) as source:
             image = source.convert("RGB")

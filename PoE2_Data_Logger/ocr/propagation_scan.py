@@ -1,3 +1,9 @@
+"""Read propagated rune positions from a normalized Runeshape recipe panel.
+
+Three crown peaks mark propagation; a gold tile frame is optional. Verified
+positions index the stored recipe combination, rather than classifying glyphs.
+Unclear crowns, row text or tile origins produce manual-review results."""
+
 from __future__ import annotations
 
 import re
@@ -13,12 +19,18 @@ from PoE2_Data_Logger.ocr.propagation_marks import supported_partial_peak_boxes,
 
 
 def _result(status, **values):
+    """Build a held propagation result whose caller-supplied fields can override defaults."""
     return {"mode": "propagation", "selected_recipe": None, "runes": [],
             "positions": [], "can_use": False, "status": status, "family": None,
             "candidates": [], "choices": [], **values}
 
 
 def _panel(image):
+    """Return a 575-pixel-wide recipe panel, preserving verified cropped-panel OCR rows.
+
+    Try existing marks or a heading before finding a left-side panel in a larger
+    capture; images below the minimum usable dimensions return no panel.
+    """
     if image.width < 160 or image.height < 120:
         return None
     candidate = image.resize((575, max(1, round(image.height * 575 / image.width))),
@@ -49,6 +61,7 @@ def _panel(image):
 
 
 def _rapid_rows(image):
+    """Run the shared RapidOCR engine under its lock and return independent text boxes."""
     with opened_scan.OCR_LOCK:
         found = opened_scan._engine()(image)
     if found.boxes is None:
@@ -62,6 +75,7 @@ def _rapid_rows(image):
 
 
 def _read_panel_rows(image):
+    """Require a Runeshape Combinations heading at .8 confidence and retain rows below it."""
     rows = _rapid_rows(image)
     title = next((row for row in rows
                   if opened_scan._key(row["text"]) == "runeshapecombinations"
@@ -72,6 +86,7 @@ def _read_panel_rows(image):
 
 
 def _gold_mask(image):
+    """Select bright, saturated yellow-gold pixels for crown and cursor geometry."""
     rgb = np.asarray(image)
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
     return ((hsv[:, :, 0] >= 15) & (hsv[:, :, 0] <= 40)
@@ -82,6 +97,11 @@ def _gold_mask(image):
 def _marked_image(image):
     # Exposure changes can fragment the gold frame. Keep the same colour and
     # three-peak geometry checks while looking at a small exposure bracket.
+    """Combine exposure-bracket crown detections and retain supported incomplete marks.
+
+    Pale pixels may recover a frame, but peaks still need the gold mask; nearby
+    boxes are deduplicated and cursor evidence chooses the returned mask.
+    """
     pixels = np.asarray(image, dtype=np.float32)
     marked, partials, supplementary = [], [], []
     cursor_mask = None
@@ -141,6 +161,7 @@ def _marked_image(image):
 
 
 def _cursors(mask):
+    """Find arrow-shaped gold components in the normalized panel’s left 46-pixel margin."""
     strip = cv2.morphologyEx(mask[:, :46], cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
     _, labels, components, centres = cv2.connectedComponentsWithStats(strip)
     found = []
@@ -161,6 +182,11 @@ def _cursors(mask):
 
 
 def _marked_boxes(mask, frame_mask=None):
+    """Locate framed tiles and check gold peaks above their top border.
+
+    Three peaks with at least two pixels each yield a mark; one or two plausible
+    peaks remain uncertain, and an ordinary frame alone is not propagation.
+    """
     joined = cv2.morphologyEx(mask if frame_mask is None else frame_mask,
                             cv2.MORPH_CLOSE, np.ones((3, 1), np.uint8))
     _, labels, components, _ = cv2.connectedComponentsWithStats(joined)
@@ -197,6 +223,10 @@ def _marked_boxes(mask, frame_mask=None):
 
 
 def _marked_tiles(mask, cursor_y, first_x=71, pitch=41):
+    """Assign framed crowns near a cursor to the fixed 41-pixel socket lattice.
+
+    Off-lattice and incomplete marks set uncertainty rather than becoming positions.
+    """
     marked, incomplete = _marked_boxes(mask)
     found, uncertain = [], False
     for centre_x, tile_top, width, height in marked:
@@ -211,7 +241,7 @@ def _marked_tiles(mask, cursor_y, first_x=71, pitch=41):
     return sorted(found), uncertain
 
 
-def _tile_layout(image, tile_top, tile_height, marked, min_first_x=15):
+def _tile_layout(image, tile_top, tile_height, marked, min_first_x=15, sockets=None, reference=None):
     """Recover the first tile and spacing when a crop excludes the arrow margin."""
     gray = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2GRAY)
     top, bottom = max(0, round(tile_top)), min(image.height, round(tile_top + tile_height))
@@ -219,7 +249,9 @@ def _tile_layout(image, tile_top, tile_height, marked, min_first_x=15):
         return None
     edges = cv2.Canny(gray[top:bottom], 50, 100)
     contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-    width = float(np.median([box[2] for box in marked])) if marked else 38.
+    # An exposure-expanded crown frame can be wider than its square tile
+    # body. It must not enlarge the pitch and shift the first rune by one.
+    width = min(float(np.median([box[2] for box in marked])), tile_height) if marked else tile_height
     centres = [box[0] for box in marked]
     for contour in contours:
         x, _, w, h = cv2.boundingRect(contour)
@@ -243,14 +275,15 @@ def _tile_layout(image, tile_top, tile_height, marked, min_first_x=15):
         steps = round((b - a) / (width * 41 / 38))
         if 1 <= steps <= 9 and .90 * width <= (b - a) / steps <= 1.22 * width:
             gaps.append((b - a) / steps)
-    pitch = float(np.median(gaps)) if gaps else width * 41 / 38
-    if any(abs((centre - grouped[0]) / pitch - round((centre - grouped[0]) / pitch)) > .16
+    if not gaps and reference is None:
+        return None
+    first_x, pitch = reference if reference is not None else (grouped[0], float(np.median(gaps)))
+    if any(abs((centre - first_x) / pitch - round((centre - first_x) / pitch)) > .16
            for centre in grouped):
         return None
-    first_x = grouped[0]
     # A glyph can interrupt its frame contour. Include preceding occupied
     # tiles on the same verified grid rather than mislabelling tile two as one.
-    while first_x - pitch >= min_first_x:
+    while reference is None and first_x - pitch >= min_first_x:
         x = round(first_x - pitch)
         half = round(pitch * 12 / 41)
         sample = gray[round(tile_top + tile_height * .18):round(tile_top + tile_height * .83),
@@ -258,10 +291,18 @@ def _tile_layout(image, tile_top, tile_height, marked, min_first_x=15):
         if not sample.size or sample.std() < 28:
             break
         first_x -= pitch
+    if sockets is not None and abs(grouped[-1] - first_x - (sockets - 1) * pitch) > 6:
+        # A missing first tile can make a perfectly regular lattice start at
+        # rune two. The visible row must span its recipe's complete socket bar.
+        return None
     return (first_x, pitch) if min_first_x <= first_x <= 85 else None
 
 
 def _reward_rows(db, detections):
+    """Canonicalize ordered reward rows while preserving quantity and skill-level constraints.
+
+    Unprefixed prose needs a recipe match of at least .92 to enter the list.
+    """
     names = [row[0] for row in db.execute("SELECT name FROM recipes")]
     quantity = re.compile(r"^\s*(\d{1,3}|[Il])\s*[xX×]\s+(.+?)\s*$")
     skill = re.compile(r"^Skill Level\s*(\d{1,2})\s*:\s*(.+?)\s*$", re.I)
@@ -288,6 +329,7 @@ def _reward_rows(db, detections):
 
 
 def _family_candidates(db, rows):
+    """Find valid families containing the complete recognized sequence as a contiguous slice."""
     sequence = [row["recipe"] for row in rows]
     if not sequence or any(name is None for name in sequence):
         return []
@@ -301,6 +343,11 @@ def _family_candidates(db, rows):
 
 
 def _row_reading(db, panel, marked, incomplete, row, all_rows, candidates, shared_layout, min_first_x):
+    """Map three-marked tile positions to recipe-order names; hold unverified geometry.
+
+    Rune names come from the stored combination order, not glyph classification.
+    A verified row origin and spacing are required before a position can be saved.
+    """
     recipe = row["recipe"]
     info = {"selected_recipe": recipe, "reward_text": row["text"], "candidates": candidates,
             "family": f"Family {candidates[0]}" if len(candidates) == 1 else None,
@@ -319,7 +366,10 @@ def _row_reading(db, panel, marked, incomplete, row, all_rows, candidates, share
     tile_height = float(np.median([tile[3] for tile in selected]))
     # All recipe rows share one lattice. Several agreeing rows are stronger
     # spacing evidence than one exposure-expanded frame on an isolated row.
-    layout = shared_layout or _tile_layout(panel, tile_top, tile_height, selected, min_first_x) or (71, 41)
+    layout = _tile_layout(panel, tile_top, tile_height, selected, min_first_x,
+                          entry["sockets"], reference=shared_layout)
+    if layout is None:
+        return _result("The first rune position was not clear — enter the propagated runes manually.", **info)
     first_x, pitch = layout
     positions = sorted(round((box[0] - first_x) / pitch) + 1 for box in selected)
     if (len(set(positions)) != len(positions) or any(position < 1 or position > len(runes) for position in positions)
@@ -330,6 +380,7 @@ def _row_reading(db, panel, marked, incomplete, row, all_rows, candidates, share
 
 
 def scan_propagation(image: Image.Image | Path):
+    """Read cursor-selected recipes and three-marked runes, holding uncertain positions for review."""
     if isinstance(image, Image.Image):
         source = image.convert("RGB")
     else:
@@ -354,7 +405,7 @@ def scan_propagation(image: Image.Image | Path):
             entry = db.execute("SELECT sockets FROM recipes WHERE name=?", (row["recipe"],)).fetchone()
             if entry is None:
                 continue
-            gray_layout = _tile_layout(panel, row["y1"] - 41, 38, [], min_first_x)
+            gray_layout = _tile_layout(panel, row["y1"] - 41, 38, [], min_first_x, entry["sockets"])
             if gray_layout is None:
                 # The standard full-margin panel has a fixed native lattice.
                 # A crop without that margin needs recoverable gray geometry.
@@ -385,11 +436,19 @@ def scan_propagation(image: Image.Image | Path):
         incomplete = [box for box in incomplete if not any(
             abs(box[0] - valid[0]) < 7 and abs(box[1] - valid[1]) < 7 for valid in marked)]
         layouts = []
+        anchors = [(row["y1"] - box[1], box[3]) for row in rows for box in marked
+                   if 3 <= row["y1"] - box[1] - box[3] / 2 <= 62]
+        body_offset = float(np.median([anchor[0] for anchor in anchors])) if anchors else None
+        body_height = float(np.median([anchor[1] for anchor in anchors])) if anchors else None
         for row in rows:
             boxes = [box for box in marked if 3 <= row["y1"] - box[1] - box[3] / 2 <= 62]
-            if boxes:
-                layout = _tile_layout(panel, float(np.median([box[1] for box in boxes])),
-                                      float(np.median([box[3] for box in boxes])), boxes, min_first_x)
+            if boxes or body_offset is not None:
+                entry = db.execute("SELECT sockets FROM recipes WHERE name=?", (row["recipe"],)).fetchone()
+                if entry is None:
+                    continue
+                tile_top = float(np.median([box[1] for box in boxes])) if boxes else row["y1"] - body_offset
+                tile_height = float(np.median([box[3] for box in boxes])) if boxes else body_height
+                layout = _tile_layout(panel, tile_top, tile_height, boxes, min_first_x, entry["sockets"])
                 if layout:
                     layouts.append(layout)
         agreeing = max(([other for other in layouts if abs(other[0] - layout[0]) <= 2

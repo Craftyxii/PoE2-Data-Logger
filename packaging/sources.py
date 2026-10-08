@@ -1,4 +1,8 @@
-"""Source and resource groups for PyInstaller."""
+"""Declare the modules and data assets that the frozen desktop build must carry.
+
+The PyInstaller spec compares APP_SOURCES against the package's Python files;
+new modules must be listed here so packaging cannot silently omit them.
+"""
 
 CORE_SOURCES = (
     "core/logger_store.py",
@@ -55,6 +59,7 @@ PACKAGE_SOURCES = (
     "platform/__init__.py",
 )
 
+# Package markers and each functional layer share one completeness check.
 APP_SOURCES = PACKAGE_SOURCES + CORE_SOURCES + OCR_SOURCES + UI_SOURCES + PLATFORM_SOURCES
 
 DATABASE_RESOURCES = (
@@ -80,4 +85,5 @@ DESKTOP_RESOURCES = (
 )
 
 FILE_RESOURCES = DATABASE_RESOURCES + SCANNER_RESOURCES + DESKTOP_RESOURCES
+# These directories retain their relative layout for runtime asset lookups.
 DIRECTORY_RESOURCES = ("fonts", "region_examples", "third_party", "atlas", "ocr/ritual_assets")

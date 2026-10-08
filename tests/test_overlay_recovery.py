@@ -1,3 +1,5 @@
+"""Offscreen Qt checks for overlay/review state restoration with mocked Windows interactions; native game focus/painting is unverified."""
+
 import os
 from pathlib import Path
 import tempfile
@@ -11,7 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QAbstractItemView
 from PIL import Image
 
 from PoE2_Data_Logger.core import logger_store as logger, service, store
@@ -153,6 +155,130 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertTrue(self.window.isVisible())
         self.assertFalse(self.window.isMinimized())
         self.assertFalse(self.window.overlay_escape.isEnabled())
+
+    def test_transparency_is_scoped_to_the_revealed_hud(self):
+        self.window.overlay_opacity_slider.setValue(40)
+        self.assertEqual(self.window.windowOpacity(), 1.0)
+        self.window.show_overlay()
+        self.assertAlmostEqual(self.window.windowOpacity(), .4, delta=.01)
+        self.window.tabs.setCurrentIndex(6)
+        self.assertFalse(self.window._overlay_revealed)
+        self.assertEqual(self.window.windowOpacity(), 1.0)
+        self.window.show_overlay()
+        self.assertAlmostEqual(self.window.windowOpacity(), .4, delta=.01)
+        self.window.hide_overlay()
+        self.assertEqual(self.window.windowOpacity(), 1.0)
+        self.window.showNormal()
+        self.assertEqual(self.window.windowOpacity(), 1.0)
+        self.window.show_overlay()
+        self.window.set_overlay_enabled(False)
+        self.assertEqual(self.window.windowOpacity(), 1.0)
+
+    def test_background_scan_keeps_hud_controls_and_event_loop_responsive(self):
+        grabbed = threading.Event()
+        release = threading.Event()
+
+        def grab(**kwargs):
+            grabbed.set()
+            if not release.wait(3):
+                raise RuntimeError("Capture test timed out")
+            return Image.new("RGB", (575, 720), "tan")
+
+        self.manager.grabber = grab
+        self.manager.readers["propagation"] = lambda image: {
+            "runes": [], "positions": [], "can_use": False,
+            "status": "Selected recipe cursor was not clear."}
+        try:
+            self.manager.capture("propagation", background=True)
+            deadline = time.monotonic() + 2
+            while not grabbed.is_set() and time.monotonic() < deadline:
+                QTest.qWait(10)
+            self.assertTrue(grabbed.is_set())
+            self.assertFalse(self.window.isVisible())
+            self.manager.capture("overlay")
+            self.window.poll()
+            self.app.processEvents()
+            self.assertTrue(self.window.isVisible())
+            self.window.normal.setText("123")
+            ticks = []
+            QTimer.singleShot(0, lambda: ticks.append(True))
+            self.app.processEvents()
+            self.assertEqual(ticks, [True])
+            self.assertEqual(self.window.normal.text(), "123")
+        finally:
+            release.set()
+            deadline = time.monotonic() + 3
+            while self.manager._capture_lock.locked() and time.monotonic() < deadline:
+                QTest.qWait(10)
+            self.assertFalse(self.manager._capture_lock.locked())
+
+    def test_confirmation_is_opaque_preserves_window_size_and_accepts_edits(self):
+        self.window.overlay_opacity_slider.setValue(40)
+        self.window.showMaximized()
+        self.app.processEvents()
+        size = self.window.size()
+        self.window.hide_overlay()
+        self.window.start_manual_remnant_review()
+        self.app.processEvents()
+        self.assertTrue(self.window._overlay_auto_review)
+        self.assertEqual(self.window.windowOpacity(), 1.0)
+        self.assertTrue(self.window.isMaximized())
+        self.assertEqual(self.window.size(), size)
+        self.window.overlay_opacity_slider.setValue(30)
+        self.assertEqual(self.window.windowOpacity(), 1.0)
+        self.window.first_recipe.setFocus()
+        QTest.keyClicks(self.window.first_recipe, "Divine Orb")
+        self.assertEqual(self.window.first_recipe.text(), "Divine Orb")
+        self.assertTrue(self.window.reject_scan_button.isEnabled())
+        QTest.mouseClick(self.window.reject_scan_button, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertIsNone(logger.get_state()["ocr_pending"])
+
+    def test_uncertain_currency_confirmation_accepts_row_edits_and_commit(self):
+        self.window.overlay_opacity_slider.setValue(40)
+        self.window.showMaximized()
+        self.app.processEvents()
+        self.window.hide_overlay()
+        self.window.inventory_phase.setCurrentIndex(self.window.inventory_phase.findData("end"))
+        self.window._inventory_read({"items": [{"slot": 1, "name": "Chaos Orb", "quantity": 4,
+            "count_needs_review": True}], "unknown": []})
+        QTest.qWait(20)
+        self.assertEqual(self.window.pending_review_kind, "currency")
+        self.assertTrue(self.window.isMaximized())
+        self.assertEqual(self.window.windowOpacity(), 1.0)
+        if self.app.platformName() == "offscreen":
+            # The offscreen window system does not deliver activation after
+            # hide/show, even for a plain Qt window. Supply that OS event so
+            # the rest of this check uses real editor and button input.
+            QApplication.setActiveWindow(self.window)
+        table = self.window.inventory_table
+        page = self.window.tabs.widget(0)
+        page.ensureWidgetVisible(table)
+        table.scrollToItem(table.item(0, 2), QAbstractItemView.ScrollHint.PositionAtCenter)
+        self.app.processEvents()
+        self.assertTrue(table.isVisible())
+        self.assertTrue(table.isEnabled())
+        QTest.mouseClick(table.viewport(), Qt.MouseButton.LeftButton,
+                        pos=table.visualItemRect(table.item(0, 2)).center())
+        QTest.mouseDClick(table.viewport(), Qt.MouseButton.LeftButton,
+                         pos=table.visualItemRect(table.item(0, 2)).center())
+        self.app.processEvents()
+        editor = self.app.focusWidget()
+        self.assertIsNotNone(editor)
+        editor.selectAll()
+        QTest.keyClicks(editor, "7")
+        QTest.keyClick(editor, Qt.Key.Key_Return)
+        self.app.processEvents()
+        page.ensureWidgetVisible(self.window.approve_scan_button)
+        self.app.processEvents()
+        QTest.mouseClick(self.window.approve_scan_button, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertEqual(logger.currency_for_map("M0001")["end"], {"Chaos Orb": 7})
+        self.assertEqual(logger.session_currency_totals()["items"],
+                         [{"name": "Chaos Orb", "kind": "Currency", "quantity": 7}])
+        self.assertFalse(self.window.isVisible())
 
     def test_escape_does_not_hide_when_overlay_is_disabled(self):
         self.window.set_overlay_enabled(False)

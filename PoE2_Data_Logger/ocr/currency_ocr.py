@@ -26,23 +26,28 @@ _READERS = threading.local()
 
 
 class _ExampleBank:
+    """Keep prepared reference pixels, stable name order and the owning reader’s identity."""
     def __init__(self, owner, signature, references, order):
+        """Store reference-bank metadata without retaining the reader object."""
         self.owner = id(owner)
         self.signature = signature
         self.references = references
         self.order = order
 
     def __bool__(self):
+        """Report whether the prepared bank contains any pixel references."""
         return bool(self.references)
 
 
 def get_reader():
+    """Reuse one CurrencyReader per worker thread so embedded JavaScript state is not shared."""
     if not hasattr(_READERS, "reader"):
         _READERS.reader = CurrencyReader()
     return _READERS.reader
 
 
 def catalog_version():
+    """Hash available icon/variant catalogs to invalidate catalog-dependent cached results."""
     digest = hashlib.sha256()
     for filename in ("currency-icons.json", "inventory-icons.json", "inventory-reference-variants.json"):
         path = ROOT / filename
@@ -53,6 +58,7 @@ def catalog_version():
 
 
 def catalog_names():
+    """List distinct names from non-ignored bundled currency and inventory families."""
     names = set()
     for filename in ("currency-icons.json", "inventory-icons.json"):
         if (ROOT / filename).exists():
@@ -63,6 +69,7 @@ def catalog_names():
 
 @lru_cache(maxsize=1)
 def omen_references():
+    """Render cached Omen artwork over the inventory background as PNG reference bytes."""
     references = []
     entries = json.loads((ROOT / "inventory-icons.json").read_text(encoding="utf-8"))["icons"]
     for entry in entries:
@@ -80,6 +87,10 @@ def omen_references():
 
 @lru_cache(maxsize=2)
 def _inventory_assets(path, modified, size):
+    """Cache catalog members and padded icon candidates with a masked count corner.
+
+    File timestamps and size participate in the cache key supplied by callers.
+    """
     inventory = json.loads(Path(path).read_text(encoding="utf-8"))["icons"]
     candidates, rgba_bank = [], []
     for item in inventory:
@@ -95,6 +106,7 @@ def _inventory_assets(path, modified, size):
 
 
 def _inventory_candidate(rgba, scale=1.0):
+    """Center scaled RGBA artwork on the 40×40 inventory backing and pad for alignment."""
     pixels = np.asarray(rgba, dtype=np.uint8).reshape(40, 40, 4)
     art = Image.fromarray(pixels, "RGBA")
     if scale != 1:
@@ -110,6 +122,7 @@ def _inventory_candidate(rgba, scale=1.0):
 
 @lru_cache(maxsize=2)
 def _calibrated_inventory_assets(path, modified, size, variants_path, variants_modified):
+    """Combine catalog artwork with allowed reference variants in one cached matching atlas."""
     entries = json.loads(Path(path).read_text(encoding="utf-8"))["icons"]
     candidates = [(entry["family"], _inventory_candidate(entry["rgba"])) for entry in entries]
     if variants_modified:
@@ -126,7 +139,13 @@ def _calibrated_inventory_assets(path, modified, size, variants_path, variants_m
 
 
 class CurrencyReader:
+    """Own offline JavaScript recognizers and bounded image-matching caches for one worker.
+
+    Prepared example banks are checked against both the reader and creating
+    thread; get_reader supplies thread-local instances for normal use.
+    """
     def __init__(self):
+        """Load offline recognizers/catalogs into a memory-limited context and prepare icon assets."""
         self._rank_cache = OrderedDict()
         self._scaled_candidates = {}
         self._example_atlases = OrderedDict()
@@ -176,11 +195,13 @@ class CurrencyReader:
 
     @staticmethod
     def _pixels(image: Image.Image):
+        """Serialize a PIL image as flat RGBA pixels and dimensions for JavaScript readers."""
         rgba = image.convert("RGBA")
         return {"data": np.asarray(rgba, dtype=np.uint8).reshape(-1).tolist(),
                 "w": rgba.width, "h": rgba.height}
 
     def _inventory_js(self, payload):
+        """Lazily prepare the legacy inventory matcher and return its top three distinct families."""
         if not self._inventory_js_ready:
             self.context.eval("var INVENTORY_BANK = " + json.dumps(self._inventory_rgba, separators=(",", ":")) + ";")
             self.context.eval("var INVENTORY_REFS = INVENTORY_BANK.map(function(r) { "
@@ -199,6 +220,12 @@ class CurrencyReader:
         return self.context.get("inventoryJSON")(payload)
 
     def icon(self, image: Image.Image, count_digits=None):
+        """Identify an icon, separating empty, ignored and uncertain inventory matches.
+
+        A weighted match needs score > -3000 with margin > 300, or score > -3200
+        with margin > 1500; fallback recognition must also pass its score/margin gates.
+        These scores describe artwork evidence; callers separately hold counts and tiers.
+        """
         pending = None
         pixels = np.asarray(image.convert("RGB"))
         dx, dy = max(1, round(image.width * .18)), max(1, round(image.height * .18))
@@ -254,6 +281,11 @@ class CurrencyReader:
         return result
 
     def inventory_ranked(self, image, calibrated=False, count_digits=None):
+        """Rank distinct icon families by weighted pixel error with translation tolerance.
+
+        Normalize backing, mask the count corner using an optional digit-width hint
+        and omit the tier corner; calibrated candidates also refine artwork scale.
+        """
         rgb = np.asarray(image.convert("RGB").resize((40, 40), Image.Resampling.LANCZOS),
                          dtype=np.float32).copy()
         background = ((rgb.max(axis=2) < 28) |
@@ -310,6 +342,10 @@ class CurrencyReader:
         return ranked
 
     def prepare_examples(self, references):
+        """Normalize and deduplicate references into a bank owned by this reader and thread.
+
+        Preserve first-seen name order and a content signature for repeat ranking.
+        """
         if threading.get_ident() != self._example_thread:
             raise ValueError("Icon reference readers belong to their worker thread.")
         if isinstance(references, _ExampleBank):
@@ -337,6 +373,7 @@ class CurrencyReader:
                             tuple((raw, tuple(names)) for raw, names in grouped.items()), order)
 
     def _example_atlas(self, references):
+        """Cache a padded vertical atlas of example pixels for batched alignment searches."""
         digest = hashlib.sha256()
         for raw, _ in references:
             digest.update(raw)
@@ -356,6 +393,7 @@ class CurrencyReader:
 
     @staticmethod
     def _exact_example_score(rgb, raw, weights, total, shifts):
+        """Recompute the best weighted error at shortlisted shifts using float64 arithmetic."""
         candidate = np.frombuffer(raw, dtype=np.uint8).reshape(40, 40, 3)
         padded = np.pad(candidate, ((4, 4), (4, 4), (0, 0)), mode="edge")
         windows = np.lib.stride_tricks.sliding_window_view(padded, (40, 40), axis=(0, 1))
@@ -364,6 +402,11 @@ class CurrencyReader:
         return -float(errors.min()) / total
 
     def examples(self, image: Image.Image, references):
+        """Return the three best distinct example names with stable ordering for ties.
+
+        Use batched alignment matching, then refine near-leading candidates before
+        caching ranks; a returned name is a candidate until caller thresholds accept it.
+        """
         bank = self.prepare_examples(references)
         if not bank:
             return []
@@ -412,6 +455,11 @@ class CurrencyReader:
         return ranked
 
     def count(self, image: Image.Image):
+        """Return a positive one-to-five-digit native count only at confidence .76 or higher.
+
+        Use a bounded cell thumbnail and the expected upper-left count anchor;
+        callers retain review responsibility for clipping or conflicting readings.
+        """
         image = image.copy()
         image.thumbnail((96, 96), Image.Resampling.LANCZOS)
         size = image.size
@@ -433,6 +481,10 @@ class CurrencyReader:
 
 
 def resolve_tier(members, cell: Image.Image, read_text):
+    """Resolve shared artwork from recognized II/III badges or a unique unprefixed base name.
+
+    Other tier-like text remains unresolved rather than selecting the base variant.
+    """
     if len(members) == 1:
         return members[0]
     cell = cell.copy()

@@ -1,3 +1,5 @@
+"""Mocked Windows clipboard checks ensuring focus changes cannot copy or read another window item."""
+
 import unittest
 from unittest.mock import Mock, patch
 

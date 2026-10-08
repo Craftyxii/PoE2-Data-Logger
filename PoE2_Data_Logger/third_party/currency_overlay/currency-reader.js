@@ -12,6 +12,7 @@
 // icon. GGG appears to size these against resolution rather than to a fixed pixel count,
 // which would otherwise make templates cut at one resolution useless at another.
 (function (root, factory) {
+  // Expose a pure pixel matcher; persistence and review decisions belong to Python.
   const api = factory();
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CurrencyReader = api;
@@ -188,6 +189,8 @@
    * @returns {{family:string|null, members:string[], score:number, margin:number, all:Array}}
    */
   function identify(shot, bank) {
+    // Rank icon families across crop candidates and hold matches that fail
+    // either the absolute score floor or runner-up separation requirements.
     const none = { family: null, members: [], score: 0, margin: 0, all: [] };
     if (!shot || !shot.w || !shot.h || !bank || !bank.icons || !bank.icons.length) return none;
     const rgba = shot.data instanceof Uint8ClampedArray ? shot.data : Uint8ClampedArray.from(shot.data);

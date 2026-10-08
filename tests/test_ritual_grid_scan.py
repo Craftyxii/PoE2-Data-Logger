@@ -1,3 +1,5 @@
+"""Ritual image enumeration checks keeping occupied unknown items visible with explicit uncertain fields."""
+
 import io
 import unittest
 from types import SimpleNamespace

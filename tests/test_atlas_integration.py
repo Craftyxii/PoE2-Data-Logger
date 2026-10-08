@@ -1,3 +1,5 @@
+"""Desktop integration checks for Atlas navigation, saved map snapshots, typed rarity and linked export outputs."""
+
 import csv
 import io
 import os

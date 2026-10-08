@@ -1,3 +1,5 @@
+"""Extract fixed-size socket features and decode a bar with exactly one seed."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -5,6 +7,7 @@ from scipy.ndimage import sobel
 
 
 def features(image, cx, cy):
+    """Describe a bounded 57×57 socket crop with radial color/edge and row-band statistics."""
     if cx < 29 or cx >= image.width - 29 or cy < 29 or cy >= image.height - 29:
         return None
     patch = np.asarray(
@@ -31,6 +34,11 @@ def features(image, cx, cy):
 
 
 def decode(p, js):
+    """Choose the best log-likelihood layout among complete bars of three to ten sockets.
+
+    Class indices represent outside the bar, an empty socket and the single seed;
+    all sampled positions contribute, including those beyond the candidate bar.
+    """
     by_index = {int(j): v for j, v in zip(js, p)}
     scores = []
     for n in range(3, 11):

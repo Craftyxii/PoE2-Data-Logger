@@ -1,3 +1,5 @@
+"""Ritual header image checks for tribute/reroll totals and blank fields when numerals are absent or unreadable."""
+
 import json
 from pathlib import Path
 from types import SimpleNamespace

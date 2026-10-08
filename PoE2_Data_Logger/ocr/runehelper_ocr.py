@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent / "third_party" / "runehelper"
 
 
 def _find_panel(gray: np.ndarray):
+    """Estimate a parchment panel from sustained side contrast, falling back to the whole image."""
     h, w = gray.shape
     whole = (0, 0, w, h)
     if min(h, w) < 64:
@@ -56,6 +57,7 @@ def _find_panel(gray: np.ndarray):
 
 
 def default_frame(image: Image.Image):
+    """Restrict a wide game capture to the left panel and trim detected vertical margins."""
     if image.width < 900 or image.height < 600 or image.width < image.height * 1.25:
         return image
     window = image.crop((0, 0, min(image.width, round(image.height * .70)), image.height))
@@ -66,6 +68,7 @@ def default_frame(image: Image.Image):
 
 @lru_cache(maxsize=1)
 def _model():
+    """Cache the English ONNX reader with CPU execution and configured intra-op threads."""
     info = json.loads((ROOT / "english.json").read_text(encoding="utf-8"))
     options = ort.SessionOptions()
     options.intra_op_num_threads = ocr_runtime.active_threads()
@@ -76,6 +79,7 @@ def _model():
 
 
 def _prepare_row(gray: np.ndarray, height: int, stride: int):
+    """Resize and percentile-normalize a row, pad to model stride and return usable time steps."""
     scale = height / gray.shape[0]
     width = max(8, round(gray.shape[1] * scale))
     method = cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC
@@ -89,6 +93,10 @@ def _prepare_row(gray: np.ndarray, height: int, stride: int):
 
 
 def _read_row(gray: np.ndarray):
+    """Decode a row by collapsing repeated CTC winners and skipping blanks.
+
+    Return text and the mean emitted-character softmax confidence on a 0–100 scale.
+    """
     info, session = _model()
     tensor, steps = _prepare_row(gray, info["height"], info["stride"])
     logits = session.run(None, {"input": tensor})[0][0, :, 0, :steps]
@@ -105,6 +113,7 @@ def _read_row(gray: np.ndarray):
 
 
 def _gray_panel(image: Image.Image):
+    """Downscale wide panels and conditionally normalize sampled parchment brightness."""
     gray = cv2.cvtColor(np.asarray(image.convert("RGB")), cv2.COLOR_RGB2GRAY)
     scale = min(1.0, 680 / gray.shape[1]) if gray.shape[1] > 750 else 1.0
     if scale < 1:
@@ -123,6 +132,7 @@ def _gray_panel(image: Image.Image):
 
 
 def _rows(gray: np.ndarray):
+    """Find right-aligned text bands, rejecting frame columns, oversized bands and dense artwork."""
     h, w = gray.shape
     x0 = w // 2
     right = gray[:, x0:]
@@ -180,6 +190,7 @@ def _rows(gray: np.ndarray):
 
 
 def _text_start(row: np.ndarray):
+    """Estimate the text boundary from blank gaps and a repeated tile-frame chain."""
     dark = cv2.threshold(row, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
     ink = (dark > 0).sum(axis=0)
     nonempty = np.flatnonzero(ink)
@@ -202,6 +213,7 @@ def _text_start(row: np.ndarray):
     tall = math.ceil(height * .8)
 
     def first_tall(start, end):
+        """Find the first near-full-height ink column within a bounded horizontal range."""
         for x in range(max(0, start), min(width - 1, end) + 1):
             if ink[x] >= tall:
                 return x
@@ -294,6 +306,10 @@ def _text_start(row: np.ndarray):
 
 
 def _recognize_rows(image: Image.Image):
+    """Read filtered panel rows at 80+ confidence, retrying full rows for missing reward prefixes.
+
+    Map row boxes back through panel scaling so callers receive capture coordinates.
+    """
     gray, scale = _gray_panel(image)
     results = []
     for y1, y2 in _rows(gray):
@@ -315,6 +331,7 @@ def _recognize_rows(image: Image.Image):
 
 
 def recognize(image: Image.Image):
+    """Prefer readable reward rows, then retry a detected panel and restore its capture offsets."""
     rows = _recognize_rows(image)
     prefix = re.compile(r"^(?:(?:\d{1,3}|[Il])\s*[xX×]\s|Skill Level\s*\d{1,2}\s*:)", re.I)
     if any(prefix.match(row["text"]) for row in rows):

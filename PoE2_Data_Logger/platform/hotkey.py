@@ -1,3 +1,5 @@
+"""Manage Windows shortcuts and serialize context-bound scans without blocking HUD key events."""
+
 from __future__ import annotations
 
 import io
@@ -56,6 +58,9 @@ KEY_LABELS.update({"PAGEUP": "PageUp", "PAGEDOWN": "PageDown", "CAPSLOCK": "Caps
 
 
 def virtual_key_name(code):
+    """Map a Windows key code to a supported label, retaining unknown keys as hexadecimal VK
+    names.
+    """
     if 0x30 <= code <= 0x39 or 0x41 <= code <= 0x5A:
         return chr(code)
     if 0x70 <= code <= 0x87:
@@ -65,6 +70,9 @@ def virtual_key_name(code):
 
 
 def parse_combo(value):
+    """Normalize one key plus distinct modifiers into Windows registration values, reserving
+    Ctrl+C for item copy.
+    """
     value = str(value or "").strip()
     if not value:
         return "", 0, 0
@@ -106,8 +114,14 @@ def parse_combo(value):
 
 
 class HotkeyManager:
+    """Own shortcut registration, a single reserved scan and latest-result publication with
+    cancellation revisions.
+    """
     def __init__(self, grabber=None, readers=None, supported=None, hover_reader=None,
                  tooltip_grabber=None, focused=None):
+        """Initialize injectable capture/read/focus adapters, synchronization locks and
+        independent scan/HUD event counters.
+        """
         self.supported = sys.platform == "win32" if supported is None else supported
         self.grabber = grabber or ImageGrab.grab
         self.readers = readers or {"seed": scan, "opened": scan_opened, "both": scan_both}
@@ -137,6 +151,9 @@ class HotkeyManager:
         self.on_event = None
 
     def _notify_event(self):
+        """Notify the optional UI bridge without letting callback errors escape the
+        capture/listener path.
+        """
         callback = self.on_event
         if callback:
             try:
@@ -145,6 +162,9 @@ class HotkeyManager:
                 pass
 
     def start(self):
+        """Load saved shortcut preferences and register supported combinations, retaining a
+        registration failure as status.
+        """
         with store._connect() as db:
             settings = logger._meta(db, "ocr_shortcut", {"combo": "", "mode": "opened"})
         configured_mode = settings.get("mode")
@@ -160,6 +180,9 @@ class HotkeyManager:
                 self.error = str(exc)
 
     def status(self):
+        """Return a lock-protected snapshot of registration, current mode, errors and latest
+        scan/HUD events.
+        """
         with self._lock:
             return {"supported": self.supported, "combo": self.combo,
                     "combos": dict(self.combos),
@@ -168,6 +191,9 @@ class HotkeyManager:
                     "overlay_sequence": self._overlay_sequence}
 
     def set_mode(self, mode):
+        """Validate and persist the general remnant scan mode without replacing dedicated
+        shortcut assignments.
+        """
         if mode not in GENERAL_MODES or mode not in self.readers:
             raise ValueError("Choose visible seed or opened remnant mode.")
         with self._lock:
@@ -176,11 +202,15 @@ class HotkeyManager:
             return self.status()
 
     def configure(self, combo, persist=True):
+        """Normalize the general shortcut and serialize registration replacement against other
+        configuration changes.
+        """
         with self._configuration_lock:
             canonical, _, _ = parse_combo(combo)
             return self._replace(canonical, self.combos, persist)
 
     def configure_for(self, kind, combo, persist=True):
+        """Validate and replace one dedicated scan/HUD shortcut while retaining the others."""
         if kind not in DEDICATED:
             raise ValueError("Choose a supported scan type.")
         with self._configuration_lock:
@@ -189,6 +219,9 @@ class HotkeyManager:
             return self._replace(self.combo, combos, persist)
 
     def _replace(self, combo, combos, persist=True):
+        """Reject conflicting shortcuts, replace listener registrations and attempt restoration
+        of old registrations after failure.
+        """
         if not self.supported:
             raise ValueError("Screen capture shortcuts are available on Windows.")
         with self._configuration_lock:
@@ -221,11 +254,17 @@ class HotkeyManager:
             return self.status()
 
     def _persist(self):
+        """Store shortcut names, scan mode and dedicated combinations in local database
+        metadata.
+        """
         with store._connect() as db:
             logger._set_meta(db, "ocr_shortcut", {"combo": self.combo, "mode": self.mode,
                                                   "combos": self.combos})
 
     def _register(self, shortcuts):
+        """Start the Windows listener and wait for a bounded registration handshake before
+        exposing it as ready.
+        """
         ready = threading.Event()
         stop = threading.Event()
         outcome = {}
@@ -248,6 +287,9 @@ class HotkeyManager:
             self._thread_id = outcome["thread_id"]
 
     def _unregister(self):
+        """Signal the listener to stop, post WM_QUIT when possible and reject replacement if
+        its thread fails to exit.
+        """
         with self._configuration_lock:
             with self._lock:
                 thread, thread_id = self._thread, self._thread_id
@@ -271,6 +313,9 @@ class HotkeyManager:
                 self._listener_stop = None
 
     def _message_loop(self, shortcuts, ready, outcome, stop):
+        """Report listener setup/runtime errors and release the readiness waiter even on
+        failure.
+        """
         try:
             self._listen(shortcuts, ready, outcome, stop)
         except Exception as error:
@@ -281,6 +326,9 @@ class HotkeyManager:
             ready.set()
 
     def _listen(self, shortcuts, ready, outcome, stop):
+        """Own Win32 key registrations and focus polling; dispatch scans to background capture
+        while keeping HUD shortcuts available.
+        """
         import ctypes
         from ctypes import wintypes
         user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -351,6 +399,7 @@ class HotkeyManager:
                 user32.UnregisterHotKey(None, ident)
 
     def capture(self, kind="default", background=False):
+        """Reserve one scan and keep background capture off the hotkey listener."""
         if kind == "overlay":
             with logger._connect() as db:
                 enabled = bool(logger._meta(db, "hud_overlay", False))
@@ -370,7 +419,29 @@ class HotkeyManager:
             self._capture_revision += 1
             revision = self._capture_revision
             self._active_capture_mode = mode
+        if background:
+            # Screenshot grabbing and the GUI hide handoff can both wait. Keep
+            # them off the Windows message loop so the HUD key and WM_QUIT
+            # continue to work while a scan is in progress. Reserve the slot
+            # above before starting the worker so repeated keys cannot queue
+            # overlapping captures.
+            try:
+                threading.Thread(target=self._capture, args=(kind, mode, revision),
+                                 daemon=True, name="poe2-hotkey-capture").start()
+            except Exception as exc:
+                self._finish_capture({"mode": mode, "result": None,
+                                      "error": f"Screen scan failed: {exc}"}, None, revision)
+        else:
+            self._capture(kind, mode, revision)
+
+    def _capture(self, kind, mode, revision):
+        """Prepare and read the reserved screenshot without blocking HUD keys."""
         try:
+            with self._lock:
+                cancelled = revision != self._capture_revision
+            if cancelled:
+                self._finish_capture(None, None, revision)
+                return
             if self.before_capture:
                 self.before_capture()
             if self.focused is not None and not self.focused():
@@ -392,8 +463,10 @@ class HotkeyManager:
                 phase = logger._meta(db, "inventory_scan_phase", "start")
             if self.supported and sys.platform == "win32":
                 from PoE2_Data_Logger.platform.hover_copy import _tooltip_bounds
-                from PoE2_Data_Logger.ui.region_select import region_for
+                from PoE2_Data_Logger.ui.region_select import region_for, validate_capture_resolution
                 bounds = _tooltip_bounds()
+                # Auto/default scans also need the full-window check before grabbing.
+                validate_capture_resolution(bounds)
                 region_key = {"opened": "live_region", "propagation": "propagation_region",
                               "seed": "seed_region", "currency": "inventory_region",
                               "ritual": "ritual_region"}.get(mode)
@@ -466,16 +539,15 @@ class HotkeyManager:
             if self.hover_reader is not None and self.supported and kind in ("default", "waystone", "tablet"):
                 copied = self.hover_reader()
             args = (kind, mode, region, image, tooltip, remnant_map, capture_map, generation, expedition, activity_crops, copied, phase, pending_map, revision)
-            if background:
-                threading.Thread(target=self._read_capture, args=args,
-                                 daemon=True, name="poe2-hotkey-ocr").start()
-            else:
-                self._read_capture(*args)
+            self._read_capture(*args)
         except Exception as exc:
             self._finish_capture({"mode": mode, "result": None,
                                   "error": f"Screen scan failed: {exc}"}, None, revision)
 
     def _grab(self, region):
+        """Validate an explicit screen rectangle before capture, or grab the primary screen
+        when no region is supplied.
+        """
         if region:
             from PoE2_Data_Logger.platform.live_watch import validate_region
             region = validate_region(region)
@@ -485,10 +557,14 @@ class HotkeyManager:
 
     @staticmethod
     def _check_image(image):
+        """Reject captured images exceeding the application pixel limit before recognition."""
         if image.width * image.height > store.MAX_IMAGE_PIXELS:
             raise ValueError("Screen capture exceeds 12 megapixels. Use a smaller game resolution.")
 
     def _read_capture(self, kind, mode, region, image, tooltip, remnant_map=None, capture_map=None, generation=None, expedition=None, activity_crops=None, copied=None, phase="start", pending_map=False, revision=None):
+        """Route captured pixels or copied item text to the appropriate reader, preserve
+        capture ownership and publish through the revision guard.
+        """
         event = None
         raw = None
         try:
@@ -640,6 +716,9 @@ class HotkeyManager:
                 self._latest = self._image = None
 
     def _finish_capture(self, event, raw, revision=None):
+        """Suppress canceled results, publish a current event with its image, release the scan
+        reservation and notify the UI.
+        """
         with self._lock:
             if revision is not None and revision != self._capture_revision:
                 event = None
@@ -654,6 +733,7 @@ class HotkeyManager:
             self._notify_event()
 
     def image(self, event_id):
+        """Return image bytes only when the requested event still owns the latest capture."""
         with self._lock:
             if self._latest and self._latest["id"] == event_id:
                 return self._image

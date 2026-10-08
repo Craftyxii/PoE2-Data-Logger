@@ -1,3 +1,5 @@
+"""Backend checks for approved item-name learning, canonical labels and duplicate/relabelled reference behavior."""
+
 import json
 from pathlib import Path
 import tempfile
@@ -44,9 +46,11 @@ class ReviewLearningBackendTests(unittest.TestCase):
         return item_ocr.scan_inventory_grid(image, logger.inventory_icons(), read=lambda _: [])
 
     def scan_ritual(self, cell, slots=(1,), columns=1, rows=1):
+        """Use a 50-pixel Ritual lattice and verified count to isolate learned artwork matching."""
         image = Image.new("RGB", (columns * 50 + 1, rows * 50 + 1), "black")
         image.paste(cell, (1, 1))
-        grid = {"rewards": [{"box": (0, 0, image.width, image.height), "slots": list(slots)}]}
+        grid = {"pitch": 50,
+                "rewards": [{"box": (0, 0, image.width, image.height), "slots": list(slots)}]}
         labels = {0: {"count": 1, "count_verified": True}}
         with patch.object(item_ocr, "_ritual_cell_labels", return_value=labels):
             return item_ocr._ritual_grid_items(image, grid, [], [], logger.ritual_names(),

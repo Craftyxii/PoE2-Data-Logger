@@ -1,3 +1,7 @@
+"""Run the Windows batch build and forward its exit status plus bounded CI failure annotations.
+
+The subprocess starts at module load; this wrapper does not build on Linux."""
+
 from collections import deque
 import os
 import subprocess

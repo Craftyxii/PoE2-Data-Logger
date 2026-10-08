@@ -1,3 +1,5 @@
+// Retained RuneHelper reference for panel geometry and text-level preparation.
+// The Python app uses the port in ocr/runehelper_ocr.py, not this C++ file directly.
 #include "ocr/PanelPreparation.h"
 
 #include <opencv2/imgproc.hpp>
@@ -57,6 +59,7 @@ using Histogram = std::array<int, 256>;
 
 Histogram LevelHistogram(const cv::Mat& gray, int left, int top, int right, int bottom)
 {
+    // Count grayscale levels inside a caller-bounded sample rectangle.
     Histogram histogram{};
 
     for (int y = top; y < bottom; ++y)
@@ -72,6 +75,7 @@ Histogram LevelHistogram(const cv::Mat& gray, int left, int top, int right, int 
 
 int Percentile(const Histogram& histogram, double total, double share)
 {
+    // Find the first intensity whose cumulative count reaches the requested share.
     const double wanted = share * total;
     double seen = 0.0;
 
@@ -88,6 +92,7 @@ int Percentile(const Histogram& histogram, double total, double share)
 
 TextLevels MeasureTextLevels(const cv::Mat& gray)
 {
+    // Sample the text-side region for low, median and high normalization anchors.
     const int left = gray.cols * kTextSampleLeftPercent / 100;
     const int right = gray.cols * kTextSampleRightPercent / 100;
     const int top = gray.rows * kTextSampleTopPercent / 100;
@@ -105,12 +110,14 @@ TextLevels MeasureTextLevels(const cv::Mat& gray)
 
 bool CloseLevels(const TextLevels& a, const TextLevels& b)
 {
+    // Decide whether all three measured anchors can reuse held exposure levels.
     return std::abs(a.p25 - b.p25) <= kHeldLevelTolerance && std::abs(a.p50 - b.p50) <= kHeldLevelTolerance &&
            std::abs(a.p95 - b.p95) <= kHeldLevelTolerance;
 }
 
 int EdgeThreshold(const cv::Mat& gray)
 {
+    // Scale the edge contrast cutoff from image intensity spread with a minimum.
     const Histogram histogram = LevelHistogram(gray, 0, 0, gray.cols, gray.rows);
     const double total = static_cast<double>(gray.total());
     const int spread = Percentile(histogram, total, 0.95) - Percentile(histogram, total, 0.05);
@@ -120,6 +127,7 @@ int EdgeThreshold(const cv::Mat& gray)
 
 int StrongestColumn(const int* counts, int from, int to)
 {
+    // Return the strongest edge column within the specified half-open interval.
     int best = -1;
 
     for (int x = std::max(0, from); x < to; ++x)
@@ -133,6 +141,7 @@ int StrongestColumn(const int* counts, int from, int to)
 
 PanelEdges MeasurePanelEdges(const cv::Mat& gray)
 {
+    // Smooth horizontal noise and accumulate brightening/darkening edge density.
     const int threshold = EdgeThreshold(gray);
 
     cv::Mat smooth;
@@ -161,6 +170,7 @@ PanelEdges MeasurePanelEdges(const cv::Mat& gray)
 
 RowSpan EdgeRowSpan(const cv::Mat& darkening, int column, int width)
 {
+    // Bound the vertical region with sustained edge density around a panel side.
     std::vector<float> edgeRows(static_cast<std::size_t>(darkening.rows), 0.0f);
 
     for (int y = 0; y < darkening.rows; ++y)
@@ -202,6 +212,7 @@ RowSpan EdgeRowSpan(const cv::Mat& darkening, int column, int width)
 
 cv::Rect FindPanel(const cv::Mat& gray)
 {
+    // Crop sufficiently supported panel edges; weak evidence retains the full image.
     const cv::Rect whole(0, 0, gray.cols, gray.rows);
 
     if (gray.cols < kMinPanelSide || gray.rows < kMinPanelSide)
@@ -240,17 +251,20 @@ cv::Rect FindPanel(const cv::Mat& gray)
 
 bool ClosePanels(const cv::Rect& a, const cv::Rect& b)
 {
+    // Compare all rectangle edges within the held-panel pixel tolerance.
     return std::abs(a.x - b.x) <= kHeldPanelTolerance && std::abs(a.y - b.y) <= kHeldPanelTolerance &&
            std::abs(a.br().x - b.br().x) <= kHeldPanelTolerance && std::abs(a.br().y - b.br().y) <= kHeldPanelTolerance;
 }
 
 double ReadingScale(int width)
 {
+    // Reduce oversized panels to the reference reading width; keep small ones native.
     return width > kMaxNativeWidth ? static_cast<double>(kReducedWidth) / width : 1.0;
 }
 
 cv::Mat NormalizeTextLevels(const cv::Mat& gray, const TextLevels& levels)
 {
+    // Map the measured intensity range to reference anchors through a lookup table.
     if (levels.p95 <= levels.p25)
         return gray;
 
@@ -269,6 +283,8 @@ cv::Mat NormalizeTextLevels(const cv::Mat& gray, const TextLevels& levels)
 
 PreparedGray PrepareGray(const cv::Mat& source, const std::optional<TextLevels>& held)
 {
+    // Downscale large inputs and normalize drifted or reusable held text levels,
+    // retaining the scale/normalization flags for downstream coordinate conversion.
     PreparedGray prepared;
     prepared.gray = source;
 

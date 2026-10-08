@@ -1,3 +1,5 @@
+"""Mocked Win32 ownership, foreground title and monitor/client-bound checks; no native game window is exercised."""
+
 import ctypes
 from ctypes import wintypes
 import os

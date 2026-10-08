@@ -1,3 +1,5 @@
+"""Qt refresh/navigation checks preserving unsaved map, tablet, kill and chain fields within their owning context."""
+
 import csv
 import io
 import os

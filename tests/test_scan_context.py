@@ -1,3 +1,5 @@
+"""Capture-context checks retaining map, phase, expedition and session ownership across delayed reviews and corrections."""
+
 import csv
 import hashlib
 import io

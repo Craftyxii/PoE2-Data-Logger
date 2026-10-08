@@ -1,3 +1,9 @@
+"""Maintain session state, export rows and commit snapshots in the shared SQLite store.
+
+Current totals, inventories and export rows may be replaced; commit snapshots
+retain recorded event details for history exports.
+"""
+
 from __future__ import annotations
 
 import csv
@@ -59,6 +65,7 @@ CONFIG_EXPORT_HEADERS = ("Tier", "Area Level", "Base Map Mods", "Map Mods", "# +
 
 
 def _tablet_detail_values(context):
+    """Flatten active tablet values, units and random-modifier counts into export columns."""
     pairs = list(context.get("tablet_affixes") or [])
     values = []
     for i in range(16):
@@ -70,6 +77,7 @@ def _tablet_detail_values(context):
 
 
 def _config_export_values(context):
+    """Build the ordered configuration columns from a saved context, padding absent slots."""
     perks = list(context.get("perks") or [])
     tablets = list(context.get("tablet_values") or [])
     return [*[context.get(key, "") for key in ("tier", "area", "base_map_mods", "map_mods", "tablets",
@@ -83,11 +91,13 @@ def _config_export_values(context):
 
 
 def _atlas_export_values(context):
+    """Project the setup ID and optional gear rarity into Atlas export columns."""
     rarity = context.get("gear_item_rarity")
     return [context.get("atlas_setup_id", ""), "" if rarity is None else rarity]
 
 
 def _extra_export_values(context):
+    """Flatten modifier text and map extras, reserving a blank scan-commit column."""
     mods = list(context.get("waystone_mods") or [])
     tablets = list(context.get("tablet_raw_mods") or [])
     return [*[context.get(key) if context.get(key) is not None else ""
@@ -101,33 +111,39 @@ def _extra_export_values(context):
 
 
 def _dump(value):
+    """Encode stored values as compact JSON while preserving Unicode text."""
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
 def _load(value):
+    """Decode JSON persisted in the shared store."""
     return json.loads(value)
 
 
 @lru_cache(maxsize=1)
 def _atlas_catalog_data():
+    """Cache the bundled Atlas catalog for validation and snapshot construction."""
     from PoE2_Data_Logger.core.atlas_catalog import catalog
     return catalog()
 
 
 @lru_cache(maxsize=1)
 def _atlas_catalog_identity():
+    """Cache the catalog fingerprint and canonical JSON used to freeze its dataset."""
     data = _atlas_catalog_data()
     encoded = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest(), encoded
 
 
 def _atlas_defaults():
+    """Create an empty allocation tied to the current Atlas catalog identity."""
     return {"catalog_version": _atlas_catalog_data()["version"],
             "catalog_id": _atlas_catalog_identity()[0], "allocated": [], "choices": {},
             "gear_item_rarity": None}
 
 
 def _validate_atlas_settings(data):
+    """Validate catalog version, allocations, choices and gear rarity; return normalized settings."""
     if not isinstance(data, dict):
         raise ValueError("Atlas settings are invalid.")
     catalog = _atlas_catalog_data()
@@ -161,6 +177,7 @@ def _validate_atlas_settings(data):
 
 
 def _atlas_snapshot(config):
+    """Derive a content-addressed setup ID and frozen Atlas fields from configuration."""
     settings = config.get("atlas_settings")
     if settings is None:
         return {}
@@ -176,6 +193,7 @@ def _atlas_snapshot(config):
 
 
 def _register_atlas_snapshot(db, context):
+    """Persist a setup and its catalog once; reject a missing noncurrent dataset."""
     setup_id = context.get("atlas_setup_id")
     if not setup_id or db.execute("SELECT 1 FROM atlas_setups WHERE setup_id=?", (setup_id,)).fetchone():
         return
@@ -212,28 +230,34 @@ def _bind_atlas_context(db, map_id, context):
 
 
 def _now():
+    """Return a UTC timestamp with second precision for stored records."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _map_id(number):
+    """Format a map number as its zero-padded session ID."""
     return f"M{number:04d}"
 
 
 def _exp_id(map_id, number):
+    """Format an expedition ID within a map."""
     return f"{map_id}-E{number:02d}"
 
 
 def _meta(db, key, default=None):
+    """Read a JSON metadata value, falling back when its key is absent."""
     row = db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
     return _load(row[0]) if row else default
 
 
 def _set_meta(db, key, value):
+    """Insert or replace a JSON metadata value on the supplied connection."""
     db.execute("INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                (key, _dump(value)))
 
 
 def _waystone_settings(config):
+    """Extract waystone fields with defaults and copy list values for later updates."""
     settings = {}
     for key, default in WAYSTONE_DEFAULTS.items():
         value = config.get(key, default)
@@ -244,6 +268,7 @@ def _waystone_settings(config):
 
 
 def _prepared_waystone(db, map_id):
+    """Return a staged waystone only when its map and session generation still match."""
     prepared = _meta(db, "prepared_waystone_setup")
     if (isinstance(prepared, dict) and prepared.get("map_id") == map_id and
             prepared.get("session_generation") == _meta(db, "session_generation", 0)):
@@ -263,6 +288,7 @@ def _map_context_settings(db, config, map_id):
 
 
 def _cancel_prepared_waystone(db):
+    """Restore settings from the next map's staged setup, then clear the staging record."""
     number = _meta(db, "current_map_number", 0) + 1
     prepared = _prepared_waystone(db, _map_id(number))
     if prepared:
@@ -273,6 +299,7 @@ def _cancel_prepared_waystone(db):
 
 
 def initialize():
+    """Create and migrate logger tables, seed bundled data and repair defaults once per process."""
     global _READY
     if _READY:
         return
@@ -541,11 +568,13 @@ def initialize():
 
 
 def _connect():
+    """Ensure logger initialization before opening a shared-store connection."""
     initialize()
     return store._connect()
 
 
 def _integer(value, name, low=0, high=None, blank=False):
+    """Parse a bounded whole number, rejecting booleans and optionally accepting blank values."""
     if blank and value in (None, ""):
         return None
     if isinstance(value, bool):
@@ -562,6 +591,7 @@ def _integer(value, name, low=0, high=None, blank=False):
 
 
 def _number(value, name, low=0, high=9999):
+    """Parse a bounded numeric value and return integral results as integers."""
     try:
         result = float(value)
     except (TypeError, ValueError):
@@ -572,10 +602,12 @@ def _number(value, name, low=0, high=9999):
 
 
 def area_level(config):
+    """Derive area level from tier, irradiation and the ocean flag."""
     return (79 if config["tier"] == 15 else 80) + int(config["irradiated"]) + int(config["ocean"])
 
 
 def _validate_settings(db, data):
+    """Merge edits with saved settings and validate modifier, tablet and master selections."""
     source = _meta(db, "settings")
     c = dict(source)
     c.update(data)
@@ -668,6 +700,11 @@ def _validate_settings(db, data):
 
 
 def _save_settings(db, data, *, confirmed_affixes=()):
+    """Save validated edits on the caller's connection and stage upcoming waystone fields.
+
+    Update an active map snapshot before activity or while its first waystone
+    setup is incomplete and start inventory is its only activity.
+    """
     for name in confirmed_affixes:
         if not isinstance(name, str) or not name.strip() or len(name) > 120 or "%" in name:
             raise ValueError("Review the tablet affix name before saving.")
@@ -713,6 +750,7 @@ def _save_settings(db, data, *, confirmed_affixes=()):
 
 
 def save_settings(data, *, confirmed_affixes=()):
+    """Apply settings and confirmed affixes in one immediate transaction, then return refreshed state."""
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
         _save_settings(db, data, confirmed_affixes=confirmed_affixes)
@@ -736,6 +774,7 @@ def save_atlas_settings(data):
 
 
 def add_affix(name):
+    """Register a nonempty affix name if absent and return refreshed logger state."""
     name = str(name or "").strip()
     if not name or len(name) > 120:
         raise ValueError("Enter an affix name under 120 characters.")
@@ -745,6 +784,7 @@ def add_affix(name):
 
 
 def add_affixes(names):
+    """Register valid reviewed affix names, skipping invalid or existing entries; return additions."""
     added = []
     with _connect() as db:
         for name in names:
@@ -757,6 +797,7 @@ def add_affixes(names):
 
 
 def _check_seed_references(db, family_ids=(), recipe_names=()):
+    """Reject recipe or family changes that invalidate affected visible-seed reward mappings."""
     families, recipes = set(family_ids), set(recipe_names)
     for stage in db.execute("SELECT family,sockets,rewards_json FROM seed_states"):
         rewards = _load(stage["rewards_json"])
@@ -774,6 +815,7 @@ def _check_seed_references(db, family_ids=(), recipe_names=()):
 
 
 def save_recipe(data):
+    """Upsert a canonical recipe and rune combo, rolling back edits that break family or seed constraints."""
     name = str(data.get("name") or "").strip()
     if not name or len(name) > 200:
         raise ValueError("Recipe name is required and must be under 200 characters.")
@@ -799,6 +841,7 @@ def save_recipe(data):
 
 
 def save_family(data):
+    """Upsert an ordered family after resolving recipe names and checking socket and seed constraints."""
     family_id = _integer(data.get("family"), "Family ID", 1, 9999)
     top = _integer(data.get("top_socket"), "Top Socket", 3, 10)
     supplied = data.get("recipes", [])
@@ -832,6 +875,7 @@ def save_family(data):
 
 
 def save_seed_state(data):
+    """Upsert a locally verified visible rune and reward mapping for a family socket stage."""
     family_id = _integer(data.get("family"), "Family ID", 1, 9999)
     sockets = _integer(data.get("sockets"), "Seed sockets", 3, 10)
     slot = str(data.get("seed_slot") or "").strip().upper()
@@ -868,6 +912,7 @@ def save_seed_state(data):
 
 
 def clear_tablets():
+    """Clear tablet modifiers and reset the scan slot in one immediate transaction."""
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
         _save_settings(db, {"tablets_used": 4, "plus_two_tablets": 0,
@@ -878,11 +923,13 @@ def clear_tablets():
 
 
 def tablet_next_slot():
+    """Read the next tablet slot reserved for sequential scanning."""
     with _connect() as db:
         return _meta(db, "tablet_auto_next", 1)
 
 
 def advance_tablet_slot(number):
+    """Advance the scan slot only when it still equals the supplied slot from one through four."""
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
         if _meta(db, "tablet_auto_next", 1) == number and 1 <= number <= 4:
@@ -890,6 +937,7 @@ def advance_tablet_slot(number):
 
 
 def save_scanned_tablet(matches, raw_mods):
+    """Save the next tablet and its configuration commit atomically, clearing the set at slot one."""
     if not matches or len(matches) > 4 or not isinstance(raw_mods, list):
         raise ValueError("Review the tablet modifiers before saving.")
     with _connect() as db:
@@ -921,6 +969,7 @@ def save_scanned_tablet(matches, raw_mods):
 
 
 def _canonical(db, input_value):
+    """Resolve a recipe by full name or normalized alias, rejecting ambiguous shortcuts."""
     raw = str(input_value or "").strip()
     if not raw:
         raise ValueError("Enter First Recipe.")
@@ -937,6 +986,7 @@ def _canonical(db, input_value):
 
 
 def rebuild_alias_keys(db):
+    """Rebuild normalized alias lookups and mark keys that name different recipe targets."""
     db.execute("DELETE FROM alias_keys")
     db.execute("DELETE FROM alias_conflicts")
     targets = {}
@@ -951,6 +1001,7 @@ def rebuild_alias_keys(db):
 
 
 def _resolve(db, first, next_recipe=None, family=None):
+    """Find valid family suffixes matching the first recipe and optional next recipe or family."""
     canonical = _canonical(db, first)
     second = _canonical(db, next_recipe) if next_recipe else None
     candidates = []
@@ -977,11 +1028,13 @@ def _resolve(db, first, next_recipe=None, family=None):
 
 
 def resolve(first, next_recipe=None, family=None):
+    """Return family candidates and ordered recipe details for the supplied recipe selection."""
     with _connect() as db:
         return _resolve(db, first, next_recipe, family)
 
 
 def _first_row(db, field, value):
+    """Find the first matching export row, checking imported rows before new rows."""
     for table in ("legacy_export", "new_export"):
         row = db.execute(f"SELECT position,row_json FROM {table} WHERE {field}=? ORDER BY position LIMIT 1",
                          (value,)).fetchone()
@@ -991,12 +1044,14 @@ def _first_row(db, field, value):
 
 
 def _has_remnant(db, map_id):
+    """Check whether either export table contains a remnant for the map."""
     return any(db.execute(f"SELECT 1 FROM {table} WHERE map_id=? AND remnant_id IS NOT NULL "
                           "AND remnant_id!='' LIMIT 1", (map_id,)).fetchone()
                for table in ("legacy_export", "new_export"))
 
 
 def _map_has_activity(db, map_id):
+    """Detect exported records, inventories, Ritual pages or saved count activity for a map."""
     for table in ("legacy_export", "new_export", "currency_snapshots", "ritual_pages"):
         if db.execute(f"SELECT 1 FROM {table} WHERE map_id=? LIMIT 1", (map_id,)).fetchone():
             return True
@@ -1022,6 +1077,7 @@ def _map_has_only_start_inventory(db, map_id):
 
 
 def _atlas_settings_target(db):
+    """Choose the current or upcoming map, advancing again when activity has frozen its setup."""
     number = _meta(db, "current_map_number", 0)
     if not number or _meta(db, "pending_new_map", False):
         number += 1
@@ -1032,6 +1088,7 @@ def _atlas_settings_target(db):
 
 
 def _patch_first(db, field, value, replacements):
+    """Replace selected cells in the first matching export row and report whether one existed."""
     hit = _first_row(db, field, value)
     if hit:
         table, position, row = hit
@@ -1042,6 +1099,7 @@ def _patch_first(db, field, value, replacements):
 
 
 def _snapshot(config):
+    """Capture export configuration with derived map totals, active tablet fields and Atlas identity."""
     master = config["atlas_master"]
     perks = [p if p != "None" else "" for p in config["master_selections"].get(master, [])]
     perks += [""] * (4 - len(perks))
@@ -1084,11 +1142,17 @@ def _snapshot(config):
 
 
 def _add_new(db, row):
+    """Append a serialized export row and index its map, expedition, remnant and chain step."""
     db.execute("INSERT INTO new_export(map_id,expedition_id,remnant_id,chain_step,row_json) VALUES(?,?,?,?,?)",
                (row[22], row[32], row[19] or None, row[25] or None, _dump(row)))
 
 
 def _record_commit(db, kind, map_id="", expedition_id="", reference="", *, context=None, details=None):
+    """Allocate a session commit number and store event details with a configuration snapshot.
+
+    Join an existing transaction or start an immediate one. Implicit count-event
+    contexts prefer the map snapshot and retain bound Atlas fields.
+    """
     if not db.in_transaction:
         db.execute("BEGIN IMMEDIATE")
     number = _meta(db, "scan_commit_count", 0) + 1
@@ -1109,6 +1173,7 @@ def _record_commit(db, kind, map_id="", expedition_id="", reference="", *, conte
 
 
 def record_commit(kind, reference=""):
+    """Record an allowed configuration event against the active or upcoming map and expedition."""
     if kind not in ("Map settings", "Tablet config", "Atlas Master", "Master perks"):
         raise ValueError("Unknown configuration commit.")
     with _connect() as db:
@@ -1124,11 +1189,13 @@ def record_commit(kind, reference=""):
 
 
 def session_generation():
+    """Read the generation token used to invalidate captures after an export reset."""
     with _connect() as db:
         return _meta(db, "session_generation", 0)
 
 
 def scan_context():
+    """Capture session, map marker and selected expedition tokens for later stale-scan checks."""
     with _connect() as db:
         number = _meta(db, "current_map_number", 0)
         return {"_scan_generation": _meta(db, "session_generation", 0),
@@ -1139,6 +1206,7 @@ def scan_context():
 
 
 def validate_scan_context(result):
+    """Reject changed capture tokens when present; accept results without a generation token."""
     if "_scan_generation" not in result:
         return
     current = scan_context()
@@ -1195,11 +1263,16 @@ def _validate_remnant_context(db, result):
 
 
 def validate_remnant_context(result):
+    """Validate a remnant capture against stored session, map and retained expedition context."""
     with _connect() as db:
         _validate_remnant_context(db, result)
 
 
 def assign_ocr_id(mode, expected_map_id=None, expected_generation=None, expected_expedition=None):
+    """Reserve or reuse the next remnant ID for review without consuming its number.
+
+    Validate the requested map, session and captured expedition within an immediate transaction.
+    """
     if mode not in ("seed", "opened"):
         raise ValueError("Choose visible seed or opened remnant mode.")
     with _connect() as db:
@@ -1233,6 +1306,7 @@ def assign_ocr_id(mode, expected_map_id=None, expected_generation=None, expected
 
 
 def discard_ocr_id():
+    """Clear the pending remnant reservation and mode without advancing the remnant counter."""
     with _connect() as db:
         _set_meta(db, "ocr_pending", None)
         _set_meta(db, "ocr_pending_mode", None)
@@ -1240,6 +1314,7 @@ def discard_ocr_id():
 
 
 def start_next_chain():
+    """Complete a nonempty selected chain or advance an empty one to the next unused expedition."""
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
         mid, expedition, eid = _chain_context(db)
@@ -1254,6 +1329,7 @@ def start_next_chain():
 
 def commit_remnant(first, next_recipe=None, family=None, scan_id=None, expected_pending=None, visible_seed=None,
                     *, expected_context=None, seed_context=None):
+    """Validate capture and optional auto-commit reservation checks, then save a remnant atomically."""
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
         if expected_context is not None:
@@ -1270,6 +1346,11 @@ def commit_remnant(first, next_recipe=None, family=None, scan_id=None, expected_
 
 def _commit_remnant(db, first, next_recipe=None, family=None, scan_id=None, visible_seed=None,
                     seed_rows=None, captured_expedition=None):
+    """Append recipe rows and a commit for one remnant on the caller's transaction.
+
+    Create map and expedition records as needed, retain captured expedition
+    identity, consume the remnant number and clear its pending reservation.
+    """
     result = (_resolve(db, first, next_recipe, family) if seed_rows is None else
               {"status": "ready", "family": family, "rows": seed_rows})
     if result["status"] != "ready":
@@ -1362,6 +1443,7 @@ def _commit_remnant(db, first, next_recipe=None, family=None, scan_id=None, visi
 
 
 def _seed_recipes(db, family, sockets, rewards):
+    """Build verified stage rewards in family order, rejecting missing or oversized recipe rows."""
     record = db.execute("SELECT recipes_json FROM families WHERE id=? AND valid=1", (family,)).fetchone()
     recipes = _load(record[0]) if record else []
     if not rewards or len(set(rewards)) != len(rewards) or not set(rewards).issubset(recipes):
@@ -1378,6 +1460,10 @@ def _seed_recipes(db, family, sockets, rewards):
 
 
 def commit_seed_batch(result, selections, automatic=False):
+    """Validate and commit selected visible seeds in one immediate transaction.
+
+    Keep their captured expedition and reserve the next remnant ID when unsaved readings remain.
+    """
     if not isinstance(result, dict) or not isinstance(selections, list) or not 1 <= len(selections) <= 24:
         raise ValueError("Select the visible remnants to commit.")
     if any(key not in result for key in ("_scan_generation", "_capture_map_id", "_capture_expedition", "_capture_map_pending")):
@@ -1455,6 +1541,7 @@ def commit_seed_batch(result, selections, automatic=False):
 
 
 def seed_previously_logged(map_id, expedition_id, family, sockets):
+    """Check commit history for a matching visible-seed family and socket stage in an expedition."""
     with _connect() as db:
         return db.execute("SELECT 1 FROM commits WHERE kind='Remnant' AND map_id=? AND "
             "expedition_id=? AND json_extract(details_json,'$.family')=? AND "
@@ -1463,6 +1550,7 @@ def seed_previously_logged(map_id, expedition_id, family, sockets):
 
 
 def _rune(value, label):
+    """Trim and bound a rune label, requiring a value for Rune 1."""
     rune = str(value or "").strip()
     if len(rune) > 80 or (label == "Rune 1" and not rune):
         raise ValueError(f"{label} is required and must be under 80 characters." if label == "Rune 1"
@@ -1471,11 +1559,13 @@ def _rune(value, label):
 
 
 def commit_chain(rune1, rune2=""):
+    """Append one rune pair and expose its step number in the single-step result."""
     result = commit_chain_steps([{"rune1": rune1, "rune2": rune2}])
     return {**result, "step": result["steps"][0], "rune1": rune1, "rune2": rune2}
 
 
 def commit_chain_runes(runes):
+    """Append a validated ordered list of runes as single-rune chain steps."""
     if not isinstance(runes, list) or not 1 <= len(runes) <= 96:
         raise ValueError("Enter 1–96 runes in chain order.")
     cleaned = [_rune(rune, "Rune 1") for rune in runes]
@@ -1483,6 +1573,7 @@ def commit_chain_runes(runes):
 
 
 def _clean_chain_steps(steps, *, limit=96):
+    """Validate chain step dictionaries and return trimmed rune pairs with an optional size limit."""
     if not isinstance(steps, list) or not steps or (limit is not None and len(steps) > limit):
         raise ValueError("Enter 1–96 chain steps in order." if limit is not None else
                          "Enter the saved chain steps to correct.")
@@ -1496,6 +1587,10 @@ def _clean_chain_steps(steps, *, limit=96):
 
 
 def _chain_context(db, expected_context=None, *, allow_selected_change=False):
+    """Require an active map and resolve its expedition, checking supplied capture tokens.
+
+    Allow a captured expedition to differ from selection only when explicitly requested.
+    """
     number = _meta(db, "current_map_number", 0)
     if not number:
         raise ValueError("Start a map before saving a chain.")
@@ -1518,6 +1613,7 @@ def _chain_context(db, expected_context=None, *, allow_selected_change=False):
 
 
 def _saved_chain_rows(db, eid):
+    """Read imported and new chain rows for an expedition, sorted by numeric step."""
     rows = []
     for table in ("legacy_export", "new_export"):
         for row in db.execute(f"SELECT position,chain_step,row_json FROM {table} WHERE expedition_id=? "
@@ -1529,15 +1625,18 @@ def _saved_chain_rows(db, eid):
 
 
 def _chain_steps_snapshot(db, eid):
+    """Project the current ordered chain into step and rune dictionaries for commit details."""
     return [{key: row[key] for key in ("step", "rune1", "rune2")} for row in _saved_chain_rows(db, eid)]
 
 
 def _require_open_chain(db, eid):
+    """Reject writes to an expedition already present in chain completions."""
     if db.execute("SELECT 1 FROM chain_completions WHERE expedition_id=?", (eid,)).fetchone():
         raise ValueError("This chain is completed. Select the current expedition to build another chain.")
 
 
 def _request_token(request_id):
+    """Normalize an optional bounded request ID for chain-operation deduplication."""
     if request_id is None:
         return None
     if not isinstance(request_id, str) or not request_id.strip() or len(request_id) > 160:
@@ -1546,6 +1645,7 @@ def _request_token(request_id):
 
 
 def _chain_receipt(db, request_id, payload, expected_context):
+    """Replay a saved request result only when payload, generation and captured expedition match."""
     if request_id is None:
         return None
     row = db.execute("SELECT * FROM chain_append_receipts WHERE request_id=?", (request_id,)).fetchone()
@@ -1559,12 +1659,14 @@ def _chain_receipt(db, request_id, payload, expected_context):
 
 
 def _save_chain_receipt(db, request_id, payload, result):
+    """Persist a request result for retry reuse when a request ID was supplied."""
     if request_id is not None:
         db.execute("INSERT INTO chain_append_receipts VALUES(?,?,?,?,?)", (
             request_id, _meta(db, "session_generation", 0), result["expedition_id"], _dump(payload), _dump(result)))
 
 
 def _append_chain_steps(db, mid, expedition, eid, cleaned):
+    """Append numbered steps and a Chain commit to an open expedition without completing it."""
     _require_open_chain(db, eid)
     step = max([row["step"] for row in _saved_chain_rows(db, eid)] or [0]) + 1
     existing = _first_row(db, "expedition_id", eid)
@@ -1594,6 +1696,7 @@ def commit_chain_draft(steps, expected_context=None, *, request_id=None):
 
 
 def commit_chain_steps(steps, *, advance_expedition=False, expected_context=None, request_id=None):
+    """Append steps atomically, optionally complete the chain, and cache a result for a request ID."""
     cleaned = _clean_chain_steps(steps)
     request_id = _request_token(request_id)
     payload = {"operation": "append", "steps": cleaned, "complete": bool(advance_expedition)}
@@ -1616,6 +1719,7 @@ def commit_chain_steps(steps, *, advance_expedition=False, expected_context=None
 
 
 def _next_unused_expedition(db, mid, expedition):
+    """Find the first later expedition number absent from expedition records and export rows."""
     used = {row[0] for row in db.execute("SELECT number FROM expeditions WHERE map_id=?", (mid,))}
     for table in ("legacy_export", "new_export"):
         for row in db.execute(f"SELECT DISTINCT expedition_id FROM {table} WHERE map_id=?", (mid,)):
@@ -1631,6 +1735,7 @@ def _next_unused_expedition(db, mid, expedition):
 
 
 def _completion_result(mid, eid, row, *, already_completed):
+    """Format the stored completion outcome, including its next expedition and replay flag."""
     return {"map_id": mid, "expedition_id": eid, "next_expedition": row["next_expedition"],
             "next_expedition_id": _exp_id(mid, row["next_expedition"]),
             "scan_commit_number": row["scan_commit_number"], "step_count": row["step_count"],
@@ -1638,6 +1743,7 @@ def _completion_result(mid, eid, row, *, already_completed):
 
 
 def _complete_chain(db, mid, expedition, eid):
+    """Record a nonempty chain's final steps and advance selection once; reuse existing completion."""
     existing = db.execute("SELECT * FROM chain_completions WHERE expedition_id=?", (eid,)).fetchone()
     if existing:
         return _completion_result(mid, eid, existing, already_completed=True)
@@ -1685,6 +1791,10 @@ def update_chain_steps(steps, expected_context=None):
         if len(by_step) != len(saved) or any(step not in by_step for step in ids):
             raise ValueError("Correct only existing, uniquely identified chain steps.")
         known = {row[0] for row in db.execute("SELECT DISTINCT seed_rune FROM seed_states WHERE seed_rune!='Unresolved'")}
+        # The correction dropdown also offers recipe runes that have no seed-state row.
+        known.update(rune.strip() for row in db.execute("SELECT combo FROM recipes")
+                     for rune in (row[0] or "").split("+")
+                     if rune.strip() and rune.strip().casefold() != "unresolved")
         known.update(rune for row in saved for rune in (row["rune1"], row["rune2"]) if rune)
         if any(rune and rune not in known for pair in cleaned for rune in pair):
             raise ValueError("Choose a known rune when correcting the chain.")
@@ -1705,11 +1815,13 @@ def update_chain_steps(steps, expected_context=None):
                 "scan_commit_number": number, "changed": bool(changes), "chain_completed": False}
 
 def _unique_kills_for_map(db, map_id):
+    """Read a map's optional unique-kill count, returning None when absent."""
     row = db.execute("SELECT unique_kills FROM map_unique_kills WHERE map_id=?", (map_id,)).fetchone()
     return row[0] if row else None
 
 
 def _save_unique_kills(db, map_id, unique):
+    """Keep the stored unique count for an unset argument, otherwise validate and upsert it."""
     if unique is _UNSET:
         return _unique_kills_for_map(db, map_id)
     value = _integer(unique, "Unique kills", 0, blank=True)
@@ -1719,6 +1831,7 @@ def _save_unique_kills(db, map_id, unique):
 
 
 def _detonated_value(db, expedition_id, value):
+    """Read the saved expedition total for an unset argument or validate an explicit count."""
     if value is _UNSET:
         row = db.execute("SELECT detonated FROM expeditions WHERE expedition_id=?", (expedition_id,)).fetchone()
         return row[0] if row else None
@@ -1726,6 +1839,7 @@ def _detonated_value(db, expedition_id, value):
 
 
 def _clean_propagation_part(runes, recipe):
+    """Validate one or two detected runes and trim the optional propagation recipe label."""
     if not isinstance(runes, list) or not 1 <= len(runes) <= 2:
         raise ValueError("A propagation scan must contain one or two detected runes.")
     if any(not isinstance(rune, str) or not rune.strip() for rune in runes):
@@ -1737,6 +1851,7 @@ def _clean_propagation_part(runes, recipe):
 
 
 def _increment_propagation(db, mid, expedition, eid, cleaned, recipe, current_value):
+    """Increase an open expedition's detonated count and record Propagation without appending steps."""
     _require_open_chain(db, eid)
     pending = _meta(db, "ocr_pending")
     if pending and (not isinstance(pending, dict) or pending.get("map_id") != mid):
@@ -1772,7 +1887,7 @@ def increment_propagation_detonated(expected_context, *, current_value=_UNSET, r
 
 
 def accept_propagation_part(expected_context, *, runes=None, recipe="", request_id=None, current_value=_UNSET):
-    """Atomically count and save a confident scan; retries never duplicate either."""
+    """Atomically count and append a propagation part; a matching request ID reuses its result."""
     cleaned, recipe = _clean_propagation_part(runes, recipe)
     if not isinstance(expected_context, dict):
         raise ValueError("The propagation capture context is invalid. Scan again.")
@@ -1794,6 +1909,7 @@ def accept_propagation_part(expected_context, *, runes=None, recipe="", request_
 
 
 def save_kills(normal, magic, rare, *, unique=_UNSET):
+    """Replace map kill totals and its first export-row counts, retaining the update in commit history."""
     values = [_integer(v, label, 0, blank=True) for v, label in
               zip((normal, magic, rare), ("Normal kills", "Magic kills", "Rare kills"))]
     with _connect() as db:
@@ -1810,6 +1926,7 @@ def save_kills(normal, magic, rare, *, unique=_UNSET):
 
 
 def save_detonated(value):
+    """Replace the selected expedition's detonated total and first export-row value, then record it."""
     count = _integer(value, "Remnants Detonated", 0, blank=True)
     with _connect() as db:
         number = _meta(db, "current_map_number")
@@ -1826,6 +1943,7 @@ def save_detonated(value):
 
 
 def save_counts(normal, magic, rare, detonated=_UNSET, *, unique=_UNSET):
+    """Save map kills and expedition totals atomically, preserving unset optional counts and recording history."""
     values = [_integer(v, label, 0, blank=True) for v, label in
               zip((normal, magic, rare), ("Normal kills", "Magic kills", "Rare kills"))]
     with _connect() as db:
@@ -1850,6 +1968,7 @@ def save_counts(normal, magic, rare, detonated=_UNSET, *, unique=_UNSET):
 
 
 def finish_map(normal, magic, rare, detonated=_UNSET, *, unique=_UNSET):
+    """Save final counts, discard pending OCR review and mark the next map in one immediate transaction."""
     values = [_integer(v, label, 0, blank=True) for v, label in
               zip((normal, magic, rare), ("Normal kills", "Magic kills", "Rare kills"))]
     with _connect() as db:
@@ -1876,6 +1995,7 @@ def finish_map(normal, magic, rare, detonated=_UNSET, *, unique=_UNSET):
 
 
 def mark_next_map(pending):
+    """Toggle the next-map marker when no remnant awaits review; cancellation restores staged waystone fields."""
     with _connect() as db:
         if _meta(db, "ocr_pending"):
             raise ValueError("Save or discard the scanned remnant before changing the map marker.")
@@ -1888,6 +2008,11 @@ def mark_next_map(pending):
 
 
 def start_map():
+    """Create the next map and first expedition in one immediate transaction.
+
+    Apply staged waystone fields or clear prior-map fields, retain earlier Atlas
+    binding and remember settings needed to undo an empty map.
+    """
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
         current = _meta(db, "current_map_number", 0)
@@ -1923,6 +2048,7 @@ def start_map():
 
 
 def undo_empty_map():
+    """Cancel a next-map marker or remove an activity-free map and restore its previous selection settings."""
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
         if _meta(db, "ocr_pending"):
@@ -1957,6 +2083,10 @@ def undo_empty_map():
 
 
 def clear_export_and_reset_ids():
+    """Clear session records and reset IDs atomically while retaining catalogs and settings.
+
+    Increment the generation token so pending captures and request receipts cannot carry into the reset session.
+    """
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
         _set_meta(db, "session_generation", _meta(db, "session_generation", 0) + 1)
@@ -1980,6 +2110,7 @@ def clear_export_and_reset_ids():
 
 
 def _retired_currency_default(name):
+    """Recognize retired default names after trimming, apostrophe normalization and case folding."""
     return str(name).strip().replace("’", "'").casefold() in _RETIRED_CURRENCY_DEFAULTS
 
 
@@ -2008,11 +2139,13 @@ def _active_catalog_names(db, table):
 
 
 def currency_names():
+    """Return sorted currency names filtered through the active local catalog."""
     with _connect() as db:
         return _active_catalog_names(db, "currency_items")
 
 
 def add_currency_item(name):
+    """Register or reuse a validated currency name, reject Item conflicts and retain retired local names."""
     from PoE2_Data_Logger.core.review_learning import validate_name
     name = validate_name(str(name or ""), "Currency")
     with _connect() as db:
@@ -2028,6 +2161,7 @@ def add_currency_item(name):
 
 
 def save_currency_icon(name, image):
+    """Store a registered currency's resized RGB PNG, reusing an identical example ID."""
     from PIL import Image
 
     if not isinstance(image, Image.Image) or image.width < 20 or image.height < 20:
@@ -2051,22 +2185,26 @@ def save_currency_icon(name, image):
 
 
 def currency_icons():
+    """Return stored currency reference IDs, names and PNG bytes in insertion order."""
     with _connect() as db:
         return [{"id": row["id"], "name": row["name"], "image": row["image_png"]}
                 for row in db.execute("SELECT id,name,image_png FROM currency_icons ORDER BY id")]
 
 
 def delete_currency_icon(icon_id):
+    """Delete the currency reference with a validated positive icon ID."""
     with _connect() as db:
         db.execute("DELETE FROM currency_icons WHERE id=?", (_integer(icon_id, "Icon ID", 1),))
 
 
 def item_names():
+    """Return registered equipment and item names in database name order."""
     with _connect() as db:
         return [row[0] for row in db.execute("SELECT name FROM item_names ORDER BY name")]
 
 
 def add_item_name(name):
+    """Register or reuse a validated Item name while rejecting Currency catalog conflicts."""
     from PoE2_Data_Logger.core.review_learning import validate_name
     name = validate_name(str(name or ""), "Item")
     with _connect() as db:
@@ -2080,6 +2218,7 @@ def add_item_name(name):
 
 
 def save_item_icon(name, image):
+    """Store a registered item's resized RGB PNG, reusing an identical example ID."""
     from PIL import Image
 
     if not isinstance(image, Image.Image) or min(image.size) < 20 or max(image.size) > 512:
@@ -2103,26 +2242,31 @@ def save_item_icon(name, image):
 
 
 def item_icons():
+    """Return stored item reference IDs, names and PNG bytes in insertion order."""
     with _connect() as db:
         return [{"id": row["id"], "name": row["name"], "image": row["image_png"]}
                 for row in db.execute("SELECT id,name,image_png FROM item_icons ORDER BY id")]
 
 
 def delete_item_icon(icon_id):
+    """Delete the item reference with a validated positive icon ID."""
     with _connect() as db:
         db.execute("DELETE FROM item_icons WHERE id=?", (_integer(icon_id, "Icon ID", 1),))
 
 
 def inventory_names():
+    """Combine active currency and item labels in case-insensitive name order."""
     return sorted(currency_names() + item_names(), key=str.casefold)
 
 
 def inventory_icons():
+    """Combine currency, item and reviewed examples with recognition category metadata."""
     return [{**row, "kind": kind} for kind, entries in
             (("currency", currency_icons()), ("item", item_icons())) for row in entries] + review_icons()
 
 
 def _catalog_name(db, table, name):
+    """Find a stored catalog label by Unicode case-insensitive comparison."""
     key = name.casefold()
     return next((row[0] for row in db.execute(f"SELECT name FROM {table}")
                  if row[0].casefold() == key), None)
@@ -2166,6 +2310,7 @@ def _canonical_registered_name(db, name, category, *, register=True):
 
 
 def _save_review_examples(db, examples, accepted):
+    """Save or relabel image-and-grid examples only for accepted positive-quantity review rows."""
     from PoE2_Data_Logger.core.review_learning import encode_example
     if not isinstance(examples, (list, tuple)) or len(examples) > MAX_RITUAL_REWARDS:
         raise ValueError("Review up to 120 captured icon examples at a time.")
@@ -2190,6 +2335,7 @@ def _save_review_examples(db, examples, accepted):
 
 
 def review_icons():
+    """Return reviewed reference images with category, grid dimensions and reviewed markers."""
     with _connect() as db:
         return [{"id": row["id"], "name": row["name"], "kind": row["kind"],
                  "columns": row["columns"], "rows": row["rows"], "image": row["image_png"],
@@ -2198,17 +2344,20 @@ def review_icons():
 
 
 def delete_review_icon(icon_id):
+    """Delete the reviewed example with a validated positive icon ID."""
     with _connect() as db:
         db.execute("DELETE FROM review_icon_examples WHERE id=?", (_integer(icon_id, "Icon ID", 1),))
 
 
 def ritual_icons():
+    """Combine Omen, currency, item and reviewed references for Ritual recognition."""
     return [{**row, "kind": kind} for kind, entries in
             (("omen", omen_icons()), ("currency", currency_icons()), ("item", item_icons()))
             for row in entries] + review_icons()
 
 
 def save_omen_icon(name, image):
+    """Store a registered Omen's RGB PNG crop at its original size, reusing an identical example ID."""
     from PIL import Image
 
     if not isinstance(image, Image.Image) or min(image.size) < 20 or max(image.size) > 512:
@@ -2232,17 +2381,20 @@ def save_omen_icon(name, image):
 
 
 def omen_icons():
+    """Return stored Omen reference IDs, names and PNG bytes in insertion order."""
     with _connect() as db:
         return [{"id": row["id"], "name": row["name"], "image": row["image_png"]}
                 for row in db.execute("SELECT id,name,image_png FROM omen_icons ORDER BY id")]
 
 
 def delete_omen_icon(icon_id):
+    """Delete the Omen reference with a validated positive icon ID."""
     with _connect() as db:
         db.execute("DELETE FROM omen_icons WHERE id=?", (_integer(icon_id, "Icon ID", 1),))
 
 
 def currency_target_map(phase):
+    """Target start inventory to the upcoming map when pending, and end inventory to the current map."""
     if phase not in ("start", "end"):
         raise ValueError("Choose start or end inventory.")
     with _connect() as db:
@@ -2255,6 +2407,10 @@ def currency_target_map(phase):
 
 
 def save_currency_snapshot(phase, items, expected_map_id=None, *, register_names=False, icon_examples=()):
+    """Replace a map's approved inventory phase and append its commit atomically.
+
+    Aggregate duplicate names, optionally register labels and teach icons, and preserve bound Atlas context.
+    """
     map_id = currency_target_map(phase)
     if not isinstance(items, list) or len(items) > 60:
         raise ValueError("A snapshot needs up to 60 inventory rows.")
@@ -2311,6 +2467,7 @@ def save_currency_snapshot(phase, items, expected_map_id=None, *, register_names
 
 
 def currency_for_map(map_id):
+    """Return latest start/end inventories and their signed difference, assuming an empty missing start."""
     with _connect() as db:
         snapshots = {row["phase"]: {"items": _load(row["items_json"]), "recorded_at": row["recorded_at"]}
                      for row in db.execute("SELECT phase,items_json,recorded_at FROM currency_snapshots "
@@ -2329,7 +2486,7 @@ def session_currency_totals():
     """Count positive inventory gains until the map IDs are reset.
 
     Only each map's latest approved end inventory contributes. A missing start
-    scan means the user started with no currency, so the whole end inventory
+    scan is treated as empty, so the whole end inventory
     counts. A scanned start takes precedence. Ritual rewards remain offers
     rather than inventory acquisitions.
     """
@@ -2392,6 +2549,7 @@ def session_currency_totals():
 
 
 def export_currency_csv():
+    """Export latest inventory phases and signed item deltas with settings and latest phase commit IDs."""
     with _connect() as db:
         db.execute("BEGIN")
         snapshots = {}
@@ -2436,11 +2594,13 @@ def export_currency_csv():
 
 
 def ritual_names():
+    """Return sorted Omen labels filtered through the active local catalog."""
     with _connect() as db:
         return _active_catalog_names(db, "ritual_names")
 
 
 def add_ritual_name(name):
+    """Register or resolve an Omen label in both Ritual and Currency catalogs."""
     from PoE2_Data_Logger.core.review_learning import validate_name
     name = validate_name(str(name or ""), "Omen")
     with _connect() as db:
@@ -2448,6 +2608,7 @@ def add_ritual_name(name):
 
 
 def ritual_pages_for_map(map_id):
+    """Read current Ritual page contents and timestamps in page-number order."""
     with _connect() as db:
         return [{"page_number": row["page_number"], "items": _load(row["items_json"]),
                  "recorded_at": row["recorded_at"]}
@@ -2458,6 +2619,11 @@ def ritual_pages_for_map(map_id):
 def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
                      tribute_available=None, rerolls_remaining=None, *,
                      register_names=False, icon_examples=()):
+    """Save reviewed Ritual offers and a commit atomically for an active map.
+
+    A repeated capture hash replaces its page; otherwise append a page.
+    Optionally register accepted labels and teach their icons.
+    """
     if not isinstance(items, list) or len(items) > MAX_RITUAL_REWARDS:
         raise ValueError(f"Review up to {MAX_RITUAL_REWARDS} Ritual rewards on a page.")
     raw_text = str(raw_text or "")
@@ -2530,6 +2696,7 @@ def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
 
 
 def export_ritual_csv():
+    """Export current Ritual page offers with saved settings and the latest matching commit metadata."""
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     writer.writerow(["Map ID", "Ritual Page", "Type", "Name", "Quantity", "Tribute",
@@ -2557,11 +2724,16 @@ def export_ritual_csv():
 
 
 def _total_kills(kills, unique=None):
+    """Sum known kill counts, leaving the result blank when all counts are absent."""
     known = [value for value in [*(kills or []), unique] if value is not None and value != ""]
     return sum(known) if known else ""
 
 
 def export_maps_csv(*, _db=None):
+    """Export one row per created map with stored settings and current kill and expedition totals.
+
+    Recover missing imported settings from remnant rows; reuse a supplied connection or open a read transaction.
+    """
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     headers = ["Map ID", "Tier", "Area Level", "Waystone %", "Map Mods",
@@ -2685,6 +2857,7 @@ def _map_summary_item_sort(name, kind):
 
 
 def _map_summary_records(db):
+    """Decode ordered commit snapshots and latest inventory phases for map-summary projection."""
     commits = [{**dict(row), "details": _load(row["details_json"]),
                 "context": _load(row["snapshot_json"])}
                for row in db.execute("SELECT number,kind,map_id,reference,recorded_at,details_json,snapshot_json "
@@ -2697,6 +2870,7 @@ def _map_summary_records(db):
 
 
 def _map_summary_item_columns(db, reserved, commits, snapshots):
+    """Build ordered item-count headers from active catalogs and saved names, qualifying collisions."""
     labels = {}
     for table, kind in (("currency_items", "Currency"), ("item_names", "Item"), ("ritual_names", "Omen")):
         for entry in _active_catalog_names(db, table):
@@ -2823,6 +2997,7 @@ def export_map_summary_csv(*, _db=None):
 
 
 def get_state():
+    """Assemble editable settings, selected IDs and counts, catalogs, current chain and recent remnants for the UI."""
     with _connect() as db:
         config = _meta(db, "settings")
         n = _meta(db, "current_map_number")
@@ -2903,6 +3078,7 @@ def get_state():
 
 
 def search_catalog(query="", kind="families", limit=100):
+    """Filter a selected catalog by text and return a bounded number of entries."""
     q = str(query).strip().lower()
     with _connect() as db:
         if kind == "families":
@@ -2929,6 +3105,10 @@ def search_catalog(query="", kind="families", limit=100):
 
 
 def export_csv(*, _db=None):
+    """Export imported and new recipe/chain rows with commit-linked Atlas fields and current completion status.
+
+    Project unique and total kills once per map; reuse a supplied connection or open a read transaction.
+    """
     out = io.StringIO(newline="")
     writer = csv.writer(out)
     with (nullcontext(_db) if _db is not None else _connect()) as db:
@@ -2964,6 +3144,7 @@ def export_csv(*, _db=None):
 
 
 def export_commits_csv():
+    """Export the ordered commit index without expanding event details or configuration snapshots."""
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     writer.writerow(["Scan Commit #", "Type", "Map ID", "Expedition ID", "Reference", "Recorded UTC"])
@@ -2992,6 +3173,7 @@ HISTORY_APPEND_HEADERS = (*KILL_EXPORT_HEADERS, "Remnants Detonated (Scan)", "St
 
 
 def _current_inventory_projection(db):
+    """Normalize latest inventory phase counts and locate the latest commit for each saved phase."""
     snapshots = {}
     for row in db.execute("SELECT map_id,phase,items_json FROM currency_snapshots"):
         items = {}
@@ -3010,6 +3192,11 @@ def _current_inventory_projection(db):
 
 
 def export_record_history_csv(*, _db=None):
+    """Expand every commit's frozen details and settings into history rows.
+
+    Mark current inventory approvals and credit gains only to the latest end.
+    Project current chain completion alongside append and correction history.
+    """
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     writer.writerow(["Scan Commit #", "Type", "Map ID", "Expedition ID", "Reference", "Recorded UTC",
@@ -3177,6 +3364,10 @@ def _review_item_export_columns(db):
 
 
 def export_all_csv(*, _db=None):
+    """Join recipe rows with expanded commit history and per-label quantity columns.
+
+    Retain unmatched imported rows and reuse one connection for its source exports.
+    """
     with (nullcontext(_db) if _db is not None else _connect()) as db:
         if _db is None:
             db.execute("BEGIN")
@@ -3384,11 +3575,13 @@ def export_atlas_csv(*, _db=None):
 
 
 def _csv_row(values):
+    """Prefix formula-like string cells with an apostrophe while leaving numeric cells unchanged."""
     return [("'" + value) if isinstance(value, str) and
             value.lstrip().startswith(("=", "+", "-", "@")) else value for value in values]
 
 
 def save_export_folder(folder):
+    """Validate an existing absolute local export directory and persist its resolved path."""
     if not isinstance(folder, str) or len(folder) > 1024:
         raise ValueError("Choose an existing local export folder.")
     path = Path(folder.strip()).expanduser()
@@ -3400,6 +3593,7 @@ def save_export_folder(folder):
 
 
 def save_reference_export_folder(folder):
+    """Validate and persist an existing absolute local directory for reference exports."""
     if not isinstance(folder, str) or len(folder) > 1024:
         raise ValueError("Choose an existing local reference export folder.")
     path = Path(folder.strip()).expanduser()
@@ -3411,10 +3605,15 @@ def save_reference_export_folder(folder):
 
 
 def export_filename(kind="xlsx"):
+    """Build a timestamped export filename in local time with the requested extension."""
     return f"PoE2_Export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{kind}"
 
 
 def save_export_file(kind="xlsx"):
+    """Write a workbook or related primary, Atlas and history CSV files to the configured directory.
+
+    Read CSV sources in one transaction and choose an unused shared filename suffix, retrying reservation collisions.
+    """
     if kind not in ("xlsx", "csv"):
         raise ValueError("Choose XLSX or Export CSV.")
     with _connect() as db:
@@ -3464,6 +3663,7 @@ def save_export_file(kind="xlsx"):
 
 
 def _write_export_bytes(destination, data):
+    """Write bytes through a temporary file beside the destination, replace it and remove leftovers."""
     destination = Path(destination)
     fd, name = tempfile.mkstemp(prefix=".PoE2_Data_Export_", suffix=".tmp", dir=destination.parent)
     try:
@@ -3475,6 +3675,7 @@ def _write_export_bytes(destination, data):
 
 
 def backup_bytes():
+    """Serialize a consistent SQLite backup through an in-memory destination connection."""
     initialize()
     with store._connect() as source:
         destination = sqlite3.connect(":memory:")

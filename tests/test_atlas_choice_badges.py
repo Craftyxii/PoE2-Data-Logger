@@ -1,3 +1,5 @@
+"""Qt coverage for numbered Atlas choice badges, hover text and allocation toggles using a controlled catalog."""
+
 import copy
 import os
 import unittest

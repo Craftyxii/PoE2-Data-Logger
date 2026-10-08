@@ -1,3 +1,5 @@
+"""Read PoE item clipboard text and capture game/monitor context around the hovered item."""
+
 from __future__ import annotations
 
 import ctypes
@@ -16,6 +18,9 @@ _CLIPBOARD_LOCK = threading.Lock()
 
 
 def _clipboard_text(user32, kernel32):
+    """Read bounded Unicode clipboard memory while releasing both the locked handle and
+    clipboard on every exit.
+    """
     user32.OpenClipboard.argtypes = (wintypes.HWND,)
     user32.OpenClipboard.restype = wintypes.BOOL
     user32.GetClipboardData.argtypes = (wintypes.UINT,)
@@ -46,6 +51,9 @@ def _clipboard_text(user32, kernel32):
 
 
 def read_hovered_text(timeout=.48):
+    """Serialize Ctrl+C item-copy requests, preserve an already-held Ctrl key and accept only
+    newly copied item text while the game stays focused.
+    """
     if sys.platform != "win32":
         return None
     from PoE2_Data_Logger.platform.live_watch import game_foreground
@@ -88,9 +96,11 @@ def read_hovered_text(timeout=.48):
 
 
 def _cursor_position():
+    """Read the native Windows mouse position or raise when cursor capture is unavailable."""
     if sys.platform != "win32":
         raise ValueError("Hovered-item screen capture is available on Windows.")
     class Point(ctypes.Structure):
+        """Match the Win32 cursor-position structure used by GetCursorPos."""
         _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
 
     point = Point()
@@ -102,6 +112,9 @@ def _cursor_position():
 
 
 def _tooltip_bounds():
+    """Prefer the external game client bounds, falling back to the cursor monitor, with a
+    12-megapixel capture limit.
+    """
     if sys.platform != "win32":
         raise ValueError("Hovered-item screen capture is available on Windows.")
     from PoE2_Data_Logger.platform.live_watch import external_window_title
@@ -120,6 +133,7 @@ def _tooltip_bounds():
                 return box
     x, y = _cursor_position()
     class MonitorInfo(ctypes.Structure):
+        """Match the Win32 monitor-info structure for physical display bounds."""
         _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
                     ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
     user32.MonitorFromPoint.argtypes = (wintypes.POINT, wintypes.DWORD)
@@ -137,12 +151,18 @@ def _tooltip_bounds():
 
 
 def capture_near_cursor():
+    """Grab the selected game or cursor-monitor bounds as RGB; tooltip localization happens
+    downstream.
+    """
     from PIL import ImageGrab
     return ImageGrab.grab(bbox=_tooltip_bounds(),
                           all_screens=True).convert("RGB")
 
 
 def capture_remnant_context(region=None, grabber=None):
+    """Grab panel and tooltip context once, enforce the combined pixel limit and return their
+    separate crops.
+    """
     from PIL import ImageGrab
     tooltip = _tooltip_bounds()
     if region:
@@ -155,6 +175,7 @@ def capture_remnant_context(region=None, grabber=None):
         raise ValueError("Combined capture exceeds 12 megapixels. Select the remnant region again.")
     frame = (grabber or ImageGrab.grab)(bbox=bounds, all_screens=True)
     def crop(box):
+        """Convert a screen rectangle into coordinates relative to the combined captured frame."""
         return frame.crop((box[0] - bounds[0], box[1] - bounds[1],
                            box[2] - bounds[0], box[3] - bounds[1]))
     return crop(panel), crop(tooltip)

@@ -7,6 +7,7 @@
 // Images are represented as a "value channel": Uint8Array of max(R,G,B), row-major,
 // length = w*h. Binary images are Uint8Array of 0/1, same layout.
 (function (root, factory) {
+  // Export pixel-to-count helpers; this module does not save inventory totals.
   const api = factory();
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.DigitReader = api;
@@ -126,6 +127,7 @@
   }
 
   function binarize(sub, floor) {
+    // Keep pixels above both the adaptive Otsu threshold and supplied floor.
     const thr = Math.max(otsu(sub.data), floor);
     const b = new Uint8Array(sub.data.length);
     for (let i = 0; i < b.length; i++) b[i] = sub.data[i] > thr ? 1 : 0;
@@ -170,6 +172,7 @@
     return comps;
   }
 
+  // Count binary foreground pixels for template selection and match filtering.
   function inkSum(m) { let s = 0; const d = m.data; for (let i = 0; i < d.length; i++) s += d[i]; return s; }
 
   // Jaccard IoU of two equal-size binary masks.
@@ -255,6 +258,7 @@
     return rankFilter(eroded, k, false); // dilation of the erosion
   }
   function rankFilter(img, k, isMin) {
+    // Apply erosion or dilation with reflected boundaries to a value-channel image.
     const { data, w, h } = img;
     const out = new Uint8Array(w * h);
     const r = Math.floor(k / 2);
@@ -284,6 +288,8 @@
   const OVERLAP = 0.20; // hardcoded in the Python accept/gap logic
 
   function overlaps(x, tw, accepted) {
+    // Reject a competing glyph occupying an accepted digit's horizontal span,
+    // while tolerating one pixel of tightly kerned template-edge overlap.
     for (const a of accepted) {
       const xo = Math.max(0, Math.min(x + tw, a.x + a.tw) - Math.max(x, a.x));
       const minW = Math.min(tw, a.tw);
@@ -438,6 +444,8 @@
   }
 
   function gapFill(bin, templates, accepted, P) {
+    // Append at most one matching glyph per bounded gap with sufficient ink;
+    // mutate accepted rather than creating a separate count interpretation.
     const sorted = accepted.slice().sort((a, b) => a.x - b.x);
     const stripW = bin.w;
     const gapThresh = Math.max(0.70, P.iouThresh - 0.06);

@@ -1,3 +1,5 @@
+"""Reference export checks taking related database records from one consistent snapshot."""
+
 from contextlib import contextmanager
 import io
 import json

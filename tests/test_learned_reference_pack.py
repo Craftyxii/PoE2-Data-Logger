@@ -1,3 +1,5 @@
+"""Reference ZIP checks preserving learned item evidence and rejecting malformed or unsafe imports."""
+
 import hashlib
 import io
 import json

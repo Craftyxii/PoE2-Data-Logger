@@ -1,3 +1,5 @@
+"""Inventory image regressions holding count/icon ambiguity and excluding visual noise from confident stacks."""
+
 import json
 from pathlib import Path
 import tempfile

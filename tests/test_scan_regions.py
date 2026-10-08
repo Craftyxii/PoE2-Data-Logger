@@ -1,3 +1,5 @@
+"""Qt region-page checks ensuring each scanner edits and saves its matching metadata key."""
+
 import os
 from pathlib import Path
 import tempfile

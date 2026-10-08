@@ -18,6 +18,7 @@ class ExportWriteError(OSError):
 
 
 def _remove_temporary(path: Path) -> None:
+    """Best-effort temporary-file cleanup that leaves the original save error visible."""
     try:
         path.unlink(missing_ok=True)
     except OSError:
@@ -26,6 +27,7 @@ def _remove_temporary(path: Path) -> None:
 
 
 def _stage_bytes(destination: Path, data: bytes) -> Path:
+    """Write and close export bytes in the destination directory before replacement."""
     descriptor, filename = tempfile.mkstemp(
         prefix=".PoE2_Data_Export_", suffix=".tmp", dir=destination.parent)
     staged = Path(filename)
@@ -39,6 +41,7 @@ def _stage_bytes(destination: Path, data: bytes) -> Path:
 
 
 def _backup_file(destination: Path) -> Path:
+    """Copy an existing destination and its metadata to a same-directory recovery file."""
     descriptor, filename = tempfile.mkstemp(
         prefix=".PoE2_Data_Export_", suffix=".recovery", dir=destination.parent)
     os.close(descriptor)

@@ -1,3 +1,5 @@
+"""Mocked Windows shortcut/capture routing checks, including map ownership and clipboard-versus-screen fallbacks."""
+
 import itertools
 from pathlib import Path
 import tempfile
@@ -7,7 +9,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from PIL import Image
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QRect, Qt
 from PySide6.QtWidgets import QApplication, QDialog
 
 from PoE2_Data_Logger.core import logger_store as logger, store
@@ -146,6 +148,7 @@ class PlatformTests(unittest.TestCase):
     def test_scaled_region_editor_returns_native_pixels(self):
         screen = Mock()
         screen.devicePixelRatio.return_value = 2
+        screen.geometry.return_value = QRect(0, 0, 960, 540)
         current = {"x": 100, "y": 200, "w": 400, "h": 200}
         with patch.object(region_select.QGuiApplication, "screenAt", return_value=screen):
             editor = region_select.RegionEditor(current, screen_bounds=(0, 0, 1920, 1080))

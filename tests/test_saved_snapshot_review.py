@@ -1,3 +1,5 @@
+"""Qt checks separating locked saved currency/Ritual previews from the next editable scan review."""
+
 import os
 from pathlib import Path
 import tempfile

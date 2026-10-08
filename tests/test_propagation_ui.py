@@ -1,3 +1,5 @@
+"""Qt propagation review checks for recipe selection, manual corrections, append/completion and context-owned persistence."""
+
 import csv
 import copy
 import io
@@ -12,7 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PIL import Image
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QFileDialog
+from PySide6.QtWidgets import QApplication, QFileDialog, QPushButton
 
 from PoE2_Data_Logger.core import logger_store as logger, service, store
 from PoE2_Data_Logger.platform.hotkey import HotkeyManager
@@ -67,7 +69,7 @@ class PropagationUITests(unittest.TestCase):
             "kind": window.pending_review_kind,
             "heading": window.review_kind.text(),
             "summary": window.review_summary.text(),
-            "preview": window.preview.pixmap().cacheKey(),
+            "preview": window.preview.pixmap().toImage(),
             "preview_hidden": window.preview.isHidden(),
             "review_hidden": window.review_group.isHidden(),
             "remnant_hidden": window.remnant_log_group.isHidden(),
@@ -92,10 +94,48 @@ class PropagationUITests(unittest.TestCase):
 
     def assert_remnant_review_preserved(self, before):
         after = self.review_state()
-        for key in ("runes", "chain_rows", "chain_drafts"):
-            before.pop(key, None)
-            after.pop(key, None)
-        self.assertEqual(after, before)
+        # Propagation has its own display while the captured remnant and typed
+        # corrections remain pending. Compare the retained data independently
+        # of the currently displayed heading, preview, and review controls.
+        for key in ("kind", "recipes", "recipe_rows", "recipe_hidden", "results", "images",
+                    "resolved", "chain_context", "propagation", "overlay_token"):
+            self.assertEqual(after[key], before[key], key)
+        self.assertEqual(self.window.review_kind.text(), "Propagation scan")
+        self.assertEqual(self.window.review_kind.property("scanKind"), "propagation")
+        self.assertTrue(self.window.review_group.isHidden())
+        self.assertTrue(self.window.remnant_log_group.isHidden())
+        self.assertTrue(self.window.approve_scan_button.isHidden())
+        self.assertTrue(self.window.reject_scan_button.isHidden())
+        self.assertFalse(self.window.approve_scan_button.isEnabled())
+        self.assertFalse(self.window.manual_remnant_button.isHidden())
+        self.assertTrue(self.window.manual_remnant_button.isEnabled())
+        self.assertEqual(self.window.manual_remnant_button.text(), "Return to remnant review")
+
+    def return_to_remnant_review(self, before):
+        pending = copy.deepcopy(logger.get_state()["ocr_pending"])
+        propagation = self.review_state()
+        self.assertEqual(self.window.manual_remnant_button.text(), "Return to remnant review")
+        self.window.manual_remnant_button.click()
+        after = self.review_state()
+        for key in ("kind", "heading", "summary", "review_hidden",
+                    "remnant_hidden", "approve", "reject", "recipes", "recipe_rows",
+                    "recipe_hidden", "results", "images", "resolved"):
+            self.assertEqual(after[key], before[key], key)
+        image = before["images"]["opened" if before["kind"] == "remnant" else "seed"]
+        if image:
+            self.assertEqual(after["preview"], before["preview"])
+            self.assertEqual(after["preview_hidden"], before["preview_hidden"])
+        else:
+            # Manual review has no captured remnant image; a prior propagation
+            # screenshot must not become its preview when returning.
+            self.assertTrue(after["preview"].isNull())
+            self.assertTrue(after["preview_hidden"])
+        for key in ("runes", "chain_rows", "chain_drafts", "chain_context"):
+            self.assertEqual(after[key], propagation[key], key)
+        self.assertEqual(after["overlay_token"], propagation["overlay_token"] + 1)
+        self.assertEqual(self.window.review_kind.property("scanKind"), before["kind"])
+        self.assertIsNone(self.window._held_remnant_review)
+        self.assertEqual(logger.get_state()["ocr_pending"], pending)
 
     def test_scans_append_in_scan_order_with_left_to_right_pairs(self):
         before = logger.get_state()["scan_commit_count"]
@@ -342,6 +382,147 @@ class PropagationUITests(unittest.TestCase):
             self.window.approve_propagation_recipe(1)
         self.assertEqual(logger.get_state()["detonated"], 1)
 
+    def held_recipe_list(self):
+        self.window._propagation_read({
+            "mode": "propagation", "can_use": False, "runes": [],
+            "status": "Marked rune positions were not clear",
+            "choices": [
+                {"selected_recipe": "Mystic Alloy", "runes": [], "can_use": False},
+                {"selected_recipe": "Prismatic Alloy", "runes": [], "can_use": False},
+                {"selected_recipe": "Swift Alloy", "runes": ["Tidal"], "can_use": True}],
+            **logger.scan_context()}, self.raw.getvalue())
+        return self.window.propagation_recipe_table
+
+    def recipe_action(self, row):
+        return self.window.propagation_recipe_table.cellWidget(row, 2).findChild(
+            QPushButton, "approvePropagationRecipe")
+
+    def test_unclear_recipe_button_selects_manual_entry_then_approves_only_that_recipe(self):
+        table = self.held_recipe_list()
+        self.window.resize(1400, 700)
+        self.window.show()
+        self.app.processEvents()
+        action = self.recipe_action(1)
+        self.assertTrue(action.isEnabled())
+        self.assertEqual(action.text(), "Enter runes")
+        action.click()
+        self.app.processEvents()
+        self.assertEqual(table.currentRow(), 1)
+        self.assertIn("Prismatic Alloy", self.window.propagation_manual_label.text())
+        viewport = self.window.tabs.widget(0).viewport()
+        first = self.window.propagation_rune_inputs[0]
+        self.assertTrue(viewport.rect().contains(first.mapTo(viewport, first.rect().center())))
+        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+        self.assertFalse(self.window.propagation_add_button.isEnabled())
+        self.window.propagation_rune_inputs[0].setEditText("opulent")
+        self.assertEqual(action.text(), "Approve")
+        action.click()
+        self.assertEqual(self.draft(), [("1", "Opulent")])
+        self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "Prismatic Alloy")
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        action.click()
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.window.review_commit_chain_button.click()
+        self.assertEqual(self.saved_parts(), [("Opulent", "")])
+        self.assertTrue(self.window.review_complete_chain_button.isEnabled())
+
+    def test_manual_runes_do_not_follow_selection_to_another_recipe(self):
+        table = self.held_recipe_list()
+        self.recipe_action(1).click()
+        self.window.propagation_rune_inputs[0].setEditText("Opulent")
+        table.setCurrentCell(0, 0)
+        self.assertEqual(self.window.propagation_rune_inputs[0].currentText(), "")
+        self.assertEqual(self.recipe_action(0).text(), "Enter runes")
+        self.assertFalse(self.window.propagation_add_button.isEnabled())
+        self.window.propagation_rune_inputs[0].setEditText("Death")
+        self.recipe_action(2).click()
+        self.assertEqual(self.draft(), [("1", "Tidal")])
+        self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "Swift Alloy")
+        self.assertEqual(logger.get_state()["detonated"], 1)
+
+    def test_manual_recipe_entry_requires_valid_runes_and_a_waiting_selection(self):
+        table = self.held_recipe_list()
+        self.window.propagation_rune_inputs[0].setEditText("Opulent")
+        self.assertEqual(table.currentRow(), -1)
+        self.assertFalse(self.window.propagation_add_button.isEnabled())
+        with self.assertRaisesRegex(ValueError, "Select a waiting propagation recipe"):
+            self.window.add_manual_propagation()
+        self.recipe_action(1).click()
+        self.window.propagation_rune_inputs[0].setEditText("Opulent typo")
+        self.assertFalse(self.window.propagation_add_button.isEnabled())
+        self.recipe_action(1).click()
+        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+        self.window.propagation_rune_inputs[0].setEditText("Opulent")
+        self.window.deny_propagation_recipe(1)
+        self.assertEqual(self.window.propagation_rune_inputs[0].currentText(), "")
+        self.assertFalse(self.window.propagation_add_button.isEnabled())
+        with self.assertRaises(ValueError):
+            self.window.add_manual_propagation()
+        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+
+    def test_clear_rescan_replaces_unclear_review_and_enables_chain_completion(self):
+        self.scan(["Death"])
+        self.scan(["Tidal"])
+        self.held_recipe_list()
+        self.recipe_action(1).click()
+        self.window.propagation_rune_inputs[0].setEditText("Power")
+        self.scan(["Opulent"], "Prismatic Alloy")
+        self.assertIsNone(self.window._manual_propagation_context)
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertEqual(self.saved_parts(), [("Death", ""), ("Tidal", ""), ("Opulent", "")])
+        self.assertEqual(logger.get_state()["detonated"], 3)
+        self.assertEqual(self.window.propagation_recipe_table.rowCount(), 0)
+        self.assertTrue(self.window.review_complete_chain_button.isEnabled())
+        self.assertTrue(self.window.expedition_complete_chain_button.isEnabled())
+        self.window.review_complete_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertEqual(self.saved_parts(), [])
+
+    def test_real_scaled_capture_saves_correct_rune_and_supports_manual_correction(self):
+        from PIL import ImageDraw, ImageEnhance
+        from PoE2_Data_Logger.ocr import propagation_scan, runehelper_ocr
+
+        path = Path(__file__).resolve().parents[1] / "PoE2_Data_Logger/region_examples/opened.jpg"
+        with Image.open(path) as opened:
+            source = runehelper_ocr.default_frame(opened.convert("RGB"))
+        for scale in (.72, .75):
+            image = Image.new("RGB", source.size, (176, 161, 130))
+            image.paste(source.resize((round(source.width * scale), round(source.height * scale)),
+                                      Image.Resampling.LANCZOS))
+            image = ImageEnhance.Brightness(image).enhance(1.2)
+            y = round(167 * scale)
+            ImageDraw.Draw(image).polygon([(1, y), (15, y - 10), (35, y), (15, y + 10)],
+                                         fill=(242, 209, 124))
+            reading = {**propagation_scan.scan_propagation(image), **logger.scan_context()}
+            raw = io.BytesIO()
+            image.save(raw, format="PNG")
+            self.window._propagation_read(reading, raw.getvalue())
+            if scale == .72:
+                self.assertTrue(reading["can_use"])
+                self.assertEqual(self.saved_parts(), [("Tidal", "")])
+                self.assertEqual(logger.get_state()["detonated"], 1)
+                self.assertIsNone(self.window.pending_review_kind)
+            else:
+                self.assertFalse(reading["can_use"])
+                self.assertEqual(logger.get_state()["detonated"], 1)
+                row = self.window.propagation_recipe_table.currentRow()
+                self.assertEqual(self.window.propagation_recipe_table.item(row, 0).text(), "Regal Orb x3")
+                self.assertTrue(self.recipe_action(row).isEnabled())
+                self.recipe_action(row).click()
+                self.window.propagation_rune_inputs[0].setEditText("Tidal")
+                self.recipe_action(row).click()
+                self.window.review_commit_chain_button.click()
+        self.assertEqual(self.saved_parts(), [("Tidal", ""), ("Tidal", "")])
+        self.assertEqual(logger.get_state()["detonated"], 2)
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        rows = list(csv.DictReader(io.StringIO(logger.export_csv().decode("utf-8-sig"))))
+        chain_rows = [row for row in rows if row["Chain Step #"]]
+        self.assertEqual([row["Propagation Rune 1"] for row in chain_rows], ["Tidal", "Tidal"])
+        self.assertTrue(self.window.review_complete_chain_button.isEnabled())
+        self.window.review_complete_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+
     def test_review_reject_remnant_button_keeps_inflight_propagation_result(self):
         self.window.manual_remnant_button.click()
         self.assertEqual(self.window.pending_review_kind, "remnant")
@@ -468,11 +649,13 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["detonated"], 2)
         self.assertEqual(self.draft(), [])
         self.assertEqual(self.saved_parts(), [("Death", "Power"), ("Opulent", "")])
+        self.return_to_remnant_review(before)
         self.window.complete_chain()
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
         self.assertEqual(self.draft(), [])
         self.scan(["Rage"], "Greater Regal Orb x3")
+        self.return_to_remnant_review(before)
         self.window.reject_scan_button.click()
         self.assertIsNone(self.window.pending_review_kind)
         self.assertIsNone(logger.get_state()["ocr_pending"])
@@ -504,6 +687,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 4)
         self.assertEqual(self.draft(), [])
         self.assertEqual(self.saved_parts(), [("Rage", "Time"), ("Death", "")])
+        self.return_to_remnant_review(before)
         self.window.complete_chain()
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
@@ -530,6 +714,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.draft(), [])
         self.assertEqual(self.saved_parts(), [("Rage", ""), ("Time", "")])
         self.assertEqual(logger.get_state()["detonated"], 2)
+        self.return_to_remnant_review(before)
 
     def test_same_chain_orphan_database_remnant_token_is_preserved_during_propagation(self):
         self.scan(["Death", "Power"])
@@ -538,21 +723,45 @@ class PropagationUITests(unittest.TestCase):
         before = self.review_state()
 
         self.scan(["Opulent"])
-        self.assert_remnant_review_preserved(before)
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertIsNone(self.window._held_remnant_review)
+        self.assertEqual(self.window.review_kind.property("scanKind"), "propagation")
+        self.assertIn("Opulent", self.window.review_summary.text())
+        for key in ("recipes", "recipe_rows", "results", "images", "resolved"):
+            self.assertEqual(self.review_state()[key], before[key], key)
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
         self.assertEqual(logger.get_state()["scan_commit_count"], 4)
         self.assertEqual(self.draft(), [])
+        self.assertEqual(self.saved_parts(), [("Death", "Power"), ("Opulent", "")])
+        # There was no displayed remnant to restore. The control opens review
+        # of the retained database token without allocating another remnant.
+        self.assertFalse(self.window.manual_remnant_button.isHidden())
+        self.assertTrue(self.window.manual_remnant_button.isEnabled())
+        self.window.manual_remnant_button.click()
+        self.assertEqual(self.window.pending_review_kind, "remnant")
+        self.assertEqual(self.window.review_kind.property("scanKind"), "remnant")
+        self.assertFalse(self.window.remnant_log_group.isHidden())
+        self.assertFalse(self.window.approve_scan_button.isHidden())
+        self.assertFalse(self.window.reject_scan_button.isHidden())
+        self.assertEqual(logger.get_state()["ocr_pending"], pending)
+        self.assertEqual(logger.get_state()["scan_commit_count"], 4)
         self.assertEqual(self.saved_parts(), [("Death", "Power"), ("Opulent", "")])
 
     def test_unclear_propagation_keeps_pending_remnant_edits_and_reports_problem(self):
         self.window.manual_remnant_button.click()
         self.window.first_recipe.setText("A reward being corrected")
         before = self.review_state()
+        pending = copy.deepcopy(logger.get_state()["ocr_pending"])
         self.scan([], clear=False)
-        self.assertEqual(self.review_state(), before)
+        self.assert_remnant_review_preserved(before)
+        self.assertEqual(logger.get_state()["ocr_pending"], pending)
+        self.assertIsNotNone(self.window._manual_propagation_context)
+        self.assertFalse(self.window.chain_review_group.isHidden())
+        self.assertFalse(self.window.propagation_rune_inputs[0].isHidden())
         self.assertIn("pending remnant remains open", self.window.chain_review_status.text())
         self.assertIn("pending remnant remains open", self.window.statusBar().currentMessage())
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+        self.return_to_remnant_review(before)
 
     def test_pending_opened_remnant_can_still_save_after_propagation(self):
         result = {"mode": "opened", "status": "Reward needs review.", "can_use": False,

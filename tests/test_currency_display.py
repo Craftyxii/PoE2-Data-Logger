@@ -1,3 +1,5 @@
+"""Icon lookup checks for bundled artwork, learned canonical names and reference-cache invalidation."""
+
 import io
 import unittest
 from pathlib import Path

@@ -1,3 +1,5 @@
+"""Recognition contract checks for model/recipe resolution and review holds on incomplete or conflicting evidence."""
+
 import io
 import json
 from pathlib import Path

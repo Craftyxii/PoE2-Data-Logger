@@ -1,3 +1,8 @@
+"""Normalize modifier wording and extract bounded values for tablet review.
+
+Catalog units and conservative text checks also gate proposed new affix names;
+these helpers return suggestions rather than updating the catalog."""
+
 from __future__ import annotations
 
 import json
@@ -11,12 +16,14 @@ _ROLL_RANGE = re.compile(r"\(\s*[+-]?\d+(?:[.,]\d+)?\s*%?\s*[-–—]\s*[+-]?\d+
 
 
 def affix_name(raw):
+    """Remove roll ranges and numbers to obtain the modifier wording used for names."""
     text = re.sub(r"(?i)\ban?\s+additional\b", "additional", _ROLL_RANGE.sub("", str(raw)))
     text = _NUMBER.sub(" ", text).replace("#", " ").replace("%", " ")
     return re.sub(r"\s+", " ", text).strip(" .,+-")
 
 
 def affix_key(raw):
+    """Normalize modifier wording, selected plurals and punctuation for comparisons."""
     text = affix_name(raw).lower()
     for noun in ("essence", "spirit", "modifier", "boss", "chest", "shrine", "strongbox"):
         text = re.sub(rf"\b{noun}(?:es|s)\b", noun, text)
@@ -25,12 +32,14 @@ def affix_key(raw):
 
 @lru_cache(maxsize=1)
 def affix_catalog():
+    """Load and cache the bundled affix entries used to resolve modifier units."""
     data = json.loads((Path(__file__).resolve().parent.parent / "affix_catalog.json").read_text(encoding="utf-8"))
     return data["affixes"]
 
 
 @lru_cache(maxsize=512)
 def affix_unit(name):
+    """Prefer a catalog unit, then infer seconds, percentages or counts from wording."""
     key = affix_key(name)
     for item in affix_catalog():
         if affix_key(item["name"]) == key:
@@ -45,6 +54,11 @@ def affix_unit(name):
 
 
 def modifier_value(raw):
+    """Extract one nonnegative value up to 9999 with its unit and normalized name.
+
+    Reject properties, usage prose, ambiguous numbers and fractional non-percent
+    values; supported implicit counts and catalog flags become one.
+    """
     text = _ROLL_RANGE.sub("", str(raw)).strip()
     compact = re.sub(r"[^a-z0-9]", "", text.lower())
     if (not text or len(text) > 250 or "usesremaining" in compact or
@@ -79,6 +93,7 @@ def modifier_value(raw):
 
 
 def looks_like_modifier(raw):
+    """Recognize likely modifier prose while excluding usage and item-property lines."""
     text = str(raw).strip()
     compact = re.sub(r"[^a-z0-9]", "", text.lower())
     if "usesremaining" in compact or compact.startswith(("adds", "canbeused", "itemlevel", "inspect",
@@ -95,6 +110,11 @@ def looks_like_modifier(raw):
 
 
 def new_affix_names(uncertain, known, ocr_rows=None):
+    """Suggest up to ten distinct unknown names with valid modifier values.
+
+    When OCR rows are supplied, require matching text confidence of at least .94
+    as well as bounded, permitted wording; this does not save catalog entries.
+    """
     known_keys = {affix_key(name) for name in known}
     confidence = {}
     if ocr_rows is not None:
@@ -121,6 +141,7 @@ def new_affix_names(uncertain, known, ocr_rows=None):
 
 
 def tablet_random_mod_counts(config):
+    """Sum random-modifier affix values per used tablet, with the legacy +2 fallback."""
     key = affix_key("Map has additional random Modifiers")
     values = [0] * 4
     for i, pair in enumerate(config.get("tablet_affixes", [])):

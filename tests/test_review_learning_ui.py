@@ -1,3 +1,5 @@
+"""Qt review checks learning only approved named items and preserving atomic validation on corrected inventory/Ritual rows."""
+
 import csv
 import io
 import os
@@ -209,14 +211,13 @@ class ReviewLearningUITests(unittest.TestCase):
         self.assertTrue(self.window.currency_review_group.isHidden())
 
     def test_other_activity_reviews_hide_manual_propagation_shortcut(self):
-        for kind in ("tablet", "waystone", "ritual"):
+        """Keep manual propagation entry in its own review instead of other scan forms."""
+        self.window._review_pending("propagation", "Review this activity")
+        self.assertFalse(self.window.manual_propagation_button.isHidden())
+        for kind in ("tablet", "waystone", "ritual", "remnant", "seed"):
             with self.subTest(kind=kind):
                 self.window._review_pending(kind, "Review this activity")
                 self.assertTrue(self.window.manual_propagation_button.isHidden())
-        for kind in ("propagation", "remnant", "seed"):
-            with self.subTest(kind=kind):
-                self.window._review_pending(kind, "Review this activity")
-                self.assertFalse(self.window.manual_propagation_button.isHidden())
 
     def test_unknown_ritual_name_is_learned_and_header_values_saved_in_export(self):
         self.ritual([self.unknown_reward(category="", category_verified=False)])

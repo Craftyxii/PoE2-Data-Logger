@@ -1,3 +1,5 @@
+"""Qt region-editor checks for crop display and saved coordinates using controlled screen/native bounds."""
+
 import gc
 import os
 import unittest
@@ -6,7 +8,7 @@ from unittest.mock import Mock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRect, Qt
 from PySide6.QtWidgets import QApplication
 
 from PoE2_Data_Logger.ui import region_select
@@ -49,6 +51,7 @@ class RegionRenderingTests(unittest.TestCase):
     def test_screenshot_preserves_scaled_native_region(self):
         screen = Mock()
         screen.devicePixelRatio.return_value = 2
+        screen.geometry.return_value = QRect(-1920, 0, 960, 540)
         current = {"x": -1500, "y": 200, "w": 400, "h": 200}
         screenshot = Image.new("RGB", (1920, 1080), (10, 20, 30))
         with patch.object(region_select.QGuiApplication, "screenAt", return_value=screen):

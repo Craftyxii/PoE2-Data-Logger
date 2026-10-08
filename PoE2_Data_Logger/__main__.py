@@ -1,3 +1,5 @@
+"""Launch the desktop app or an isolated frozen-build smoke check with startup error reporting."""
+
 import os
 from pathlib import Path
 import sys
@@ -6,6 +8,9 @@ import traceback
 
 
 def run():
+    """Start the desktop normally, or isolate smoke-test data and report startup exceptions
+    before returning a failure code.
+    """
     if "--smoke-test" in sys.argv:
         with tempfile.TemporaryDirectory(prefix="poe2-build-check-") as directory:
             os.environ["RUNESHAPE_SCAN_DATA_DIR"] = directory

@@ -1,3 +1,8 @@
+"""Exercise Windows installer metadata, repeat installation, running-client guards and file retention.
+
+Native Qt test windows verify installer guards; they are not game-overlay
+interaction tests. The installed app also runs its isolated smoke check."""
+
 import hashlib
 import os
 from pathlib import Path
@@ -11,6 +16,9 @@ import traceback
 
 
 def version_strings(path):
+    """Read ProductName, ProductVersion and FileVersion from the Windows executable version
+    resource.
+    """
     import ctypes
     import struct
 
@@ -45,6 +53,9 @@ def version_strings(path):
 
 
 def check_version(path, version, beta):
+    """Require installer/runtime version strings to match the selected numeric version and Beta
+    display channel.
+    """
     display = f"{version} Beta" if beta else version
     name = f"PoE2 Data Logger {display}" if beta else "PoE2 Data Logger"
     actual = version_strings(path)
@@ -53,6 +64,7 @@ def check_version(path, version, beta):
 
 
 def launch(executable, arguments, timeout=120, env=None):
+    """Run a quoted Windows executable within the timeout and fail on a nonzero exit code."""
     process = subprocess.run(f'"{executable}" {arguments}', timeout=timeout, env=env,
                              check=False)
     if process.returncode:
@@ -60,7 +72,9 @@ def launch(executable, arguments, timeout=120, env=None):
 
 
 def verify_blocked_launch(executable, arguments, protected_files, check_saved):
+    """Require a running-client rejection and unchanged protected runtime/user files."""
     def fingerprints():
+        """Hash each required runtime file and fail if a guard check has removed one."""
         values = {}
         for path in protected_files:
             if not path.is_file():
@@ -79,15 +93,20 @@ def verify_blocked_launch(executable, arguments, protected_files, check_saved):
 
 
 def running_client_titles(version, beta):
+    """List recognized prior releases plus the current title without duplicate window names."""
     current = f"PoE2 Data Logger {version} Beta" if beta else "PoE2 Data Logger"
     return tuple(dict.fromkeys((
         "PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta",
         "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta",
-        "PoE2 Data Logger 1.3.1 Beta", "PoE2 Data Logger 1.3.1.1 Beta", current,
+        "PoE2 Data Logger 1.3.1 Beta", "PoE2 Data Logger 1.3.1.1 Beta",
+        "PoE2 Data Logger 1.3.1.2 Beta", current,
     )))
 
 
 def verify_running_guards(installer, directory, check_saved, version, beta):
+    """Create native Windows Qt windows for known client titles and verify install/uninstall
+    refuses each without touching retained files.
+    """
     import ctypes
     from PySide6.QtCore import QEvent
     from PySide6.QtWidgets import QApplication, QWidget
@@ -129,6 +148,9 @@ def verify_running_guards(installer, directory, check_saved, version, beta):
 
 
 def verify(installer):
+    """Install and update into a temporary folder, verify labels/guards/startup and ensure
+    uninstall retains planted user files.
+    """
     match = re.fullmatch(r"PoE2-Data-Logger-Setup-v([0-9]+\.[0-9]+(?:\.[0-9]+){0,2})(-beta)?\.exe", installer.name)
     if not match:
         raise RuntimeError("Installer filename does not contain a valid release version.")
@@ -144,6 +166,9 @@ def verify(installer):
         planted_tool = directory / "icacls.exe"
         planted_tool.write_bytes(b"Executable search-path sentinel")
         def check_saved():
+            """Check that saved database/export bytes and the executable-search-path sentinel
+            remain unchanged.
+            """
             if data.read_bytes() != b"saved database contents" or user_file.read_bytes() != b"saved export contents":
                 raise RuntimeError("Installer changed saved user files.")
             if planted_tool.read_bytes() != b"Executable search-path sentinel":

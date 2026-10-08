@@ -1,3 +1,4 @@
+# Build and verify a Windows installer; release publication runs only for tags.
 name: Windows installer
 
 on:
@@ -51,6 +52,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Build tool update failed.' }
           python -m pip install -r requirements-build.txt
       - name: Verify 100-map user workflow
+        # This simulation injects scan results at the UI boundary; capture OCR
+        # regressions are separate checks, not evidence from this simulation.
         env:
           POE2_RUN_HUNDRED_MAP_SESSION: '1'
           POE2_SESSION_ARTIFACTS: ${{ runner.temp }}/poe2-release-session
@@ -95,6 +98,7 @@ jobs:
             PoE2-Data-Logger-Setup-v*.exe.sha256
           if-no-files-found: error
       - name: Publish release
+        # The earlier version check binds installer metadata to the release tag.
         if: github.ref_type == 'tag'
         shell: pwsh
         env:

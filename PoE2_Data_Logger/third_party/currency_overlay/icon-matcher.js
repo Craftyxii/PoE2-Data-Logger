@@ -25,6 +25,7 @@
  *   const best = IconMatcher.match(cellRgb, cands).best.apiId;   // cellRgb = Uint8Array(S*S*3)
  */
 (function (root, factory) {
+  // Publish the matcher to CommonJS or the embedding QuickJS/browser global.
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.IconMatcher = factory();
 }(typeof self !== 'undefined' ? self : this, function () {
@@ -34,6 +35,7 @@
   var DEFAULTS = { size: 40, corner: 13, align: 4, minWeight: 0.05 };
 
   function opts(o) {
+    // Fill comparison dimensions and masking/alignment options without I/O.
     o = o || {};
     return {
       size: o.size || DEFAULTS.size,
@@ -68,12 +70,14 @@
   }
 
   function zeroCorner(w, S, corner) {
+    // Exclude stack-count pixels from a feature's foreground weights in place.
     for (var y = 0; y < corner; y++) {
       for (var x = 0; x < corner; x++) w[y * S + x] = 0;
     }
   }
 
   function distFromNavy2(rgb, i3) {
+    // Measure squared RGB distance from the slot backing for cell foreground.
     var dr = rgb[i3] - NAVY[0], dg = rgb[i3 + 1] - NAVY[1], db = rgb[i3 + 2] - NAVY[2];
     return dr * dr + dg * dg + db * db;
   }
@@ -106,10 +110,12 @@
     return { rgb: masked, weights: w, size: S, corner: o.corner, align: o.align, minWeight: o.minWeight };
   }
 
+  // Keep shifted candidate pixel indices inside their image during scoring.
   function clamp(v, hi) { return v < 0 ? 0 : (v > hi ? hi : v); }
 
   // Higher = better: negated mean foreground-weighted SSD, best over +/-align shift.
   function score(cell, cand) {
+    // This scorer uses the cell's weights; cand.weights is not consulted here.
     var S = cell.size, A = cell.align, mw = cell.minWeight;
     var cw = cell.weights, cr = cell.rgb, dr = cand.rgb, hi = S - 1;
     var best = Infinity;

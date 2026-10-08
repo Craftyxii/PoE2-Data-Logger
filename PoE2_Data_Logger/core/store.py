@@ -1,3 +1,10 @@
+"""Persist reviewed seed screenshots and load local glyph evidence.
+
+The bundled states seed logger initialization; runtime matching reads valid
+families from SQLite. Saved scans retain their selected stage rewards/status
+and export those stored values rather than rematching the current catalog.
+"""
+
 from __future__ import annotations
 
 import csv
@@ -19,6 +26,7 @@ STATES = json.loads((HERE / "catalog.json").read_text())["states"]
 
 
 def states() -> list[dict]:
+    """Load seed stages belonging to currently valid database families in family/socket order."""
     from PoE2_Data_Logger.core import logger_store
     logger_store.initialize()
     with _connect() as db:
@@ -30,11 +38,17 @@ def states() -> list[dict]:
 
 
 def candidates(sockets: int, slot: str, rune: str) -> list[dict]:
+    """Filter current seed states by exact socket count, visible slot and rune label."""
     return [s for s in states() if s["sockets"] == sockets and
             s["seed_slot"] == slot and s["seed_rune"] == rune]
 
 
 def validate(sockets, slot, rune, family=None):
+    """Validate a reviewed seed and require a choice when multiple families match.
+
+    An explicit family must match the stage; an unmatched seed may remain
+    unresolved when no family is supplied.
+    """
     from PoE2_Data_Logger.core.logger_store import _integer
     depth = _integer(sockets, "Socket count", 3, 10)
     if slot not in [f"P{i}" for i in range(1, depth + 1)]:
@@ -58,6 +72,7 @@ def validate(sockets, slot, rune, family=None):
 
 @contextmanager
 def _connect():
+    """Ensure the screenshot table exists and commit or roll back the yielded SQLite work."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(DATA_DIR / "scans.sqlite3", timeout=10)
     try:
@@ -82,6 +97,11 @@ def _connect():
 
 
 def save_scan(raw: bytes, file_name: str, sockets, slot: str, rune: str, family=None):
+    """Upsert reviewed seed metadata by screenshot hash and optionally store glyph evidence.
+
+    Keep the selected stage rewards and status on the scan row, and reuse a
+    hash-named image file when the same screenshot is reviewed again.
+    """
     depth, selected = validate(sockets, slot, rune, family)
     suffix = ".png" if raw.startswith(b"\x89PNG\r\n\x1a\n") else ".jpg"
     if suffix == ".jpg" and not raw.startswith(b"\xff\xd8\xff"):
@@ -127,6 +147,10 @@ def save_scan(raw: bytes, file_name: str, sockets, slot: str, rune: str, family=
 
 
 def _reviewed_vector(raw: bytes, sockets: int, slot: str):
+    """Locate and normalize a book, then encode the reviewed slot's 36-pixel grayscale crop.
+
+    Return no evidence when a book is absent or that crop would leave the image.
+    """
     import numpy as np
     from PIL import Image
     from PoE2_Data_Logger.ocr.glyph_eval import vector
@@ -149,6 +173,7 @@ def _reviewed_vector(raw: bytes, sockets: int, slot: str):
 
 
 def reviewed_glyphs(runes=None):
+    """Load optional rune-filtered local vectors, skipping malformed data and normalizing large norms."""
     import numpy as np
     from PoE2_Data_Logger.core import logger_store
     logger_store.initialize()
@@ -175,6 +200,7 @@ def reviewed_glyphs(runes=None):
 
 
 def _record(row):
+    """Expose decoded saved rewards while removing internal image filenames and hashes."""
     result = dict(row)
     result["rewards"] = json.loads(result.pop("rewards_json"))
     result.pop("image_name")
@@ -183,12 +209,14 @@ def _record(row):
 
 
 def list_scans(limit=200):
+    """Return the newest saved scan rows first, bounded by the requested SQL limit."""
     with _connect() as db:
         rows = db.execute("SELECT * FROM scans ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
     return [_record(row) for row in rows]
 
 
 def image_for(scan_id):
+    """Look up the saved screenshot path for a scan ID, or None for an unknown ID."""
     with _connect() as db:
         row = db.execute("SELECT image_name FROM scans WHERE id=?", (scan_id,)).fetchone()
     if row is None:
@@ -197,6 +225,11 @@ def image_for(scan_id):
 
 
 def export_csv():
+    """Export saved seed scans by ID with stored rewards/status and spreadsheet-safe cells.
+
+    The nine columns describe screenshot review history, with a UTF-8 BOM for
+    spreadsheet readers; this is separate from the map-summary logger export.
+    """
     from PoE2_Data_Logger.core.logger_store import _csv_row
     out = io.StringIO(newline="")
     writer = csv.writer(out)

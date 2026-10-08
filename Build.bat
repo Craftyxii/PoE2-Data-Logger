@@ -1,4 +1,6 @@
 @echo off
+rem Build with Python 3.12, then verify the frozen app and OCR assets before NSIS.
+rem Each failed command stops the pipeline rather than packaging partial output.
 cd /d "%~dp0"
 py -3.12 -m pip install --upgrade "pip>=26.2"
 if errorlevel 1 exit /b 1

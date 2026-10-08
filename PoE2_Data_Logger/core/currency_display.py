@@ -21,10 +21,12 @@ _MAX_REFERENCE_PIXELS = 1000000
 
 
 def _name_key(name):
+    """Strip and case-fold string labels for artwork matching, rejecting other types."""
     return name.strip().casefold() if isinstance(name, str) else ""
 
 
 def _png(image):
+    """Encode a prepared Pillow image as PNG bytes for the counter UI."""
     output = io.BytesIO()
     image.save(output, format="PNG")
     return output.getvalue()
@@ -62,6 +64,7 @@ def _bundled_pngs():
 def _reference_png(raw):
     """Bound imported artwork and keep full equipment footprints in proportion."""
     def render(source):
+        """Bound decoded dimensions and fit the full artwork within 96 pixels per side."""
         if (min(source.size) < 1 or max(source.size) > 1024 or
                 source.width * source.height > _MAX_REFERENCE_PIXELS):
             return None

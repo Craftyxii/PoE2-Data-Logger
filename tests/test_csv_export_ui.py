@@ -1,3 +1,5 @@
+"""Qt Save As checks for cancel/overwrite decisions and the coordinated main, Atlas and history CSV files."""
+
 from contextlib import contextmanager
 import os
 from pathlib import Path

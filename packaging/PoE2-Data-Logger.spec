@@ -1,3 +1,9 @@
+"""Freeze the Qt desktop app with local OCR engines, reference assets and catalogs.
+
+Missing source/resource declarations abort the build before bundling. OCR engine
+libraries are collected explicitly; unused Qt web/Quick components are excluded.
+"""
+
 from pathlib import Path
 from runpy import run_path
 from PyInstaller.utils.hooks import collect_all, collect_submodules
@@ -25,6 +31,7 @@ for package in ("rapidocr", "onnxruntime", "quickjs", "cv2"):
     binaries += libraries
     hiddenimports += imports
 
+# Analyze the desktop entry point; source assets remain available as bundle data.
 analysis = Analysis(
     [str(app / "__main__.py")],
     pathex=[str(project)], binaries=binaries, datas=datas, hiddenimports=hiddenimports,
@@ -42,5 +49,7 @@ exe = EXE(
     version=str(project / "packaging" / "version_info.txt"),
     argv_emulation=False, target_arch=None, codesign_identity=None, entitlements_file=None,
 )
+# Emit a directory build so the installer can replace runtime files independently
+# of the user-managed Databases directory.
 coll = COLLECT(exe, analysis.binaries, analysis.datas, strip=False, upx=True,
                upx_exclude=[], name="PoE2-Data-Logger")

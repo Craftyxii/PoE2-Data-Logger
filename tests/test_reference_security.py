@@ -1,3 +1,5 @@
+"""Reference import validation checks for bounded archives, safe paths and rejected malformed image/catalog data."""
+
 import base64
 import hashlib
 import io

@@ -1,3 +1,5 @@
+"""Hotkey routing checks keeping propagation capture separate from remnant detection and preserving captured context."""
+
 import io
 import tempfile
 import unittest

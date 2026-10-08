@@ -1,3 +1,5 @@
+"""Qt checks for activity-specific chain controls, discarded drafts and retained accepted propagation counts."""
+
 import csv
 import io
 import json
@@ -178,6 +180,72 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.window.first_recipe.text(), first_recipe)
         self.assertEqual(logger.get_state()["ocr_pending"], held)
         self.assertEqual(self.expedition_counts()["M0001-E01"], 2)
+
+    def test_remnant_review_never_displays_propagation_actions(self):
+        self.auto_propagate()
+        counts, audit = self.expedition_counts(), self.propagation_audit()
+        self.opened_remnant()
+        held = logger.get_state()["ocr_pending"]
+        for refresh in (lambda: None, self.window.refresh):
+            refresh()
+            self.assertEqual(self.window.review_kind.property("scanKind"), "remnant")
+            self.assertTrue(self.window.manual_propagation_button.isHidden())
+            self.assertTrue(self.window.chain_review_group.isHidden())
+            self.assertFalse(self.window.review_commit_chain_button.isVisible())
+            self.assertFalse(self.window.review_complete_chain_button.isVisible())
+            self.assertTrue(self.window.remnant_log_group.isVisible())
+        self.window.approve_scan_button.click()
+        self.assertIsNone(logger.get_state()["ocr_pending"])
+        self.assertEqual(self.window.recipe_table.property("savedRemnant"), held["remnant_id"])
+        self.assertTrue(self.window.manual_propagation_button.isHidden())
+        self.assertTrue(self.window.chain_review_group.isHidden())
+        self.assertEqual(self.expedition_counts(), counts)
+        self.assertEqual(self.propagation_audit(), audit)
+
+    def test_independent_propagation_controls_return_to_unchanged_remnant_review(self):
+        self.opened_remnant()
+        held = logger.get_state()["ocr_pending"]
+        first = self.window.first_recipe.text()
+        resolved = self.window.resolved
+        self.propagate(("Rage", "Time"), "Chaos Orb x2")
+        self.assertEqual(self.window.review_kind.property("scanKind"), "propagation")
+        self.assertTrue(self.window.remnant_log_group.isHidden())
+        self.assertFalse(self.window.approve_scan_button.isVisible())
+        self.assertFalse(self.window.reject_scan_button.isVisible())
+        self.assertTrue(self.window.chain_review_group.isVisible())
+        self.window.review_commit_chain_button.click()
+        self.assertEqual(len(logger.get_state()["chain"]), 1)
+        self.window.manual_remnant_button.click()
+        self.assertEqual(self.window.pending_review_kind, "remnant")
+        self.assertEqual(self.window.review_kind.property("scanKind"), "remnant")
+        self.assertEqual(self.window.first_recipe.text(), first)
+        self.assertEqual(self.window.resolved, resolved)
+        self.assertEqual(logger.get_state()["ocr_pending"], held)
+        self.assertTrue(self.window.chain_review_group.isHidden())
+        self.assertTrue(self.window.manual_propagation_button.isHidden())
+        self.assertTrue(self.window.approve_scan_button.isVisible())
+        self.window.approve_scan_button.click()
+        self.assertIsNone(logger.get_state()["ocr_pending"])
+        self.assertEqual(len(logger.get_state()["chain"]), 1)
+        self.assertEqual(self.expedition_counts()["M0001-E01"], 1)
+
+    def test_return_to_existing_remnant_keeps_accepted_unsaved_propagation_part(self):
+        self.opened_remnant()
+        held = logger.get_state()["ocr_pending"]
+        self.propagate(("Rage", "Time"), "Chaos Orb x2")
+        self.window.manual_remnant_button.click()
+        self.assertEqual(logger.get_state()["ocr_pending"], held)
+        self.assertTrue(self.window.chain_review_group.isHidden())
+        self.assertTrue(self.window.manual_propagation_button.isHidden())
+        self.assertEqual(self.window._chain_steps(), [{"rune1": "Rage", "rune2": "Time"}])
+        self.window.tabs.setCurrentIndex(1)
+        self.window.expedition_commit_chain_button.click()
+        self.assertEqual(self.exported_chain(), [("M0001", "M0001-E01", "1", "Rage", "Time")])
+        self.assertEqual(self.expedition_counts()["M0001-E01"], 1)
+        self.window.tabs.setCurrentIndex(0)
+        self.window.approve_scan_button.click()
+        self.assertIsNone(logger.get_state()["ocr_pending"])
+        self.assertEqual(self.exported_chain(), [("M0001", "M0001-E01", "1", "Rage", "Time")])
 
     def test_automatically_saved_remnant_keeps_saved_preview_and_accepted_counts(self):
         self.propagate()

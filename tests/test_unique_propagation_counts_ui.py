@@ -1,3 +1,5 @@
+"""Qt checks separating editable kill totals from accepted propagation detonation counts and completed expeditions."""
+
 import csv
 import io
 import os

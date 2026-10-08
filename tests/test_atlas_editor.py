@@ -1,3 +1,5 @@
+"""Qt Atlas graph interaction checks against a small fixture catalog: allocation, choice selection and preserved drafts."""
+
 import os
 import unittest
 from unittest.mock import patch

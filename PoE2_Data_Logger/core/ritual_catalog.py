@@ -1,3 +1,9 @@
+"""Bundled Omen names used to initialize the editable Ritual name database.
+
+Initialization filters retired defaults; this tuple is seed input rather than
+the current display catalog or a record of previously logged rewards.
+"""
+
 OMEN_NAMES = (
     "Omen of Refreshment",
     "Omen of Resurgence",

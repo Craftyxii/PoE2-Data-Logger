@@ -1,3 +1,5 @@
+"""Synthetic PE/archive tests exercising frozen-build validation without launching a Windows installer."""
+
 from __future__ import annotations
 
 from pathlib import Path

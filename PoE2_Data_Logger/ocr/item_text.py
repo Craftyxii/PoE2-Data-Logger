@@ -1,3 +1,8 @@
+"""Parse copied or recognized waystone/tablet text into editable proposals.
+
+Screen OCR is anchored to a tooltip title and may retry uncertain tablet
+percentage rows; returned fields still require review."""
+
 from __future__ import annotations
 
 import re
@@ -17,6 +22,7 @@ _TABLET_TITLE = re.compile(r"^(?:[A-Za-z' -]+\s+)?Tab[li1]ets?(?:\s+\d+)?$", re.
 
 
 def _number(line):
+    """Read the first signed percentage, accepting comma decimals and preserving integers."""
     match = _PERCENT.search(line)
     if not match:
         return None
@@ -25,12 +31,14 @@ def _number(line):
 
 
 def _normal_lines(text):
+    """Validate the text-size limit and return stripped nonempty lines."""
     if not isinstance(text, str) or len(text) > MAX_ITEM_TEXT:
         raise ValueError("The copied item text is too long or invalid.")
     return [line.strip() for line in text.replace("\r", "").split("\n") if line.strip()]
 
 
 def _item_kind(lines):
+    """Identify waystones or tablets from the copied Item Class property."""
     klass = next((line.split(":", 1)[1].strip() for line in lines
                   if line.lower().startswith("item class:")), "")
     if re.search(r"waystones?", klass, re.I):
@@ -41,6 +49,10 @@ def _item_kind(lines):
 
 
 def _modifier_lines(lines, kind):
+    """Collect at most 80 modifier lines after the item-specific property boundary.
+
+    Skip separators, labels and properties, and stop at recognized usage/footer prose.
+    """
     if kind == "waystone":
         start = next((i + 1 for i, line in enumerate(lines)
                       if line.lower().startswith("item level:")), None)
@@ -66,11 +78,13 @@ def _modifier_lines(lines, kind):
 
 
 def _is_footer(line):
+    """Recognize usage, inspection and terminal item-status text that ends modifiers."""
     key = re.sub(r"[^a-z0-9]", "", line.lower())
     return bool(_FOOTER.match(line) or key.startswith(("canbeused", "inspect", "togglechat")))
 
 
 def parse_item_text(text, affixes=()):
+    """Parse supported copied items into reviewable waystone fields or tablet affix matches."""
     lines = _normal_lines(text)
     kind = _item_kind(lines)
     if not kind:
@@ -106,6 +120,11 @@ def parse_item_text(text, affixes=()):
 
 
 def parse_screen_tooltip(ocr_rows, affixes=()):
+    """Find a waystone/tablet title and parse its bounded tooltip body.
+
+    Waystones need a drop-chance boundary; tablets merge likely wrapped modifiers
+    and retain OCR rows alongside matching and uncertain affix proposals.
+    """
     lines = [row["text"].strip() if isinstance(row, dict) else str(row).strip()
              for row in ocr_rows]
     anchor = next(((i, "waystone") for i, line in enumerate(lines)
@@ -172,6 +191,11 @@ def parse_screen_tooltip(ocr_rows, affixes=()):
 
 
 def read_screen_tooltip(image, affixes=(), ocr_rows=None):
+    """Read or reuse OCR rows, isolate the tooltip and retry unclear tablet percentages.
+
+    A single retry at .94 confidence may replace a row; remaining tablet rows
+    below .9 are added to uncertainty before returning the parsed proposal.
+    """
     from PoE2_Data_Logger.ocr.item_ocr import ocr_lines
     rows = [dict(row) for row in ocr_rows] if ocr_rows is not None else ocr_lines(image)
     parts = [dict(part) for row in rows for part in row.get("parts", [row])]

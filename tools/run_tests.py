@@ -1,3 +1,9 @@
+"""Discover regression tests in an isolated profile with Qt offscreen by default.
+
+This script runs discovery at module load; assertion failures set its exit code.
+Injected scan-result simulations and mocked Windows tests do not exercise native
+game-overlay input or prove capture recognition."""
+
 import argparse
 import os
 from pathlib import Path

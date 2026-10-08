@@ -16,6 +16,7 @@ def supported_partial_peak_boxes(masks, recipe_rows, *, tile_layout, tile_size=3
 
 
 def _supported_boxes(masks, recipe_rows, tile_layout, tile_size, finder):
+    """Merge nearby boxes across exposures, retaining native or multiply supported detections."""
     groups = []
     for factor, mask in masks:
         for box in finder(mask, recipe_rows, tile_layout=tile_layout, tile_size=tile_size):
@@ -31,6 +32,11 @@ def _supported_boxes(masks, recipe_rows, tile_layout, tile_size, finder):
 
 
 def _partial_peak_boxes(mask, recipe_rows, *, tile_layout, tile_size):
+    """Find one or two plausible crown peaks at known tile positions to flag incomplete marks.
+
+    Search near the expected crown baseline and reject growing glyph strokes;
+    these boxes preserve uncertainty and do not establish a complete three-peak crown.
+    """
     pixels = np.asarray(mask, dtype=bool)
     first_x, pitch = tile_layout
     found = []

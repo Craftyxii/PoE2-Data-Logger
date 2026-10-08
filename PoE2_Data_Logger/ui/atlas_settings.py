@@ -28,6 +28,7 @@ BRONZE = QColor("#6b5639")
 
 
 def _asset_pixmap(relative_path):
+    """Load artwork only from the bundled Atlas directory; invalid paths yield an empty pixmap."""
     if not relative_path:
         return QPixmap()
     # Bundled catalog resources only; never turn a node's filename into an
@@ -50,6 +51,7 @@ class AtlasChoiceBadgeItem(QGraphicsObject):
     """Keep selectable nodes and their option numbers readable at any zoom."""
 
     def __init__(self, node_item):
+        """Attach a fixed-size clickable choice marker to the node artwork."""
         super().__init__(node_item)
         self.node_item = node_item
         # Only this small overlay ignores zoom. Node artwork and tree bounds
@@ -62,14 +64,17 @@ class AtlasChoiceBadgeItem(QGraphicsObject):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def boundingRect(self):
+        """Reserve the 30-pixel marker area independent of tree zoom."""
         return QRectF(-15, -15, 30, 30)
 
     def shape(self):
+        """Use the marker circle as its mouse hit area."""
         path = QPainterPath()
         path.addEllipse(self.boundingRect())
         return path
 
     def paint(self, painter, option, widget=None):
+        """Draw the selected option number only for allocated nodes with a choice."""
         item = self.node_item
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(QPen(QColor("#fff0ba") if item.selected or item.hovered else GOLD, 2))
@@ -91,11 +96,13 @@ class AtlasChoiceBadgeItem(QGraphicsObject):
             painter.drawLine(QPointF(0, 3), QPointF(5, -2))
 
     def mousePressEvent(self, event):
+        """Record screen position to distinguish a marker click from a drag."""
         QToolTip.hideText()
         self._pressed_at = event.screenPos()
         event.accept()
 
     def mouseReleaseEvent(self, event):
+        """Forward a short in-circle click to the owning node."""
         start = getattr(self, "_pressed_at", event.screenPos())
         if (event.screenPos() - start).manhattanLength() <= 6 and self.shape().contains(event.pos()):
             self.node_item.clicked.emit(self.node_item.node_id)
@@ -103,9 +110,11 @@ class AtlasChoiceBadgeItem(QGraphicsObject):
 
 
 class AtlasNodeItem(QGraphicsObject):
+    """Render one catalog node with allocation, hover, selection, and choice state."""
     clicked = Signal(str)
 
     def __init__(self, node, pixmap=None, frames=None, parent=None):
+        """Place catalog artwork and an optional choice badge at the node coordinates."""
         super().__init__(parent)
         self.node = node
         self.node_id = str(node["id"])
@@ -125,16 +134,19 @@ class AtlasNodeItem(QGraphicsObject):
         self.choice_badge = AtlasChoiceBadgeItem(self) if node.get("choices") else None
 
     def boundingRect(self):
+        """Include the node glow and selection ring in repaint bounds."""
         radius = self.radius + 15
         return QRectF(-radius, -radius, radius * 2, radius * 2)
 
     def shape(self):
+        """Provide a circular click area slightly larger than the node artwork."""
         path = QPainterPath()
         radius = self.radius + 8
         path.addEllipse(QRectF(-radius, -radius, radius * 2, radius * 2))
         return path
 
     def paint(self, painter, option, widget=None):
+        """Draw allocation glow, clipped artwork, frame, and the selected-node ring."""
         radius = self.radius
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self.allocated or self.hovered:
@@ -181,6 +193,7 @@ class AtlasNodeItem(QGraphicsObject):
                                       radius * 2 + 16, radius * 2 + 16))
 
     def hoverEnterEvent(self, event):
+        """Highlight the node and badge and show the current effect tooltip."""
         self.hovered = True
         self.update()
         if self.choice_badge is not None:
@@ -190,6 +203,7 @@ class AtlasNodeItem(QGraphicsObject):
             QToolTip.showText(event.screenPos(), self.toolTip(), event.widget())
 
     def hoverLeaveEvent(self, event):
+        """Clear hover highlighting and dismiss the effect tooltip."""
         self.hovered = False
         self.update()
         if self.choice_badge is not None:
@@ -198,11 +212,13 @@ class AtlasNodeItem(QGraphicsObject):
         super().hoverLeaveEvent(event)
 
     def mousePressEvent(self, event):
+        """Hide the tooltip and record the press position for click detection."""
         QToolTip.hideText()
         self._pressed_at = event.screenPos()
         event.accept()
 
     def mouseReleaseEvent(self, event):
+        """Emit the node ID for a short click that ends inside its hit area."""
         start = getattr(self, "_pressed_at", event.screenPos())
         if (event.screenPos() - start).manhattanLength() <= 6 and self.shape().contains(event.pos()):
             self.clicked.emit(self.node_id)
@@ -210,7 +226,9 @@ class AtlasNodeItem(QGraphicsObject):
 
 
 class AtlasTreeView(QGraphicsView):
+    """Pan and zoom the Atlas scene while keeping zoom within a usable range."""
     def __init__(self, scene, parent=None):
+        """Configure hand dragging, mouse-anchored zoom, rendering, and tooltip styling."""
         super().__init__(scene, parent)
         self.setRenderHints(QPainter.RenderHint.Antialiasing |
                             QPainter.RenderHint.SmoothPixmapTransform)
@@ -225,12 +243,14 @@ class AtlasTreeView(QGraphicsView):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def zoom(self, factor):
+        """Clamp uniform scene scaling between 0.025 and 4 around the mouse anchor."""
         current = self.transform().m11()
         target = min(4.0, max(.025, current * factor))
         if current > 0:
             self.scale(target / current, target / current)
 
     def wheelEvent(self, event):
+        """Convert vertical wheel steps into bounded exponential zoom."""
         delta = event.angleDelta().y()
         if delta:
             self.zoom(math.pow(1.15, delta / 120))
@@ -239,6 +259,7 @@ class AtlasTreeView(QGraphicsView):
             super().wheelEvent(event)
 
     def hideEvent(self, event):
+        """Dismiss any scene tooltip when the tree view is hidden."""
         QToolTip.hideText()
         super().hideEvent(event)
 
@@ -247,10 +268,12 @@ class GearRaritySpinBox(QDoubleSpinBox):
     """Reserve the negative sentinel for unknown, never a displayed gear stat."""
 
     def __init__(self, parent=None):
+        """Route line-edit key events through the unknown-value entry helper."""
         super().__init__(parent)
         self.lineEdit().installEventFilter(self)
 
     def _prepare_number_entry(self, event):
+        """Select the unknown label before typing or pasting a numeric draft."""
         if (self.value() < 0 and self.text() == self.specialValueText() and
                 (event.text().isprintable() or event.matches(QKeySequence.StandardKey.Paste))):
             # A mouse click places the caret inside "Not set". Replace that
@@ -259,24 +282,42 @@ class GearRaritySpinBox(QDoubleSpinBox):
             self.selectAll()
 
     def eventFilter(self, source, event):
+        """Prepare numeric replacement for key events received by the embedded editor."""
         if source is self.lineEdit() and event.type() == QEvent.Type.KeyPress:
             self._prepare_number_entry(event)
         return super().eventFilter(source, event)
 
     def keyPressEvent(self, event):
+        """Apply unknown-label replacement before normal spinbox key handling."""
         self._prepare_number_entry(event)
         super().keyPressEvent(event)
 
+    def focusOutEvent(self, event):
+        """Keep incomplete typed numbers visible when focus moves to Save."""
+        text = self.lineEdit().text()
+        position = self.lineEdit().cursorPosition()
+        unknown = self.value() < 0 and text == self.specialValueText()
+        incomplete = not unknown and self.validate(text, len(text))[0] != QValidator.State.Acceptable
+        super().focusOutEvent(event)
+        if incomplete:
+            # Qt normally replaces an incomplete decimal with the previous
+            # value before the Save button's clicked signal reaches the page.
+            self.lineEdit().setText(text)
+            self.lineEdit().setCursorPosition(position)
+
     def validate(self, text, position):
+        """Reject typed negatives while retaining Qt validation for intermediate decimals."""
         if text.lstrip().startswith("-"):
             return QValidator.State.Invalid, text, position
         return super().validate(text, position)
 
 
 class AtlasSettingsPage(QWidget):
+    """Own an Atlas and gear-rarity draft; emit validated saves for the window to persist."""
     saved = Signal(dict)
 
     def __init__(self, parent=None):
+        """Build the Atlas editor and retain raw numeric drafts across refreshes."""
         super().__init__(parent)
         self._catalog = catalog()
         self._main_activity = "Main Atlas" if "Main Atlas" in self._catalog.get("activities", []) else "General"
@@ -288,6 +329,7 @@ class AtlasSettingsPage(QWidget):
         self._loading = False
         self._dirty = False
         self._baseline = None
+        self._baseline_rarity_text = None
         self._first_show = True
         self._tree_built = False
         self._background_items = []
@@ -396,7 +438,8 @@ class AtlasSettingsPage(QWidget):
         self.fit_button.clicked.connect(self.fit_tree)
         self.choice_combo.currentIndexChanged.connect(self._choice_changed)
         self.gear_rarity.valueChanged.connect(self._mark_dirty)
-        self.save_button.clicked.connect(lambda: self.saved.emit(self.settings()))
+        self.gear_rarity.lineEdit().textChanged.connect(self._mark_dirty)
+        self.save_button.clicked.connect(self._request_save)
         general = self.activity_filter.findData(self._main_activity)
         if general >= 0:
             self.activity_filter.setCurrentIndex(general)
@@ -404,6 +447,7 @@ class AtlasSettingsPage(QWidget):
 
     @property
     def dirty(self):
+        """Report whether allocations, choices, or raw rarity text differ from the loaded baseline."""
         return self._dirty
 
     def ensure_tree(self):
@@ -415,6 +459,7 @@ class AtlasSettingsPage(QWidget):
         self._update_visuals()
 
     def _build_scene(self):
+        """Build catalog backgrounds, node artwork, and straight or curved connecting edges."""
         art = self._catalog.get("art") or {}
         background = _asset_pixmap(art.get("background"))
         if not background.isNull():
@@ -497,22 +542,39 @@ class AtlasSettingsPage(QWidget):
 
     @staticmethod
     def _place_art(item, rect, pixmap):
+        """Scale a pixmap to the catalog rectangle and position its upper-left corner."""
         from PySide6.QtGui import QTransform
         item.setTransform(QTransform.fromScale(rect.width() / pixmap.width(),
                                                rect.height() / pixmap.height()))
         item.setPos(rect.topLeft())
 
     def _allocatable(self, node):
+        """Honor an explicit allocation flag; otherwise exclude roots and decorations."""
         return bool(node.get("allocatable", node.get("kind") not in ("root", "decorative")))
 
     def settings(self):
+        """Snapshot draft IDs and numeric rarity, using None for the unknown sentinel."""
         rarity = self.gear_rarity.value()
         return {"catalog_version": str(self._catalog["version"]),
                 "allocated": sorted(self._allocated),
                 "choices": dict(sorted(self._choices.items())),
                 "gear_item_rarity": round(rarity, 2) if rarity >= 0 else None}
 
+    def _request_save(self):
+        """Validate the typed rarity before Qt can fall back to a previous value."""
+        text = self.gear_rarity.lineEdit().text()
+        unknown = self.gear_rarity.value() < 0 and text == self.gear_rarity.specialValueText()
+        if not unknown and self.gear_rarity.validate(text, len(text))[0] != QValidator.State.Acceptable:
+            self.set_state("Finish gear item rarity with a number between 0 and 9999 before saving.")
+            position = self.gear_rarity.lineEdit().cursorPosition()
+            self.gear_rarity.setFocus()
+            self.gear_rarity.lineEdit().setCursorPosition(position)
+            return
+        self.gear_rarity.interpretText()
+        self.saved.emit(self.settings())
+
     def set_settings(self, payload, status="", force=False):
+        """Refresh saved settings while retaining numeric and tree drafts unless forced."""
         if status:
             self.status.setText(status)
         if self._dirty and not force:
@@ -531,6 +593,7 @@ class AtlasSettingsPage(QWidget):
             with QSignalBlocker(self.gear_rarity):
                 self.gear_rarity.setValue(-1 if rarity is None else float(rarity))
             self._baseline = self.settings()
+            self._baseline_rarity_text = self.gear_rarity.lineEdit().text()
             self._dirty = False
             self._update_visuals()
             self._show_node_details()
@@ -539,9 +602,11 @@ class AtlasSettingsPage(QWidget):
         return True
 
     def set_state(self, status=""):
+        """Display status supplied by the owner without changing the draft."""
         self.status.setText(status)
 
     def toggle_node(self, node_id):
+        """Select and toggle a draft allocation, retain its choice, and expose available effects."""
         node_id = str(node_id)
         node = self._nodes.get(node_id)
         if node is None:
@@ -562,17 +627,20 @@ class AtlasSettingsPage(QWidget):
             QTimer.singleShot(0, self, lambda: self._open_choice_popup(node_id))
 
     def _open_choice_popup(self, node_id):
+        """Open the deferred effect menu only if that node remains selected and allocated."""
         if (self._selected_node == node_id and node_id in self._allocated
                 and self.choice_combo.isVisible()):
             self.choice_combo.showPopup()
 
     def autofill(self):
+        """Allocate every eligible node in the draft while retaining selected effect choices."""
         self._allocated = {node_id for node_id, node in self._nodes.items() if self._allocatable(node)}
         self._mark_dirty()
         self._update_visuals()
         self._show_node_details()
 
     def clear_allocations(self):
+        """Remove all draft allocations while preserving choices for later reallocation."""
         self.choice_combo.hidePopup()
         self._allocated.clear()
         self._mark_dirty()
@@ -580,12 +648,15 @@ class AtlasSettingsPage(QWidget):
         self._show_node_details()
 
     def _mark_dirty(self, *args):
+        """Count intermediate numeric text as a draft even before its value changes."""
         if self._loading:
             return
-        self._dirty = self.settings() != self._baseline
+        self._dirty = (self.settings() != self._baseline or
+                       self.gear_rarity.lineEdit().text() != self._baseline_rarity_text)
         self._update_summary()
 
     def _choice_changed(self, index):
+        """Update or clear the selected node's draft effect choice and refresh its display."""
         node_id = self._selected_node
         if self._loading or not node_id:
             return
@@ -599,6 +670,7 @@ class AtlasSettingsPage(QWidget):
         self._show_node_details()
 
     def _show_node_details(self):
+        """Show base effects, numbered alternatives, and whether the retained choice is active."""
         node = self._nodes.get(self._selected_node)
         if node is None:
             return
@@ -643,12 +715,15 @@ class AtlasSettingsPage(QWidget):
         self.node_effects.setHtml(text or "<p>No effect description is provided for this node.</p>")
 
     def _node_tooltip(self, node_id):
+        """Build a wrapped effect tooltip that distinguishes allocated and inactive saved choices."""
         node = self._nodes[node_id]
 
         def escaped(value):
+            """Escape catalog text for HTML while preserving effect line breaks."""
             return html.escape(str(value)).replace("\n", "<br>")
 
         def effects_text(effects):
+            """Wrap each escaped effect in its own tooltip paragraph."""
             return "".join(f"<p>{escaped(effect)}</p>" for effect in effects)
 
         if self._allocatable(node):
@@ -681,6 +756,7 @@ class AtlasSettingsPage(QWidget):
         return f'<table width="360"><tr><td>{text}</td></tr></table>'
 
     def _update_visuals(self):
+        """Refresh node states, choice badges, tooltips, and allocation-dependent edge colours."""
         for node_id, item in self.node_items.items():
             item.allocated = node_id in self._allocated
             item.choice_number, _ = _selected_choice(item.node.get("choices") or [],
@@ -701,6 +777,7 @@ class AtlasSettingsPage(QWidget):
         self._update_summary()
 
     def _update_summary(self):
+        """Count total and visible allocations, unchosen allocated nodes, and unsaved changes."""
         pending = sum(bool(self._nodes[node_id].get("choices")) and node_id not in self._choices
                       for node_id in self._allocated)
         current = self.activity_filter.currentData()
@@ -715,6 +792,7 @@ class AtlasSettingsPage(QWidget):
         self.summary.setText(" · ".join(parts))
 
     def _filter_changed(self, *args):
+        """Show the chosen activity, close its effect menu, and fit the visible tree."""
         activity = self.activity_filter.currentData()
         for node_id, item in self.node_items.items():
             item.setVisible(activity == "all" or self._nodes[node_id].get("activity", "General") == activity)
@@ -729,6 +807,7 @@ class AtlasSettingsPage(QWidget):
         self._update_summary()
 
     def fit_tree(self):
+        """Fit visible nondecorative nodes with padding for the screen-sized choice markers."""
         rect = QRectF()
         for item in self.node_items.values():
             if item.isVisible() and item.node.get("kind") != "decorative":
@@ -746,6 +825,7 @@ class AtlasSettingsPage(QWidget):
         self.view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
 
     def showEvent(self, event):
+        """Build artwork lazily and defer the first fit until the view has its visible size."""
         super().showEvent(event)
         self.ensure_tree()
         if self._first_show:

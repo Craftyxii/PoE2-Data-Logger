@@ -1,3 +1,5 @@
+"""Smoke coverage for rendered text recognition and bundled socket/rune models, including damaged model rejection."""
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -1,3 +1,5 @@
+"""Map snapshot regressions for saved setup fields, tablet configuration and settings changes after logging begins."""
+
 import csv
 import io
 import json

@@ -1,3 +1,5 @@
+"""Filesystem fault-injection checks for staging, replacement and rollback across companion export files."""
+
 import errno
 import os
 from pathlib import Path

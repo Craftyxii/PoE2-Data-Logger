@@ -1,3 +1,5 @@
+"""Capture/composite propagation checks for cursor rows, three-marked positions, cropped layouts and uncertain review holds."""
+
 from pathlib import Path
 import tempfile
 import unittest
@@ -224,13 +226,16 @@ class PropagationOCRTests(unittest.TestCase):
         self.assertEqual(result["runes"], ["Rage"])
         self.assertFalse(result["choices"][1]["can_use"])
 
-    def test_recipe_database_supplies_socket_count_and_rune_order(self):
-        image, rows = self.panel(["Greater Exalted Orb x3"], marks={0: [4]})
-        rows[0]["text"] = "1x Greater Exalted Orb"
-        result = self.scan(image, rows)
-        self.assertTrue(result["can_use"], result)
-        self.assertEqual(result["selected_recipe"], "Greater Exalted Orb")
-        self.assertEqual(result["runes"], ["Prismatic"])
+    def test_visible_socket_count_cannot_be_overridden_by_a_different_quantity_recipe(self):
+        for recipes, selected in ((["Greater Exalted Orb x3"], 0),
+                                   (["Medved's Saga", "Greater Exalted Orb x3", "Greater Regal Orb x3"], 1)):
+            with self.subTest(shared_geometry=len(recipes) > 1):
+                image, rows = self.panel(recipes, selected, {index: [4] for index in range(len(recipes))})
+                rows[selected]["text"] = "1x Greater Exalted Orb"
+                result = self.scan(image, rows)
+                self.assertFalse(result["can_use"], result)
+                self.assertEqual(result["selected_recipe"], "Greater Exalted Orb")
+                self.assertEqual(result["runes"], [])
 
     def test_selected_reward_low_confidence_is_not_accepted(self):
         image, rows = self.panel(["Medved's Saga"], marks={0: [1]})
@@ -291,6 +296,46 @@ class PropagationOCRTests(unittest.TestCase):
         result = propagation_scan.scan_propagation(self.source)
         self.assertTrue(result["can_use"], result)
         self.assertEqual(result["selected_recipe"], "Regal Orb x3")
+        self.assertEqual(result["runes"], ["Tidal"])
+
+    def scaled_content(self, scale, brightness):
+        # Scale the actual panel inside a larger capture, preserving the
+        # original crown and glyph pixels rather than drawing new markers.
+        image = Image.new("RGB", self.source.size, (176, 161, 130))
+        image.paste(self.source.resize((round(self.source.width * scale), round(self.source.height * scale)),
+                                       Image.Resampling.LANCZOS))
+        image = ImageEnhance.Brightness(image).enhance(brightness)
+        y = round(167 * scale)
+        ImageDraw.Draw(image).polygon([(1, y), (15, y - 10), (35, y), (15, y + 10)],
+                                     fill=(242, 209, 124))
+        return image
+
+    def test_real_expanded_crown_does_not_shift_the_third_rune_to_the_second(self):
+        result = propagation_scan.scan_propagation(self.scaled_content(.72, 1.2))
+        self.assertTrue(result["can_use"], result)
+        self.assertEqual(result["selected_recipe"], "Regal Orb x3")
+        self.assertEqual(result["positions"], [3])
+        self.assertEqual(result["runes"], ["Tidal"])
+        self.assertEqual([choice["positions"] for choice in result["choices"]], [[3], [3], [3]])
+
+    def test_real_crown_with_unproven_first_tile_holds_instead_of_saving_the_second_rune(self):
+        for scale, brightness in ((.74, .9), (.74, 1.1), (.75, 1.2)):
+            with self.subTest(scale=scale, brightness=brightness):
+                result = propagation_scan.scan_propagation(self.scaled_content(scale, brightness))
+                self.assertEqual(result["selected_recipe"], "Regal Orb x3", result)
+                self.assertFalse(result["can_use"], result)
+                self.assertEqual(result["positions"], [])
+                self.assertEqual(result["runes"], [])
+                self.assertIn("first rune position", result["status"])
+
+    def test_second_reward_alchemy_three_crown_selects_tidal_at_the_third_position(self):
+        recipes = ["Cyclonic Alloy", "Orb of Alchemy x3", "Glassblower's Bauble x3",
+                   "Expansive Alloy", "Glassblower's Bauble x2", "Regal Orb x3", "Exalted Orb x2"]
+        image, rows = self.panel(recipes, selected=1, marks={index: [3] for index in range(len(recipes))})
+        result = self.scan(image, rows)
+        self.assertTrue(result["can_use"], result)
+        self.assertEqual(result["selected_recipe"], "Orb of Alchemy x3")
+        self.assertEqual(result["positions"], [3])
         self.assertEqual(result["runes"], ["Tidal"])
 
     def test_real_bundled_ocr_reads_short_wide_panel_with_controlled_cursor(self):
@@ -360,18 +405,19 @@ class PropagationOCRTests(unittest.TestCase):
                     (left, top + height - 4, right, top + height - 1)):
             draw.rectangle(box, fill=(176, 161, 130))
 
-    def test_selected_recipe_needs_three_marks_and_position_without_any_gold_frame(self):
+    def test_frameless_crown_with_erased_predecessors_cannot_assume_the_first_tile_position(self):
         image, rows = self.panel(["Greater Exalted Orb x3"], marks={0: [4]})
         self.remove_gold_frame(image, 71 + 41 * 3, 68)
-        # The database supplies the other runes. Their visible tiles are not
-        # required to log the selected recipe's marked fourth rune.
+        # A crown proves propagation, but erasing every preceding tile makes
+        # its index ambiguous. The database cannot supply the image origin.
         draw = ImageDraw.Draw(image)
         draw.rectangle((50, 68, 173, 105), fill=(176, 161, 130))
         self.assertEqual(propagation_scan._marked_boxes(propagation_scan._gold_mask(image))[0], [])
         result = self.scan(image, rows)
-        self.assertTrue(result["can_use"], result)
-        self.assertEqual(result["positions"], [4])
-        self.assertEqual(result["runes"], ["Electrocuting"])
+        self.assertFalse(result["can_use"], result)
+        self.assertEqual(result["positions"], [])
+        self.assertEqual(result["runes"], [])
+        self.assertIn("first rune position", result["status"])
 
     def test_frameless_marks_without_arrow_keep_explicit_recipe_approval(self):
         image, rows = self.panel(["Medved's Saga"], selected=None, marks={0: [1, 5]})

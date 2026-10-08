@@ -1,3 +1,5 @@
+"""Image checks preserving deferred markers across scales without attaching them to adjacent or empty slots."""
+
 import json
 from pathlib import Path
 import unittest

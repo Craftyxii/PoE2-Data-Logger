@@ -1,3 +1,8 @@
+"""Prepare stack-count and tier-badge crops for recognition.
+
+Presence flags retain uncertain label evidence even when no complete crop
+can be read, letting callers hold clipped counts and shared-icon tiers."""
+
 from __future__ import annotations
 
 import cv2
@@ -5,7 +10,8 @@ import numpy as np
 from PIL import Image, ImageOps
 
 
-def count_crops(cell):
+def count_crops(cell, *, complete_only=False):
+    """Crop aligned stack digits without verifying a shortened glyph cluster."""
     pixels = np.asarray(cell.convert('RGB'), dtype=np.uint8)
     height = max(11, round(cell.height * .36))
     strip = pixels[:height, :max(14, round(cell.width * .85))]
@@ -23,12 +29,18 @@ def count_crops(cell):
         if not parts or parts[0][0] > max(7, round(cell.width * .16)):
             continue
         group = [parts[0]]
+        alignment = max(2, round(cell.height * .045))
         for part in parts[1:]:
             previous = group[-1]
             if (part[0] - (previous[0] + previous[2]) > max(4, round(cell.width * .09)) or
-                    abs(part[1] - group[0][1]) > 2 or abs(part[3] - group[0][3]) > 2):
+                    abs(part[1] - group[0][1]) > alignment or
+                    abs(part[3] - group[0][3]) > alignment):
                 break
             group.append(part)
+        if complete_only and len(group) != len(parts):
+            # Two OCR variants of the same clipped prefix are not independent
+            # evidence for the full stack. Keep this count pending instead.
+            continue
         x0 = max(0, min(p[0] for p in group) - 1)
         y0 = max(0, min(p[1] for p in group) - 1)
         x1 = min(strip.shape[1], max(p[0] + p[2] for p in group) + 1)
@@ -52,6 +64,7 @@ def count_crops(cell):
 
 
 def fallback_crops(cell):
+    """Return masked and raw upper-left count views for a tentative OCR retry."""
     patches = []
     for width, height, floor, saturation in ((.46, .28, 145, 55), (.46, .32, 145, 55),
                                             (.40, .32, 145, 55), (.46, .32, 210, 25),
@@ -71,6 +84,7 @@ def fallback_crops(cell):
 
 
 def tier_crops(cell):
+    """Retain complete II/III badge strokes across inventory capture scales."""
     pixels = np.asarray(cell.convert('RGB'), dtype=np.uint8)
     x0, y0 = round(cell.width * .5), round(cell.height * .62)
     strip = pixels[y0:, x0:]
@@ -85,16 +99,20 @@ def tier_crops(cell):
         return [], False
     strokes.sort()
     clusters = []
+    spacing = max(4, round(cell.width * .075))
+    alignment = max(2, round(cell.height * .04))
     for part in strokes:
-        if not clusters or part[0] - (clusters[-1][-1][0] + clusters[-1][-1][2]) > 4:
+        if not clusters or part[0] - (clusters[-1][-1][0] + clusters[-1][-1][2]) > spacing:
             clusters.append([part])
         else:
             clusters[-1].append(part)
     group = next((g for g in reversed(clusters) if 2 <= len(g) <= 3 and
-                  max(p[1] for p in g) - min(p[1] for p in g) <= 2 and
-                  max(p[3] for p in g) - min(p[3] for p in g) <= 2), None)
+                  max(p[1] for p in g) - min(p[1] for p in g) <= alignment and
+                  max(p[3] for p in g) - min(p[3] for p in g) <= alignment), None)
     if group is None:
-        return [], False
+        # Unreadable badge evidence must hold shared-icon tiers for review,
+        # rather than silently selecting the base currency variant.
+        return [], True
     left, top = min(p[0] for p in group), min(p[1] for p in group)
     right, bottom = max(p[0] + p[2] for p in group), max(p[1] + p[3] for p in group)
     raw = Image.fromarray(strip[max(0,top-1):bottom+1,max(0,left-1):right+1]).convert('RGB')

@@ -1,3 +1,5 @@
+"""Native/Python icon scoring comparisons with QuickJS and tests for ranking, alignment and score-margin boundaries."""
+
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import io

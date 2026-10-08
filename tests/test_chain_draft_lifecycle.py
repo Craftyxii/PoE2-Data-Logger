@@ -1,3 +1,5 @@
+"""Qt checks for transient draft cleanup and restart persistence of saved open-chain parts."""
+
 import os
 from pathlib import Path
 import tempfile

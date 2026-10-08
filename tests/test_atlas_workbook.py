@@ -1,3 +1,5 @@
+"""Workbook/CSV checks for sheet relationships, compact Atlas setup rows, numeric item counts and snapshot-consistent exports."""
+
 from contextlib import contextmanager
 import csv
 import importlib.util

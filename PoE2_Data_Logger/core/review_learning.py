@@ -13,6 +13,7 @@ from PIL import Image
 
 
 def validate_name(name, category="Item"):
+    """Trim a reviewed label and reject empty, oversized, control or surrogate text."""
     if not isinstance(name, str):
         raise ValueError("Enter an item name.")
     name = name.strip()
@@ -25,6 +26,7 @@ def validate_name(name, category="Item"):
 
 
 def footprint(slots, *, columns=12, maximum_rows=10):
+    """Return dimensions only for unique slots filling a rectangle at most 2 by 4 cells."""
     if (not isinstance(slots, (list, tuple)) or not slots or
             any(type(slot) is not int or not 1 <= slot <= columns * maximum_rows for slot in slots) or
             len(set(slots)) != len(slots)):

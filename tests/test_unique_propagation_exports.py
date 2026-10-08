@@ -1,3 +1,5 @@
+"""Export checks projecting unique/total kills and one-per-scan propagation counts without inflating paired runes."""
+
 import csv
 import io
 from pathlib import Path

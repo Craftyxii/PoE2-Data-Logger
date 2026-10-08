@@ -1,3 +1,5 @@
+"""Qt rolling-total checks for approved/rejected end scans, map changes, reset and debug-only reference tools."""
+
 import os
 from pathlib import Path
 import tempfile

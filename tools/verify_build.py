@@ -1,3 +1,5 @@
+"""Inspect a frozen Windows launcher, embedded application modules and bundled native runtime files."""
+
 from __future__ import annotations
 
 import json
@@ -9,6 +11,9 @@ from PyInstaller.archive.readers import CArchiveReader
 
 
 def pe_machine(path):
+    """Validate PE headers, section bounds and file completeness, then return the executable
+    machine architecture.
+    """
     with Path(path).open('rb') as stream:
         data = stream.read(65536)
         size = stream.seek(0, 2)
@@ -30,6 +35,9 @@ def pe_machine(path):
 
 
 def verify(executable, check_files=True):
+    """Inspect the PyInstaller archive and, when requested, require the bundled Python 3.12 x64
+    runtime and compatible native libraries.
+    """
     executable = Path(executable)
     archive = CArchiveReader(str(executable))
     options = archive.options

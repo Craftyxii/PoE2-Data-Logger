@@ -16,6 +16,7 @@ _ACTIVE_LOCK = threading.Lock()
 
 
 def saved_threads():
+    """Read the SQLite thread preference, falling back for invalid values or types."""
     from PoE2_Data_Logger.core import logger_store as logger
 
     with logger._connect() as db:
@@ -28,6 +29,7 @@ def saved_threads():
 
 
 def active_threads():
+    """Freeze the process thread count once under a lock for shared OCR sessions."""
     global _ACTIVE_THREADS
     with _ACTIVE_LOCK:
         if _ACTIVE_THREADS is None:
@@ -36,6 +38,7 @@ def active_threads():
 
 
 def save_threads(count):
+    """Persist an allowed future thread count after freezing this process's active count."""
     if type(count) is not int or count not in THREAD_OPTIONS:
         raise ValueError("CPU OCR threads must be 1, 2, 4 or 6.")
     from PoE2_Data_Logger.core import logger_store as logger

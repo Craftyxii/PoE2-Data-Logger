@@ -22,6 +22,7 @@ HERE = Path(__file__).resolve().parent.parent
 
 @lru_cache(maxsize=1)
 def _assets():
+    """Cache the socket classifier, glyph gallery and book templates used by seed scans."""
     model = joblib.load(HERE / "socket_model.joblib")
     model.n_jobs = 1
     with np.load(HERE / "glyphs.npz") as gallery:
@@ -35,6 +36,11 @@ def _assets():
 
 
 def scan(path: Path):
+    """Locate up to 24 readable pre-open bars and return their seed/family suggestions.
+
+    Reviewed glyphs extend the gallery; the visible-bar list requires socket
+    confidence of at least .80, with a diagnostic fallback when no bar qualifies.
+    """
     with Image.open(path) as image:
         im = image.convert("RGB")
     assets = _assets()
@@ -67,6 +73,11 @@ def scan(path: Path):
 
 
 def _scan_scaled_bar(im, book, model, names, vectors, all_states):
+    """Refine a book’s scale and map the best reading back to capture coordinates.
+
+    Competing socket/seed readings within .02 confidence disable commitment
+    even when the highest-scoring alignment otherwise looks usable.
+    """
     alternatives = []
     for delta in (0, -.025, .025, -.05, .05, -.075, .075):
         scale = round(book[3] + delta, 3)
@@ -100,6 +111,12 @@ def _scan_scaled_bar(im, book, model, names, vectors, all_states):
 
 
 def _scan_bar(im, book, model, names, vectors, all_states):
+    """Decode one seed in three to ten sockets, then compare slot-allowed glyphs and families.
+
+    Socket confidence below .60 stops identification. Position disagreement,
+    book/glyph scores below .70 or a glyph margin below .08 require review;
+    commitment also needs one non-inferred database stage.
+    """
     bx, by, bar_score = book
     patches = []
     indices = []
@@ -210,6 +227,7 @@ def _scan_bar(im, book, model, names, vectors, all_states):
 
 
 def main():
+    """Scan a screenshot supplied on the command line and print the result as JSON."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("screenshot", type=Path)
     args = parser.parse_args()

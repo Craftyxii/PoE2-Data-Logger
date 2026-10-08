@@ -1,3 +1,5 @@
+"""Storage/export checks distinguishing unknown, zero and saved kill counts, including unique kills and legacy callers."""
+
 import json
 from pathlib import Path
 import sqlite3

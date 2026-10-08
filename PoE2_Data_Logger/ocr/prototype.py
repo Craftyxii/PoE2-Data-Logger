@@ -1,3 +1,5 @@
+"""Locate book anchors and normalize pre-open bars to fixed socket geometry."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -17,6 +19,7 @@ def ncc_find_all(
     threshold: float = 0.65,
     limit: int = 24,
 ) -> list[tuple[int, int, float]]:
+    """Find up to limit grayscale correlation peaks, suppressing nearby duplicate anchors."""
     a = gray if gray is not None else np.asarray(im.convert("L"), dtype=np.float32)
     t = np.asarray(template.convert("L"), dtype=np.float32)
     h, w = t.shape
@@ -94,15 +97,18 @@ def normalize_book(im: Image.Image, book):
 def ncc_find(
     im: Image.Image, template: Image.Image, gray: np.ndarray | None = None
 ) -> tuple[int, int, float]:
+    """Return the strongest correlation anchor, or a negative-score sentinel if none fits."""
     peaks = ncc_find_all(im, template, gray, threshold=-1, limit=1)
     return peaks[0] if peaks else (0, 0, -1.0)
 
 
 def center_for(book_x: int, book_y: int, sockets: int, slot: int) -> tuple[int, int]:
+    """Map a one-based left-to-right slot using 57-pixel spacing left of the book anchor."""
     return book_x - BOOK_TO_LAST - (sockets - slot) * SPACING, book_y + BOOK_TO_CENTER_Y
 
 
 def crop_at(im: Image.Image, x: int, y: int, w: int, h: int) -> Image.Image | None:
+    """Return a centered crop only when its entire rectangle lies inside the image."""
     box = (x - w // 2, y - h // 2, x - w // 2 + w, y - h // 2 + h)
     if box[0] < 0 or box[1] < 0 or box[2] > im.width or box[3] > im.height:
         return None

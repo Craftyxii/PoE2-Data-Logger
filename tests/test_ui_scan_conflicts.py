@@ -1,3 +1,5 @@
+"""Qt scan-conflict checks preserving a pending remnant review across other captured activity and delayed worker results."""
+
 import copy
 import io
 import os

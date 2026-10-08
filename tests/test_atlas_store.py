@@ -1,3 +1,5 @@
+"""Storage checks for Atlas validation, stable setup identities and map-owned historical setup snapshots."""
+
 import copy
 import csv
 import hashlib

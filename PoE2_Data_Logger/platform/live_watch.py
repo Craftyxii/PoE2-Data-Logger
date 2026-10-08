@@ -1,3 +1,5 @@
+"""Check external Windows foreground ownership and validate bounded screen-capture rectangles."""
+
 from __future__ import annotations
 
 import os
@@ -5,6 +7,9 @@ import sys
 
 
 def external_window_title(user32, window):
+    """Read a Windows title only for a valid external process; own-process or unreadable
+    windows return an empty string.
+    """
     import ctypes
     from ctypes import wintypes
 
@@ -25,6 +30,7 @@ def external_window_title(user32, window):
 
 
 def game_foreground():
+    """Require Windows and an external foreground title exactly matching Path of Exile 2."""
     if sys.platform != "win32":
         return False
     import ctypes
@@ -37,6 +43,9 @@ def game_foreground():
 
 
 def validate_region(region):
+    """Coerce capture coordinates to integers and reject undersized, oversized or out-of-range
+    screen rectangles.
+    """
     if not isinstance(region, dict):
         raise ValueError("Select the opened remnant region first.")
     try:

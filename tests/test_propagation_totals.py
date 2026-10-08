@@ -1,3 +1,5 @@
+"""Storage checks counting accepted propagation scans once while preserving pair order and expedition totals."""
+
 from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path

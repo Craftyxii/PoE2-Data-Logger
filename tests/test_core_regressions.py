@@ -1,3 +1,5 @@
+"""Storage and concurrent-write regressions for mapped seed rewards, settings snapshots and preserved reference edits."""
+
 from concurrent.futures import ThreadPoolExecutor
 import csv
 import io

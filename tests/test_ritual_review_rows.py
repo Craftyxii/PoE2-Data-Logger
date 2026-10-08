@@ -1,3 +1,5 @@
+"""Qt correction checks retaining unknown Ritual rows until required fields are corrected or removed."""
+
 import copy
 import csv
 import io

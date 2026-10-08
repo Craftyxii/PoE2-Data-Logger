@@ -1,3 +1,5 @@
+"""Qt inventory-review checks attaching each row to its captured slot without borrowing unrelated image evidence."""
+
 import os
 from pathlib import Path
 import tempfile

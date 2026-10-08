@@ -48,6 +48,7 @@ def _line_groups(lines, horizontal, tolerance=2.5):
 
 
 def _hits(groups, start, pitch, intervals, tolerance, boundary=None):
+    """Pair expected lattice dividers with nearby lines or explicitly allowed image boundaries."""
     matches = []
     for index in range(intervals + 1):
         at = start + index * pitch
@@ -62,6 +63,11 @@ def _hits(groups, start, pitch, intervals, tolerance, boundary=None):
 
 
 def _locate(pixels, header_box):
+    """Fit a complete 12×10 lattice with per-row divider and outer-boundary evidence.
+
+    Optionally constrain it below the Favours heading; allow cropped outer
+    boundaries only with supporting geometry, then refine a common square pitch.
+    """
     height, width = pixels.shape[:2]
     edges = cv2.Canny(pixels, 12, 35)
     minimum = max(24, round(min(width, height) * .18))
@@ -238,6 +244,7 @@ def _locate(pixels, header_box):
 
 
 def _cell_box(origin, pitch, column, row, width=1, height=1):
+    """Convert zero-based lattice positions and a cell footprint to rounded capture bounds."""
     x, y = origin
     return tuple(round(value) for value in
                  (x + column * pitch, y + row * pitch,
@@ -245,6 +252,7 @@ def _cell_box(origin, pitch, column, row, width=1, height=1):
 
 
 def _occupied(pixels, box, pitch):
+    """Check inset brightness and variation so dim empty motifs and cell highlights are excluded."""
     left, top, right, bottom = box
     inset = max(2, round(pitch * .15))
     cell = pixels[top + inset:bottom - inset, left + inset:right - inset]
@@ -259,12 +267,17 @@ def _occupied(pixels, box, pitch):
 
 @lru_cache(maxsize=2)
 def _corner_template(bottom_right):
+    """Cache the bundled upper-left or lower-right ornate item-frame sample."""
     name = "corner_bottom_right.png" if bottom_right else "corner_top_left.png"
     with Image.open(Path(__file__).resolve().parent / "ritual_assets" / name) as image:
         return np.asarray(image.convert("RGB"))
 
 
 def _corner_strength(pixels, box, pitch, bottom_right=False):
+    """Return binary corner support from local correlation and brown ornament color.
+
+    The threshold depends on corner orientation and pitch to accommodate resampling.
+    """
     left, top, right, bottom = box
     # Brown equipment artwork alone is not an ornate frame.  Verify the
     # actual curled corner shape before using it to join multiple cells.
@@ -315,6 +328,7 @@ def _no_divider(pixels, edges, origin, pitch, row, column, vertical):
 
 
 def _rewards(pixels, geometry):
+    """Group item cells at a common ornament scale, retaining capture boxes."""
     scale = 52.65 / geometry["pitch"]
     if abs(scale - 1) > .05:
         # The ornament samples are eight pixels wide at the game's standard
@@ -337,7 +351,43 @@ def _rewards(pixels, geometry):
     return _rewards_at_scale(pixels, geometry)
 
 
+def _footprint_pixels(pixels, geometry):
+    """Restore moderately dimmed frame evidence from the uniform blue backing.
+
+    Only footprint geometry uses these pixels. Icon identity and quantities
+    continue to use the original capture, so this cannot create a confident
+    item match by brightening unclear artwork.
+    """
+    # Origin/pitch also describe the normalized image; stored capture bounds
+    # deliberately remain in original-image coordinates after resizing.
+    left, top, right, bottom = _cell_box(geometry["origin"], geometry["pitch"],
+                                        0, 0, COLUMNS, ROWS)
+    grid = pixels[top:bottom, left:right].astype(np.float32)
+    if not grid.size:
+        return pixels
+    red, green, blue = grid.transpose(2, 0, 1)
+    backing = ((red < 20) & (green < 20) & (blue > red * 1.5) &
+               (blue > green * 1.5) & (blue >= 10) & (blue <= 35))
+    values = blue[backing].astype(np.uint8)
+    if values.size < .015 * grid.shape[0] * grid.shape[1]:
+        return pixels
+    mode = int(np.bincount(values, minlength=256).argmax())
+    # The captured game backing is approximately RGB(8,4,28). Require a
+    # substantial, consistent backing before compensating for dimmed frames;
+    # scattered blue artwork and severe darkness are insufficient evidence.
+    if not 12 <= mode <= 22 or float((np.abs(values.astype(int) - mode) <= 2).mean()) <= .6:
+        return pixels
+    corrected = pixels.copy()
+    corrected[top:bottom, left:right] = np.clip(grid * (28 / mode), 0, 255).astype(np.uint8)
+    return corrected
+
+
 def _rewards_at_scale(pixels, geometry):
+    """Join cells only when item frame corners or missing dividers agree."""
+    footprint_pixels = _footprint_pixels(pixels, geometry)
+    if footprint_pixels is not pixels:
+        pixels = footprint_pixels
+        geometry = dict(geometry, edges=cv2.Canny(pixels, 12, 35))
     origin, pitch = geometry["origin"], geometry["pitch"]
     boxes = {row * COLUMNS + column + 1: _cell_box(origin, pitch, column, row)
              for row in range(ROWS) for column in range(COLUMNS)}
@@ -378,6 +428,7 @@ def _rewards_at_scale(pixels, geometry):
     components = {slot: {slot} for slot in remaining}
 
     def join(first, second):
+        """Merge two adjacent cell components and share the merged set with every member."""
         a, b = components[first], components[second]
         if a is not b:
             combined = a | b

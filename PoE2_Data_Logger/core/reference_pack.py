@@ -1,3 +1,10 @@
+"""Exchange editable reference tables and labelled image evidence in bounded ZIP packs.
+
+The manifest carries recipe, name, seed and recognition references plus saved
+seed screenshots. Import checks archive membership, image hashes, footprints
+and relational references before committing supported database changes.
+"""
+
 from __future__ import annotations
 
 import base64
@@ -24,6 +31,7 @@ MAX_REVIEW_IMAGE = 500000
 
 
 def _name(raw, limit=200):
+    """Require bounded nonempty string metadata without characters below ASCII space, then trim it."""
     if not isinstance(raw, str) or not raw.strip() or len(raw) > limit or any(
             ord(char) < 32 for char in raw):
         raise ValueError("Reference pack contains an invalid name.")
@@ -31,6 +39,11 @@ def _name(raw, limit=200):
 
 
 def _image(raw, limit=MAX_IMAGE, kind=None):
+    """Verify bounded PNG/JPEG pixels and normalize legacy icon formats by their category.
+
+    Screenshot bytes remain unchanged; currency/item icons become 96-pixel RGB
+    PNGs, while Omen artwork retains proportions within a 512-pixel bound.
+    """
     if len(raw) > limit:
         raise ValueError("Reference image is too large.")
     try:
@@ -66,6 +79,7 @@ def _image(raw, limit=MAX_IMAGE, kind=None):
 
 
 def _existing_recipe(db, name):
+    """Find a case-insensitive canonical recipe spelling and reject ambiguous case duplicates."""
     matches = db.execute("SELECT name FROM recipes WHERE name=? COLLATE NOCASE", (name,)).fetchall()
     if len(matches) > 1:
         raise ValueError("Recipe database contains conflicting case spellings.")
@@ -73,6 +87,7 @@ def _existing_recipe(db, name):
 
 
 def _recipe_name(db, raw):
+    """Validate a reference name and require a canonical recipe already present in the database."""
     name = _existing_recipe(db, _name(raw))
     if name is None:
         raise ValueError("Reference pack references an unknown recipe.")
@@ -80,6 +95,7 @@ def _recipe_name(db, raw):
 
 
 def _review_entry(entry):
+    """Validate learned-icon metadata, hash/path shape and category-compatible cell footprint."""
     from PoE2_Data_Logger.core.review_learning import validate_name
 
     if (not isinstance(entry, dict) or entry.get("kind") not in ("currency", "omen", "item") or
@@ -96,6 +112,7 @@ def _review_entry(entry):
 
 
 def _review_image(raw, entry):
+    """Check canonical learned PNG dimensions and visible artwork without changing its hashed bytes."""
     from PoE2_Data_Logger.core.review_learning import encode_example
 
     _image(raw, limit=MAX_REVIEW_IMAGE)
@@ -110,6 +127,11 @@ def _review_image(raw, entry):
 
 
 def export_pack():
+    """Package reference tables, labelled examples and seed screenshots from one read transaction.
+
+    Verify stored image hashes and retain learned PNG bytes, then enforce the
+    manifest, image-count and size limits used by the importer.
+    """
     assets = {}
     with logger._connect() as db:
         db.execute("BEGIN")
@@ -185,6 +207,11 @@ def export_pack():
 
 
 def _inspect(path):
+    """Read a bounded supported pack and require exactly its declared, hash-verified assets.
+
+    Reject duplicate/encrypted entries, conflicting learned labels and invalid
+    image formats or footprints without extracting archive paths to disk.
+    """
     path = Path(path)
     if not path.is_file() or path.stat().st_size > MAX_PACK:
         raise ValueError("Choose a reference pack under 256 MB.")
@@ -256,6 +283,12 @@ def _inspect(path):
 
 
 def import_pack(path, replace_existing=False):
+    """Apply validated references in one write transaction, ignoring collisions by default.
+
+    Optional replacement updates supported reference records; recipe/seed links,
+    labels and glyph vectors are checked. Remove newly created screenshot files
+    if import fails, while returning per-record counts after a successful commit.
+    """
     data, assets = _inspect(path)
     counts = {key: 0 for key in ("recipes", "families", "aliases", "seed_states", "affixes",
                                   "master_perks", "currency_names", "omen_names", "item_names", "glyphs",

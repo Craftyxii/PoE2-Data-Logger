@@ -1,3 +1,5 @@
+"""Cross-store workflow regressions for repeated snapshots, committed settings, numeric exports and stale-context rejection."""
+
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import csv

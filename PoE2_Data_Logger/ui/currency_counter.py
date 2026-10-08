@@ -18,6 +18,7 @@ _TIERS = {"lesser": 0, "": 1, "greater": 2, "perfect": 3, "refined": 2, "ancient
 
 
 def _group_for(item):
+    """Prefer an explicit catalog group, then classify by item kind and currency name."""
     explicit = str(item.get("group") or "").strip()
     if explicit:
         return explicit
@@ -51,6 +52,7 @@ def _group_for(item):
 
 
 def _variant_key(name):
+    """Sort by natural base name, then tier, preserving numeric level order."""
     normalized = name.casefold().replace("’", "'")
     match = re.match(r"^(lesser|greater|perfect|refined|ancient)\s+(.+)$", normalized)
     tier, base = (match.group(1), match.group(2)) if match else ("", normalized)
@@ -61,6 +63,7 @@ def _variant_key(name):
 
 
 def _group_key(group):
+    """Order known currency families first, then custom groups alphabetically."""
     try:
         return 0, _GROUP_ORDER.index(group), ""
     except ValueError:
@@ -68,7 +71,9 @@ def _group_key(group):
 
 
 class CurrencyCard(QFrame):
+    """Display one tracked item with its icon and current session quantity."""
     def __init__(self, item, png=None, parent=None):
+        """Build an accessible item card and initialize its icon and supplied quantity."""
         super().__init__(parent)
         self.name = item["name"]
         self.setObjectName("sessionCurrencyCard")
@@ -103,6 +108,7 @@ class CurrencyCard(QFrame):
         self.set_quantity(item["quantity"])
 
     def set_icon(self, png):
+        """Display supplied PNG bytes at card size or use a diamond placeholder."""
         picture = QPixmap()
         if png and picture.loadFromData(png, "PNG"):
             self.icon.setPixmap(picture.scaled(52, 60, Qt.AspectRatioMode.KeepAspectRatio,
@@ -113,6 +119,7 @@ class CurrencyCard(QFrame):
             self.icon.setStyleSheet("font-size:28px;color:#807361;")
 
     def set_quantity(self, amount):
+        """Update the current total, zero-state colour, tooltip, and accessible amount."""
         self.quantity = amount
         self.total_label.setText(f"{amount:,}")
         colour = "#F5C364" if amount else "#807B73"
@@ -121,13 +128,16 @@ class CurrencyCard(QFrame):
         self.setToolTip(f"{self.name}\n{amount:,} found this session")
 
     def resizeEvent(self, event):
+        """Elide the visible name to fit while retaining its full tooltip."""
         super().resizeEvent(event)
         self.name_label.setText(self.name_label.fontMetrics().elidedText(
             self.name, Qt.TextElideMode.ElideRight, max(1, self.name_label.width())))
 
 
 class SessionCurrencyCounter(QWidget):
+    """Filter and group supplied session totals alongside zero-count catalog entries."""
     def __init__(self, parent=None):
+        """Build the search, counting-status summary, and responsive grouped card grid."""
         super().__init__(parent)
         self.setObjectName("sessionCurrencyCounter")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
@@ -173,6 +183,11 @@ class SessionCurrencyCounter(QWidget):
         content.addLayout(self.grid)
 
     def set_totals(self, data, icons=None, catalog=None):
+        """Replace displayed totals, merge names case-insensitively, and retain catalog zeros.
+
+        Negative supplied quantities contribute zero; found items and groups sort first.
+        The caller supplies the map counts and pending-scan status shown in the summary.
+        """
         icons = icons or {}
         if catalog is not None:
             self._catalog = {}
@@ -242,6 +257,7 @@ class SessionCurrencyCounter(QWidget):
         self._filter()
 
     def _filter(self):
+        """Match item or group names and prioritize groups with visible nonzero totals."""
         query = self.search.text().strip().casefold()
         self._visible_groups = tuple(
             (group, tuple(name for name in names if query in name.casefold() or query in group.casefold()))
@@ -257,6 +273,7 @@ class SessionCurrencyCounter(QWidget):
         self._relayout()
 
     def _relayout(self):
+        """Reuse cards in one to six columns, rebuilding only when width or visible groups change."""
         if not hasattr(self, "grid"):
             return
         columns = max(1, min(6, (self.width() + 12) // 252))
@@ -286,5 +303,6 @@ class SessionCurrencyCounter(QWidget):
         self._columns = columns
 
     def resizeEvent(self, event):
+        """Reflow the grouped cards after the widget width changes."""
         super().resizeEvent(event)
         self._relayout()

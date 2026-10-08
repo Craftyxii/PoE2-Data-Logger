@@ -1,3 +1,5 @@
+"""Export checks retaining map-linked expedition identities and ordered saved chain data."""
+
 import csv
 import io
 from pathlib import Path

@@ -1,3 +1,5 @@
+"""Storage checks deriving per-map positive gains from latest approved snapshots rather than summing scan history."""
+
 import json
 from pathlib import Path
 import tempfile

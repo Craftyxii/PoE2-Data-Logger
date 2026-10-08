@@ -36,6 +36,9 @@ ACTIVITIES = ["Main Atlas", "Breach", "Expedition", "Ritual", "Delirium", "Abyss
 
 
 def write_gzip(path: Path, value: dict) -> None:
+    """Write stable sorted JSON as gzip with zero mtime so unchanged source inputs reproduce
+    the same bytes.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     # Zero mtime makes rebuilding from the same sources byte-for-byte repeatable.
     path.write_bytes(gzip.compress(json.dumps(value, ensure_ascii=False, sort_keys=True,
@@ -43,11 +46,15 @@ def write_gzip(path: Path, value: dict) -> None:
 
 
 def read_csv(path: Path) -> list[dict]:
+    """Load a UTF-8 source table as dictionaries keyed by its header row."""
     with path.open(encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
 
 
 def refresh_inputs(directory: Path) -> dict:
+    """Select Atlas passives, their choices and relevant stat translations from pinned local
+    research files, recording input hashes.
+    """
     atlas = json.loads((directory / INPUT_NAMES[0]).read_text(encoding="utf-8"))
     passives = read_csv(directory / INPUT_NAMES[1])
     variants = read_csv(directory / INPUT_NAMES[2])
@@ -87,6 +94,7 @@ def refresh_inputs(directory: Path) -> dict:
 
 
 def plain_text(text: str) -> str:
+    """Strip game markup while retaining the displayed label after a link separator."""
     return re.sub(r"\[([^\[\]]+)\]", lambda match: match.group(1).split("|")[-1], text).strip()
 
 
@@ -128,6 +136,9 @@ def translated_effects(stats: dict, translations: list[dict]) -> list[str]:
 
 
 def positions(atlas: dict) -> tuple[dict, dict]:
+    """Resolve orbit coordinates and bidirectional neighbors, choosing duplicate placements by
+    their connected-node distances.
+    """
     candidates = defaultdict(list)
     neighbors = defaultdict(set)
     for group in atlas["groups"]:
@@ -144,6 +155,9 @@ def positions(atlas: dict) -> tuple[dict, dict]:
     chosen = {}
     for node_hash, placements in candidates.items():
         def score(point):
+            """Rank one duplicate node placement by its nearest distances to candidate neighbor
+            placements.
+            """
             return sum(min(math.dist(point, other) for other in candidates[target])
                        for target in neighbors[node_hash] if target in candidates)
         chosen[node_hash] = min(placements, key=score)
@@ -152,6 +166,7 @@ def positions(atlas: dict) -> tuple[dict, dict]:
 
 def icon_name(path: str) -> str:
     # Original stem remains legible; suffix prevents case/path collisions.
+    """Keep the icon stem and add a path hash to avoid filename collisions."""
     return Path(path).stem + "-" + hashlib.sha256(path.encode()).hexdigest()[:8] + ".png"
 
 
@@ -186,6 +201,9 @@ def edge_curves(atlas: dict, coords: dict, hash_to_id: dict) -> dict:
 
 
 def make_catalog(inputs: dict) -> dict:
+    """Build node/effect/choice, edge and artwork metadata from local inputs, then validate the
+    pinned catalog shape.
+    """
     atlas = inputs["atlas"]
     coords, neighbors = positions(atlas)
     hash_to_id = {key: node["id"] for key, node in atlas["passives"].items()}
@@ -273,6 +291,9 @@ def make_catalog(inputs: dict) -> dict:
 
 
 def validate(data: dict) -> None:
+    """Assert expected pinned node/choice counts, finite coordinates, unique identities and
+    valid graph/effect references.
+    """
     nodes = data["nodes"]
     assert len(nodes) == 575, len(nodes)
     assert sum(n["allocatable"] for n in nodes.values()) == 530
@@ -291,6 +312,9 @@ def validate(data: dict) -> None:
 
 
 def rebuild_art(directory: Path, data: dict, output: Path) -> None:
+    """Crop pinned sprite sheets into runtime icons/backgrounds/frames and retain provenance
+    without machine-specific paths.
+    """
     from PIL import Image
     (output / "icons").mkdir(parents=True, exist_ok=True)
     (output / "art").mkdir(parents=True, exist_ok=True)
@@ -328,6 +352,9 @@ def rebuild_art(directory: Path, data: dict, output: Path) -> None:
 
 
 def main() -> None:
+    """Parse local rebuild options, refresh inputs/art only when requested and write the
+    validated catalog bundle.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--research-directory", type=Path)
     parser.add_argument("--art-directory", type=Path)

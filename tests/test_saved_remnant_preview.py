@@ -1,3 +1,5 @@
+"""Qt checks retaining a locked saved remnant preview through refresh until a new scan/manual review replaces it."""
+
 import io
 import json
 import os
