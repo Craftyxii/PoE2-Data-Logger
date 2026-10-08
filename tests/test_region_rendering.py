@@ -3,7 +3,7 @@
 import gc
 import os
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -18,6 +18,12 @@ class RegionRenderingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        """Isolate synthetic image rendering from the runner's physical monitors."""
+        mapping = patch.object(region_select, "_logical_capture_bounds", side_effect=QRect)
+        mapping.start()
+        self.addCleanup(mapping.stop)
 
     def test_screenshot_colors_and_rows_survive_source_release(self):
         screenshot = Image.new("RGB", (321, 201), (17, 28, 49))
@@ -49,12 +55,11 @@ class RegionRenderingTests(unittest.TestCase):
         editor.close()
 
     def test_screenshot_preserves_scaled_native_region(self):
-        screen = Mock()
-        screen.devicePixelRatio.return_value = 2
-        screen.geometry.return_value = QRect(-1920, 0, 960, 540)
+        """Keep native selection pixels when the display adapter returns half-size logical bounds."""
         current = {"x": -1500, "y": 200, "w": 400, "h": 200}
         screenshot = Image.new("RGB", (1920, 1080), (10, 20, 30))
-        with patch.object(region_select.QGuiApplication, "screenAt", return_value=screen):
+        with patch.object(region_select, "_logical_capture_bounds",
+                          return_value=QRect(-1920, 0, 960, 540)):
             editor = region_select.RegionEditor(current, screenshot=screenshot,
                                                 screen_bounds=(-1920, 0, 1920, 1080))
         self.assertEqual((editor.width(), editor.height()), (960, 540))

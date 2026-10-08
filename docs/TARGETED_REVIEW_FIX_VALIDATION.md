@@ -102,6 +102,20 @@ review-learning UI cases passed. The 16 installer metadata/source checks also
 passed. The tagged Windows pipeline repeats the full regression suite before
 building or publishing the installer.
 
+The first tagged Windows run completed the 100-map simulation with 2,587 commits
+and zero mismatches. Its 894-case regression suite then reported eight errors
+from synthetic region-editor fixtures querying the real Windows monitor instead
+of a controlled display adapter, and one failure comparing a short Windows temp
+path with the canonical name of the same export folder. Publication was blocked.
+
+Rendering and drag fixtures now supply their synthetic logical capture bounds;
+the separate native-coordinate tests still exercise monitor identity, origins,
+DPI and rejection guards. The export-folder test retains its exact draft-path
+check and compares directory identity after the export canonicalizes the path.
+All 39 cases in the four affected rendering, platform, navigation and coordinate
+modules pass locally after these fixture corrections. No application monitor or
+export-folder guard was relaxed.
+
 ### Skyfall / Celestial report
 
 The user confirmed that Celestial itself carries the three propagation marks in the reported Skyfall capture. Saving Tempest is therefore incorrect; the mark belongs to Celestial, not an unmarked hovered tile.

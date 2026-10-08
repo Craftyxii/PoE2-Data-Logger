@@ -146,11 +146,10 @@ class PlatformTests(unittest.TestCase):
         self.assertTrue(manager.image(event["id"]))
 
     def test_scaled_region_editor_returns_native_pixels(self):
-        screen = Mock()
-        screen.devicePixelRatio.return_value = 2
-        screen.geometry.return_value = QRect(0, 0, 960, 540)
+        """Convert a controlled half-size logical selection back to its native pixels."""
         current = {"x": 100, "y": 200, "w": 400, "h": 200}
-        with patch.object(region_select.QGuiApplication, "screenAt", return_value=screen):
+        with patch.object(region_select, "_logical_capture_bounds",
+                          return_value=QRect(0, 0, 960, 540)):
             editor = region_select.RegionEditor(current, screen_bounds=(0, 0, 1920, 1080))
         self.assertEqual((editor.width(), editor.height()), (960, 540))
         self.assertEqual(editor.region(), current)
@@ -159,7 +158,9 @@ class PlatformTests(unittest.TestCase):
         editor.close()
 
     def test_region_drag_stays_inside_capture_bounds(self):
-        editor = region_select.RegionEditor(screen_bounds=(0, 0, 1920, 1080))
+        """Clip dragged selections using a synthetic display with equal native and logical bounds."""
+        with patch.object(region_select, "_logical_capture_bounds", side_effect=QRect):
+            editor = region_select.RegionEditor(screen_bounds=(0, 0, 1920, 1080))
         press = Mock()
         press.button.return_value = Qt.MouseButton.LeftButton
         press.position.return_value = QPointF(editor.width() - 20, 100)

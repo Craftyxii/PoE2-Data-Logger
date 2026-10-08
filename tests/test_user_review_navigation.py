@@ -124,6 +124,7 @@ class UserReviewNavigationTests(unittest.TestCase):
         self.assertEqual(next(row["Propagation Rune 1"] for row in rows if row["Chain Step #"]), "Tidal")
 
     def test_chosen_export_folder_survives_saving_an_unrelated_setting(self):
+        """Retain the chosen destination across refreshes, accepting equivalent Windows path aliases."""
         folder = str(Path(self.tmp.name) / "shared exports")
         Path(folder).mkdir()
         self.window.tabs.setCurrentIndex(5)
@@ -135,14 +136,15 @@ class UserReviewNavigationTests(unittest.TestCase):
         self.window.tabs.setCurrentIndex(5)
         self.assertEqual(self.window.export_folder.text(), folder)
         def immediate(_label, write, done):
+            """Complete the export worker inline so saved-path assertions follow its callback."""
             done(write())
         with patch.object(self.window, "_submit", side_effect=immediate):
             next(button for button in self.window.findChildren(QPushButton)
                  if button.text() == "Save XLSX to folder").click()
-        self.assertEqual(logger.get_state()["export_folder"], folder,
-                         self.window.statusBar().currentMessage())
+        self.assertTrue(Path(logger.get_state()["export_folder"]).samefile(folder),
+                        self.window.statusBar().currentMessage())
         self.assertTrue(list(Path(folder).glob("*.xlsx")))
-        self.assertEqual(self.window.export_folder.text(), folder)
+        self.assertTrue(Path(self.window.export_folder.text()).samefile(folder))
 
     def test_perk_selection_survives_viewing_another_master(self):
         self.window.tabs.setCurrentIndex(3)

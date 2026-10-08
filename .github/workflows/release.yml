@@ -51,6 +51,16 @@ jobs:
           python -m pip install --upgrade "pip>=26.2"
           if ($LASTEXITCODE -ne 0) { throw 'Build tool update failed.' }
           python -m pip install -r requirements-build.txt
+      - name: Check Windows display and export fixtures
+        # Fail platform-specific fixture mismatches before the longer session
+        # and complete suite; native-coordinate guards remain covered here.
+        run: |
+          python tools/run_tests.py --pattern 'test_region_*.py'
+          if ($LASTEXITCODE -ne 0) { throw 'Region fixture checks failed.' }
+          python tools/run_tests.py --pattern test_platform.py
+          if ($LASTEXITCODE -ne 0) { throw 'Platform fixture checks failed.' }
+          python tools/run_tests.py --pattern test_user_review_navigation.py
+          if ($LASTEXITCODE -ne 0) { throw 'Review navigation fixture checks failed.' }
       - name: Verify 100-map user workflow
         # This simulation injects scan results at the UI boundary; capture OCR
         # regressions are separate checks, not evidence from this simulation.

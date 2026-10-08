@@ -55,6 +55,9 @@ Python changes after that pass are limited to the display title, installer
 guard/probe checks and a smaller scan-preview minimum height. Test updates supply
 the real grid pitch to learned-artwork fixtures and enforce the new requirement
 that propagation entry stays out of remnant review.
+Windows-only fixture corrections also isolate synthetic rendering tests from
+the runner's real monitors and accept equivalent short/long names for the same
+export directory. Dedicated native-coordinate rejection checks remain in place.
 
 Capture regressions and offscreen Qt review/navigation checks exercise the
 recognition and save/export paths separately. The Windows release pipeline runs
