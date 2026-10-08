@@ -328,6 +328,7 @@ class LoggerWindow(QMainWindow):
         self._remnant_reading = None
         self._propagation_reading = None
         self._manual_propagation_context = None
+        self._propagation_review_active = False
         self._chain_context = None
         self._chain_drafts = {}
         self._chain_scan_number = 0
@@ -793,6 +794,9 @@ class LoggerWindow(QMainWindow):
             self._ritual_reading = None
             self._pending_ritual_map = None
         self.pending_review_kind = kind
+        if kind != "propagation":
+            self._discard_chain_review_draft()
+        self._set_chain_review_active(kind == "propagation")
         self.review_kind.setText({"remnant": "Remnant", "seed": "Visible remnants",
                                   "waystone": "Waystone", "tablet": "Tablet",
                                   "currency": "Currency inventory", "ritual": "Ritual rewards",
@@ -864,6 +868,9 @@ class LoggerWindow(QMainWindow):
         if self.pending_review_kind != kind:
             return
         self.pending_review_kind = None
+        if kind != "propagation":
+            self._discard_chain_review_draft()
+        self._set_chain_review_active(kind == "propagation")
         if self._overlay_auto_review:
             self.hide_overlay()
         if kind == "tablet":
@@ -1682,6 +1689,11 @@ class LoggerWindow(QMainWindow):
         chain.addLayout(expedition_row)
         self.chain_note = message("Enter the whole chain, then commit it once.")
         chain.addWidget(self.chain_note)
+        self.chain_list = QListWidget()
+        self.chain_list.setAccessibleName("Current expedition chain")
+        self.chain_list.setMaximumHeight(170)
+        chain.addWidget(self.chain_list)
+        self.chain_list.hide()
         self.rune_grid = QGridLayout()
         self.rune_inputs = []
         chain.addLayout(self.rune_grid)
@@ -1691,10 +1703,6 @@ class LoggerWindow(QMainWindow):
         buttons.addWidget(button("+ More runes", lambda: self.add_runes(6)))
         buttons.addStretch()
         chain.addLayout(buttons)
-        self.chain_list = QListWidget()
-        self.chain_list.setMaximumHeight(170)
-        chain.addWidget(self.chain_list)
-        self.chain_list.hide()
 
     def _build_kill_controls(self, content, *, compact=False):
         kills = self._group("MAP KILLS", content)
@@ -2042,10 +2050,6 @@ class LoggerWindow(QMainWindow):
         self.show_tablet_raw()
         self._sync_header_ids(state)
         self._load_chain_context()
-        self.chain_list.clear()
-        for entry in state["chain"]:
-            self.chain_list.addItem(f"#{entry['step']}  " + " · ".join(filter(None, (entry['rune1'], entry['rune2']))))
-        self.chain_list.setVisible(bool(state["chain"]))
         kill_values = (*state["kills"], state.get("unique_kills"))
         for widget, count in zip((self.normal, self.magic, self.rare, self.unique), kill_values):
             widget.setText("" if count is None else str(count))
@@ -2354,6 +2358,7 @@ class LoggerWindow(QMainWindow):
         self._waystone_form_baseline = self._counts_form_baseline = None
         self._tablet_form_baseline = self._active_master_baseline = self._perk_form_baseline = None
         self.pending_review_kind = None
+        self._discard_chain_review_draft()
         self._failed_review = False
         self._remnant_reading = None
         self._propagation_reading = None
@@ -2481,6 +2486,26 @@ class LoggerWindow(QMainWindow):
             previous = part
         return steps
 
+    def _set_chain_review_active(self, active):
+        # A held remnant can remain pending independently while propagation
+        # actions display their own review controls.
+        self._propagation_review_active = active
+        self.chain_review_group.setVisible(active and (
+            bool(self.chain_review_table.rowCount()) or bool(self._manual_propagation_context) or
+            self.pending_review_kind == "propagation"))
+
+    def _discard_chain_review_draft(self):
+        # Accepted scan counts and audit snapshots are already saved. Only
+        # the uncommitted rune draft and its review choices are discarded.
+        self._set_chain_review_active(False)
+        self._clear_manual_propagation()
+        for field in self.rune_inputs:
+            with QSignalBlocker(field):
+                field.clear()
+                field.setProperty("chainPart", None)
+                field.setProperty("chainRecipe", None)
+        self._chain_fields_changed()
+
     def _refresh_chain_review(self):
         if not hasattr(self, "chain_review_table") or not hasattr(self, "rune_inputs"):
             return
@@ -2489,6 +2514,7 @@ class LoggerWindow(QMainWindow):
         table.setRowCount(0)
         previous = None
         part_number = 0
+        chain_parts = []
         for index, field in enumerate(self.rune_inputs):
             rune = value(field)
             if not rune:
@@ -2496,6 +2522,8 @@ class LoggerWindow(QMainWindow):
             part = field.property("chainPart") or f"manual-{index}"
             if part != previous:
                 part_number += 1
+                chain_parts.append({"runes": [], "recipe": field.property("chainRecipe") or ""})
+            chain_parts[-1]["runes"].append(rune)
             previous = part
             row = table.rowCount()
             table.insertRow(row)
@@ -2506,8 +2534,19 @@ class LoggerWindow(QMainWindow):
                     item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, column, item)
         del blocker
-        self.chain_review_group.setVisible(bool(table.rowCount()) or bool(self._manual_propagation_context) or
-                                           self.pending_review_kind == "propagation")
+        self.chain_list.clear()
+        saved_chain = self.state.get("chain") or []
+        for entry in saved_chain:
+            self.chain_list.addItem(f"#{entry['step']}  " + " → ".join(
+                filter(None, (entry['rune1'], entry['rune2']))))
+        next_step = max((entry["step"] for entry in saved_chain), default=0) + 1
+        for number, part in enumerate(chain_parts, next_step):
+            text = f"#{number}  " + " → ".join(part["runes"])
+            if part["recipe"]:
+                text += " · " + part["recipe"]
+            self.chain_list.addItem(text)
+        self.chain_list.setVisible(bool(saved_chain or chain_parts))
+        self._set_chain_review_active(self._propagation_review_active)
         table.setVisible(table.rowCount() > 0)
         self.review_commit_chain_button.setEnabled(table.rowCount() > 0)
         self._manual_propagation_changed()
@@ -2581,7 +2620,7 @@ class LoggerWindow(QMainWindow):
         table.setVisible(bool(self._propagation_choices))
         table.setMinimumHeight(min(260, 38 + 62 * len(self._propagation_choices)))
         self._manual_propagation_changed()
-        self.chain_review_group.show()
+        self._set_chain_review_active(True)
 
     def start_manual_propagation(self):
         self._load_chain_context()
@@ -2661,7 +2700,6 @@ class LoggerWindow(QMainWindow):
                 text = (result.get("status") or "Check the selected recipe and marked runes.")
                 text += " The pending remnant remains open for review."
                 set_message(self.chain_review_status, text, "error")
-                self.chain_review_group.show()
                 self.statusBar().showMessage(text, 15000)
                 self.tabs.setCurrentIndex(0)
             token = self._overlay_review_token
@@ -2706,6 +2744,7 @@ class LoggerWindow(QMainWindow):
         self.state["detonated"] = saved["detonated"]
         self.state["scan_commit_count"] = saved["scan_commit_number"]
         self._set_commit_badge(saved["scan_commit_number"])
+        self._propagation_review_active = True
         self._chain_fields_changed()
         if preserve_remnant_review:
             text = " → ".join(runes) + " added to the chain draft."
@@ -3859,6 +3898,7 @@ class LoggerWindow(QMainWindow):
                                 (saved["scan_commit_number"], saved["remnant_id"])).fetchone()
         rows = logger._load(commit[0])["recipes"] if commit else []
         self._review_saved("remnant", saved["scan_commit_number"])
+        self._discard_chain_review_draft()
         self.first_recipe.clear()
         self.next_recipe.clear()
         self.results = {"seed": None, "opened": None}
@@ -4900,6 +4940,7 @@ class LoggerWindow(QMainWindow):
         self.results = {"seed": None, "opened": None}
         self.images = {"seed": None, "opened": None}
         self.pending_review_kind = None
+        self._set_chain_review_active(False)
         self._failed_review = False
         self._pending_currency_map = self._pending_ritual_map = self._pending_tablet_slot = None
         self._pending_currency_phase = None

@@ -418,7 +418,7 @@ class PropagationUITests(unittest.TestCase):
                 self.assertEqual(self.window.pending_review_kind, "remnant")
                 self.assertEqual(self.window.first_recipe.text(), "A reward being corrected")
 
-    def test_pending_opened_remnant_allows_propagation_without_losing_review_or_chain(self):
+    def test_pending_opened_remnant_allows_propagation_after_discarding_previous_draft(self):
         self.scan(["Death", "Power"], "Divine Orb x2")
         result = {"mode": "opened", "status": "The first reward needs review.",
                   "can_use": False, "first_recipe": None,
@@ -428,6 +428,8 @@ class PropagationUITests(unittest.TestCase):
         pending = logger.get_state()["ocr_pending"]
         self.assertEqual(pending["remnant_id"], "R0001")
         self.assertEqual(self.window.pending_review_kind, "remnant")
+        self.assertEqual(self.draft(), [])
+        self.assertTrue(self.window.chain_review_group.isHidden())
         self.assertFalse(self.window.approve_scan_button.isEnabled())
         self.window.first_recipe.setText("Perfect Chaos Orb x3")
         self.window.next_recipe.setText("Perfect Exalted Orb x3")
@@ -445,7 +447,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
         self.assertEqual(logger.get_state()["scan_commit_count"], 2)
         self.assertEqual(logger.get_state()["detonated"], 2)
-        self.assertEqual(self.draft(), [("1", "Death"), ("1", "Power"), ("2", "Opulent")])
+        self.assertEqual(self.draft(), [("1", "Opulent")])
         self.window.commit_chain()
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
@@ -460,7 +462,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.draft(), [])
         self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(1))
         self.assertEqual([(row["rune1"], row["rune2"]) for row in logger.get_state()["chain"]],
-                         [("Death", "Power"), ("Opulent", "")])
+                         [("Opulent", "")])
 
     def test_manual_remnant_keeps_original_expedition_while_propagation_advances(self):
         self.scan(["Rage", "Time"])
@@ -468,6 +470,7 @@ class PropagationUITests(unittest.TestCase):
         self.window.first_recipe.setText("Reward being corrected")
         self.window.next_recipe.setText("Next reward being corrected")
         self.assertEqual(self.window.pending_review_kind, "remnant")
+        self.assertEqual(self.draft(), [])
         pending = logger.get_state()["ocr_pending"]
         self.assertEqual(pending["expedition_id"], "M0001-E01")
         self.assertFalse(self.window.approve_scan_button.isHidden())
@@ -478,7 +481,7 @@ class PropagationUITests(unittest.TestCase):
         self.assert_remnant_review_preserved(before)
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
         self.assertEqual(logger.get_state()["scan_commit_count"], 2)
-        self.assertEqual(self.draft(), [("1", "Rage"), ("1", "Time"), ("2", "Death")])
+        self.assertEqual(self.draft(), [("1", "Death")])
         self.window.commit_chain()
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
@@ -502,7 +505,8 @@ class PropagationUITests(unittest.TestCase):
         self.scan(["Time"])
         self.assert_remnant_review_preserved(before)
         self.assertIsNone(logger.get_state()["ocr_pending"])
-        self.assertEqual(self.draft(), [("1", "Rage"), ("2", "Time")])
+        self.assertEqual(self.draft(), [("1", "Time")])
+        self.assertEqual(logger.get_state()["detonated"], 2)
 
     def test_same_chain_orphan_database_remnant_token_is_preserved_during_propagation(self):
         self.scan(["Death", "Power"])
@@ -538,11 +542,13 @@ class PropagationUITests(unittest.TestCase):
         self.window.approve_review()
         self.assertIsNone(logger.get_state()["ocr_pending"])
         self.assertEqual(logger.get_state()["detonated"], 1)
-        self.assertEqual(self.draft(), [("1", "Rage"), ("1", "Time")])
+        self.assertEqual(self.draft(), [])
+        self.assertTrue(self.window.chain_review_group.isHidden())
         rows = list(csv.DictReader(io.StringIO(logger.export_csv().decode("utf-8-sig"))))
         self.assertTrue(any(pending["remnant_id"] in row.values() for row in rows))
-        self.window.commit_chain()
-        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        with self.assertRaisesRegex(ValueError, "Fill runes in order"):
+            self.window.commit_chain()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
 
     def test_pending_opened_review_survives_chain_commit_and_next_chain_scan(self):
         result = {"mode": "opened", "status": "Reward needs review.", "can_use": False,
@@ -560,7 +566,8 @@ class PropagationUITests(unittest.TestCase):
         self.scan(["Power"])
         self.assertEqual(logger.get_state()["detonated"], 1)
         self.window.approve_review()
-        self.assertEqual(self.draft(), [("1", "Power")])
+        self.assertEqual(self.draft(), [])
+        self.assertTrue(self.window.chain_review_group.isHidden())
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
         self.assertIsNone(logger.get_state()["ocr_pending"])
         with logger._connect() as db:
