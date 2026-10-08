@@ -67,6 +67,7 @@ class UniquePropagationExportTests(unittest.TestCase):
                     runes=["Bond"], recipe="1x Regal Orb")
         logger.commit_chain_draft([{"rune1": "Rage", "rune2": "Time"},
                                    {"rune1": "Bond", "rune2": ""}])
+        logger.complete_chain(logger.scan_context())
         third = logger.increment_propagation_detonated(logger.scan_context(),
                     runes=["Death", "Power"], recipe="1x Chaos Orb")
         logger.commit_chain_draft([{"rune1": "Death", "rune2": "Power"}])
@@ -102,7 +103,7 @@ class UniquePropagationExportTests(unittest.TestCase):
             for row in rows[1:]:
                 for cell in row:
                     field = headers[cell.get("r").rstrip("0123456789")]
-                    if field in logger.HISTORY_APPEND_HEADERS:
+                    if field in ("Unique Kills (Map)", "Total Kills", "Remnants Detonated (Scan)"):
                         found[field] = (cell.get("t"), cell.findtext("s:v", namespaces=ns))
             self.assertEqual(found, {"Unique Kills (Map)": (None, "0"), "Total Kills": (None, "0"),
                                      "Remnants Detonated (Scan)": (None, "1")})

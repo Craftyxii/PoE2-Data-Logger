@@ -33,12 +33,42 @@ class ChainDraftLifecycleTests(unittest.TestCase):
         logger._READY = False
         self.tmp.cleanup()
 
-    def test_completed_chains_do_not_accumulate_empty_drafts(self):
-        for _ in range(10):
+    def test_appending_and_completing_chains_do_not_accumulate_empty_drafts(self):
+        for number in range(1, 11):
             self.window.rune_inputs[0].setText("Death")
             self.window.commit_chain()
+            self.assertEqual(self.window.state["current_expedition_id"], f"M0001-E{number:02}")
+            self.assertEqual([(part["rune1"], part["rune2"]) for part in self.window.state["chain"]],
+                             [("Death", "")])
+            self.assertTrue(all(not field.text() for field in self.window.rune_inputs))
+            self.assertEqual(self.window._chain_drafts, {})
+            self.window.complete_chain()
             self.assertEqual(self.window._chain_drafts, {})
         self.assertEqual(self.window.state["current_expedition_id"], "M0001-E11")
+
+    def test_committed_open_chain_survives_restart_while_unsaved_fields_do_not(self):
+        self.window.rune_inputs[0].setText("Death")
+        self.window.expedition_commit_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.window.rune_inputs[0].setText("Time")
+        self.window.close()
+        self.window.pool.shutdown(wait=True, cancel_futures=True)
+        self.app.processEvents()
+        logger._READY = False
+        self.window = LoggerWindow()
+        self.window._poll.stop()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.assertFalse(logger.get_state()["chain_completed"])
+        self.assertEqual([(part["rune1"], part["rune2"]) for part in self.window.state["chain"]],
+                         [("Death", "")])
+        self.assertEqual([self.window.chain_list.item(i).text()
+                          for i in range(self.window.chain_list.count())], ["#1  Death"])
+        self.assertTrue(all(not field.text() for field in self.window.rune_inputs))
+        self.assertEqual(self.window._chain_drafts, {})
+        self.assertFalse(self.window.expedition_commit_chain_button.isEnabled())
+        self.assertTrue(self.window.expedition_complete_chain_button.isEnabled())
+        self.window.expedition_complete_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
 
     def test_clearing_one_draft_preserves_other_expedition_unsaved_runes(self):
         self.window.rune_inputs[0].setText("Rage")

@@ -50,7 +50,10 @@ class PropagationTotalsTests(unittest.TestCase):
         self.accept(["Opulent"])
         saved = logger.commit_chain_draft([
             {"rune1": "Death", "rune2": "Power"}, {"rune1": "Opulent"}], logger.scan_context())
-        self.assertEqual(saved["next_expedition_id"], "M0001-E02")
+        self.assertEqual(saved["expedition_id"], "M0001-E01")
+        self.assertEqual(logger.get_state()["detonated"], 2)
+        completed = logger.complete_chain(logger.scan_context())
+        self.assertEqual(completed["next_expedition_id"], "M0001-E02")
         self.assertIsNone(logger.get_state()["detonated"])
         with logger._connect() as db:
             self.assertEqual(db.execute("SELECT detonated FROM expeditions WHERE expedition_id='M0001-E01'")
@@ -134,6 +137,7 @@ class PropagationTotalsTests(unittest.TestCase):
     def test_pending_remnant_other_expedition_on_same_map_stays_independent(self):
         pending = logger.assign_ocr_id("opened")
         logger.commit_chain_draft([{"rune1": "Death"}], logger.scan_context())
+        logger.complete_chain(logger.scan_context())
         accepted = self.accept(["Power"])
         self.assertEqual(accepted["expedition_id"], "M0001-E02")
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
@@ -169,6 +173,31 @@ class PropagationTotalsTests(unittest.TestCase):
         self.assertEqual(sorted(item["detonated"] for item in results), list(range(1, 7)))
         self.assertEqual(sorted(item["scan_commit_number"] for item in results), list(range(1, 7)))
         self.assertEqual(logger.get_state()["detonated"], 6)
+
+    def test_manual_draft_callback_receipt_counts_once_and_preserves_distinct_scan(self):
+        context = logger.scan_context()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            saved = list(pool.map(lambda _: logger.increment_propagation_detonated(
+                context, runes=["Death", "Power"], recipe="Unique Belt", request_id="capture-a"), range(2)))
+        self.assertEqual(sorted(item["reused"] for item in saved), [False, True])
+        self.assertEqual([item["detonated"] for item in saved], [1, 1])
+        self.assertEqual([item["scan_commit_number"] for item in saved], [1, 1])
+        self.assertEqual(logger.get_state()["chain"], [])
+        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
+        another = logger.increment_propagation_detonated(context, runes=["Death", "Power"],
+            recipe="Unique Belt", request_id="capture-b")
+        self.assertEqual((another["detonated"], another["reused"]), (2, False))
+        before = self.records()
+        with self.assertRaisesRegex(ValueError, "different scan"):
+            logger.increment_propagation_detonated(context, runes=["Time"], recipe="Unique Belt", request_id="capture-a")
+        self.assertEqual(self.records(), before)
+        logger.commit_chain_draft([{"rune1": "Death", "rune2": "Power"}])
+        logger.complete_chain(context)
+        before = self.records()
+        replay = logger.increment_propagation_detonated(context, runes=["Death", "Power"],
+            recipe="Unique Belt", request_id="capture-a")
+        self.assertTrue(replay["reused"])
+        self.assertEqual(self.records(), before)
 
     def test_propagation_freezes_setup_and_blocks_undo_and_reset_reuse(self):
         atlas = dict(logger.get_state()["settings"]["atlas_settings"])

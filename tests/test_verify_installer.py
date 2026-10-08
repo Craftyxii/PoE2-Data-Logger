@@ -116,20 +116,21 @@ class ReleasePackagingTests(unittest.TestCase):
         for name in (".onInit", "un.onInit"):
             with self.subTest(function=name):
                 body = installer.split(f"Function {name}\n", 1)[1].split("FunctionEnd", 1)[0]
-                for title in ("PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta", "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta", "PoE2 Data Logger 1.3.1 Beta", "${APP_NAME}"):
+                for title in ("PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta", "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta", "PoE2 Data Logger 1.3.1 Beta", "PoE2 Data Logger 1.3.1.1 Beta", "${APP_NAME}"):
                     self.assertIn(f'FindWindowW(p 0, w "{title}")', body)
                 running = body.split("  running:\n", 1)[1].split("  ready:", 1)[0]
                 self.assertIn("/SD IDOK", running)
                 self.assertIn("SetErrorLevel 2\n    Abort", running)
 
     def test_native_guard_probe_includes_previous_release_and_current_beta(self):
-        titles = running_client_titles("1.3.1.1", True)
+        titles = running_client_titles("1.3.1.2", True)
         self.assertEqual(titles, (
             "PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta",
             "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta",
             "PoE2 Data Logger 1.3.1 Beta", "PoE2 Data Logger 1.3.1.1 Beta",
+            "PoE2 Data Logger 1.3.1.2 Beta",
         ))
-        self.assertEqual(running_client_titles("1.3.1.1", False)[-1], "PoE2 Data Logger")
+        self.assertEqual(running_client_titles("1.3.1.2", False)[-1], "PoE2 Data Logger")
         prior = running_client_titles("1.3.1", True)
         self.assertEqual(prior.count("PoE2 Data Logger 1.3.1 Beta"), 1)
 

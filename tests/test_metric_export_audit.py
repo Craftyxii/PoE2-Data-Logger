@@ -290,7 +290,10 @@ class MetricExportAuditTests(unittest.TestCase):
                                           {"rune1": "Power", "rune2": ""},
                                           {"rune1": "Opulent", "rune2": ""}],
                                          expected_context=logger.scan_context())
-        self.assertEqual(chain["next_expedition_id"], "M0001-E02")
+        self.assertEqual(chain["expedition_id"], "M0001-E01")
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        complete = logger.complete_chain(logger.scan_context())
+        self.assertEqual(complete["next_expedition_id"], "M0001-E02")
         main = self.csv_rows(logger.export_all_csv())
         propagation = [row for row in main if row["Type"] == "Propagation"]
         self.assertEqual([row["Matched Recipe"] for row in propagation],

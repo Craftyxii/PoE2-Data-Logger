@@ -45,9 +45,22 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def propagate(self, runes=("Death", "Power"), recipe="Divine Orb x2", clear=True, **extra):
+        # A held row that the user approves remains a draft until Commit to
+        # chain. Confident direct scans have their own automatic-save checks.
         result = {"mode": "propagation", "runes": list(runes),
                   "positions": list(range(1, len(runes) + 1)), "selected_recipe": recipe,
-                  "can_use": clear, "status": "Propagation read", **logger.scan_context(), **extra}
+                  "can_use": False, "status": "Confirm propagated recipe", **logger.scan_context(), **extra}
+        if clear:
+            result["choices"] = [{"selected_recipe": recipe, "runes": list(runes), "can_use": True}]
+        self.window._propagation_read(result, self.raw)
+        if clear:
+            self.window.approve_propagation_recipe(0)
+        return result
+
+    def auto_propagate(self, runes=("Death", "Power"), recipe="Divine Orb x2"):
+        result = {"mode": "propagation", "runes": list(runes),
+                  "positions": list(range(1, len(runes) + 1)), "selected_recipe": recipe,
+                  "can_use": True, "status": "Propagation read", **logger.scan_context()}
         self.window._propagation_read(result, self.raw)
         return result
 
@@ -77,7 +90,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
                  row["Propagation Rune 1"], row["Propagation Rune 2"])
                 for row in rows if row["Chain Step #"]]
 
-    def assert_discarded(self, counts, audit):
+    def assert_discarded(self, counts, audit, saved=()):
         self.assertTrue(self.window.chain_review_group.isHidden())
         self.assertEqual(self.draft_rows(), [])
         self.assertTrue(all(field.text() == "" and not field.property("chainPart")
@@ -90,15 +103,15 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertFalse(self.window.review_commit_chain_button.isEnabled())
         self.assertEqual(self.expedition_counts(), counts)
         self.assertEqual(self.propagation_audit(), audit)
-        self.assertEqual(self.expedition_chain_rows(), [])
-        self.assertTrue(self.window.chain_list.isHidden())
+        self.assertEqual(self.expedition_chain_rows(), list(saved))
+        self.assertEqual(self.window.chain_list.isHidden(), not bool(saved))
         self.window.refresh()
         self.assertTrue(self.window.chain_review_group.isHidden())
         self.assertEqual(self.draft_rows(), [])
         self.assertEqual(self.window._chain_drafts, {})
         self.assertEqual(self.expedition_counts(), counts)
         self.assertEqual(self.propagation_audit(), audit)
-        self.assertEqual(self.expedition_chain_rows(), [])
+        self.assertEqual(self.expedition_chain_rows(), list(saved))
 
     def opened_remnant(self, clear=True):
         if clear:
@@ -246,7 +259,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(exported[0]["Ritual Rerolls Remaining"], "2")
         self.assertEqual(self.exported_chain(), [])
 
-    def test_repeated_propagation_accumulates_until_commit_then_saved_chain_survives_reviews(self):
+    def test_manual_parts_append_to_same_expedition_and_survive_unrelated_reviews(self):
         self.propagate()
         self.propagate(("Opulent",), "Greater Regal Orb x3")
         self.window.refresh()
@@ -257,27 +270,32 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         expected = [("M0001", "M0001-E01", "1", "Death", "Power"),
                     ("M0001", "M0001-E01", "2", "Opulent", "")]
         self.assertEqual(self.exported_chain(), expected)
-        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
-        self.assertTrue(self.window.chain_review_group.isHidden())
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.assertEqual(logger.get_state()["detonated"], 2)
+        saved = ["#1  Death → Power", "#2  Opulent"]
+        self.assertEqual(self.expedition_chain_rows(), saved)
 
-        # A later draft belongs to E02; discarding it must not rewrite the saved E01 chain.
+        # A later uncommitted scan still belongs to E01. Discarding only its
+        # draft keeps accepted counts and the parts already saved to E01.
         self.propagate(("Rage", "Time"), "Chaos Orb x2")
         counts, audit = self.expedition_counts(), self.propagation_audit()
         self.tablet(automatic=True)
-        self.assert_discarded(counts, audit)
+        self.assert_discarded(counts, audit, saved)
         self.assertEqual(self.exported_chain(), expected)
-        self.assertEqual(counts, {"M0001-E01": 2, "M0001-E02": 1})
+        self.assertEqual(counts, {"M0001-E01": 3})
 
         self.propagate(("Rebirth",), "Uncut Spirit Gem")
         self.window.commit_chain()
         self.assertEqual(self.exported_chain(), expected + [
-            ("M0001", "M0001-E02", "1", "Rebirth", "")])
-        self.assertEqual(self.expedition_counts()["M0001-E02"], 2)
-        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E03")
+            ("M0001", "M0001-E01", "3", "Rebirth", "")])
+        self.assertEqual(self.expedition_counts()["M0001-E01"], 4)
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.window.expedition_complete_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
         self.opened_remnant()
         self.window.approve_remnant_scan()
         self.assertEqual(self.exported_chain(), expected + [
-            ("M0001", "M0001-E02", "1", "Rebirth", "")])
+            ("M0001", "M0001-E01", "3", "Rebirth", "")])
         self.assertTrue(self.window.chain_review_group.isHidden())
 
     def test_discarded_draft_does_not_reappear_after_expedition_context_round_trip(self):
@@ -292,31 +310,25 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertFalse(self.window.chain_review_group.isHidden())
         self.assertEqual(self.draft_rows(), [])
 
-    def test_existing_expedition_chain_list_updates_live_and_preserves_committed_parts(self):
+    def test_expedition_list_shows_only_saved_parts_and_preserves_them_after_draft_discard(self):
         self.propagate()
-        self.assertEqual(self.expedition_chain_rows(), ["#1  Death → Power · Divine Orb x2"])
-        self.assertFalse(self.window.chain_list.isHidden())
-        self.propagate(("Opulent",), "Greater Regal Orb x3")
-        self.assertEqual(self.expedition_chain_rows(), [
-            "#1  Death → Power · Divine Orb x2", "#2  Opulent · Greater Regal Orb x3"])
-
-        # Correcting the review table must update the same Expedition list and eventual export.
-        self.window.chain_review_table.item(1, 1).setText("Time")
-        self.app.processEvents()
-        self.assertEqual(self.expedition_chain_rows(), [
-            "#1  Death → Time · Divine Orb x2", "#2  Opulent · Greater Regal Orb x3"])
-        self.window.commit_chain()
-        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
         self.assertEqual(self.expedition_chain_rows(), [])
         self.assertTrue(self.window.chain_list.isHidden())
+        self.propagate(("Opulent",), "Greater Regal Orb x3")
+        self.assertEqual(self.expedition_chain_rows(), [])
 
-        self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(1))
+        # A draft correction reaches the saved list and export only on Commit.
+        self.window.chain_review_table.item(1, 1).setText("Time")
+        self.app.processEvents()
+        self.assertEqual(self.expedition_chain_rows(), [])
+        self.window.commit_chain()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
         saved = ["#1  Death → Time", "#2  Opulent"]
         self.assertEqual(self.expedition_chain_rows(), saved)
         self.assertFalse(self.window.chain_list.isHidden())
         exported = self.exported_chain()
         self.propagate(("Rage",), "Chaos Orb x2")
-        self.assertEqual(self.expedition_chain_rows(), saved + ["#3  Rage · Chaos Orb x2"])
+        self.assertEqual(self.expedition_chain_rows(), saved)
         counts, audit = self.expedition_counts(), self.propagation_audit()
         self.currency()
         self.assertTrue(self.window.chain_review_group.isHidden())
@@ -328,6 +340,185 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.window.refresh()
         self.assertEqual(self.expedition_chain_rows(), saved)
         self.assertEqual(self.window._chain_drafts, {})
+
+    def test_confident_scans_save_pairs_in_order_without_advancing_until_complete(self):
+        self.auto_propagate()
+        self.assertEqual(self.exported_chain(), [("M0001", "M0001-E01", "1", "Death", "Power")])
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.assertEqual(self.draft_rows(), [])
+        self.assertTrue(all(not field.text() for field in self.window.rune_inputs))
+        self.auto_propagate(("Rage", "Time"), "Chaos Orb x2")
+        expected = [("M0001", "M0001-E01", "1", "Death", "Power"),
+                    ("M0001", "M0001-E01", "2", "Rage", "Time")]
+        self.assertEqual(self.exported_chain(), expected)
+        self.assertEqual(self.expedition_counts(), {"M0001-E01": 2})
+        self.assertEqual(len(self.propagation_audit()), 2)
+        self.assertEqual(self.expedition_chain_rows(), ["#1  Death → Power", "#2  Rage → Time"])
+        self.assertFalse(self.window.review_commit_chain_button.isEnabled())
+        self.assertFalse(self.window.expedition_commit_chain_button.isEnabled())
+        self.assertTrue(self.window.review_complete_chain_button.isEnabled())
+        self.assertTrue(self.window.expedition_complete_chain_button.isEnabled())
+        self.window.review_complete_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertEqual(self.exported_chain(), expected)
+        self.assertEqual(self.expedition_counts()["M0001-E01"], 2)
+        self.assertFalse(self.window.review_complete_chain_button.isEnabled())
+        self.assertFalse(self.window.expedition_complete_chain_button.isEnabled())
+        self.window.review_complete_chain_button.click()
+        self.window.expedition_complete_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+
+    def test_automatic_chain_save_and_completion_do_not_consume_pending_remnant(self):
+        self.opened_remnant(clear=False)
+        held = logger.get_state()["ocr_pending"]
+        first_recipe = self.window.first_recipe.text()
+        self.auto_propagate()
+        self.assertEqual(self.window.pending_review_kind, "remnant")
+        self.assertEqual(self.window.first_recipe.text(), first_recipe)
+        self.assertEqual(logger.get_state()["ocr_pending"], held)
+        self.assertEqual(self.exported_chain(), [("M0001", "M0001-E01", "1", "Death", "Power")])
+        self.window.expedition_complete_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertEqual(self.window.pending_review_kind, "remnant")
+        self.assertEqual(self.window.first_recipe.text(), first_recipe)
+        self.assertEqual(logger.get_state()["ocr_pending"], held)
+
+    def test_confident_scan_after_manual_draft_keeps_both_parts_for_explicit_commit(self):
+        self.propagate(("Rage", "Time"), "Chaos Orb x2")
+        self.auto_propagate(("Death", "Power"), "Divine Orb x2")
+        self.assertEqual(self.exported_chain(), [])
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.assertEqual(self.expedition_counts(), {"M0001-E01": 2})
+        self.assertEqual(self.draft_rows(), [
+            ("1", "Rage", "Chaos Orb x2"), ("1", "Time", "Chaos Orb x2"),
+            ("2", "Death", "Divine Orb x2"), ("2", "Power", "Divine Orb x2")])
+        self.assertFalse(self.window.review_complete_chain_button.isEnabled())
+        self.window.review_commit_chain_button.click()
+        self.assertEqual(self.exported_chain(), [
+            ("M0001", "M0001-E01", "1", "Rage", "Time"),
+            ("M0001", "M0001-E01", "2", "Death", "Power")])
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.assertEqual(self.expedition_counts(), {"M0001-E01": 2})
+
+    def test_replayed_confident_read_does_not_duplicate_counts_but_new_capture_can_match(self):
+        result = self.auto_propagate()
+        before = logger.get_state()["scan_commit_count"]
+        self.window._propagation_read(result, self.raw)
+        self.assertEqual(logger.get_state()["scan_commit_count"], before)
+        self.assertEqual(self.expedition_counts(), {"M0001-E01": 1})
+        self.assertEqual(self.exported_chain(), [("M0001", "M0001-E01", "1", "Death", "Power")])
+        self.auto_propagate()
+        self.assertEqual(self.expedition_counts(), {"M0001-E01": 2})
+        self.assertEqual(self.exported_chain(), [
+            ("M0001", "M0001-E01", "1", "Death", "Power"),
+            ("M0001", "M0001-E01", "2", "Death", "Power")])
+
+    def test_new_automatic_part_preserves_unsaved_dropdown_corrections(self):
+        self.auto_propagate()
+        self.window.expedition_chain_table.cellWidget(0, 1).setCurrentText("Time")
+        self.auto_propagate(("Opulent",), "Greater Regal Orb x3")
+        self.assertEqual(self.window.expedition_chain_table.cellWidget(0, 1).currentText(), "Time")
+        self.assertTrue(self.window.expedition_save_chain_button.isEnabled())
+        self.assertFalse(self.window.review_complete_chain_button.isEnabled())
+        self.assertEqual(self.exported_chain(), [
+            ("M0001", "M0001-E01", "1", "Death", "Power"),
+            ("M0001", "M0001-E01", "2", "Opulent", "")])
+        self.window.expedition_save_chain_button.click()
+        self.assertEqual(self.exported_chain(), [
+            ("M0001", "M0001-E01", "1", "Time", "Power"),
+            ("M0001", "M0001-E01", "2", "Opulent", "")])
+        self.assertEqual(self.expedition_counts(), {"M0001-E01": 2})
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+
+    def test_denying_all_held_recipes_allows_completing_the_saved_chain(self):
+        self.auto_propagate()
+        self.propagate((), clear=False, choices=[
+            {"selected_recipe": "Chaos Orb", "runes": ["Rage"], "can_use": True},
+            {"selected_recipe": "Divine Orb", "runes": ["Death"], "can_use": True}])
+        self.assertEqual(self.window.pending_review_kind, "propagation")
+        self.assertFalse(self.window.review_complete_chain_button.isEnabled())
+        self.window.deny_propagation_recipe(0)
+        self.assertEqual(self.window.pending_review_kind, "propagation")
+        self.window.deny_propagation_recipe(1)
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertTrue(self.window.review_complete_chain_button.isEnabled())
+        self.window.review_complete_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertEqual(self.expedition_counts()["M0001-E01"], 1)
+        self.assertEqual(self.exported_chain(), [("M0001", "M0001-E01", "1", "Death", "Power")])
+
+    def test_completion_refuses_unsaved_draft_and_held_propagation_choice(self):
+        self.auto_propagate()
+        self.propagate(("Rage", "Time"), "Chaos Orb x2")
+        before = logger.get_state()["scan_commit_count"]
+        with self.assertRaises(ValueError):
+            self.window.complete_chain()
+        self.assertEqual(logger.get_state()["scan_commit_count"], before)
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.assertEqual(self.draft_rows(), [("1", "Rage", "Chaos Orb x2"),
+                                            ("1", "Time", "Chaos Orb x2")])
+        self.currency()
+        self.window.reject_review()
+        self.propagate((), clear=False, choices=[{"selected_recipe": "Chaos Orb", "runes": [],
+                                                 "can_use": False}])
+        before = logger.get_state()["scan_commit_count"]
+        with self.assertRaises(ValueError):
+            self.window.complete_chain()
+        self.assertEqual(logger.get_state()["scan_commit_count"], before)
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.assertEqual(self.expedition_counts()["M0001-E01"], 2)
+
+    def test_building_chain_dropdown_corrections_preserve_structure_then_completion_locks_it(self):
+        self.auto_propagate()
+        self.auto_propagate(("Opulent",), "Greater Regal Orb x3")
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.assertFalse(logger.get_state()["chain_completed"])
+        counts, audit = self.expedition_counts(), self.propagation_audit()
+        table = self.window.expedition_chain_table
+        self.assertEqual(table.rowCount(), 2)
+        table.cellWidget(0, 1).setCurrentText("Rebirth")
+        table.cellWidget(0, 2).setCurrentText("Time")
+        table.cellWidget(1, 1).setCurrentText("Arcane")
+        self.assertTrue(self.window.expedition_save_chain_button.isEnabled())
+        self.assertFalse(self.window.review_complete_chain_button.isEnabled())
+        self.assertFalse(self.window.expedition_complete_chain_button.isEnabled())
+        before = logger.get_state()["scan_commit_count"]
+        with self.assertRaises(ValueError):
+            self.window.complete_chain()
+        self.assertEqual(logger.get_state()["scan_commit_count"], before)
+        self.assertEqual(self.exported_chain(), [
+            ("M0001", "M0001-E01", "1", "Death", "Power"),
+            ("M0001", "M0001-E01", "2", "Opulent", "")])
+        self.window.expedition_save_chain_button.click()
+        self.assertEqual(self.exported_chain(), [
+            ("M0001", "M0001-E01", "1", "Rebirth", "Time"),
+            ("M0001", "M0001-E01", "2", "Arcane", "")])
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.assertFalse(logger.get_state()["chain_completed"])
+        self.assertEqual(self.expedition_counts(), counts)
+        self.assertEqual(self.propagation_audit(), audit)
+        self.window.expedition_complete_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertEqual(self.expedition_chain_rows(), [])
+        self.assertEqual(self.window.expedition_chain_table.rowCount(), 0)
+        self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(1))
+        self.assertTrue(logger.get_state()["chain_completed"])
+        self.assertEqual(self.expedition_counts(), counts)
+        self.assertEqual(self.propagation_audit(), audit)
+        self.assertFalse(self.window.expedition_save_chain_button.isEnabled())
+        self.assertFalse(self.window.expedition_chain_table.cellWidget(0, 1).isEnabled())
+        self.assertFalse(self.window.expedition_chain_table.cellWidget(0, 2).isEnabled())
+        self.assertFalse(self.window.review_commit_chain_button.isEnabled())
+        self.assertFalse(self.window.expedition_commit_chain_button.isEnabled())
+        self.assertFalse(self.window.review_complete_chain_button.isEnabled())
+        self.assertFalse(self.window.expedition_complete_chain_button.isEnabled())
+        with self.assertRaises(ValueError):
+            self.auto_propagate(("Rage",), "Chaos Orb")
+        self.assertEqual(self.expedition_counts(), counts)
+        self.assertEqual(self.propagation_audit(), audit)
+        self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertEqual(self.expedition_chain_rows(), [])
 
     def test_new_map_and_session_reset_do_not_reuse_previous_draft(self):
         self.propagate()
@@ -347,6 +538,17 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.window.start_manual_propagation()
         self.assertFalse(self.window.chain_review_group.isHidden())
         self.assertEqual(self.draft_rows(), [])
+
+    def test_new_map_retains_saved_chain_history_and_discards_only_the_unsaved_part(self):
+        self.auto_propagate()
+        self.propagate(("Rage", "Time"), "Chaos Orb x2")
+        audit = self.propagation_audit()
+        self.window.finish_map()
+        self.assertEqual(logger.get_state()["current_map_id"], "M0002")
+        self.assert_discarded({"M0001-E01": 2, "M0002-E01": None}, audit)
+        self.assertEqual(self.exported_chain(), [("M0001", "M0001-E01", "1", "Death", "Power")])
+        self.assertEqual(logger.get_state()["chain"], [])
+        self.assertFalse(self.window.expedition_complete_chain_button.isEnabled())
 
 
 if __name__ == "__main__":

@@ -163,13 +163,17 @@ class HundredMapSession(unittest.TestCase):
         target.click()
         self.app.processEvents()
 
-    def record(self, kind, details=None, snapshot=None, reference=None, map_id=None, expedition=None):
+    def record(self, kind, details=None, snapshot=None, reference=None, map_id=None, expedition=None,
+               batch_remaining=0):
         number = len(self.commit_log) + 1
         with logger._connect() as db:
-            row = db.execute("SELECT * FROM commits ORDER BY number DESC LIMIT 1").fetchone()
+            row = db.execute("SELECT * FROM commits WHERE number=?", (number,)).fetchone()
             count = db.execute("SELECT count(*) FROM commits").fetchone()[0]
-        self.check(count, number, "commits:count")
-        if not row or count != number:
+        # A confident propagation scan atomically saves its accepted count and
+        # chain part. Verify both audit entries in order against the ledger.
+        expected_count = number + batch_remaining
+        self.check(count, expected_count, "commits:count")
+        if not row or count != expected_count:
             raise RuntimeError(f"UI did not create expected {kind} commit: {self.w.statusBar().currentMessage()}")
         saved = dict(row)
         mid = map_id or f"M{self.current:04}"
@@ -187,8 +191,8 @@ class HundredMapSession(unittest.TestCase):
             for key, val in snapshot.items():
                 self.check(actual_context.get(key), val, f"snapshot:{kind}:{key}")
         self.commit_log.append({"number": number, "kind": kind, "map_id": mid,
-                                "details": details or {}})
-        self.check(logger.get_state()["scan_commit_count"], number, "commits:header-count")
+                                "details": copy.deepcopy(details or {})})
+        self.check(logger.get_state()["scan_commit_count"], expected_count, "commits:header-count")
         self.coverage[kind] += 1
 
     def atlas_edit(self, n):
@@ -225,8 +229,9 @@ class HundredMapSession(unittest.TestCase):
 
     def configure(self, n):
         # Atlas edits precede activity so they apply to the intended current map.
-        if n % 5 == 1:
-            self.atlas_edit(n)
+        # Save through the character UI on every map; repeating a setup also
+        # checks that identical setups remain shared in the compact workbook.
+        self.atlas_edit(n)
         self.w.tabs.setCurrentIndex(3)
         master = ["Jado", "Doryani", "Hilda", "None"][(n - 1) % 4]
         self.choose(self.w.master, master)
@@ -241,6 +246,7 @@ class HundredMapSession(unittest.TestCase):
         self.record("Master perks", reference=configured)
         capacity = 1 + (n - 1) % 4
         self.w.tabs.setCurrentIndex(2)
+        self.button("Clear tablet config", 2)
         random_affix = "Map has additional random Modifiers"
         if self.w.tablet_affixes[0].findData(random_affix) < 0:
             self.w.new_affix.setText(random_affix)
@@ -261,6 +267,27 @@ class HundredMapSession(unittest.TestCase):
             random_counts.append((n + i) % 4 if i < capacity else 0)
         self.button("Save tablet config", 2)
         self.record("Tablet config")
+        raw_tablets = [[], [], [], []]
+        if n % 10 == 0:
+            before = len(self.commit_log)
+            self.w._hover_item_read({"kind": "tablet", "source": "screen OCR",
+                "ocr_rows": [{"text": "Unclear tablet inscription", "score": .2}],
+                "mods": [], "matches": [], "uncertain": [], **logger.scan_context()}, self.raw.getvalue())
+            self.check(logger.get_state()["scan_commit_count"], before, "auto:unclear-tablet-held")
+            self.check(self.w.pending_review_kind, "tablet", "auto:unclear-tablet-review")
+            self.w.reject_scan_button.click()
+            self.coverage["unclear tablet held with auto-all enabled"] += 1
+        for slot in range(1, capacity + 1):
+            raw_tablets[slot - 1] = [f"{n % 29 + slot - 1}% increased Pack Size",
+                f"Map has {(n + slot - 1) % 4} additional random Modifiers"]
+            self.w._hover_item_read({"kind": "tablet", "source": "screen OCR",
+                "ocr_rows": [{"text": text, "score": .99} for text in raw_tablets[slot - 1]],
+                "mods": raw_tablets[slot - 1], "matches": [], "uncertain": [],
+                **logger.scan_context()}, self.raw.getvalue())
+            self.record("Tablet config", reference=f"Tablet {slot}")
+            self.check(self.w.pending_review_kind, None, "auto:tablet-saved-review-cleared")
+            self.check(logger.tablet_next_slot(), slot + 1, "auto:tablet-scan-order")
+            self.coverage["clear live tablet automatic commit"] += 1
         config = {"tier": 15 + n % 2, "waystone": (n * 13) % 251,
                   "base_map_mods": n % 8, "irradiated": "Yes" if n % 3 == 0 else "No",
                   "ocean": "Yes" if n % 5 == 0 else "No", "deli": "Yes" if n % 2 == 0 else "No",
@@ -274,7 +301,7 @@ class HundredMapSession(unittest.TestCase):
                   "master_selections": copy.deepcopy(self.selections), "tablets_used": capacity,
                   "tablet_capacity": capacity, "tablet_affixes": tablet_pairs,
                   "tablet_values": tablet_values, "tablet_random_mods": random_counts,
-                  "tablet_raw_mods": [[], [], [], []], "expedition": 1}
+                  "tablet_raw_mods": raw_tablets, "expedition": 1}
         for field, val in ((self.w.waystone, config["waystone"]), (self.w.map_mods, config["base_map_mods"]),
                            (self.w.item_rarity, config["item_rarity"]), (self.w.monster_rarity, config["monster_rarity"]),
                            (self.w.pack_size, config["pack_size"]), (self.w.effectiveness, config["effectiveness"])):
@@ -307,12 +334,37 @@ class HundredMapSession(unittest.TestCase):
         self.record("Map settings", snapshot=config)
         self.expected[f"M{n:04}"] = {"snapshot": config, "inventories": {}, "ritual": [], "chain": [],
                                       "recipes": [], "kills": [100 + n, n % 31, n % 17, n % 5]}
+        fields = {key: config[key] for key in
+                  ("tier", "waystone", "item_rarity", "monster_rarity", "pack_size", "effectiveness")}
+        fields["map_mods"] = 2
+        mods = config["waystone_mods"][:2]
+        result = {"kind": "waystone", "source": "screen OCR", "name": f"Session Waystone {n}",
+                  "fields": fields, "mods": mods,
+                  "ocr_rows": [{"text": text, "score": .99} for text in mods], **logger.scan_context()}
+        if n % 10 == 0:
+            before = len(self.commit_log)
+            self.w._hover_item_read({**result, "fields": {**fields, "tier": None}}, self.raw.getvalue())
+            self.check(logger.get_state()["scan_commit_count"], before, "auto:unclear-waystone-held")
+            self.check(self.w.pending_review_kind, "waystone", "auto:unclear-waystone-review")
+            self.w.reject_scan_button.click()
+            self.coverage["unclear waystone held with auto-all enabled"] += 1
+        self.w._hover_item_read(result, self.raw.getvalue())
+        config.update(base_map_mods=2, map_mods=2 + config["master_adds_mod"],
+                      total_mods=2 + config["master_adds_mod"] + config["tablet_mods"],
+                      waystone_name=result["name"])
+        self.record("Map settings", snapshot=config)
+        self.check(self.w.pending_review_kind, None, "auto:waystone-saved-review-cleared")
+        self.coverage["clear live waystone automatic commit"] += 1
         self.coverage["distinct map setup"] += 1
         return config
 
-    def inventory(self, phase, amounts, *, custom=None, rejected=None, unnamed=False):
+    def inventory(self, phase, amounts, *, custom=None, rejected=None, unnamed=False, automatic=False, live=False):
         self.choose(self.w.inventory_phase, phase)
         before = len(self.commit_log)
+        if automatic:
+            # A grid contains positive stacks; zero amounts represent absent
+            # icons and must not be manufactured into a supposedly clear read.
+            amounts = {name: quantity for name, quantity in amounts.items() if quantity > 0}
         items = [{"slot": i + 2, "name": name, "quantity": qty}
                  for i, (name, qty) in enumerate(amounts.items())]
         unknown = []
@@ -322,7 +374,7 @@ class HundredMapSession(unittest.TestCase):
         result = {"items": items, "unknown": unknown}
         # Real capture bookkeeping and queued completion; only scanner output is substituted.
         with patch.object(item_ocr, "scan_inventory_grid", return_value=result):
-            self.w._inventory_captured(self.artwork.copy(), live=False)
+            self.w._inventory_captured(self.artwork.copy(), live=automatic or live)
             self.wait_tasks()
         offset = len(items)
         for i, name in enumerate([val for val in [custom, rejected, "" if unnamed else None] if val is not None]):
@@ -339,13 +391,15 @@ class HundredMapSession(unittest.TestCase):
                 controls.findChild(QPushButton, "rejectCurrency").click()
                 self.rejected_labels.add(name) if name else None
                 self.coverage["individual row reject"] += 1
-        self.check(logger.get_state()["scan_commit_count"], before, "learning:row-buttons-no-commit")
-        self.check(self.w.pending_review_kind, "currency", "learning:whole-scan-decision-pending")
+        if not automatic:
+            self.check(logger.get_state()["scan_commit_count"], before, "learning:row-buttons-no-commit")
+            self.check(self.w.pending_review_kind, "currency", "learning:whole-scan-decision-pending")
         saved = dict(amounts)
         if custom:
             saved[custom] = 2
             self.labels.add(custom)
-        self.w.approve_scan_button.click()
+        if not automatic:
+            self.w.approve_scan_button.click()
         context = self.expected[f"M{self.current:04}"]["snapshot"]
         context = {**context, "expedition": self.expedition}
         baseline = "Scanned" if phase == "start" or "start" in self.expected[f"M{self.current:04}"]["inventories"] else "Assumed empty"
@@ -355,6 +409,9 @@ class HundredMapSession(unittest.TestCase):
         self.check(self.w.approve_scan_button.isEnabled(), False, "review:saved-inventory-lock")
         self.check(self.w.inventory_table.cellWidget(0, 3).isEnabled() if self.w.inventory_table.rowCount() else False,
                    False, "review:saved-row-lock")
+        self.coverage["clear live currency automatic commit" if automatic else "currency manual review commit"] += 1
+        if live and not automatic:
+            self.coverage["unclear currency held with auto-all enabled"] += 1
         self.verify_totals()
 
     def reject_inventory(self):
@@ -398,7 +455,11 @@ class HundredMapSession(unittest.TestCase):
         raw = f"Synthetic Ritual evidence {n}"
         result = {"items": rows + [{"name": "", "category": "Item", "quantity": 1, "tribute": 0, "deferred": False}],
                   "raw_text": raw, "tribute_available": 10000 + n, "rerolls_remaining": n % 5}
-        self.w._ritual_read(result, live=False)
+        before = len(self.commit_log)
+        self.w._ritual_read(result, live=True)
+        self.check(logger.get_state()["scan_commit_count"], before, "auto:unclear-ritual-held")
+        self.check(self.w.pending_review_kind, "ritual", "auto:unclear-ritual-review")
+        self.coverage["unclear Ritual held with auto-all enabled"] += 1
         # Editing actual counters and reward cells exercises the review form.
         self.w.ritual_tribute.setText(str(20000 + n))
         self.w.ritual_rerolls.setText(str(n % 4))
@@ -415,6 +476,22 @@ class HundredMapSession(unittest.TestCase):
         self.check(len(pages), 1, "ritual:page-count")
         self.check(pages[0]["items"], rows, "ritual:persisted-rewards")
         self.coverage["Ritual quantities/cost/deferred/counters"] += 1
+        automatic_rows = [{"category": "Omen", "name": "Omen of Whittling", "quantity": 2,
+                           "tribute": 500 + n, "source": f"Clear Ritual offer {n}", "deferred": n % 2 == 0}]
+        automatic_raw = f"Clear synthetic Ritual evidence {n}"
+        clear = {"items": [{**automatic_rows[0], "score": .99, "name_match": 1}],
+                 "raw_text": automatic_raw, "tribute_available": 30000 + n, "rerolls_remaining": n % 4,
+                 "reward_count": 1, "unmatched": []}
+        self.w._ritual_read(clear, live=True)
+        self.record("Ritual", {"page": 2, "items": automatic_rows, "raw_text": automatic_raw,
+                    "tribute_available": 30000 + n, "rerolls_remaining": n % 4}, context, reference="Page 2")
+        self.check(self.w.pending_review_kind, None, "auto:ritual-saved-review-cleared")
+        pages = logger.ritual_pages_for_map(f"M{n:04}")
+        self.check(len(pages), 2, "ritual:auto-and-manual-page-history")
+        self.check(pages[0]["items"], rows, "ritual:auto-keeps-earlier-page")
+        self.check(pages[1]["items"], automatic_rows, "ritual:automatic-offer-fields-exact")
+        self.expected[f"M{n:04}"]["ritual"] += automatic_rows
+        self.coverage["clear live Ritual automatic commit"] += 1
         self.verify_totals()
 
     def remnant(self, n, seed=False):
@@ -423,65 +500,166 @@ class HundredMapSession(unittest.TestCase):
             reading = {"sockets": 5, "seed_slot": "P3", "seed_rune": "Power", "family": "Family 1",
                        "candidates": [1], "can_commit": True, "rewards": ["Divine Orb", "Divine Orb x2"]}
             result = {"mode": "seed", "remnants": [reading], "status": "Synthetic seed reading", **context}
-            self.w.show_result("seed", result, self.raw.getvalue())
             expected = OPENED[1:]
         else:
             result = {"mode": "opened", "can_use": True, "family": "Family 1", "candidates": [1],
                       "sockets": 6, "recipe_sockets": 6, "socket_source": "opened icons", "list_complete": False,
                       "first_recipe": "Divine Orb x3", "next_recipe": "Divine Orb x2",
+                      "first_line_gap": 40, "status": "Review the opened rewards before logging.",
                       "opened_recipes": [{"recipe": row["recipe"], "raw": row["recipe"], "ocr_score": .99, "match_score": 1}
                                          for row in OPENED[:2]], **context}
-            self.w.show_result("opened", result, self.raw.getvalue())
             expected = OPENED
-        self.w.approve_scan_button.click()
+        mode = "seed" if seed else "opened"
+        if n % 10 == 0:
+            held = copy.deepcopy(result)
+            if seed:
+                held["remnants"][0]["can_commit"] = False
+            else:
+                held["opened_recipes"][0]["ocr_score"] = .2
+            before = len(self.commit_log)
+            self.w._scan_done(mode, held, self.raw.getvalue())
+            self.check(logger.get_state()["scan_commit_count"], before,
+                       "auto:unclear-seed-held" if seed else "auto:unclear-opened-held")
+            self.check(self.w.pending_review_kind, "seed" if seed else "remnant", "auto:remnant-review-required")
+            self.w.reject_scan_button.click()
+            self.coverage["unclear seed held with auto-all enabled" if seed else
+                          "unclear opened remnant held with auto-all enabled"] += 1
+        self.w._scan_done(mode, result, self.raw.getvalue())
         details = {"recipes": expected}
         if seed:
             details["visible_seed"] = {"sockets": 5, "slot": "P3", "rune": "Power", "scan_index": 1, "mode": "seed"}
         self.record("Remnant", details, {**self.expected[f"M{n:04}"]["snapshot"], "expedition": self.expedition})
         self.expected[f"M{n:04}"]["recipes"] += copy.deepcopy(expected)
         self.coverage["seed recipe family order" if seed else "opened recipe resolution"] += 1
+        self.coverage["clear live seed automatic commit" if seed else "clear live opened remnant automatic commit"] += 1
         self.check(self.w.first_recipe.text(), "", "review:remnant-draft-cleared")
         self.check(self.w.pending_review_kind, None, "review:remnant-pending-cleared")
 
     def propagation(self, n):
+        mid = f"M{n:04}"
+        eid = mid + "-E01"
         steps = [{"step": 1, "rune1": "Death", "rune2": "Power"},
                  {"step": 2, "rune1": "Opulent", "rune2": ""}]
-        context = {**self.expected[f"M{n:04}"]["snapshot"], "expedition": self.expedition}
+        context = {**self.expected[mid]["snapshot"], "expedition": self.expedition}
         if n % 3:
             self.w._propagation_read({"mode": "propagation", "can_use": True, "runes": ["Death", "Power"],
                 "positions": [1, 2], "selected_recipe": "Divine Orb x2", "status": "Pair scan", **logger.scan_context()}, self.raw.getvalue())
+            self.record("Propagation", {"runes": ["Death", "Power"], "recipe": "Divine Orb x2", "detonated": 1},
+                        context, reference="Divine Orb x2", batch_remaining=1)
+            self.record("Chain", {"steps": steps[:1], "detonated": 1}, context, reference="Steps 1–1")
+            self.coverage["confident propagation automatically saves chain part"] += 1
         else:
+            clear_candidate = n % 6 == 0
             self.w._propagation_read({"mode": "propagation", "can_use": False, "runes": [],
                 "status": "Choose recipe", "choices": [
                     {"selected_recipe": "Wrong recipe", "runes": ["Rage", "Time"], "can_use": True},
-                    {"selected_recipe": "Divine Orb x2", "runes": [], "can_use": False}], **logger.scan_context()}, self.raw.getvalue())
+                    {"selected_recipe": "Divine Orb x2", "runes": ["Death", "Power"] if clear_candidate else [],
+                     "can_use": clear_candidate}], **logger.scan_context()}, self.raw.getvalue())
             self.w.propagation_recipe_table.cellWidget(0, 2).findChildren(QPushButton)[1].click()
             self.w.propagation_recipe_table.setCurrentCell(1, 0)
-            self.w.propagation_rune_inputs[0].setEditText("Death")
-            self.w.propagation_rune_inputs[1].setEditText("Power")
-            self.w.propagation_add_button.click()
+            if clear_candidate:
+                self.w.propagation_recipe_table.cellWidget(1, 2).findChildren(QPushButton)[0].click()
+                self.coverage["held recipe row approval creates draft"] += 1
+            else:
+                self.w.propagation_rune_inputs[0].setEditText("Death")
+                self.w.propagation_rune_inputs[1].setEditText("Power")
+                self.w.propagation_add_button.click()
+                self.coverage["held recipe manually entered runes create draft"] += 1
+            self.record("Propagation", {"runes": ["Death", "Power"], "recipe": "Divine Orb x2", "detonated": 1},
+                        context, reference="Divine Orb x2")
+            self.check(logger.get_state()["chain"], [], "propagation:manual-part-awaits-commit")
+            self.check(self.w.chain_review_table.rowCount(), 2, "propagation:manual-paired-draft")
+            self.check(self.w.review_complete_chain_button.isEnabled(), False,
+                       "propagation:cannot-complete-uncommitted-draft")
+            self.w.review_commit_chain_button.click()
+            self.record("Chain", {"steps": steps[:1], "detonated": 1}, context, reference="Steps 1–1")
             self.coverage["propagation deny/manual fallback"] += 1
-        self.record("Propagation", {"runes": ["Death", "Power"], "recipe": "Divine Orb x2", "detonated": 1}, context)
+        self.check(logger.get_state()["current_expedition_id"], eid, "propagation:first-part-stays-in-expedition")
+        self.check(logger.get_state()["chain"], steps[:1], "propagation:first-saved-paired-part")
+        self.check(self.w.chain_review_table.rowCount(), 0, "propagation:saved-part-clears-draft")
         self.w._propagation_read({"mode": "propagation", "can_use": True, "runes": ["Opulent"], "positions": [1],
             "selected_recipe": "Greater Regal Orb x3", "status": "Second chain part", **logger.scan_context()}, self.raw.getvalue())
-        self.record("Propagation", {"runes": ["Opulent"], "recipe": "Greater Regal Orb x3", "detonated": 2}, context)
+        self.record("Propagation", {"runes": ["Opulent"], "recipe": "Greater Regal Orb x3", "detonated": 2},
+                    context, reference="Greater Regal Orb x3", batch_remaining=1)
+        self.record("Chain", {"steps": steps[1:], "detonated": 2}, context, reference="Steps 2–2")
+        self.coverage["confident propagation automatically saves chain part"] += 1
+        self.check(logger.get_state()["current_expedition_id"], eid, "propagation:repeated-auto-save-same-expedition")
+        self.check(logger.get_state()["chain"], steps, "propagation:saved-part-order")
         self.check(logger.get_state()["detonated"], 2, "propagation:pair-counts-one")
-        self.check([self.w.chain_review_table.item(i, 2).text() for i in range(3)],
-                   ["Divine Orb x2", "Divine Orb x2", "Greater Regal Orb x3"], "propagation:recipe-order")
-        self.w.review_commit_chain_button.click()
-        self.record("Chain", {"steps": steps, "detonated": 2}, context, reference="Steps 1–2")
-        self.expected[f"M{n:04}"]["chain"] = steps
+        self.check(self.w.expedition_chain_table.rowCount(), 2, "propagation:saved-parts-visible-on-expedition")
+        self.check([field.text() for field in self.w.rune_inputs], [""] * len(self.w.rune_inputs),
+                   "propagation:automatic-save-clears-draft")
+        if n % 10 == 0:
+            with logger._connect() as db:
+                identities = [tuple(row) for row in db.execute(
+                    "SELECT position,chain_step,map_id,expedition_id FROM new_export "
+                    "WHERE expedition_id=? AND chain_step IS NOT NULL AND chain_step!='' ORDER BY chain_step", (eid,))]
+            self.w.tabs.setCurrentIndex(1)
+            self.choose(self.w.expedition_chain_table.cellWidget(0, 2), "Life")
+            self.check(self.w.expedition_complete_chain_button.isEnabled(), False,
+                       "propagation:save-corrections-before-completing")
+            self.w.expedition_save_chain_button.click()
+            self.record("Chain correction", {"detonated": 2, "changes": [
+                {"step": 1, "previous_rune1": "Death", "previous_rune2": "Power",
+                 "rune1": "Death", "rune2": "Life"}]}, context, reference="Corrected 1 chain parts")
+            steps[0]["rune2"] = "Life"
+            self.check(logger.get_state()["chain"], steps, "propagation:dropdown-corrects-same-parts")
+            self.check(logger.get_state()["detonated"], 2, "propagation:correction-keeps-detonated-count")
+            self.check(logger.get_state()["current_expedition_id"], eid, "propagation:correction-keeps-expedition")
+            with logger._connect() as db:
+                corrected_identities = [tuple(row) for row in db.execute(
+                    "SELECT position,chain_step,map_id,expedition_id FROM new_export "
+                    "WHERE expedition_id=? AND chain_step IS NOT NULL AND chain_step!='' ORDER BY chain_step", (eid,))]
+                first_part = next(entry for entry in self.commit_log if entry["kind"] == "Chain" and entry["map_id"] == mid)
+                original = json.loads(db.execute("SELECT details_json FROM commits WHERE number=?",
+                                                (first_part["number"],)).fetchone()[0])
+            self.check(corrected_identities, identities, "propagation:correction-keeps-row-identities")
+            self.check(original["steps"], first_part["details"]["steps"],
+                       "propagation:correction-preserves-original-audit")
+            self.coverage["saved rune dropdown corrections before completion"] += 1
+        self.w.tabs.setCurrentIndex(0 if n % 2 else 1)
+        completion = self.w.review_complete_chain_button if n % 2 else self.w.expedition_complete_chain_button
+        self.check(completion.isEnabled(), True, "propagation:complete-chain-ready")
+        completion.click()
+        self.record("Chain completion", {"steps": steps, "detonated": 2,
+                    "next_expedition": 2, "next_expedition_id": mid + "-E02"},
+                    context, reference="Completed 2 chain parts")
+        self.expected[mid]["chain"] = copy.deepcopy(steps)
         self.expedition += 1
-        self.check(logger.get_state()["current_expedition_id"], f"M{n:04}-E02", "propagation:next-expedition")
+        self.check(logger.get_state()["current_expedition_id"], mid + "-E02", "propagation:next-expedition")
+        self.check(logger.get_state()["chain"], [], "propagation:next-chain-empty")
+        self.check(self.w.expedition_chain_table.rowCount(), 0, "propagation:completion-clears-current-display")
+        self.check(self.w.chain_list.count(), 0, "propagation:completion-clears-chain-list")
         self.check([field.text() for field in self.w.rune_inputs], [""] * len(self.w.rune_inputs), "propagation:chain-draft-cleared")
+        # Use the normal expedition selector to inspect the retained final
+        # chain. Completed parts are readable but their structure is locked.
+        self.choose(self.w.expedition, 1)
+        self.check(logger.get_state()["chain"], steps, "propagation:completed-history-retained")
+        self.check(logger.get_state()["chain_completed"], True, "propagation:completed-chain-locked")
+        self.check(all(not self.w.expedition_chain_table.cellWidget(row, column).isEnabled()
+                       for row in range(2) for column in (1, 2)), True,
+                   "propagation:completed-rune-dropdowns-locked")
+        self.check(self.w.expedition_complete_chain_button.isEnabled(), False,
+                   "propagation:cannot-complete-chain-twice")
+        self.choose(self.w.expedition, 2)
+        self.check(logger.get_state()["chain"], [], "propagation:return-to-next-empty-chain")
+        self.coverage["complete chain in Review" if n % 2 else "complete chain in Expedition"] += 1
         self.coverage["paired chain parts and order"] += 1
+
+    @staticmethod
+    def map_records(db, mid):
+        records = []
+        for table in ("maps", "map_unique_kills", "currency_snapshots", "ritual_pages", "commits", "new_export", "expeditions"):
+            records += [dict(row) for row in db.execute(f"SELECT * FROM {table} WHERE map_id=? ORDER BY rowid", (mid,))]
+        for table in ("chain_completions", "chain_append_receipts"):
+            records += [dict(row) for row in db.execute(
+                f"SELECT * FROM {table} WHERE expedition_id LIKE ? ORDER BY rowid", (mid + "-E%",))]
+        return records
 
     def freeze_old(self):
         with logger._connect() as db:
             for mid, fingerprint in self.frozen.items():
-                record = []
-                for table in ("maps", "map_unique_kills", "currency_snapshots", "ritual_pages", "commits", "new_export", "expeditions"):
-                    record += [dict(row) for row in db.execute(f"SELECT * FROM {table} WHERE map_id=? ORDER BY rowid", (mid,))]
+                record = self.map_records(db, mid)
                 self.check(hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest(), fingerprint, "freeze:old-map-and-history")
 
     def finish(self, n):
@@ -505,9 +683,7 @@ class HundredMapSession(unittest.TestCase):
             self.check(unique, expected["kills"][3], "kills:unique-finished-map")
             for key, val in expected["snapshot"].items():
                 self.check(snapshot.get(key), val, "map-snapshot:" + key)
-            data = []
-            for table in ("maps", "map_unique_kills", "currency_snapshots", "ritual_pages", "commits", "new_export", "expeditions"):
-                data += [dict(row) for row in db.execute(f"SELECT * FROM {table} WHERE map_id=? ORDER BY rowid", (f"M{n:04}",))]
+            data = self.map_records(db, f"M{n:04}")
         self.frozen[f"M{n:04}"] = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
         self.completed = n
         self.expedition = 1
@@ -574,6 +750,13 @@ class HundredMapSession(unittest.TestCase):
             rows = grouped[mid]
             self.check(len(rows), len(expected["recipes"]) + 2, "exports:primary-recipe-chain-count")
             self.check(sum(row["Type"] == "Chain" for row in rows), 2, "exports:primary-chain-count")
+            chain_rows = [row for row in rows if row["Type"] == "Chain"]
+            self.check([{"step": int(row["Chain Step #"]),
+                         "rune1": row["Propagation Rune 1"],
+                         "rune2": row["Propagation Rune 2"]} for row in chain_rows],
+                       expected["chain"], "exports:final-chain-order-and-corrections")
+            self.check([row["Expedition ID"] for row in chain_rows], [mid + "-E01"] * 2,
+                       "exports:chain-parts-retain-expedition")
             first = rows[0]
             phases = expected["inventories"]
             for name in self.labels | {"Chaos Orb", "Divine Orb", "Exalted Orb"}:
@@ -616,31 +799,41 @@ class HundredMapSession(unittest.TestCase):
         self.check(logger.get_state()["current_map_id"], f"M{self.current + 1:04}", "restart:current-map")
         self.check(self.labels <= set(logger.inventory_names()), True, "restart:learned-labels")
         self.check(any(r["name"] in self.labels for r in logger.review_icons()), True, "restart:learned-artwork")
+        self.check(self.w.auto_all_checkbox.isChecked(), True, "restart:auto-all-ui-preference")
         self.verify_totals()
         self.freeze_old()
         self.coverage["application restart persistence"] += 1
 
     def test_one_hundred_maps_saved_and_shared(self):
+        self.w.auto_all_checkbox.setChecked(True)
+        self.app.processEvents()
+        self.check({key: logger.get_state()["settings"][key] for key in
+                    ("ocr_auto_commit", "auto_commit", "tablet_auto_commit")},
+                   {"ocr_auto_commit": True, "auto_commit": True, "tablet_auto_commit": True},
+                   "auto:all-activities-enabled-through-ui")
+        self.coverage["auto-all enabled through Options checkbox"] += 1
         for n in range(1, 101):
             self.current = n
             self.freeze_old()
             self.configure(n)
             if n % 4:
                 start = {} if n % 11 == 0 else {"Chaos Orb": n * 3, "Divine Orb": n % 4 + 3}
-                self.inventory("start", start)
+                self.inventory("start", start, automatic=bool(start))
             end = {"Chaos Orb": n * 3 + n % 9, "Divine Orb": n % 4,
                    "Exalted Orb": n % 13}
             custom = f"User labelled token {n // 10}" if n % 10 == 1 else None
             rejected = f"Rejected token {n}" if custom else None
-            self.inventory("end", end, custom=custom, rejected=rejected, unnamed=bool(custom))
+            self.inventory("end", end, custom=custom, rejected=rejected, unnamed=bool(custom), live=bool(custom))
             if n % 5 == 0:
                 self.reject_inventory()
                 self.inventory("end", {"Chaos Orb": n * 3 + 1, "Exalted Orb": n % 7})
                 self.coverage["latest End correction"] += 1
+            # Repeat the actual End capture with clear stacks. It replaces the
+            # current map snapshot while retaining the earlier review audit.
+            self.inventory("end", self.expected[f"M{n:04}"]["inventories"]["end"], automatic=True)
             self.ritual(n)
             self.remnant(n)
-            if n % 4 == 0:
-                self.remnant(n, seed=True)
+            self.remnant(n, seed=True)
             self.propagation(n)
             self.finish(n)
             if n % 25 == 0:
@@ -649,6 +842,17 @@ class HundredMapSession(unittest.TestCase):
                     self.restart()
             if n % 10 == 0:
                 print(f"100-map GUI progress: {n}/100, {len(self.commit_log)} commits, {len(self.failures)} mismatches", flush=True)
+        for activity in ("Atlas settings", "clear live waystone automatic commit",
+                         "clear live tablet automatic commit", "clear live currency automatic commit",
+                         "clear live Ritual automatic commit", "clear live opened remnant automatic commit",
+                         "clear live seed automatic commit", "paired chain parts and order", "Map totals"):
+            self.check(self.coverage[activity] >= 100, True, "coverage:at-least-100:" + activity)
+        self.check(self.coverage["confident propagation automatically saves chain part"] >= 100,
+                   True, "coverage:at-least-100:automatic-propagation")
+        for activity in ("unclear waystone held with auto-all enabled", "unclear tablet held with auto-all enabled",
+                         "unclear currency held with auto-all enabled", "unclear Ritual held with auto-all enabled",
+                         "unclear opened remnant held with auto-all enabled", "unclear seed held with auto-all enabled"):
+            self.check(self.coverage[activity] >= 10, True, "coverage:uncertain-reads-stay-held:" + activity)
         # Backup is exported through the File action and opened independently as SQLite.
         backup = self.output / "Session_Backup.sqlite3"
         action = next(a for a in self.w.findChildren(QAction) if a.text() == "Save database backup as…")

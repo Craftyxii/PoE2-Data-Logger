@@ -221,7 +221,7 @@ class AtlasTreeView(QGraphicsView):
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setStyleSheet("QToolTip { background:#1c1c1e; color:#eeeae3; "
                           "border:1px solid #6b5639; padding:8px; }")
-        self.setMinimumHeight(460)
+        self.setMinimumHeight(240)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def zoom(self, factor):

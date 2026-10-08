@@ -44,7 +44,8 @@ class RemnantPropagationIndependenceTests(unittest.TestCase):
             runes=["Death", "Rebirth"] if runes is None else runes)
 
     def advance(self):
-        return logger.commit_chain_draft([{"rune1": "Death", "rune2": "Rebirth"}], logger.scan_context())
+        logger.commit_chain_draft([{"rune1": "Death", "rune2": "Rebirth"}], logger.scan_context())
+        return logger.complete_chain(logger.scan_context())
 
     def test_pending_remnant_logs_original_expedition_after_chain_advance(self):
         result = self.opened()

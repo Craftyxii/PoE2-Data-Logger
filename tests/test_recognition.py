@@ -194,6 +194,7 @@ class RecognitionTests(unittest.TestCase):
         opened = self.fresh_auto_capture()
         logger.increment_propagation_detonated(logger.scan_context(), runes=["Death", "Rebirth"])
         logger.commit_chain_draft([{"rune1": "Death", "rune2": "Rebirth"}], logger.scan_context())
+        logger.complete_chain(logger.scan_context())
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
         saved = auto_commit.commit(opened)
         self.assertTrue(saved["committed"])

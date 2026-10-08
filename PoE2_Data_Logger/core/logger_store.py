@@ -319,6 +319,12 @@ def initialize():
                 CREATE TABLE IF NOT EXISTS expeditions(
                     expedition_id TEXT PRIMARY KEY,map_id TEXT NOT NULL,number INTEGER NOT NULL,
                     detonated INTEGER);
+                CREATE TABLE IF NOT EXISTS chain_completions(
+                    expedition_id TEXT PRIMARY KEY,scan_commit_number INTEGER NOT NULL,
+                    step_count INTEGER NOT NULL,next_expedition INTEGER NOT NULL,recorded_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS chain_append_receipts(
+                    request_id TEXT PRIMARY KEY,session_generation INTEGER NOT NULL,
+                    expedition_id TEXT NOT NULL,payload_json TEXT NOT NULL,result_json TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS scan_links(
                     remnant_id TEXT PRIMARY KEY,scan_id INTEGER NOT NULL);
                 CREATE TABLE IF NOT EXISTS seed_states(
@@ -1236,13 +1242,13 @@ def discard_ocr_id():
 def start_next_chain():
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
-        if not _meta(db, "current_map_number"):
-            raise ValueError("Start a map before starting another chain.")
-        if _meta(db, "pending_new_map"):
-            raise ValueError("The next map is marked; its first chain is Expedition #1.")
-        config = _meta(db, "settings")
-        config["expedition"] += 1
-        _set_meta(db, "settings", config)
+        mid, expedition, eid = _chain_context(db)
+        if _saved_chain_rows(db, eid):
+            _complete_chain(db, mid, expedition, eid)
+        else:
+            config = _meta(db, "settings")
+            config["expedition"] = _next_unused_expedition(db, mid, expedition)
+            _set_meta(db, "settings", config)
     return get_state()
 
 
@@ -1476,69 +1482,227 @@ def commit_chain_runes(runes):
     return commit_chain_steps([{"rune1": rune, "rune2": ""} for rune in cleaned])
 
 
-def commit_chain_draft(steps, expected_context=None):
-    return commit_chain_steps(steps, advance_expedition=True, expected_context=expected_context)
-
-
-def commit_chain_steps(steps, *, advance_expedition=False, expected_context=None):
-    if not isinstance(steps, list) or not 1 <= len(steps) <= 96:
-        raise ValueError("Enter 1–96 chain steps in order.")
+def _clean_chain_steps(steps, *, limit=96):
+    if not isinstance(steps, list) or not steps or (limit is not None and len(steps) > limit):
+        raise ValueError("Enter 1–96 chain steps in order." if limit is not None else
+                         "Enter the saved chain steps to correct.")
     cleaned = []
     for item in steps:
-        if not isinstance(item, dict):
+        if not isinstance(item, dict) or not isinstance(item.get("rune1"), str) or (
+                item.get("rune2") is not None and not isinstance(item.get("rune2"), str)):
             raise ValueError("Enter the chain runes in order.")
-        cleaned.append((_rune(item.get("rune1"), "Rune 1"),
-                        _rune(item.get("rune2"), "Rune 2")))
+        cleaned.append((_rune(item.get("rune1"), "Rune 1"), _rune(item.get("rune2"), "Rune 2")))
+    return cleaned
+
+
+def _chain_context(db, expected_context=None, *, allow_selected_change=False):
+    number = _meta(db, "current_map_number", 0)
+    if not number:
+        raise ValueError("Start a map before saving a chain.")
+    if _meta(db, "pending_new_map", False):
+        raise ValueError("Start the next map before saving a chain.")
+    mid = _map_id(number)
+    expedition = _meta(db, "settings")["expedition"]
+    if expected_context is not None:
+        if not isinstance(expected_context, dict):
+            raise ValueError("The chain capture context is invalid. Scan again.")
+        current = {"_scan_generation": _meta(db, "session_generation", 0),
+                   "_capture_map_id": mid, "_capture_map_pending": False}
+        if not allow_selected_change:
+            current["_capture_expedition"] = expedition
+        if any(expected_context.get(key) != value for key, value in current.items()):
+            raise ValueError("The map, expedition or session changed. Scan again before saving the chain.")
+        if allow_selected_change:
+            expedition = _integer(expected_context.get("_capture_expedition"), "Captured expedition", 1)
+    return mid, expedition, _exp_id(mid, expedition)
+
+
+def _saved_chain_rows(db, eid):
+    rows = []
+    for table in ("legacy_export", "new_export"):
+        for row in db.execute(f"SELECT position,chain_step,row_json FROM {table} WHERE expedition_id=? "
+                              "AND chain_step IS NOT NULL AND chain_step!=''", (eid,)):
+            values = _load(row["row_json"])
+            rows.append({"table": table, "position": row["position"], "values": values,
+                         "step": int(row["chain_step"]), "rune1": values[26], "rune2": values[27]})
+    return sorted(rows, key=lambda item: item["step"])
+
+
+def _chain_steps_snapshot(db, eid):
+    return [{key: row[key] for key in ("step", "rune1", "rune2")} for row in _saved_chain_rows(db, eid)]
+
+
+def _require_open_chain(db, eid):
+    if db.execute("SELECT 1 FROM chain_completions WHERE expedition_id=?", (eid,)).fetchone():
+        raise ValueError("This chain is completed. Select the current expedition to build another chain.")
+
+
+def _request_token(request_id):
+    if request_id is None:
+        return None
+    if not isinstance(request_id, str) or not request_id.strip() or len(request_id) > 160:
+        raise ValueError("The chain request ID is invalid.")
+    return request_id.strip()
+
+
+def _chain_receipt(db, request_id, payload, expected_context):
+    if request_id is None:
+        return None
+    row = db.execute("SELECT * FROM chain_append_receipts WHERE request_id=?", (request_id,)).fetchone()
+    if row is None:
+        return None
+    _, _, eid = _chain_context(db, expected_context, allow_selected_change=expected_context is not None)
+    if (row["session_generation"] != _meta(db, "session_generation", 0) or row["expedition_id"] != eid
+            or _load(row["payload_json"]) != payload):
+        raise ValueError("This chain request ID was already used for a different scan or chain.")
+    return {**_load(row["result_json"]), "reused": True}
+
+
+def _save_chain_receipt(db, request_id, payload, result):
+    if request_id is not None:
+        db.execute("INSERT INTO chain_append_receipts VALUES(?,?,?,?,?)", (
+            request_id, _meta(db, "session_generation", 0), result["expedition_id"], _dump(payload), _dump(result)))
+
+
+def _append_chain_steps(db, mid, expedition, eid, cleaned):
+    _require_open_chain(db, eid)
+    step = max([row["step"] for row in _saved_chain_rows(db, eid)] or [0]) + 1
+    existing = _first_row(db, "expedition_id", eid)
+    det = _detonated_value(db, eid, _UNSET)
+    context = _bind_atlas_context(db, mid, _snapshot(_meta(db, "settings")))
+    steps = [{"step": step + offset, "rune1": rune1, "rune2": rune2}
+             for offset, (rune1, rune2) in enumerate(cleaned)]
+    commit_number = _record_commit(db, "Chain", mid, eid, f"Steps {step}–{step + len(cleaned) - 1}",
+                                   context=context, details={"detonated": det, "steps": steps})
+    for offset, (rune1, rune2) in enumerate(cleaned):
+        row = [""] * 67
+        row[22], row[25], row[26], row[27], row[31], row[32] = (
+            mid, step + offset, rune1, rune2, expedition, eid)
+        if offset == 0 and not existing and det is not None:
+            row[33] = det
+        row.extend(_extra_export_values(context))
+        row[67 + len(BASE_EXTRA_HEADERS) - 1] = commit_number
+        _add_new(db, row)
+    db.execute("INSERT OR IGNORE INTO expeditions VALUES(?,?,?,?)", (eid, mid, expedition, None))
+    return {"map_id": mid, "expedition_id": eid, "steps": [item["step"] for item in steps],
+            "scan_commit_number": commit_number, "reused": False}
+
+
+def commit_chain_draft(steps, expected_context=None, *, request_id=None):
+    """Append a reviewed part to the current chain; completion is a separate action."""
+    return commit_chain_steps(steps, expected_context=expected_context, request_id=request_id)
+
+
+def commit_chain_steps(steps, *, advance_expedition=False, expected_context=None, request_id=None):
+    cleaned = _clean_chain_steps(steps)
+    request_id = _request_token(request_id)
+    payload = {"operation": "append", "steps": cleaned, "complete": bool(advance_expedition)}
+    # Persist the same JSON representation used when replaying a receipt.
+    payload = _load(_dump(payload))
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
-        number = _meta(db, "current_map_number")
-        if not number:
-            raise ValueError("Start a map before committing a chain.")
-        if _meta(db, "pending_new_map"):
-            raise ValueError("Start the next map before committing a chain.")
-        if expected_context is not None:
-            if not isinstance(expected_context, dict):
-                raise ValueError("The chain capture context is invalid. Scan again.")
-            current = {"_scan_generation": _meta(db, "session_generation", 0),
-                       "_capture_map_id": _map_id(number),
-                       "_capture_map_pending": False,
-                       "_capture_expedition": _meta(db, "settings")["expedition"]}
-            if any(expected_context.get(key) != value for key, value in current.items()):
-                raise ValueError("The map, expedition or session changed. Scan again before committing the chain.")
-        mid = _map_id(number)
-        config = _meta(db, "settings")
-        expedition = config["expedition"]
-        eid = _exp_id(mid, expedition)
-        step = max([int(row[0] or 0) for table in ("legacy_export", "new_export")
-                    for row in db.execute(f"SELECT chain_step FROM {table} WHERE expedition_id=? AND chain_step IS NOT NULL AND chain_step!=''",
-                                          (eid,))] or [0]) + 1
-        existing = _first_row(db, "expedition_id", eid)
-        det = db.execute("SELECT detonated FROM expeditions WHERE expedition_id=?", (eid,)).fetchone()
-        context = _bind_atlas_context(db, mid, _snapshot(config))
-        commit_number = _record_commit(db, "Chain", mid, eid, f"Steps {step}–{step + len(cleaned) - 1}",
-                                       context=context, details={"detonated": det[0] if det else None, "steps": [
-                                           {"step": step + offset, "rune1": rune1, "rune2": rune2}
-                                           for offset, (rune1, rune2) in enumerate(cleaned)]})
-        for offset, (rune1, rune2) in enumerate(cleaned):
-            row = [""] * 67
-            row[22], row[25], row[26], row[27], row[31], row[32] = (
-                mid, step + offset, rune1, rune2, expedition, eid)
-            if offset == 0 and not existing and det and det[0] is not None:
-                row[33] = det[0]
-            row.extend(_extra_export_values(context))
-            row[67 + len(BASE_EXTRA_HEADERS) - 1] = commit_number
-            _add_new(db, row)
-        db.execute("INSERT OR IGNORE INTO expeditions VALUES(?,?,?,?)", (eid, mid, expedition, None))
-        result = {"map_id": mid, "expedition_id": eid,
-                  "steps": list(range(step, step + len(cleaned))),
-                  "scan_commit_number": commit_number}
+        previous = _chain_receipt(db, request_id, payload, expected_context)
+        if previous is not None:
+            return previous
+        mid, expedition, eid = _chain_context(db, expected_context)
+        result = _append_chain_steps(db, mid, expedition, eid, cleaned)
         if advance_expedition:
-            config["expedition"] = expedition + 1
-            _set_meta(db, "settings", config)
-            result.update(next_expedition=config["expedition"],
-                          next_expedition_id=_exp_id(mid, config["expedition"]))
+            completed = _complete_chain(db, mid, expedition, eid)
+            result.update(next_expedition=completed["next_expedition"],
+                          next_expedition_id=completed["next_expedition_id"],
+                          completion_commit_number=completed["scan_commit_number"])
+        _save_chain_receipt(db, request_id, payload, result)
         return result
 
+
+def _next_unused_expedition(db, mid, expedition):
+    used = {row[0] for row in db.execute("SELECT number FROM expeditions WHERE map_id=?", (mid,))}
+    for table in ("legacy_export", "new_export"):
+        for row in db.execute(f"SELECT DISTINCT expedition_id FROM {table} WHERE map_id=?", (mid,)):
+            if row[0] and str(row[0]).startswith(mid + "-E"):
+                try:
+                    used.add(int(str(row[0]).split("-E", 1)[1]))
+                except ValueError:
+                    pass
+    following = expedition + 1
+    while following in used:
+        following += 1
+    return following
+
+
+def _completion_result(mid, eid, row, *, already_completed):
+    return {"map_id": mid, "expedition_id": eid, "next_expedition": row["next_expedition"],
+            "next_expedition_id": _exp_id(mid, row["next_expedition"]),
+            "scan_commit_number": row["scan_commit_number"], "step_count": row["step_count"],
+            "already_completed": already_completed}
+
+
+def _complete_chain(db, mid, expedition, eid):
+    existing = db.execute("SELECT * FROM chain_completions WHERE expedition_id=?", (eid,)).fetchone()
+    if existing:
+        return _completion_result(mid, eid, existing, already_completed=True)
+    steps = _chain_steps_snapshot(db, eid)
+    if not steps:
+        raise ValueError("Save at least one chain part before completing the chain.")
+    following = _next_unused_expedition(db, mid, expedition)
+    number = _record_commit(db, "Chain completion", mid, eid, f"Completed {len(steps)} chain parts",
+                            details={"steps": steps, "detonated": _detonated_value(db, eid, _UNSET),
+                                     "next_expedition": following, "next_expedition_id": _exp_id(mid, following)})
+    db.execute("INSERT INTO chain_completions VALUES(?,?,?,?,?)", (eid, number, len(steps), following, _now()))
+    config = _meta(db, "settings")
+    config["expedition"] = following
+    _set_meta(db, "settings", config)
+    row = db.execute("SELECT * FROM chain_completions WHERE expedition_id=?", (eid,)).fetchone()
+    return _completion_result(mid, eid, row, already_completed=False)
+
+
+def complete_chain(expected_context=None):
+    """Close saved parts and advance once, retaining the final ordered chain for history."""
+    with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        # A repeated callback may arrive after the first completion selected the next EID.
+        mid, expedition, eid = _chain_context(db, expected_context,
+                                              allow_selected_change=expected_context is not None)
+        existing = db.execute("SELECT * FROM chain_completions WHERE expedition_id=?", (eid,)).fetchone()
+        if existing:
+            return _completion_result(mid, eid, existing, already_completed=True)
+        _chain_context(db, expected_context)
+        return _complete_chain(db, mid, expedition, eid)
+
+
+def update_chain_steps(steps, expected_context=None):
+    """Correct existing parts while building, without changing identity, order or counts."""
+    cleaned = _clean_chain_steps(steps, limit=None)
+    ids = [_integer(item.get("step"), "Chain step", 1) for item in steps]
+    if len(set(ids)) != len(ids):
+        raise ValueError("Each saved chain step may be corrected only once.")
+    with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        mid, _, eid = _chain_context(db, expected_context)
+        _require_open_chain(db, eid)
+        saved = _saved_chain_rows(db, eid)
+        by_step = {row["step"]: row for row in saved}
+        if len(by_step) != len(saved) or any(step not in by_step for step in ids):
+            raise ValueError("Correct only existing, uniquely identified chain steps.")
+        known = {row[0] for row in db.execute("SELECT DISTINCT seed_rune FROM seed_states WHERE seed_rune!='Unresolved'")}
+        known.update(rune for row in saved for rune in (row["rune1"], row["rune2"]) if rune)
+        if any(rune and rune not in known for pair in cleaned for rune in pair):
+            raise ValueError("Choose a known rune when correcting the chain.")
+        changes = []
+        for step, (rune1, rune2) in zip(ids, cleaned):
+            row = by_step[step]
+            if (row["rune1"], row["rune2"]) == (rune1, rune2):
+                continue
+            changes.append({"step": step, "previous_rune1": row["rune1"], "previous_rune2": row["rune2"],
+                            "rune1": rune1, "rune2": rune2})
+            values = row["values"]
+            values[26], values[27] = rune1, rune2
+            db.execute(f"UPDATE {row['table']} SET row_json=? WHERE position=?", (_dump(values), row["position"]))
+        number = (_record_commit(db, "Chain correction", mid, eid, f"Corrected {len(changes)} chain parts",
+                                 details={"changes": changes, "detonated": _detonated_value(db, eid, _UNSET)})
+                  if changes else None)
+        return {"map_id": mid, "expedition_id": eid, "steps": [item["step"] for item in changes],
+                "scan_commit_number": number, "changed": bool(changes), "chain_completed": False}
 
 def _unique_kills_for_map(db, map_id):
     row = db.execute("SELECT unique_kills FROM map_unique_kills WHERE map_id=?", (map_id,)).fetchone()
@@ -1561,8 +1725,7 @@ def _detonated_value(db, expedition_id, value):
     return _integer(value, "Remnants Detonated", 0, blank=True)
 
 
-def increment_propagation_detonated(expected_context, *, current_value=_UNSET, runes=None, recipe=""):
-    """Persist one accepted propagation scan, independently of its one or two runes."""
+def _clean_propagation_part(runes, recipe):
     if not isinstance(runes, list) or not 1 <= len(runes) <= 2:
         raise ValueError("A propagation scan must contain one or two detected runes.")
     if any(not isinstance(rune, str) or not rune.strip() for rune in runes):
@@ -1570,34 +1733,64 @@ def increment_propagation_detonated(expected_context, *, current_value=_UNSET, r
     cleaned = [_rune(rune, "Rune 1") for rune in runes]
     if not isinstance(recipe, str) or len(recipe) > 200:
         raise ValueError("The propagation recipe must be under 200 characters.")
+    return cleaned, recipe.strip()
+
+
+def _increment_propagation(db, mid, expedition, eid, cleaned, recipe, current_value):
+    _require_open_chain(db, eid)
+    pending = _meta(db, "ocr_pending")
+    if pending and (not isinstance(pending, dict) or pending.get("map_id") != mid):
+        raise ValueError("The scanned remnant belongs to another map. Save or discard it first.")
+    count = (_detonated_value(db, eid, current_value) or 0) + 1
+    db.execute("INSERT INTO expeditions VALUES(?,?,?,?) ON CONFLICT(expedition_id) "
+               "DO UPDATE SET detonated=excluded.detonated", (eid, mid, expedition, count))
+    _patch_first(db, "expedition_id", eid, {33: count})
+    number = _record_commit(db, "Propagation", mid, eid, recipe,
+                            details={"detonated": count, "runes": cleaned, "recipe": recipe})
+    return {"map_id": mid, "expedition_id": eid, "detonated": count, "scan_commit_number": number}
+
+
+def increment_propagation_detonated(expected_context, *, current_value=_UNSET, runes=None, recipe="", request_id=None):
+    """Persist one accepted held/manual scan independently of its unsaved draft."""
+    cleaned, recipe = _clean_propagation_part(runes, recipe)
+    if not isinstance(expected_context, dict):
+        raise ValueError("The propagation capture context is invalid. Scan again.")
+    request_id = _request_token(request_id)
+    payload = {"operation": "propagation-draft", "runes": cleaned, "recipe": recipe,
+               "current_value": None if current_value is _UNSET else current_value,
+               "count_from_saved": current_value is _UNSET}
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
-        number = _meta(db, "current_map_number", 0)
-        if not number:
-            raise ValueError("Start a map before accepting a propagation scan.")
-        if _meta(db, "pending_new_map", False):
-            raise ValueError("Start the next map before accepting a propagation scan.")
-        if not isinstance(expected_context, dict):
-            raise ValueError("The propagation capture context is invalid. Scan again.")
-        expedition = _meta(db, "settings")["expedition"]
-        mid = _map_id(number)
-        current = {"_scan_generation": _meta(db, "session_generation", 0),
-                   "_capture_map_id": mid, "_capture_map_pending": False,
-                   "_capture_expedition": expedition}
-        if any(expected_context.get(key) != value for key, value in current.items()):
-            raise ValueError("The map, expedition or session changed. Scan propagation again.")
-        eid = _exp_id(mid, expedition)
-        pending = _meta(db, "ocr_pending")
-        if pending and (not isinstance(pending, dict) or pending.get("map_id") != mid):
-            raise ValueError("The scanned remnant belongs to another map. Save or discard it first.")
-        count = (_detonated_value(db, eid, current_value) or 0) + 1
-        db.execute("INSERT INTO expeditions VALUES(?,?,?,?) ON CONFLICT(expedition_id) "
-                   "DO UPDATE SET detonated=excluded.detonated", (eid, mid, expedition, count))
-        _patch_first(db, "expedition_id", eid, {33: count})
-        commit_number = _record_commit(db, "Propagation", mid, eid, recipe.strip(),
-                                       details={"detonated": count, "runes": cleaned, "recipe": recipe.strip()})
-        return {"map_id": mid, "expedition_id": eid, "detonated": count,
-                "scan_commit_number": commit_number}
+        previous = _chain_receipt(db, request_id, payload, expected_context)
+        if previous is not None:
+            return previous
+        mid, expedition, eid = _chain_context(db, expected_context)
+        result = _increment_propagation(db, mid, expedition, eid, cleaned, recipe, current_value)
+        result["reused"] = False
+        _save_chain_receipt(db, request_id, payload, result)
+        return result
+
+
+def accept_propagation_part(expected_context, *, runes=None, recipe="", request_id=None, current_value=_UNSET):
+    """Atomically count and save a confident scan; retries never duplicate either."""
+    cleaned, recipe = _clean_propagation_part(runes, recipe)
+    if not isinstance(expected_context, dict):
+        raise ValueError("The propagation capture context is invalid. Scan again.")
+    request_id = _request_token(request_id)
+    payload = {"operation": "propagation", "runes": cleaned, "recipe": recipe,
+               "current_value": None if current_value is _UNSET else current_value,
+               "count_from_saved": current_value is _UNSET}
+    with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        previous = _chain_receipt(db, request_id, payload, expected_context)
+        if previous is not None:
+            return previous
+        mid, expedition, eid = _chain_context(db, expected_context)
+        accepted = _increment_propagation(db, mid, expedition, eid, cleaned, recipe, current_value)
+        result = _append_chain_steps(db, mid, expedition, eid, [(cleaned[0], cleaned[1] if len(cleaned) > 1 else "")])
+        result.update(detonated=accepted["detonated"], propagation_commit_number=accepted["scan_commit_number"])
+        _save_chain_receipt(db, request_id, payload, result)
+        return result
 
 
 def save_kills(normal, magic, rare, *, unique=_UNSET):
@@ -1768,7 +1961,7 @@ def clear_export_and_reset_ids():
         db.execute("BEGIN IMMEDIATE")
         _set_meta(db, "session_generation", _meta(db, "session_generation", 0) + 1)
         for table in ("legacy_export", "new_export", "maps", "map_unique_kills", "expeditions", "scan_links",
-                      "currency_snapshots", "ritual_pages", "commits"):
+                      "currency_snapshots", "ritual_pages", "commits", "chain_completions", "chain_append_receipts"):
             db.execute(f"DELETE FROM {table}")
         db.execute("DELETE FROM sqlite_sequence WHERE name IN ('new_export','ritual_pages')")
         _set_meta(db, "current_map_number", 0)
@@ -2530,7 +2723,7 @@ def _map_summary_item_columns(db, reserved, commits, snapshots):
                 name = name.strip()
                 labels.setdefault(name.casefold(), (name, "Currency"))
     legacy_headers = [*_meta(db, "export_headers", []), *EXPORT_EXTRA_HEADERS, *ATLAS_EXPORT_HEADERS,
-                      *KILL_EXPORT_HEADERS, "Type", "Map Modifiers"]
+                      *KILL_EXPORT_HEADERS, *CHAIN_EXPORT_HEADERS, "Type", "Map Modifiers"]
     used = {header.casefold() for header in [*reserved, *legacy_headers]}
     columns = []
     for key, (name, kind) in sorted(labels.items(), key=lambda entry: _map_summary_item_sort(*entry[1])):
@@ -2696,7 +2889,9 @@ def get_state():
             "masters": masters, "families": families, "seed_states": seed_states,
             "recipes": [r[0] for r in db.execute("SELECT name FROM recipes ORDER BY name")],
             "runes": [r[0] for r in db.execute("SELECT DISTINCT seed_rune FROM seed_states WHERE seed_rune!='Unresolved' ORDER BY seed_rune")],
-            "chain": chain, "recent": recent,
+            "chain": chain, "chain_completed": db.execute(
+                "SELECT 1 FROM chain_completions WHERE expedition_id=?", (eid,)).fetchone() is not None,
+            "recent": recent,
             "counts": {"historical_rows": db.execute("SELECT count(*) FROM legacy_export").fetchone()[0],
                        "new_rows": db.execute("SELECT count(*) FROM new_export").fetchone()[0],
                        "saved_scans": db.execute("SELECT count(*) FROM scans").fetchone()[0],
@@ -2737,10 +2932,14 @@ def export_csv(*, _db=None):
     out = io.StringIO(newline="")
     writer = csv.writer(out)
     with (nullcontext(_db) if _db is not None else _connect()) as db:
+        if _db is None:
+            db.execute("BEGIN")
         writer.writerow([*_meta(db, "export_headers"), *EXPORT_EXTRA_HEADERS[:-2],
-                         *ATLAS_EXPORT_HEADERS, *EXPORT_EXTRA_HEADERS[-2:], *KILL_EXPORT_HEADERS])
+                         *ATLAS_EXPORT_HEADERS, *EXPORT_EXTRA_HEADERS[-2:], *KILL_EXPORT_HEADERS,
+                         *CHAIN_EXPORT_HEADERS])
         atlas_contexts = {row["number"]: _load(row["snapshot_json"])
                           for row in db.execute("SELECT number,snapshot_json FROM commits")}
+        completed = {row[0] for row in db.execute("SELECT expedition_id FROM chain_completions")}
         seen_maps = set()
         for table in ("legacy_export", "new_export"):
             for item in db.execute(f"SELECT row_json FROM {table} ORDER BY position"):
@@ -2758,7 +2957,9 @@ def export_csv(*, _db=None):
                     seen_maps.add(map_id)
                 else:
                     kill_values = ["", ""]
-                writer.writerow(_csv_row([*values[:-2], *_atlas_export_values(context), *values[-2:], *kill_values]))
+                status = ("Completed" if values[32] in completed else "Open") if values[25] else ""
+                writer.writerow(_csv_row([*values[:-2], *_atlas_export_values(context), *values[-2:],
+                                          *kill_values, status]))
     return out.getvalue().encode("utf-8-sig")
 
 
@@ -2783,8 +2984,11 @@ HISTORY_DETAIL_HEADERS = ("Inventory Phase", "Currency", "Quantity", "Ritual Pag
                           "Start Recorded UTC", "End Recorded UTC", "Deferred", "New Find Quantity",
                           "Ritual Tribute Available", "Ritual Rerolls Remaining")
 KILL_EXPORT_HEADERS = ("Unique Kills (Map)", "Total Kills")
+CHAIN_EXPORT_HEADERS = ("Chain Status",)
+CHAIN_CORRECTION_HEADERS = ("Previous Rune 1", "Previous Rune 2")
 HISTORY_APPEND_HEADERS = (*KILL_EXPORT_HEADERS, "Remnants Detonated (Scan)", "Start Baseline",
-                          "Current Inventory Snapshot", "Session Found Quantity")
+                          "Current Inventory Snapshot", "Session Found Quantity", *CHAIN_EXPORT_HEADERS,
+                          *CHAIN_CORRECTION_HEADERS)
 
 
 def _current_inventory_projection(db):
@@ -2817,6 +3021,7 @@ def export_record_history_csv(*, _db=None):
         if _db is None:
             db.execute("BEGIN")
         current_inventories, current_commits = _current_inventory_projection(db)
+        completed = {row[0] for row in db.execute("SELECT expedition_id FROM chain_completions")}
         for commit in db.execute("SELECT * FROM commits ORDER BY number"):
             context = _load(commit["snapshot_json"])
             details = _load(commit["details_json"])
@@ -2881,9 +3086,13 @@ def export_record_history_csv(*, _db=None):
                                "Remnant Scan Mode": seed.get("mode", "")})
                 entries = [{"Recipe": item["recipe"], "Socket Count": item["sockets"], "Exact Rune Combo": item["combo"]}
                            for item in details.get("recipes", [])]
-            elif commit["kind"] == "Chain":
+            elif commit["kind"] in ("Chain", "Chain completion"):
                 entries = [{"Chain Step #": item["step"], "Propagation Rune 1": item["rune1"],
                             "Propagation Rune 2": item["rune2"]} for item in details.get("steps", [])]
+            elif commit["kind"] == "Chain correction":
+                entries = [{"Chain Step #": item["step"], "Propagation Rune 1": item["rune1"],
+                            "Propagation Rune 2": item["rune2"], "Previous Rune 1": item["previous_rune1"],
+                            "Previous Rune 2": item["previous_rune2"]} for item in details.get("changes", [])]
             elif commit["kind"] == "Propagation":
                 runes = details.get("runes") or []
                 entries = [{"Recipe": details.get("recipe", ""),
@@ -2911,7 +3120,10 @@ def export_record_history_csv(*, _db=None):
                                            1 if commit["kind"] == "Propagation" else "",
                                            shared.get("Start Baseline", ""),
                                            shared.get("Current Inventory Snapshot", ""),
-                                           values.get("Session Found Quantity", "")]))
+                                           values.get("Session Found Quantity", ""),
+                                           ("Completed" if commit["expedition_id"] in completed else "Open")
+                                           if commit["kind"] in ("Chain", "Chain correction", "Chain completion", "Propagation") else "",
+                                           *(values.get(name, "") for name in CHAIN_CORRECTION_HEADERS)]))
     return output.getvalue().encode("utf-8-sig")
 
 

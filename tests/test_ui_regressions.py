@@ -9,6 +9,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image, ImageDraw
+from PySide6.QtCore import QPoint, QRect
 from PySide6.QtWidgets import QApplication, QFileDialog
 
 from PoE2_Data_Logger.core import logger_store as logger, service, store
@@ -48,6 +49,32 @@ class UIRegressionTests(unittest.TestCase):
         raw = io.BytesIO()
         Image.new("RGB", (600, 400), color).save(raw, format="PNG")
         return raw.getvalue()
+
+    def test_chain_and_atlas_controls_fit_small_screen_after_completion(self):
+        self.window.show()
+        self.window.rune_inputs[0].setText("Death")
+        self.window.commit_chain()
+        self.window.complete_chain()
+        self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(1))
+        self.window.resize(1366, 720)
+        self.app.processEvents()
+        self.assertEqual(self.window.size().toTuple(), (1366, 720))
+        page = self.window.tabs.widget(1)
+        self.window.tabs.setCurrentIndex(1)
+        page.ensureWidgetVisible(self.window.expedition_complete_chain_button, 20, 20)
+        self.app.processEvents()
+        targets = [self.window.expedition_complete_chain_button]
+        for target in targets:
+            rect = QRect(target.mapTo(self.window, QPoint()), target.size())
+            self.assertTrue(target.isVisible())
+            self.assertTrue(self.window.rect().contains(rect))
+        self.window.tabs.setCurrentIndex(self.window.tabs.indexOf(self.window.atlas_settings_page))
+        self.app.processEvents()
+        for target in (self.window.atlas_settings_page.gear_rarity, self.window.atlas_settings_page.save_button):
+            rect = QRect(target.mapTo(self.window, QPoint()), target.size())
+            self.assertTrue(target.isVisible())
+            self.assertTrue(self.window.rect().contains(rect))
+        self.assertEqual(self.window.height(), 720)
 
     def opened_result(self):
         return {"mode": "opened", "status": "Review opened rewards.", "can_use": True,
@@ -144,6 +171,9 @@ class UIRegressionTests(unittest.TestCase):
         self.window.rune_inputs[0].setText("Rage")
         self.window.rune_inputs[1].setText("Time")
         self.window.commit_chain()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertEqual([row["rune1"] for row in logger.get_state()["chain"]], ["Rage", "Time"])
+        self.window.complete_chain()
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E03")
         self.assertEqual(self.window.header_expedition.currentData(), 3)
         self.assertEqual(logger.get_state()["chain"], [])
@@ -265,6 +295,7 @@ class UIRegressionTests(unittest.TestCase):
         work, callback = self.reference_job()
         context = logger.scan_context()
         logger.commit_chain_draft([{"rune1": "Rage"}], context)
+        logger.complete_chain(context)
         self.window.refresh()
         saved = self.persist_reference(work)
         callback(saved)

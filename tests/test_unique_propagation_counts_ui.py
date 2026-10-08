@@ -103,14 +103,15 @@ class UniquePropagationCountsUITests(unittest.TestCase):
                               ("Normal Kills", "Magic Kills", "Rare Kills", "Unique Kills")],
                              ["10", "0", "", "0"])
 
-    def test_each_accepted_scan_counts_one_remnant_and_chain_commit_resets_next_expedition(self):
+    def test_each_accepted_scan_counts_one_remnant_and_completion_resets_next_expedition(self):
         self.scan(["Death", "Power"])
         self.assert_current_detonated(1)
         self.scan(["Opulent"])
         self.assert_current_detonated(2)
         self.window.refresh()
         self.assert_current_detonated(2)
-        self.window.review_commit_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.window.review_complete_chain_button.click()
 
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
         self.assert_current_detonated(None)
@@ -121,7 +122,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.assert_current_detonated(None)
         self.scan(["Rage", "Time"])
         self.assert_current_detonated(1)
-        self.window.commit_chain()
+        self.window.complete_chain()
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E03")
         self.assert_current_detonated(None)
         row = self.map_rows()["M0001"]
@@ -242,14 +243,16 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.scan(["Opulent"])
         self.assert_current_detonated(2)
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
-        self.assertEqual(self.window._chain_steps(), [{"rune1": "Opulent", "rune2": ""}])
+        self.assertEqual(self.window._chain_steps(), [])
+        self.assertEqual([(part["rune1"], part["rune2"]) for part in logger.get_state()["chain"]],
+                         [("Death", ""), ("Opulent", "")])
         self.window.reject_review()
         self.assert_current_detonated(2)
 
-    def test_stale_scan_after_chain_commit_and_new_map_does_not_count(self):
+    def test_stale_scan_after_chain_completion_and_new_map_does_not_count(self):
         context = logger.scan_context()
         self.scan(["Death"])
-        self.window.commit_chain()
+        self.window.complete_chain()
         with self.assertRaisesRegex(ValueError, "expedition changed"):
             self.scan(["Time"], context=context)
         self.assert_current_detonated(None)
@@ -267,11 +270,16 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.window.rune_inputs[1].setText("Power")
         self.window.commit_chain()
         self.assert_current_detonated(None)
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
         self.assertEqual(self.map_rows()["M0001"]["Expedition 1 Detonated"], "")
+        self.window.complete_chain()
         self.scan(["Rage", "Time"])
-        self.window.rune_inputs[2].setText("Opulent")
+        self.window.rune_inputs[0].setText("Opulent")
         self.assert_current_detonated(1)
         self.window.commit_chain()
+        self.assert_current_detonated(1)
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.window.complete_chain()
         self.assert_current_detonated(None)
         self.assertEqual(self.map_rows()["M0001"]["Expedition 2 Detonated"], "1")
 

@@ -99,10 +99,20 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
         self.assertEqual(self.window._chain_steps(), [
             {"rune1": "Death", "rune2": "Power"}, {"rune1": "Rage", "rune2": "Time"}])
         self.window.review_commit_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.assertEqual(logger.get_state()["detonated"], 2)
+        self.assertEqual([(row["rune1"], row["rune2"]) for row in logger.get_state()["chain"]],
+                         [("Death", "Power"), ("Rage", "Time")])
+        self.assertFalse(self.window.review_commit_chain_button.isEnabled())
+        self.assertTrue(self.window.review_complete_chain_button.isEnabled())
+        self.window.review_complete_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertFalse(self.window.review_complete_chain_button.isEnabled())
+        self.window.review_complete_chain_button.click()
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
 
         # The currency snapshot belongs to the map, independently of the
-        # expedition number that advanced when its chain was committed.
+        # expedition number that advanced only when its chain was completed.
         self.currency("end", {"Chaos Orb": 8, "Divine Orb": 2})
         self.assertEqual(self.totals(), {"Chaos Orb": 8, "Divine Orb": 2})
         self.currency("end", {"Chaos Orb": 7, "Divine Orb": 1})
@@ -165,6 +175,30 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
         self.assertEqual(self.rows(logger.export_currency_csv())[0]["Net Change"], "6")
         self.assert_workbook_matches_csv()
 
+    def test_repeated_confident_callback_behind_manual_draft_keeps_one_part_and_count(self):
+        self.window.rune_inputs[0].setText("Death")
+        result = {"can_use": True, "runes": ["Rage", "Time"],
+                  "selected_recipe": "Chaos Orb", **logger.scan_context()}
+        self.window._propagation_read(result, self.raw)
+        expected = [{"rune1": "Death", "rune2": ""}, {"rune1": "Rage", "rune2": "Time"}]
+        self.assertEqual(self.window._chain_steps(), expected)
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.window._propagation_read(result, self.raw)
+        self.assertEqual(self.window._chain_steps(), expected)
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.window.review_commit_chain_button.click()
+        self.window._propagation_read(result, self.raw)
+        self.assertEqual([(row["rune1"], row["rune2"]) for row in logger.get_state()["chain"]],
+                         [("Death", ""), ("Rage", "Time")])
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        # Matching runes in a genuinely new capture still append normally.
+        self.window._propagation_read({"can_use": True, "runes": ["Rage", "Time"],
+                                      "selected_recipe": "Chaos Orb", **logger.scan_context()}, self.raw)
+        self.assertEqual(logger.get_state()["detonated"], 2)
+        self.assertEqual(len(logger.get_state()["chain"]), 3)
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.assert_workbook_matches_csv()
+
     def test_reject_restart_and_id_reset_preserve_then_clear_only_approved_data(self):
         self.currency("end", {"Chaos Orb": 4})
         self.currency("end", {"Chaos Orb": 999}, approve=False)
@@ -208,6 +242,9 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["detonated"], 1)
         self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "Greater Jeweller's Orb")
         self.window.commit_chain()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.assertFalse(logger.get_state()["chain_completed"])
         rows = [row for row in self.rows(logger.export_record_history_csv()) if row["Type"] == "Propagation"]
         self.assertEqual(len(rows), 1)
         self.assertEqual((rows[0]["Map ID"], rows[0]["Expedition ID"], rows[0]["Recipe"],
