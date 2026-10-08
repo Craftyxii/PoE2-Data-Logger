@@ -236,11 +236,13 @@ class UniquePropagationCountsUITests(unittest.TestCase):
                                            "can_use": False, "first_recipe": None,
                                            "opened_recipes": [], **logger.scan_context()}, self.raw)
         pending = logger.get_state()["ocr_pending"]
+        self.assertEqual(self.window._chain_steps(), [])
+        self.assertTrue(self.window.chain_review_group.isHidden())
+        self.assert_current_detonated(1)
         self.scan(["Opulent"])
         self.assert_current_detonated(2)
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
-        self.assertEqual(self.window._chain_steps(), [{"rune1": "Death", "rune2": ""},
-                                                   {"rune1": "Opulent", "rune2": ""}])
+        self.assertEqual(self.window._chain_steps(), [{"rune1": "Opulent", "rune2": ""}])
         self.window.reject_review()
         self.assert_current_detonated(2)
 
