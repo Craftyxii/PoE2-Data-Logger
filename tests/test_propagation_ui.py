@@ -14,7 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PIL import Image
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QFileDialog, QPushButton
+from PySide6.QtWidgets import QApplication, QComboBox, QFileDialog, QPushButton
 
 from PoE2_Data_Logger.core import logger_store as logger, service, store
 from PoE2_Data_Logger.platform.hotkey import HotkeyManager
@@ -50,8 +50,14 @@ class PropagationUITests(unittest.TestCase):
                   "selected_recipe": recipe, "can_use": clear, "status": "Propagation read",
                   **(logger.scan_context() if context is None else context)}
         if manual:
+            with logger._connect() as db:
+                entry = db.execute("SELECT sockets,combo FROM recipes WHERE name=?", (recipe,)).fetchone()
+                original = [rune.strip() for rune in entry["combo"].split("+")]
+                ordered = [*runes, *original[len(runes):]]
+                db.execute("UPDATE recipes SET combo=? WHERE name=?", (" + ".join(ordered), recipe))
             result.update(can_use=False, choices=[{"selected_recipe": recipe,
-                                                   "runes": runes, "can_use": True}])
+                                                   "runes": runes, "positions": result["positions"],
+                                                   "can_use": True}])
         self.window._propagation_read(result, self.raw.getvalue())
         if manual:
             self.window.approve_propagation_recipe(0)
@@ -363,6 +369,8 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.window.unique.text(), "not a number")
 
     def test_missing_arrow_recipe_approve_and_deny_choose_one_part(self):
+        for name, runes in (("Recipe A", ["Death", "Power"]), ("Recipe B", ["Rage", "Time"])):
+            logger.save_recipe({"name": name, "sockets": 2, "combo": " + ".join(runes)})
         result = {"mode": "propagation", "can_use": False, "runes": [], "status": "Select a recipe",
                   "choices": [
                       {"selected_recipe": "Recipe A", "runes": ["Death", "Power"], "can_use": True},
@@ -389,7 +397,7 @@ class PropagationUITests(unittest.TestCase):
             "choices": [
                 {"selected_recipe": "Mystic Alloy", "runes": [], "can_use": False},
                 {"selected_recipe": "Prismatic Alloy", "runes": [], "can_use": False},
-                {"selected_recipe": "Swift Alloy", "runes": ["Tidal"], "can_use": True}],
+                {"selected_recipe": "Swift Alloy", "runes": ["Soul"], "positions": [3], "can_use": True}],
             **logger.scan_context()}, self.raw.getvalue())
         return self.window.propagation_recipe_table
 
@@ -397,76 +405,207 @@ class PropagationUITests(unittest.TestCase):
         return self.window.propagation_recipe_table.cellWidget(row, 2).findChild(
             QPushButton, "approvePropagationRecipe")
 
-    def test_unclear_recipe_button_selects_manual_entry_then_approves_only_that_recipe(self):
+    def row_fields(self, row):
+        return self.window._propagation_row_inputs[row]
+
+    def select_row_slots(self, row, first, second=None):
+        for field, slot in zip(self.row_fields(row), (first, second)):
+            field.setCurrentIndex(0 if slot is None else field.findData(slot))
+
+    def hold_recipes(self, *choices):
+        self.window._propagation_read({
+            "mode": "propagation", "can_use": False, "runes": [],
+            "status": "Check the marked runes", "choices": list(choices),
+            **logger.scan_context()}, self.raw.getvalue())
+
+    def test_unclear_recipe_inline_entry_approves_only_its_recipe(self):
         table = self.held_recipe_list()
         self.window.resize(1400, 700)
         self.window.show()
         self.app.processEvents()
         action = self.recipe_action(1)
-        self.assertTrue(action.isEnabled())
-        self.assertEqual(action.text(), "Enter runes")
-        action.click()
+        self.assertFalse(action.isEnabled())
+        self.assertEqual(action.text(), "Approve")
+        table.setCurrentCell(1, 0)
         self.app.processEvents()
         self.assertEqual(table.currentRow(), 1)
-        self.assertIn("Prismatic Alloy", self.window.propagation_manual_label.text())
-        viewport = self.window.tabs.widget(0).viewport()
-        first = self.window.propagation_rune_inputs[0]
-        self.assertTrue(viewport.rect().contains(first.mapTo(viewport, first.rect().center())))
+        first, second = self.row_fields(1)
+        self.assertIsInstance(first, QComboBox)
+        self.assertTrue(first.isVisibleTo(self.window))
+        self.assertEqual(second.currentText(), "")
+        self.assertTrue(all(not field.isVisibleTo(self.window)
+                            for field in self.window.propagation_rune_inputs))
+        self.assertFalse(self.window.propagation_add_button.isVisibleTo(self.window))
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
         self.assertFalse(self.window.propagation_add_button.isEnabled())
-        self.window.propagation_rune_inputs[0].setEditText("opulent")
+        self.select_row_slots(1, 3)
         self.assertEqual(action.text(), "Approve")
+        self.assertTrue(action.isEnabled())
         action.click()
         self.assertEqual(self.draft(), [("1", "Opulent")])
         self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "Prismatic Alloy")
         self.assertEqual(logger.get_state()["detonated"], 1)
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
-        action.click()
+        with self.assertRaises(ValueError):
+            self.window.approve_propagation_recipe(1)
         self.assertEqual(logger.get_state()["detonated"], 1)
         self.window.review_commit_chain_button.click()
         self.assertEqual(self.saved_parts(), [("Opulent", "")])
         self.assertTrue(self.window.review_complete_chain_button.isEnabled())
 
-    def test_manual_runes_do_not_follow_selection_to_another_recipe(self):
+    def test_inline_runes_stay_with_their_recipe_when_selection_changes(self):
         table = self.held_recipe_list()
-        self.recipe_action(1).click()
-        self.window.propagation_rune_inputs[0].setEditText("Opulent")
+        table.setCurrentCell(1, 0)
+        self.select_row_slots(1, 3)
         table.setCurrentCell(0, 0)
-        self.assertEqual(self.window.propagation_rune_inputs[0].currentText(), "")
-        self.assertEqual(self.recipe_action(0).text(), "Enter runes")
+        self.assertEqual(self.row_fields(1)[0].currentText(), "Opulent")
+        self.assertEqual(self.row_fields(0)[0].currentText(), "")
+        self.assertEqual(self.recipe_action(0).text(), "Approve")
+        self.assertFalse(self.recipe_action(0).isEnabled())
         self.assertFalse(self.window.propagation_add_button.isEnabled())
-        self.window.propagation_rune_inputs[0].setEditText("Death")
+        self.select_row_slots(0, 2)
         self.recipe_action(2).click()
-        self.assertEqual(self.draft(), [("1", "Tidal")])
+        self.assertEqual(self.draft(), [("1", "Soul")])
         self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "Swift Alloy")
         self.assertEqual(logger.get_state()["detonated"], 1)
 
-    def test_manual_recipe_entry_requires_valid_runes_and_a_waiting_selection(self):
+    def test_inline_recipe_entry_requires_first_rune_and_cannot_approve_denied_row(self):
         table = self.held_recipe_list()
-        self.window.propagation_rune_inputs[0].setEditText("Opulent")
         self.assertEqual(table.currentRow(), -1)
         self.assertFalse(self.window.propagation_add_button.isEnabled())
         with self.assertRaisesRegex(ValueError, "Select a waiting propagation recipe"):
             self.window.add_manual_propagation()
-        self.recipe_action(1).click()
-        self.window.propagation_rune_inputs[0].setEditText("Opulent typo")
-        self.assertFalse(self.window.propagation_add_button.isEnabled())
+        table.setCurrentCell(1, 0)
+        self.select_row_slots(1, None, 3)
+        self.assertFalse(self.row_fields(1)[0].isEditable())
+        self.assertEqual(self.row_fields(1)[0].findText("Opulent typo"), -1)
+        self.assertFalse(self.recipe_action(1).isEnabled())
         self.recipe_action(1).click()
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
-        self.window.propagation_rune_inputs[0].setEditText("Opulent")
+        self.select_row_slots(1, 3)
         self.window.deny_propagation_recipe(1)
-        self.assertEqual(self.window.propagation_rune_inputs[0].currentText(), "")
-        self.assertFalse(self.window.propagation_add_button.isEnabled())
+        self.assertTrue(all(not field.isEnabled() for field in self.row_fields(1)))
         with self.assertRaises(ValueError):
-            self.window.add_manual_propagation()
+            self.window.approve_propagation_recipe(1)
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+
+    def test_farrul_dropdowns_contain_only_each_recipe_in_database_order(self):
+        names = ("Farrul's Rune of Grace", "Farrul's Rune of the Hunt")
+        orders = (("Momentum", "Bloodletting", "Adaptive", "Time", "Life"),
+                  ("Vision", "Bloodletting", "Bond", "Time", "Rage"))
+        self.hold_recipes(*({"selected_recipe": name, "runes": [], "can_use": False}
+                            for name in names))
+        self.window.show()
+        self.app.processEvents()
+        table = self.window.propagation_recipe_table
+        for row, expected in enumerate(orders):
+            with self.subTest(recipe=names[row]):
+                fields = self.row_fields(row)
+                self.assertEqual(self.recipe_action(row).text(), "Approve")
+                self.assertFalse(self.recipe_action(row).isEnabled())
+                self.assertEqual(table.cellWidget(row, 1).findChildren(QComboBox), list(fields))
+                for field in fields:
+                    self.assertFalse(field.isEditable())
+                    self.assertEqual([field.itemText(index) for index in range(field.count())],
+                                     ["", *expected])
+                    self.assertEqual([field.itemData(index) for index in range(field.count())],
+                                     [None, *range(5)])
+                    self.assertEqual(field.currentText(), "")
+                    self.assertEqual(field.findText("Power"), -1)
+                self.assertEqual(fields[0].findText(orders[1 - row][0]), -1)
+        self.assertTrue(all(not field.isVisibleTo(self.window)
+                            for field in self.window.propagation_rune_inputs))
+        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+
+    def test_inline_correction_is_saved_and_exported_with_its_recipe(self):
+        recipe = "Farrul's Rune of Grace"
+        self.hold_recipes({"selected_recipe": recipe, "runes": ["Momentum", "Time"],
+                           "positions": [1, 4], "can_use": True})
+        self.assertEqual([field.currentText() for field in self.row_fields(0)], ["Momentum", "Time"])
+        self.select_row_slots(0, 1, 4)
+        self.recipe_action(0).click()
+        self.assertEqual(self.draft(), [("1", "Bloodletting"), ("1", "Life")])
+        self.assertEqual(self.window.chain_review_table.item(0, 2).text(), recipe)
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
+        self.window.review_commit_chain_button.click()
+        self.assertEqual(self.saved_parts(), [("Bloodletting", "Life")])
+        rows = list(csv.DictReader(io.StringIO(logger.export_csv().decode("utf-8-sig"))))
+        chain_rows = [row for row in rows if row["Chain Step #"]]
+        self.assertEqual([(row["Propagation Rune 1"], row["Propagation Rune 2"])
+                          for row in chain_rows], [("Bloodletting", "Life")])
+        with logger._connect() as db:
+            commit = db.execute("SELECT reference FROM commits WHERE kind='Propagation'").fetchone()
+        self.assertEqual(commit["reference"], recipe)
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.assertTrue(self.window.review_complete_chain_button.isEnabled())
+
+    def test_duplicate_rune_names_keep_distinct_slots_and_require_left_to_right_order(self):
+        self.hold_recipes({"selected_recipe": "Swift Alloy", "runes": [], "can_use": False})
+        first, second = self.row_fields(0)
+        self.assertEqual([first.itemText(index) for index in range(first.count())],
+                         ["", "Adaptive", "Rebirth", "Soul", "Rebirth"])
+        self.assertEqual([first.itemData(index) for index in range(first.count())],
+                         [None, 0, 1, 2, 3])
+        for slots in ((3, 1), (1, 1)):
+            with self.subTest(slots=slots):
+                self.select_row_slots(0, *slots)
+                self.assertFalse(self.recipe_action(0).isEnabled())
+                self.recipe_action(0).click()
+                self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+                self.assertEqual(self.draft(), [])
+        self.select_row_slots(0, 1, 3)
+        self.assertEqual((first.currentText(), second.currentText()), ("Rebirth", "Rebirth"))
+        self.assertEqual((first.currentData(), second.currentData()), (1, 3))
+        self.assertTrue(self.recipe_action(0).isEnabled())
+        self.recipe_action(0).click()
+        self.assertEqual(self.draft(), [("1", "Rebirth"), ("1", "Rebirth")])
+        self.window.review_commit_chain_button.click()
+        self.assertEqual(self.saved_parts(), [("Rebirth", "Rebirth")])
+        self.assertEqual(logger.get_state()["detonated"], 1)
+
+    def test_ocr_preselects_only_compatible_recipe_runes_and_keeps_unclear_rows_blank(self):
+        self.hold_recipes(
+            {"selected_recipe": "Farrul's Rune of Grace", "runes": ["Momentum", "Life"],
+             "positions": [1, 5], "can_use": True},
+            {"selected_recipe": "Farrul's Rune of the Hunt", "runes": ["Momentum"],
+             "positions": [1], "can_use": True},
+            {"selected_recipe": "Farrul's Rune of Grace", "runes": ["Time"],
+             "positions": [4], "can_use": False})
+        self.assertEqual([field.currentData() for field in self.row_fields(0)], [0, 4])
+        for row in (1, 2):
+            self.assertEqual([field.currentText() for field in self.row_fields(row)], ["", ""])
+            self.assertEqual(self.recipe_action(row).text(), "Approve")
+            self.assertFalse(self.recipe_action(row).isEnabled())
+            self.recipe_action(row).click()
+        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+        self.assertEqual(self.draft(), [])
+
+    def test_unavailable_recipe_order_keeps_manual_fallback_outside_recipe_row(self):
+        self.hold_recipes(
+            {"selected_recipe": "Farrul's Rune of Grace", "runes": [], "can_use": False},
+            {"selected_recipe": "Missing recipe", "runes": [], "can_use": False})
+        self.window.show()
+        self.app.processEvents()
+        self.assertIsNone(self.row_fields(1))
+        cell = self.window.propagation_recipe_table.cellWidget(1, 1)
+        self.assertTrue(cell is None or not cell.findChildren(QComboBox))
+        self.window.propagation_recipe_table.setCurrentCell(0, 0)
+        self.assertTrue(all(not field.isVisibleTo(self.window)
+                            for field in self.window.propagation_rune_inputs))
+        self.window.propagation_recipe_table.setCurrentCell(1, 0)
+        self.assertTrue(all(field.isVisibleTo(self.window)
+                            for field in self.window.propagation_rune_inputs))
+        self.enter_manual("Death", "Rebirth")
+        self.assertEqual(self.draft(), [("1", "Death"), ("1", "Rebirth")])
+        self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "Missing recipe")
 
     def test_clear_rescan_replaces_unclear_review_and_enables_chain_completion(self):
         self.scan(["Death"])
         self.scan(["Tidal"])
-        self.held_recipe_list()
-        self.recipe_action(1).click()
-        self.window.propagation_rune_inputs[0].setEditText("Power")
+        table = self.held_recipe_list()
+        table.setCurrentCell(1, 0)
+        self.select_row_slots(1, 3)
         self.scan(["Opulent"], "Prismatic Alloy")
         self.assertIsNone(self.window._manual_propagation_context)
         self.assertIsNone(self.window.pending_review_kind)
@@ -508,9 +647,9 @@ class PropagationUITests(unittest.TestCase):
                 self.assertEqual(logger.get_state()["detonated"], 1)
                 row = self.window.propagation_recipe_table.currentRow()
                 self.assertEqual(self.window.propagation_recipe_table.item(row, 0).text(), "Regal Orb x3")
+                self.assertFalse(self.recipe_action(row).isEnabled())
+                self.select_row_slots(row, 2)
                 self.assertTrue(self.recipe_action(row).isEnabled())
-                self.recipe_action(row).click()
-                self.window.propagation_rune_inputs[0].setEditText("Tidal")
                 self.recipe_action(row).click()
                 self.window.review_commit_chain_button.click()
         self.assertEqual(self.saved_parts(), [("Tidal", ""), ("Tidal", "")])

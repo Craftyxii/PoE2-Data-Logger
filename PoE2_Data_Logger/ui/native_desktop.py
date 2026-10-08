@@ -1217,6 +1217,7 @@ class LoggerWindow(QMainWindow):
         self.chain_review_status = message("Scan propagation using its dedicated key, or enter the marked runes below.")
         chain_review.addWidget(self.chain_review_status)
         self._propagation_choices = []
+        self._propagation_row_inputs = []
         self.propagation_recipe_table = QTableWidget(0, 3)
         self.propagation_recipe_table.setAccessibleName("Detected propagation recipes")
         self.propagation_recipe_table.setHorizontalHeaderLabels(["Recipe", "Marked runes · left to right", "Review"])
@@ -1234,10 +1235,13 @@ class LoggerWindow(QMainWindow):
             rune_names = sorted({rune.strip() for row in db.execute("SELECT combo FROM recipes")
                                  for rune in (row[0] or "").split("+")
                                  if rune.strip() and rune.strip().casefold() != "unresolved"})
+        self.propagation_manual_group = QWidget()
+        manual_group = QVBoxLayout(self.propagation_manual_group)
+        manual_group.setContentsMargins(0, 0, 0, 0)
         self.propagation_manual_label = QLabel("Select a recipe, then enter its marked runes below.")
         self.propagation_manual_label.setWordWrap(True)
         self.propagation_manual_label.hide()
-        chain_review.addWidget(self.propagation_manual_label)
+        manual_group.addWidget(self.propagation_manual_label)
         manual = QHBoxLayout()
         self.propagation_rune_inputs = []
         for caption in ("First marked rune", "Second marked rune (optional)"):
@@ -1254,13 +1258,14 @@ class LoggerWindow(QMainWindow):
         self.propagation_add_button = button("Add chain part", lambda: self.run(self.add_manual_propagation), "primary")
         self.propagation_add_button.setEnabled(False)
         manual.addWidget(self.propagation_add_button)
-        chain_review.addLayout(manual)
+        manual_group.addLayout(manual)
         self.propagation_recipe_table.currentCellChanged.connect(self._propagation_recipe_selected)
         help_text = QLabel("Enter only the runes with three gold marks, left to right. Select a recipe row to attach it to a manual entry. "
                           "Add chain part counts one remnant. "
                           "Double-click a rune below to correct it before committing.")
         help_text.setWordWrap(True)
-        chain_review.addWidget(help_text)
+        manual_group.addWidget(help_text)
+        chain_review.addWidget(self.propagation_manual_group)
         self.chain_review_table = QTableWidget(0, 3)
         self.chain_review_table.setHorizontalHeaderLabels(["Chain part", "Rune", "Recipe"])
         self.chain_review_table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked |
@@ -2930,7 +2935,7 @@ class LoggerWindow(QMainWindow):
                 self._chain_fields_changed(defer_review=True)
 
     def _manual_propagation_changed(self, *_):
-        """Update recipe-specific approval labels after manual rune edits."""
+        """Update row approvals independently and hide fallback fields for resolved recipes."""
         if hasattr(self, "propagation_add_button"):
             try:
                 self._manual_propagation_runes()
@@ -2950,13 +2955,23 @@ class LoggerWindow(QMainWindow):
                 if actions:
                     approve = actions.findChild(QPushButton, "approvePropagationRecipe")
                     if approve:
-                        manual = row == selected and any(field.currentText().strip()
-                                                         for field in self.propagation_rune_inputs)
-                        can_approve = ready if manual else choice.get("can_use", bool(choice.get("runes")))
-                        approve.setText("Approve" if can_approve else "Enter runes")
+                        if self._propagation_row_inputs[row]:
+                            try:
+                                self._propagation_recipe_runes(row)
+                                can_approve = True
+                            except ValueError:
+                                can_approve = False
+                        else:
+                            manual = row == selected and any(field.currentText().strip()
+                                                             for field in self.propagation_rune_inputs)
+                            can_approve = ready if manual else choice.get("can_use", bool(choice.get("runes")))
+                        approve.setText("Approve")
                         approve.setToolTip("Confirm this recipe's marked runes." if can_approve else
+                                           "Choose the marked runes in this recipe's dropdowns, left to right."
+                                           if self._propagation_row_inputs[row] else
                                            "Select this recipe and enter its marked runes below.")
-                        approve.setEnabled(active and not choice.get("denied"))
+                        approve.setEnabled(active and not choice.get("denied") and
+                                           (can_approve or self._propagation_row_inputs[row] is None))
             if self._propagation_choices:
                 text = ("Marked runes for " + (selected_choice.get("selected_recipe") or
                                               selected_choice.get("reward_text") or "the selected recipe")
@@ -2964,12 +2979,73 @@ class LoggerWindow(QMainWindow):
                         "Select a waiting recipe, then enter its marked runes below.")
                 self.propagation_manual_label.setText(text)
             self.propagation_manual_label.setVisible(bool(self._propagation_choices))
+            fallback = (not any(self._propagation_row_inputs) or
+                        0 <= selected < len(self._propagation_row_inputs) and
+                        self._propagation_row_inputs[selected] is None)
+            self.propagation_manual_group.setVisible(fallback)
             self._update_chain_completion_controls()
+
+    def _propagation_recipe_runes(self, row):
+        """Read only this recipe's selected slots, requiring first then optional later second."""
+        fields = self._propagation_row_inputs[row]
+        first, second = [field.currentData() for field in fields]
+        if first is None:
+            raise ValueError("Choose the first marked rune in this recipe.")
+        if second is not None and second <= first:
+            raise ValueError("Choose marked runes in left-to-right recipe order.")
+        return [field.currentText() for field in fields if field.currentData() is not None]
+
+    def _build_propagation_recipe_inputs(self, row, choice):
+        """Build noneditable choices from this recipe's complete stored combo, retaining slot order."""
+        with logger._connect() as db:
+            recipe = db.execute("SELECT sockets,combo FROM recipes WHERE name=? COLLATE NOCASE",
+                                (choice.get("selected_recipe") or "",)).fetchone()
+        names = [rune.strip() for rune in (recipe["combo"] or "").split("+")] if recipe else []
+        if (not recipe or len(names) != recipe["sockets"] or
+                any(not rune or rune.casefold() == "unresolved" for rune in names)):
+            return None
+        controls = QWidget()
+        layout = QHBoxLayout(controls)
+        layout.setContentsMargins(4, 4, 4, 4)
+        fields = []
+        for caption in ("First marked rune", "Second marked rune (optional)"):
+            column = QVBoxLayout()
+            column.setSpacing(2)
+            column.addWidget(QLabel("First rune" if not fields else "Second (optional)"))
+            field = combo([(None, "")] + list(enumerate(names)))
+            field.setAccessibleName(f"{choice['selected_recipe']} · {caption}")
+            field.setToolTip(caption + " · choose only runes with three gold marks.")
+            field.setMinimumWidth(0)
+            field.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            column.addWidget(field)
+            layout.addLayout(column, 1)
+            fields.append(field)
+        # Prefill verified readings only when their names map to this recipe's
+        # ordered slots; incomplete OCR must leave the user a blank selection.
+        runes = choice.get("runes") or []
+        if choice.get("can_use", bool(runes)) and 1 <= len(runes) <= 2:
+            positions = [position - 1 for position in choice.get("positions") or []]
+            if not positions:
+                previous = -1
+                for rune in runes:
+                    position = next((index for index, name in enumerate(names)
+                                     if index > previous and name.casefold() == rune.casefold()), None)
+                    if position is None:
+                        break
+                    positions.append(position)
+                    previous = position
+            if (len(positions) == len(runes) and positions == sorted(set(positions)) and
+                    all(0 <= position < len(names) and names[position].casefold() == rune.casefold()
+                        for position, rune in zip(positions, runes))):
+                for field, position in zip(fields, positions):
+                    field.setCurrentIndex(position + 1)
+        self.propagation_recipe_table.setCellWidget(row, 1, controls)
+        return fields
 
     def _propagation_recipe_selected(self, row, _column, previous_row, _previous_column):
         # Manual corrections belong to one recipe. Switching rows must not
         # apply a correction entered for a different reward.
-        """Clear manual runes when the user selects a different recipe."""
+        """Clear fallback manual input on row changes while retaining each row's own selections."""
         if row != previous_row:
             for field in self.propagation_rune_inputs:
                 with QSignalBlocker(field):
@@ -2989,12 +3065,13 @@ class LoggerWindow(QMainWindow):
                 field.setCurrentIndex(0)
                 field.setEditText("")
         self._propagation_choices = []
+        self._propagation_row_inputs = []
         self.propagation_recipe_table.setRowCount(0)
         self.propagation_recipe_table.hide()
         self._manual_propagation_changed()
 
     def _prepare_manual_propagation(self, result):
-        """Create per-recipe correction controls for an uncertain scan."""
+        """Create recipe-only rune dropdowns beside each uncertain scan's approval action."""
         self._clear_manual_propagation()
         self._manual_propagation_context = dict(result)
         self._propagation_choices = [dict(choice) for choice in result.get("choices") or []]
@@ -3007,6 +3084,7 @@ class LoggerWindow(QMainWindow):
             runes = choice.get("runes") or []
             table.setItem(index, 1, QTableWidgetItem(" → ".join(runes) or
                                                    choice.get("status") or "Enter marked runes below"))
+            self._propagation_row_inputs.append(self._build_propagation_recipe_inputs(index, choice))
             actions = QWidget()
             layout = QHBoxLayout(actions)
             layout.setContentsMargins(4, 4, 4, 4)
@@ -3018,6 +3096,9 @@ class LoggerWindow(QMainWindow):
             layout.addWidget(approve)
             layout.addWidget(deny)
             table.setCellWidget(index, 2, actions)
+        for fields in self._propagation_row_inputs:
+            for field in fields or []:
+                field.currentIndexChanged.connect(self._manual_propagation_changed)
         table.setVisible(bool(self._propagation_choices))
         table.setMinimumHeight(min(260, 38 + 62 * len(self._propagation_choices)))
         del blocker
@@ -3063,10 +3144,14 @@ class LoggerWindow(QMainWindow):
         self.tabs.setCurrentIndex(0)
 
     def deny_propagation_recipe(self, row):
-        """Reject one recipe and remove any manual runes entered for it."""
+        """Reject one recipe and disable only that row's rune selectors and approval controls."""
         if 0 <= row < len(self._propagation_choices):
             self._propagation_choices[row]["denied"] = True
             self.propagation_recipe_table.cellWidget(row, 2).setEnabled(False)
+            controls = self.propagation_recipe_table.cellWidget(row, 1)
+            if controls:
+                controls.setEnabled(False)
+                controls.hide()
             self.propagation_recipe_table.item(row, 1).setText("Denied")
             if self.propagation_recipe_table.currentRow() == row:
                 for field in self.propagation_rune_inputs:
@@ -3083,7 +3168,7 @@ class LoggerWindow(QMainWindow):
                 self._refresh_chain_review()
 
     def approve_propagation_recipe(self, row):
-        """Approve one recipe or bring its required manual rune fields into view."""
+        """Approve this row's recipe-only selections through the existing chain-part workflow."""
         if not self._manual_propagation_context:
             raise ValueError("Scan propagation before choosing a recipe.")
         logger.validate_scan_context(self._manual_propagation_context)
@@ -3093,6 +3178,18 @@ class LoggerWindow(QMainWindow):
         if choice.get("denied"):
             raise ValueError("Select a waiting propagation recipe.")
         self.propagation_recipe_table.setCurrentCell(row, 0)
+        if self._propagation_row_inputs[row]:
+            try:
+                runes = self._propagation_recipe_runes(row)
+            except ValueError as error:
+                self._focus_manual_propagation()
+                self.statusBar().showMessage(str(error), 15000)
+                return
+            result = {**choice, **self._manual_propagation_context,
+                      "can_use": True, "runes": runes,
+                      "selected_recipe": choice["selected_recipe"]}
+            self._accept_manual_propagation(result)
+            return
         manual = any(field.currentText().strip() for field in self.propagation_rune_inputs)
         if not manual and not choice.get("can_use", bool(choice.get("runes"))):
             self._focus_manual_propagation()
@@ -3111,12 +3208,17 @@ class LoggerWindow(QMainWindow):
         self._accept_manual_propagation(result)
 
     def _focus_manual_propagation(self):
-        """Reveal and focus the selected recipe's manual rune inputs."""
-        field = self.propagation_rune_inputs[0]
+        """Reveal the selected row's inline selector, or the standalone manual fallback."""
+        row = self.propagation_recipe_table.currentRow()
+        fields = (self._propagation_row_inputs[row]
+                  if 0 <= row < len(self._propagation_row_inputs) else None)
+        field = (fields or self.propagation_rune_inputs)[0]
         field.setFocus(Qt.FocusReason.OtherFocusReason)
         page = self.tabs.widget(0)
-        # The fields can sit below the viewport when a long recipe list is
-        # shown. Reveal them after Qt lays out the selected-recipe caption.
+        # Scroll both the recipe table and the outer review page so a selected
+        # row's controls remain reachable even in a long detected recipe list.
+        if fields:
+            self.propagation_recipe_table.scrollToItem(self.propagation_recipe_table.item(row, 0))
         QTimer.singleShot(0, lambda: page.ensureWidgetVisible(field, 12, 24)
                           if not self._closed and self._manual_propagation_context else None)
 

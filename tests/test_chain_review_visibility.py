@@ -47,6 +47,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def propagate(self, runes=("Death", "Power"), recipe="Divine Orb x2", clear=True, **extra):
+        """Approve synthetic parts against matching recipe slots in this test's isolated catalog."""
         # A held row that the user approves remains a draft until Commit to
         # chain. Confident direct scans have their own automatic-save checks.
         result = {"mode": "propagation", "runes": list(runes),
@@ -54,6 +55,13 @@ class ChainReviewVisibilityTests(unittest.TestCase):
                   "can_use": False, "status": "Confirm propagated recipe", **logger.scan_context(), **extra}
         if clear:
             result["choices"] = [{"selected_recipe": recipe, "runes": list(runes), "can_use": True}]
+            with logger._connect() as db:
+                stored = db.execute("SELECT sockets,combo FROM recipes WHERE name=?", (recipe,)).fetchone()
+                if stored:
+                    slots = (stored["combo"] or "").split("+")
+                    slots[:len(runes)] = runes
+                    db.execute("UPDATE recipes SET combo=? WHERE name=?",
+                               (" + ".join(slots[:stored["sockets"]]), recipe))
         self.window._propagation_read(result, self.raw)
         if clear:
             self.window.approve_propagation_recipe(0)
