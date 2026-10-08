@@ -58,7 +58,7 @@ class UniquePropagationExportTests(unittest.TestCase):
         self.assertTrue(all(row["Unique Kills (Map)"] == "" for row in rows[1:]))
         main_headers = next(csv.reader(io.StringIO(logger.export_all_csv().decode("utf-8-sig"))))
         self.assertEqual(main_headers.index("Type"), 127)
-        self.assertEqual(main_headers[-3:], list(logger.HISTORY_APPEND_HEADERS))
+        self.assertEqual(main_headers[-len(logger.HISTORY_APPEND_HEADERS):], list(logger.HISTORY_APPEND_HEADERS))
 
     def test_propagation_scan_rows_preserve_pair_order_ids_and_one_per_scan_delta(self):
         first = logger.increment_propagation_detonated(logger.scan_context(),

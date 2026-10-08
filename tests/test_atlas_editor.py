@@ -186,6 +186,32 @@ class AtlasEditorTests(unittest.TestCase):
         self.page.gear_rarity.stepUp()
         self.assertEqual(self.page.settings()["gear_item_rarity"], 0)
 
+    def test_gear_rarity_accepts_typing_after_clicking_unknown_value(self):
+        field = self.page.gear_rarity
+        for target in (field, field.lineEdit()):
+            for text, expected in (("125.5", 125.5), ("0", 0), (".75", .75)):
+                with self.subTest(target=type(target).__name__, text=text):
+                    self.page.set_settings({}, force=True)
+                    QTest.mouseClick(field.lineEdit(), Qt.MouseButton.LeftButton)
+                    QTest.keyClicks(target, text)
+                    QTest.keyClick(target, Qt.Key.Key_Tab)
+                    self.assertEqual(self.page.settings()["gear_item_rarity"], expected)
+                    self.assertTrue(self.page.dirty)
+
+    def test_gear_rarity_paste_and_edit_keep_the_typed_number(self):
+        field = self.page.gear_rarity
+        self.app.clipboard().setText("187.25")
+        QTest.mouseClick(field.lineEdit(), Qt.MouseButton.LeftButton)
+        QTest.keyClick(field.lineEdit(), Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
+        self.assertEqual(self.page.settings()["gear_item_rarity"], 187.25)
+        field.lineEdit().setCursorPosition(1)
+        QTest.keyClick(field.lineEdit(), Qt.Key.Key_Delete)
+        self.assertEqual(self.page.settings()["gear_item_rarity"], 17.25)
+        saved = []
+        self.page.saved.connect(saved.append)
+        self.page.save_button.click()
+        self.assertEqual(saved[0]["gear_item_rarity"], 17.25)
+
     def test_bundled_main_tree_art_and_all_activity_filters_load(self):
         data = bundled_catalog()
         with patch("PoE2_Data_Logger.ui.atlas_settings.catalog", return_value=data):

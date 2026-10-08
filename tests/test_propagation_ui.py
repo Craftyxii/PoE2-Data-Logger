@@ -205,6 +205,126 @@ class PropagationUITests(unittest.TestCase):
         self.assertIsNone(self.window.pending_review_kind)
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
+    def enter_manual(self, *runes):
+        for index, field in enumerate(self.window.propagation_rune_inputs):
+            field.setEditText(runes[index] if index < len(runes) else "")
+        self.window.propagation_add_button.click()
+
+    def test_failed_scan_manual_pair_counts_once_and_commits_in_order(self):
+        self.scan([], clear=False)
+        self.assertFalse(self.window.chain_review_group.isHidden())
+        self.enter_manual("Death", "Rebirth")
+        self.assertEqual(self.draft(), [("1", "Death"), ("1", "Rebirth")])
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertFalse(self.window.propagation_add_button.isEnabled())
+        self.window.propagation_add_button.click()
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.enter_manual("Power")
+        self.window.review_commit_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        rows = list(csv.DictReader(io.StringIO(logger.export_csv().decode("utf-8-sig"))))
+        self.assertTrue(any("Death" in row.values() and "Rebirth" in row.values() for row in rows))
+        self.assertTrue(any("Power" in row.values() for row in rows))
+
+    def test_manual_pair_preserves_pending_remnant_and_its_expedition(self):
+        self.window.manual_remnant_button.click()
+        self.window.first_recipe.setText("Reward being corrected")
+        pending = logger.get_state()["ocr_pending"]
+        self.scan([], clear=False)
+        self.enter_manual("Rage", "Time")
+        self.assertEqual(self.window.pending_review_kind, "remnant")
+        self.assertEqual(self.window.first_recipe.text(), "Reward being corrected")
+        self.assertEqual(logger.get_state()["ocr_pending"], pending)
+        self.window.commit_chain()
+        self.assertEqual(logger.get_state()["ocr_pending"], pending)
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+
+    def test_manual_fields_clear_on_map_or_expedition_change(self):
+        self.scan([], clear=False)
+        self.window.propagation_rune_inputs[0].setEditText("Death")
+        stale = dict(self.window._manual_propagation_context)
+        self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
+        self.assertFalse(self.window.propagation_add_button.isEnabled())
+        self.assertIsNone(self.window._manual_propagation_context)
+        self.window._manual_propagation_context = stale
+        self.window.propagation_rune_inputs[0].setEditText("Power")
+        with self.assertRaisesRegex(ValueError, "expedition changed"):
+            self.window.add_manual_propagation()
+        self.assertEqual(logger.get_state()["detonated"], None)
+        self.window.finish_map()
+        self.assertIsNone(self.window._manual_propagation_context)
+        self.assertEqual(self.window.propagation_rune_inputs[0].currentText(), "")
+
+    def test_review_table_correction_preserves_pair_without_extra_detonation(self):
+        self.scan(["Death", "Power"])
+        self.window.chain_review_table.item(1, 1).setText("Rebirth")
+        self.assertEqual(self.draft(), [("1", "Death"), ("1", "Rebirth")])
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.assertEqual(self.window._chain_steps(), [{"rune1": "Death", "rune2": "Rebirth"}])
+
+    def test_manual_entry_is_accessible_without_a_scan_and_typo_cannot_be_committed(self):
+        self.window.manual_propagation_button.click()
+        self.assertFalse(self.window.chain_review_group.isHidden())
+        self.enter_manual("Death", "Rebirth")
+        self.window.chain_review_table.item(0, 1).setText("Deth")
+        before = logger.get_state()["scan_commit_count"]
+        with self.assertRaisesRegex(ValueError, "Correct the chain rune names"):
+            self.window.commit_chain()
+        self.assertEqual(logger.get_state()["scan_commit_count"], before)
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.window.chain_review_table.item(0, 1).setText("death")
+        self.window.commit_chain()
+        self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(1))
+        self.assertEqual(logger.get_state()["chain"][0]["rune1"], "Death")
+
+    def test_new_map_commits_header_kills_to_finished_map_and_clears_next_map(self):
+        from PySide6.QtWidgets import QPushButton
+        for field, text in zip((self.window.normal, self.window.magic, self.window.rare, self.window.unique),
+                               ("11", "22", "33", "44")):
+            field.setText(text)
+        actions = self.window.findChildren(QPushButton)
+        self.assertFalse(any(action.text() == "Save counts" for action in actions))
+        next(action for action in actions if action.text() == "+ New map").click()
+        self.assertEqual(logger.get_state()["current_map_id"], "M0002")
+        rows = list(csv.DictReader(io.StringIO(logger.export_maps_csv().decode("utf-8-sig"))))
+        finished = next(row for row in rows if row["Map ID"] == "M0001")
+        self.assertEqual((finished["Normal Kills"], finished["Magic Kills"], finished["Rare Kills"],
+                          finished["Unique Kills"], finished["Total Kills"]), ("11", "22", "33", "44", "110"))
+        self.assertTrue(all(not field.text() for field in
+                            (self.window.normal, self.window.magic, self.window.rare, self.window.unique)))
+
+    def test_invalid_kill_count_keeps_current_map_and_typed_counts(self):
+        self.window.normal.setText("10")
+        self.window.unique.setText("not a number")
+        before = logger.get_state()["scan_commit_count"]
+        with self.assertRaises(ValueError):
+            self.window.finish_map()
+        self.assertEqual(logger.get_state()["current_map_id"], "M0001")
+        self.assertEqual(logger.get_state()["scan_commit_count"], before)
+        self.assertEqual(self.window.normal.text(), "10")
+        self.assertEqual(self.window.unique.text(), "not a number")
+
+    def test_missing_arrow_recipe_approve_and_deny_choose_one_part(self):
+        result = {"mode": "propagation", "can_use": False, "runes": [], "status": "Select a recipe",
+                  "choices": [
+                      {"selected_recipe": "Recipe A", "runes": ["Death", "Power"], "can_use": True},
+                      {"selected_recipe": "Recipe B", "runes": ["Rage", "Time"], "can_use": True}],
+                  **logger.scan_context()}
+        self.window._propagation_read(result, self.raw.getvalue())
+        self.assertEqual(self.window.propagation_recipe_table.rowCount(), 2)
+        self.window.deny_propagation_recipe(0)
+        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+        with self.assertRaises(ValueError):
+            self.window.approve_propagation_recipe(0)
+        self.window.approve_propagation_recipe(1)
+        self.assertEqual(self.draft(), [("1", "Rage"), ("1", "Time")])
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "Recipe B")
+        with self.assertRaises(ValueError):
+            self.window.approve_propagation_recipe(1)
+        self.assertEqual(logger.get_state()["detonated"], 1)
+
     def test_review_reject_remnant_button_keeps_inflight_propagation_result(self):
         self.window.manual_remnant_button.click()
         self.assertEqual(self.window.pending_review_kind, "remnant")

@@ -46,7 +46,7 @@ class SessionCurrencyUITests(unittest.TestCase):
         self.window.approve_review()
 
     def quantities(self):
-        return {name: card.quantity for name, card in self.window.session_currency.cards.items()}
+        return {name: card.quantity for name, card in self.window.session_currency.cards.items() if card.quantity > 0}
 
     def test_reference_tools_live_in_debug_and_are_hidden_by_default(self):
         page = self.window.tabs.widget(4).widget()
@@ -57,7 +57,8 @@ class SessionCurrencyUITests(unittest.TestCase):
         self.window.developer_mode.setChecked(True)
         self.assertFalse(self.window.inventory_reference_group.isHidden())
         self.assertTrue(page.isAncestorOf(self.window.session_currency))
-        self.assertTrue(page.isAncestorOf(self.window.normal))
+        self.assertFalse(page.isAncestorOf(self.window.normal))
+        self.assertTrue(self.window.kill_counts_group.isAncestorOf(self.window.normal))
 
     def test_only_approved_end_scans_update_totals_and_repeats_replace_them(self):
         self.approve("start", **{"Chaos Orb": 10, "Divine Orb": 2})
@@ -70,7 +71,8 @@ class SessionCurrencyUITests(unittest.TestCase):
         self.assertEqual(self.quantities(), {"Chaos Orb": 8, "Divine Orb": 1})
         self.approve("end", **{"Chaos Orb": 16, "Divine Orb": 4})
         self.assertEqual(self.quantities(), {"Chaos Orb": 6, "Divine Orb": 2})
-        for name, card in self.window.session_currency.cards.items():
+        for name in self.quantities():
+            card = self.window.session_currency.cards[name]
             self.assertFalse(card.icon.pixmap().isNull(), name)
             self.assertEqual(card.name_label.toolTip(), name)
 
@@ -97,8 +99,9 @@ class SessionCurrencyUITests(unittest.TestCase):
         with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
             self.window.reset_logger()
         self.assertEqual(self.quantities(), {})
-        self.assertEqual(self.window.session_currency.grid.count(), 0)
-        self.assertFalse(self.window.session_currency.empty.isHidden())
+        self.assertGreater(self.window.session_currency.grid.count(), 0)
+        self.assertTrue(self.window.session_currency.empty.isHidden())
+        self.assertEqual(self.window.session_currency.cards["Chaos Orb"].quantity, 0)
         self.assertEqual(logger.get_state()["current_map_id"], "M0001")
         self.assertEqual(self.window.session_currency.search.text(), "")
         self.assertIsNotNone(self.window.icon_name)
@@ -110,12 +113,27 @@ class SessionCurrencyUITests(unittest.TestCase):
             self.window.reset_logger()
         self.assertEqual(self.quantities(), {"Chaos Orb": 8})
 
-    def test_missing_baseline_is_visible_and_later_start_scan_updates_totals(self):
+    def test_end_only_counts_as_empty_start_and_later_start_scan_updates_totals(self):
         self.approve("end", **{"Chaos Orb": 100})
-        self.assertEqual(self.quantities(), {})
-        self.assertIn("needs a start scan", self.window.session_currency.summary.text())
+        self.assertEqual(self.quantities(), {"Chaos Orb": 100})
+        self.assertIn("assumed to start empty", self.window.session_currency.summary.text())
         self.approve("start", **{"Chaos Orb": 97})
         self.assertEqual(self.quantities(), {"Chaos Orb": 3})
+
+    def test_empty_start_updates_summary_even_when_quantities_stay_the_same(self):
+        self.approve("end", **{"Chaos Orb": 12, "Divine Orb": 2})
+        self.assertIn("assumed to start empty", self.window.session_currency.summary.text())
+        self.approve("start")
+        self.assertEqual(self.quantities(), {"Chaos Orb": 12, "Divine Orb": 2})
+        self.assertNotIn("assumed", self.window.session_currency.summary.text())
+
+    def test_multiple_end_only_maps_and_corrected_end_scan(self):
+        self.approve("end", **{"Chaos Orb": 12, "Divine Orb": 2})
+        self.window.finish_map()
+        self.approve("end", **{"Chaos Orb": 5, "Exalted Orb": 9})
+        self.assertEqual(self.quantities(), {"Chaos Orb": 17, "Divine Orb": 2, "Exalted Orb": 9})
+        self.approve("end", **{"Chaos Orb": 3, "Exalted Orb": 8})
+        self.assertEqual(self.quantities(), {"Chaos Orb": 15, "Divine Orb": 2, "Exalted Orb": 8})
 
     def test_custom_learned_icon_and_name_display_with_session_quantity(self):
         name = "My newly labelled currency"
@@ -136,13 +154,13 @@ class SessionCurrencyUITests(unittest.TestCase):
         self.approve("end", **{"Chaos Orb": 1000, "Divine Orb": 2, "Exalted Orb": 5})
         counter = self.window.session_currency
         counter.search.setText("DIVINE")
-        self.assertEqual(counter._visible, ("Divine Orb",))
-        self.assertEqual(counter.grid.count(), 1)
+        self.assertIn("Divine Orb", counter._visible)
+        self.assertTrue(all("divine" in name.casefold() for name in counter._visible))
         counter.search.setText("Nothing matches")
         self.assertEqual(counter.grid.count(), 0)
         self.assertIn("No currency matches", counter.empty.text())
         counter.search.clear()
-        self.assertEqual(counter._visible, ("Chaos Orb", "Divine Orb", "Exalted Orb"))
+        self.assertTrue({"Chaos Orb", "Divine Orb", "Exalted Orb"} <= set(counter._visible))
         self.assertEqual(counter.cards["Chaos Orb"].total_label.text(), "1,000")
         self.assertEqual(self.quantities(), {"Chaos Orb": 1000, "Divine Orb": 2, "Exalted Orb": 5})
         counter.resize(500, 320)
@@ -151,14 +169,15 @@ class SessionCurrencyUITests(unittest.TestCase):
         counter.resize(1050, 320)
         counter._relayout()
         self.assertEqual(counter._columns, 4)
-        self.assertEqual(counter.grid.count(), 3)
+        self.assertGreater(counter.grid.count(), len(counter.cards))
 
-    def test_latest_correction_to_zero_removes_its_card_without_other_items(self):
+    def test_latest_correction_to_zero_keeps_its_card(self):
         self.approve("start")
         self.approve("end", **{"Chaos Orb": 8, "Divine Orb": 1})
         self.approve("end", **{"Divine Orb": 1})
         self.assertEqual(self.quantities(), {"Divine Orb": 1})
-        self.assertEqual(self.window.session_currency.grid.count(), 1)
+        self.assertEqual(self.window.session_currency.cards["Chaos Orb"].quantity, 0)
+        self.assertIn("Chaos Orb", self.window.session_currency._visible)
 
 
 if __name__ == "__main__":

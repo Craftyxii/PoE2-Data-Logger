@@ -9,6 +9,8 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QFileDialog
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
 
 from PoE2_Data_Logger.core import logger_store as logger, store
 from PoE2_Data_Logger.core.atlas_catalog import catalog
@@ -102,6 +104,27 @@ class AtlasIntegrationTests(unittest.TestCase):
         logger.start_map()
         self.window.refresh()
         self.assertEqual(logger.get_state()["settings"]["atlas_settings"]["gear_item_rarity"], 200)
+
+    def test_typed_gear_rarity_saves_and_reaches_both_export_sheets(self):
+        self.window.show()
+        self.window.tabs.setCurrentIndex(12)
+        self.app.processEvents()
+        field = self.page.gear_rarity.lineEdit()
+        QTest.mouseClick(field, Qt.MouseButton.LeftButton)
+        QTest.keyClicks(field, "187.25")
+        QTest.mouseClick(self.page.save_button, Qt.MouseButton.LeftButton)
+        self.assertFalse(self.page.dirty)
+        self.assertEqual(logger.get_state()["settings"]["atlas_settings"]["gear_item_rarity"], 187.25)
+        logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 1}])
+        main = list(csv.DictReader(io.StringIO(logger.export_all_csv().decode("utf-8-sig"))))
+        inventory = next(row for row in main if row["Type"] == "Currency")
+        self.assertEqual(inventory["Gear Item Rarity %"], "187.25")
+        atlas = list(csv.DictReader(io.StringIO(logger.export_atlas_csv().decode("utf-8-sig"))))
+        matching = [row for row in atlas if row["Atlas Setup ID"] == inventory["Atlas Setup ID"]]
+        self.assertTrue(matching)
+        self.assertEqual({row["Gear Item Rarity %"] for row in matching}, {"187.25"})
+        self.window.refresh()
+        self.assertEqual(self.page.gear_rarity.value(), 187.25)
 
     def test_csv_save_as_writes_linked_companion(self):
         self.configure(0)

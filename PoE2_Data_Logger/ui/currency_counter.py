@@ -1,10 +1,70 @@
-"""Compact session totals, with responsive cards and no scan controls."""
+"""Grouped session totals, retaining the tracked catalog at zero until found."""
+import re
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QSizePolicy,
     QVBoxLayout, QWidget,
 )
+
+
+_GROUP_ORDER = (
+    "Chaos orbs", "Exalted orbs", "Divine orbs", "Other orbs", "Essences",
+    "Omens", "Runes and soul cores", "Catalysts", "Alloys", "Delirium",
+    "Expedition", "Other currency", "Items",
+)
+_TIERS = {"lesser": 0, "": 1, "greater": 2, "perfect": 3, "refined": 2, "ancient": 2}
+
+
+def _group_for(item):
+    explicit = str(item.get("group") or "").strip()
+    if explicit:
+        return explicit
+    name = item["name"].casefold().replace("’", "'")
+    kind = str(item.get("kind") or "Currency").casefold()
+    if kind == "omen" or name.startswith("omen of "):
+        return "Omens"
+    if kind == "item":
+        return "Items"
+    if "essence of " in name:
+        return "Essences"
+    if kind in ("rune", "soul core") or re.search(r"\brune\b", name) or "soul core" in name or "talisman" in name:
+        return "Runes and soul cores"
+    if "chaos orb" in name:
+        return "Chaos orbs"
+    if "exalted orb" in name:
+        return "Exalted orbs"
+    if "divine orb" in name:
+        return "Divine orbs"
+    if "orb" in name:
+        return "Other orbs"
+    if "catalyst" in name:
+        return "Catalysts"
+    if "alloy" in name:
+        return "Alloys"
+    if "liquid" in name or "simulacrum" in name:
+        return "Delirium"
+    if "artifact" in name or "coinage" in name:
+        return "Expedition"
+    return "Other currency"
+
+
+def _variant_key(name):
+    normalized = name.casefold().replace("’", "'")
+    match = re.match(r"^(lesser|greater|perfect|refined|ancient)\s+(.+)$", normalized)
+    tier, base = (match.group(1), match.group(2)) if match else ("", normalized)
+    # Natural ordering also keeps level 9 before level 10 for fluxes and gems.
+    natural = tuple((0, int(part)) if part.isdigit() else (1, part)
+                    for part in re.split(r"(\d+)", base))
+    return natural, _TIERS[tier], normalized
+
+
+def _group_key(group):
+    try:
+        return 0, _GROUP_ORDER.index(group), ""
+    except ValueError:
+        return 1, 0, group.casefold()
 
 
 class CurrencyCard(QFrame):
@@ -55,6 +115,8 @@ class CurrencyCard(QFrame):
     def set_quantity(self, amount):
         self.quantity = amount
         self.total_label.setText(f"{amount:,}")
+        colour = "#F5C364" if amount else "#807B73"
+        self.total_label.setStyleSheet(f"font-size:24px;font-weight:700;color:{colour};")
         self.total_label.setAccessibleName(f"{self.name}: {amount:,} found")
         self.setToolTip(f"{self.name}\n{amount:,} found this session")
 
@@ -70,7 +132,12 @@ class SessionCurrencyCounter(QWidget):
         self.setObjectName("sessionCurrencyCounter")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         self.cards = {}
+        self.groups = {}
+        self.group_labels = {}
+        self._catalog = {}
+        self._items = {}
         self._visible = ()
+        self._visible_groups = ()
         self._columns = 0
         self._layout_key = None
         content = QVBoxLayout(self)
@@ -94,7 +161,7 @@ class SessionCurrencyCounter(QWidget):
         self.search.textChanged.connect(self._filter)
         header.addWidget(self.search)
         content.addLayout(header)
-        self.empty = QLabel("Approve a start and end inventory scan to count the currency found in each map.")
+        self.empty = QLabel("Approve an end inventory scan to count currency found. A start scan subtracts what you brought in.")
         self.empty.setProperty("role", "note")
         self.empty.setWordWrap(True)
         self.empty.setContentsMargins(0, 12, 0, 12)
@@ -105,27 +172,65 @@ class SessionCurrencyCounter(QWidget):
         self.grid.setAlignment(Qt.AlignmentFlag.AlignTop)
         content.addLayout(self.grid)
 
-    def set_totals(self, data, icons=None):
+    def set_totals(self, data, icons=None, catalog=None):
         icons = icons or {}
-        found = {item["name"]: item for item in data["items"] if item["quantity"] > 0}
-        for name in set(self.cards) - set(found):
+        if catalog is not None:
+            self._catalog = {}
+            for entry in catalog:
+                item = {"name": entry, "kind": "Currency"} if isinstance(entry, str) else dict(entry)
+                name = str(item.get("name") or "").strip()
+                if name:
+                    self._catalog.setdefault(name.casefold(), {**item, "name": name})
+        items = {key: {**item, "quantity": 0} for key, item in self._catalog.items()}
+        for item in data["items"]:
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            key = name.casefold()
+            if key not in items:
+                items[key] = {**item, "name": name, "quantity": 0}
+            items[key]["quantity"] += max(0, item.get("quantity", 0))
+            if item.get("kind"):
+                items[key]["kind"] = item["kind"]
+        tracked = {item["name"]: item for item in items.values()}
+        found = sum(item["quantity"] > 0 for item in tracked.values())
+        for name in set(self.cards) - set(tracked):
             card = self.cards.pop(name)
             self.grid.removeWidget(card)
             card.hide()
             card.deleteLater()
-        for name, item in found.items():
+        self._items = tracked
+        for name, item in tracked.items():
             if name in self.cards:
                 self.cards[name].set_quantity(item["quantity"])
                 if name in icons:
                     self.cards[name].set_icon(icons[name])
             else:
                 self.cards[name] = CurrencyCard(item, icons.get(name), self)
+        groups = {}
+        for name, item in tracked.items():
+            groups.setdefault(_group_for(item), []).append(name)
+        self.groups = {group: tuple(sorted(groups[group], key=_variant_key))
+                       for group in sorted(groups, key=_group_key)}
+        for group in set(self.group_labels) - set(self.groups):
+            label = self.group_labels.pop(group)
+            self.grid.removeWidget(label)
+            label.hide()
+            label.deleteLater()
+        for group in self.groups:
+            if group not in self.group_labels:
+                label = QLabel(group)
+                label.setAccessibleName(group + " currency group")
+                label.setProperty("role", "eyebrow")
+                label.setStyleSheet("color:#D2B275;font-size:12px;font-weight:700;")
+                label.setContentsMargins(0, 8, 0, 2)
+                self.group_labels[group] = label
         counted = data["maps_counted"]
-        parts = [f"{len(found)} item types · {counted} {'map' if counted == 1 else 'maps'} counted"]
-        missing = data["maps_pending_baseline"]
+        parts = [f"{found} of {len(tracked)} item types found · {counted} {'map' if counted == 1 else 'maps'} counted"]
+        assumed = data.get("maps_assumed_empty", 0)
         waiting = data["maps_pending_end"]
-        if missing:
-            parts.append(f"{missing} {'map needs a' if missing == 1 else 'maps need'} start scan")
+        if assumed:
+            parts.append(f"{assumed} {'map assumed' if assumed == 1 else 'maps assumed'} to start empty")
         if waiting:
             parts.append(f"{waiting} {'map awaits an' if waiting == 1 else 'maps await'} end scan")
         self.summary.setText(" · ".join(parts))
@@ -133,18 +238,21 @@ class SessionCurrencyCounter(QWidget):
 
     def _filter(self):
         query = self.search.text().strip().casefold()
-        self._visible = tuple(name for name in sorted(self.cards, key=str.casefold)
-                              if query in name.casefold())
+        self._visible_groups = tuple(
+            (group, tuple(name for name in names if query in name.casefold() or query in group.casefold()))
+            for group, names in self.groups.items())
+        self._visible_groups = tuple((group, names) for group, names in self._visible_groups if names)
+        self._visible = tuple(name for _, names in self._visible_groups for name in names)
         self.empty.setVisible(not self._visible)
         self.empty.setText("No currency matches your search." if self.cards else
-                           "Approve a start and end inventory scan to count the currency found in each map.")
+                           "Approve an end inventory scan to count currency found. A start scan subtracts what you brought in.")
         self._relayout()
 
     def _relayout(self):
         if not hasattr(self, "grid"):
             return
         columns = max(1, min(6, (self.width() + 12) // 252))
-        key = (columns, self._visible)
+        key = (columns, self._visible_groups)
         if key == self._layout_key:
             return
         self._layout_key = key
@@ -152,10 +260,19 @@ class SessionCurrencyCounter(QWidget):
             self.grid.takeAt(0)
         for card in self.cards.values():
             card.hide()
-        for index, name in enumerate(self._visible):
-            card = self.cards[name]
-            self.grid.addWidget(card, index // columns, index % columns)
-            card.show()
+        for label in self.group_labels.values():
+            label.hide()
+        row = 0
+        for group, names in self._visible_groups:
+            label = self.group_labels[group]
+            self.grid.addWidget(label, row, 0, 1, columns)
+            label.show()
+            row += 1
+            for index, name in enumerate(names):
+                card = self.cards[name]
+                self.grid.addWidget(card, row + index // columns, index % columns)
+                card.show()
+            row += (len(names) + columns - 1) // columns
         for column in range(max(columns, self._columns)):
             self.grid.setColumnStretch(column, 1 if column < columns else 0)
         self._columns = columns

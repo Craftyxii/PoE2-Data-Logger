@@ -2068,8 +2068,11 @@ def save_currency_snapshot(phase, items, expected_map_id=None, *, register_names
                    "items_json=excluded.items_json,recorded_at=excluded.recorded_at,"
                    "snapshot_json=excluded.snapshot_json",
                    (map_id, phase, _dump(totals), _now(), _dump(context)))
+        has_start = db.execute("SELECT 1 FROM currency_snapshots WHERE map_id=? AND phase='start'",
+                               (map_id,)).fetchone() is not None
         _record_commit(db, "Currency", map_id, reference=phase.title() + " inventory", context=context,
                        details={"phase": phase, "items": totals,
+                                "start_baseline": "Scanned" if has_start else "Assumed empty",
                                 "item_kinds": {name: "Item" if name.casefold() in item_catalog else "Currency"
                                                for name in totals}})
     return currency_for_map(map_id)
@@ -2084,16 +2087,19 @@ def currency_for_map(map_id):
     end = snapshots.get("end", {}).get("items", {})
     return {"map_id": map_id, "start": start, "end": end,
             "net": {name: end.get(name, 0) - start.get(name, 0) for name in set(start) | set(end)}
-            if "start" in snapshots and "end" in snapshots else {},
+            if "end" in snapshots else {},
+            "start_baseline": "Scanned" if "start" in snapshots else
+                              "Assumed empty" if "end" in snapshots else None,
             "recorded_at": {phase: row["recorded_at"] for phase, row in snapshots.items()}}
 
 
 def session_currency_totals():
     """Count positive inventory gains until the map IDs are reset.
 
-    Only each map's latest approved start/end pair contributes. An end-only
-    inventory is not evidence of a gain without its starting baseline, and
-    Ritual rewards are offers rather than inventory acquisitions.
+    Only each map's latest approved end inventory contributes. A missing start
+    scan means the user started with no currency, so the whole end inventory
+    counts. A scanned start takes precedence. Ritual rewards remain offers
+    rather than inventory acquisitions.
     """
     with _connect() as db:
         db.execute("BEGIN")
@@ -2131,16 +2137,15 @@ def session_currency_totals():
                         missing.remove(key)
                 if not missing:
                     break
-        totals, counted, pending_baseline, pending_end = {}, 0, 0, 0
+        totals, counted, assumed_empty, pending_end = {}, 0, 0, 0
         for phases in snapshots.values():
-            if "start" not in phases:
-                pending_baseline += 1
-                continue
             if "end" not in phases:
                 pending_end += 1
                 continue
             counted += 1
-            start, end = phases["start"], phases["end"]
+            if "start" not in phases:
+                assumed_empty += 1
+            start, end = phases.get("start", {}), phases["end"]
             for key, quantity in end.items():
                 gained = quantity - start.get(key, 0)
                 if gained > 0:
@@ -2150,12 +2155,13 @@ def session_currency_totals():
             name, kind = labels.get(key, (saved_names[key], "Currency"))
             items.append({"name": name, "kind": kind, "quantity": quantity})
         return {"items": sorted(items, key=lambda item: item["name"].casefold()),
-                "maps_counted": counted, "maps_pending_baseline": pending_baseline,
-                "maps_pending_end": pending_end}
+                "maps_counted": counted, "maps_pending_baseline": 0,
+                "maps_pending_end": pending_end, "maps_assumed_empty": assumed_empty}
 
 
 def export_currency_csv():
     with _connect() as db:
+        db.execute("BEGIN")
         snapshots = {}
         for row in db.execute("SELECT map_id,phase,items_json,recorded_at,snapshot_json FROM currency_snapshots "
                               "ORDER BY map_id,phase"):
@@ -2171,24 +2177,29 @@ def export_currency_csv():
                      *(f"End {header}" for header in CONFIG_EXPORT_HEADERS[:-4]),
                      *(f"Start {header}" for header in ATLAS_EXPORT_HEADERS),
                      *(f"End {header}" for header in ATLAS_EXPORT_HEADERS),
-                     "Start Deli", "Start Wisp", "End Deli", "End Wisp"])
+                     "Start Deli", "Start Wisp", "End Deli", "End Wisp", "Start Baseline",
+                     "Session Found Quantity"])
     for map_id, phases in sorted(snapshots.items()):
         start = _load(phases["start"]["items_json"]) if "start" in phases else {}
         end = _load(phases["end"]["items_json"]) if "end" in phases else {}
         start_config = _config_export_values(_load(phases["start"]["snapshot_json"]) if "start" in phases else {})
         end_config = _config_export_values(_load(phases["end"]["snapshot_json"]) if "end" in phases else {})
-        for name in sorted(set(start) | set(end)):
-            both = "start" in phases and "end" in phases
-            writer.writerow(_csv_row([map_id, name, start.get(name, 0) if "start" in phases else "",
-                             end.get(name, 0) if "end" in phases else "",
-                             end.get(name, 0) - start.get(name, 0) if both else "",
+        # An empty inventory is still an approved snapshot with its own map,
+        # timestamp, commit and settings. Keep its metadata in this export too.
+        for name in sorted(set(start) | set(end)) or [""]:
+            writer.writerow(_csv_row([map_id, name, start.get(name, 0) if name else "",
+                             end.get(name, 0) if name and "end" in phases else "",
+                             end.get(name, 0) - start.get(name, 0) if name and "end" in phases else "",
                              phases["start"]["recorded_at"] if "start" in phases else "",
                              phases["end"]["recorded_at"] if "end" in phases else "",
                              commits.get((map_id, "start"), "") if "start" in phases else "",
                              commits.get((map_id, "end"), "") if "end" in phases else "",
                              *start_config[:-4], *end_config[:-4],
                              *start_config[-4:-2], *end_config[-4:-2],
-                             *start_config[-2:], *end_config[-2:]]))
+                             *start_config[-2:], *end_config[-2:],
+                             "Scanned" if "start" in phases else "Assumed empty",
+                             max(0, end.get(name, 0) - start.get(name, 0))
+                             if name and "end" in phases else 0 if "end" in phases else ""]))
     return output.getvalue().encode("utf-8-sig")
 
 
@@ -2553,7 +2564,26 @@ HISTORY_DETAIL_HEADERS = ("Inventory Phase", "Currency", "Quantity", "Ritual Pag
                           "Start Recorded UTC", "End Recorded UTC", "Deferred", "New Find Quantity",
                           "Ritual Tribute Available", "Ritual Rerolls Remaining")
 KILL_EXPORT_HEADERS = ("Unique Kills (Map)", "Total Kills")
-HISTORY_APPEND_HEADERS = (*KILL_EXPORT_HEADERS, "Remnants Detonated (Scan)")
+HISTORY_APPEND_HEADERS = (*KILL_EXPORT_HEADERS, "Remnants Detonated (Scan)", "Start Baseline",
+                          "Current Inventory Snapshot", "Session Found Quantity")
+
+
+def _current_inventory_projection(db):
+    snapshots = {}
+    for row in db.execute("SELECT map_id,phase,items_json FROM currency_snapshots"):
+        items = {}
+        for name, quantity in _load(row["items_json"]).items():
+            if isinstance(name, str) and name.strip():
+                key = name.strip().casefold()
+                items[key] = items.get(key, 0) + quantity
+        snapshots[row["map_id"], row["phase"]] = items
+    commits = {}
+    for row in db.execute("SELECT number,map_id,reference,details_json FROM commits "
+                          "WHERE kind='Currency' ORDER BY number"):
+        phase = _load(row["details_json"]).get("phase") or str(row["reference"] or "").split(" ", 1)[0].lower()
+        if (row["map_id"], phase) in snapshots:
+            commits[row["map_id"], phase] = row["number"]
+    return snapshots, commits
 
 
 def export_record_history_csv(*, _db=None):
@@ -2565,6 +2595,9 @@ def export_record_history_csv(*, _db=None):
                        for n in range(1, 5)), *ATLAS_EXPORT_HEADERS, "Deli", "Wisp", *HISTORY_APPEND_HEADERS])
     starts = {}
     with (nullcontext(_db) if _db is not None else _connect()) as db:
+        if _db is None:
+            db.execute("BEGIN")
+        current_inventories, current_commits = _current_inventory_projection(db)
         for commit in db.execute("SELECT * FROM commits ORDER BY number"):
             context = _load(commit["snapshot_json"])
             details = _load(commit["details_json"])
@@ -2576,22 +2609,36 @@ def export_record_history_csv(*, _db=None):
                 shared["Inventory Phase"] = phase
                 totals = details.get("items", {})
                 start = starts.get(commit["map_id"])
+                shared["Start Baseline"] = details.get("start_baseline") or (
+                    "Scanned" if phase == "start" or start is not None else "Assumed empty")
+                is_current = current_commits.get((commit["map_id"], phase)) == commit["number"]
+                shared["Current Inventory Snapshot"] = is_current
+                shared["Session Found Quantity"] = 0
+                current_start = current_inventories.get((commit["map_id"], "start"), {})
+                current_end = current_inventories.get((commit["map_id"], "end"), {})
+                credited = set()
                 names = set(totals) | (set(start["items"]) if phase == "end" and start else set())
                 kinds = {**(start["kinds"] if phase == "end" and start else {}),
                          **details.get("item_kinds", {})}
                 for name in sorted(names):
                     is_item = kinds.get(name) == "Item"
                     amount = totals.get(name, 0)
+                    key = name.strip().casefold()
+                    found = (max(0, current_end.get(key, 0) - current_start.get(key, 0))
+                             if is_current and phase == "end" and key not in credited else 0)
+                    credited.add(key)
                     entries.append({"Item Name" if is_item else "Currency": name, "Quantity": amount,
                                     "Item Source": "Inventory" if is_item else "",
                                     "Start Count": amount if phase == "start" else
-                                                   start["items"].get(name, 0) if start else "",
+                                                   start["items"].get(name, 0) if start else 0,
                                     "End Count": amount if phase == "end" else "",
                                     "Net Change": amount - start["items"].get(name, 0)
-                                                  if phase == "end" and start else "",
+                                                  if phase == "end" and start else
+                                                  amount if phase == "end" else "",
                                     "Start Recorded UTC": commit["recorded_at"] if phase == "start" else
                                                           start["recorded_at"] if start else "",
-                                    "End Recorded UTC": commit["recorded_at"] if phase == "end" else ""})
+                                    "End Recorded UTC": commit["recorded_at"] if phase == "end" else "",
+                                    "Session Found Quantity": found})
                 if phase == "start":
                     starts[commit["map_id"]] = {"items": totals, "kinds": kinds,
                                                "recorded_at": commit["recorded_at"]}
@@ -2642,7 +2689,10 @@ def export_record_history_csv(*, _db=None):
                                            *config_values,
                                            details.get("unique_kills") if details.get("unique_kills") is not None else "",
                                            _total_kills(kills, details.get("unique_kills")),
-                                           1 if commit["kind"] == "Propagation" else ""]))
+                                           1 if commit["kind"] == "Propagation" else "",
+                                           shared.get("Start Baseline", ""),
+                                           shared.get("Current Inventory Snapshot", ""),
+                                           values.get("Session Found Quantity", "")]))
     return output.getvalue().encode("utf-8-sig")
 
 

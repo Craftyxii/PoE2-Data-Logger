@@ -61,14 +61,34 @@ class SessionCurrencyTotalsTests(unittest.TestCase):
         self.assertEqual(self.quantities(), {})
         self.assertEqual(logger.session_currency_totals()["maps_counted"], 1)
 
-    def test_end_only_inventory_waits_for_baseline_then_empty_baseline_is_valid(self):
+    def test_end_only_inventory_counts_empty_start_then_scanned_start_takes_precedence(self):
         self.snapshot("end", **{"Chaos Orb": 100})
         self.assertEqual(logger.session_currency_totals(), {
-            "items": [], "maps_counted": 0, "maps_pending_baseline": 1, "maps_pending_end": 0})
+            "items": [{"name": "Chaos Orb", "kind": "Currency", "quantity": 100}],
+            "maps_counted": 1, "maps_pending_baseline": 0, "maps_pending_end": 0,
+            "maps_assumed_empty": 1})
+        self.assertEqual(logger.currency_for_map("M0001")["net"], {"Chaos Orb": 100})
+        self.assertEqual(logger.currency_for_map("M0001")["start_baseline"], "Assumed empty")
         self.snapshot("start", **{"Chaos Orb": 97})
         self.assertEqual(self.quantities(), {"Chaos Orb": 3})
+        self.assertEqual(logger.session_currency_totals()["maps_assumed_empty"], 0)
+        self.assertEqual(logger.currency_for_map("M0001")["start_baseline"], "Scanned")
         self.snapshot("start")
         self.assertEqual(self.quantities(), {"Chaos Orb": 100})
+
+    def test_mixed_end_only_and_paired_maps_keep_latest_gain_without_duplicate_scans(self):
+        for _ in range(3):
+            self.snapshot("end", **{"Chaos Orb": 10, "Divine Orb": 2})
+        self.snapshot("end", **{"Chaos Orb": 7, "Divine Orb": 1})
+        self.next_map()
+        self.snapshot("start", **{"Chaos Orb": 7, "Divine Orb": 1})
+        self.snapshot("end", **{"Chaos Orb": 11, "Divine Orb": 1, "Exalted Orb": 3})
+        self.next_map()
+        self.snapshot("end", **{"Chaos Orb": 2, "Exalted Orb": 4})
+        result = logger.session_currency_totals()
+        self.assertEqual(self.quantities(), {"Chaos Orb": 13, "Divine Orb": 1, "Exalted Orb": 7})
+        self.assertEqual((result["maps_counted"], result["maps_assumed_empty"],
+                          result["maps_pending_baseline"], result["maps_pending_end"]), (3, 2, 0, 0))
 
     def test_start_only_and_prepared_next_map_do_not_add_unfinished_counts(self):
         self.snapshot("start", **{"Chaos Orb": 20})
@@ -138,7 +158,8 @@ class SessionCurrencyTotalsTests(unittest.TestCase):
         self.assertEqual(self.quantities(), {"Chaos Orb": 8})
         logger.clear_export_and_reset_ids()
         self.assertEqual(logger.session_currency_totals(), {
-            "items": [], "maps_counted": 0, "maps_pending_baseline": 0, "maps_pending_end": 0})
+            "items": [], "maps_counted": 0, "maps_pending_baseline": 0, "maps_pending_end": 0,
+            "maps_assumed_empty": 0})
         logger.start_map()
         self.snapshot("start")
         self.snapshot("end", **{"Chaos Orb": 2})

@@ -133,19 +133,46 @@ class PropagationOCRTests(unittest.TestCase):
         self.assertFalse(result["can_use"])
         self.assertEqual(result["runes"], [])
 
-    def test_missing_cursor_does_not_guess_selected_recipe(self):
+    def test_missing_cursor_offers_single_recipe_for_explicit_approval(self):
         image, rows = self.panel(["Medved's Saga"], None, {0: [1]})
         result = self.scan(image, rows)
         self.assertFalse(result["can_use"])
         self.assertEqual(result["selected_recipe"], None)
-        self.assertIn("widen the Propagation scan region", result["status"])
+        self.assertIn("approve", result["status"])
+        self.assertEqual(len(result["choices"]), 1)
+        self.assertTrue(result["choices"][0]["can_use"])
+        self.assertEqual(result["choices"][0]["runes"], ["Rage"])
 
-    def test_crop_that_omits_outside_cursor_does_not_guess_selected_recipe(self):
+    def test_crop_that_omits_outside_cursor_keeps_recipe_and_rune_choice(self):
         image, rows = self.panel(["Medved's Saga"], marks={0: [1]})
         result = self.scan(image.crop((46, 0, image.width, image.height)), rows)
         self.assertFalse(result["can_use"])
         self.assertIsNone(result["selected_recipe"])
         self.assertEqual(result["runes"], [])
+        self.assertEqual(result["choices"][0]["selected_recipe"], "Medved's Saga")
+        self.assertTrue(result["choices"][0]["can_use"], result)
+        self.assertEqual(result["choices"][0]["runes"], ["Rage"])
+
+    def test_no_arrow_multiple_marked_rows_keep_each_recipe_in_display_order(self):
+        image, rows = self.panel(["Medved's Saga", "Greater Regal Orb x3"], None,
+                                 {0: [1, 5], 1: [1, 5]})
+        result = self.scan(image, rows)
+        self.assertFalse(result["can_use"])
+        self.assertEqual(result["runes"], [])
+        self.assertEqual([choice["selected_recipe"] for choice in result["choices"]],
+                         ["Medved's Saga", "Greater Regal Orb x3"])
+        self.assertTrue(all(choice["can_use"] for choice in result["choices"]), result)
+        self.assertEqual(result["choices"][0]["runes"], ["Rage", "Time"])
+
+    def test_no_arrow_unclear_marks_still_list_recipe_for_manual_entry(self):
+        image, rows = self.panel(["Medved's Saga"], None, {0: []})
+        result = self.scan(image, rows)
+        self.assertFalse(result["can_use"])
+        self.assertEqual(len(result["choices"]), 1)
+        self.assertEqual(result["choices"][0]["selected_recipe"], "Medved's Saga")
+        self.assertFalse(result["choices"][0]["can_use"])
+        self.assertEqual(result["choices"][0]["runes"], [])
+        self.assertIn("manually", result["choices"][0]["status"])
 
     def test_multiple_cursors_are_ambiguous(self):
         image, rows = self.panel(["Medved's Saga", "Greater Regal Orb x3"], 0, {0: [1]})
@@ -167,6 +194,18 @@ class PropagationOCRTests(unittest.TestCase):
         result = self.scan(image, rows)
         self.assertFalse(result["can_use"])
         self.assertEqual(result["runes"], [])
+
+    def test_one_or_two_crown_peaks_are_not_a_mark(self):
+        for offsets in ((0,), (-9, 9)):
+            image, rows = self.panel(["Medved's Saga"], marks={0: []})
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((52, 68, 89, 104), outline=(242, 213, 144), width=2)
+            for offset in offsets:
+                draw.polygon([(71 + offset, 63), (69 + offset, 67), (73 + offset, 67)],
+                             fill=(242, 213, 144))
+            result = self.scan(image, rows)
+            self.assertFalse(result["can_use"], result)
+            self.assertFalse(result["choices"][0]["can_use"], result)
 
     def test_inconsistent_visible_recipe_sequence_is_not_accepted(self):
         image, rows = self.panel(["Medved's Saga", "Divine Orb"], marks={0: [1]})
@@ -210,12 +249,14 @@ class PropagationOCRTests(unittest.TestCase):
                 self.assertEqual(result["runes"], ["Arcane"])
                 self.assertEqual(result["positions"], [2])
 
-    def test_short_wide_panel_without_cursor_still_cannot_select_a_recipe(self):
+    def test_short_wide_panel_without_cursor_offers_validated_choice(self):
         image, rows = self.panel(["Medved's Saga"], selected=None, marks={0: [1, 5]})
         result = self.scan(image.crop((0, 0, 575, 300)), rows)
         self.assertFalse(result["can_use"])
         self.assertIsNone(result["selected_recipe"])
         self.assertEqual(result["runes"], [])
+        self.assertEqual(result["choices"][0]["runes"], ["Rage", "Time"])
+        self.assertTrue(result["choices"][0]["can_use"])
 
     def test_short_wide_geometry_does_not_bypass_minimum_capture_size(self):
         image, rows = self.panel(["Medved's Saga"], marks={0: [1, 5]})
@@ -261,10 +302,29 @@ class PropagationOCRTests(unittest.TestCase):
         self.assertEqual(result["selected_recipe"], "Regal Orb x3")
         self.assertEqual(result["runes"], ["Tidal"])
 
-    def test_real_screenshot_without_cursor_does_not_scan(self):
+    def test_real_screenshot_without_cursor_reads_all_recipes_for_explicit_approval(self):
         result = propagation_scan.scan_propagation(self.source)
         self.assertFalse(result["can_use"])
         self.assertEqual(result["runes"], [])
+        self.assertEqual([choice["selected_recipe"] for choice in result["choices"]],
+                         ["Lesser Jeweller's Orb", "Regal Orb x3", "Exalted Orb x2"])
+        self.assertEqual([choice["runes"] for choice in result["choices"]],
+                         [["Cyclonic"], ["Tidal"], ["Tidal"]])
+        self.assertTrue(all(choice["can_use"] for choice in result["choices"]), result)
+
+    def test_real_tight_crop_preserves_header_and_adjusts_rune_positions(self):
+        for left in (20, 35, 46):
+            with self.subTest(left=left):
+                image = self.source.crop((left, 0, self.source.width, self.source.height))
+                result = propagation_scan.scan_propagation(image)
+                self.assertFalse(result["can_use"], result)
+                self.assertEqual(len(result["choices"]), 3, result)
+                self.assertEqual(result["choices"][0]["runes"], ["Cyclonic"])
+                self.assertEqual(result["choices"][1]["runes"], ["Tidal"])
+                self.assertEqual(result["choices"][0]["positions"], [3])
+                self.assertEqual(result["choices"][1]["positions"], [3])
+                self.assertTrue(result["choices"][0]["can_use"], result)
+                self.assertTrue(result["choices"][1]["can_use"], result)
 
 
 if __name__ == "__main__":

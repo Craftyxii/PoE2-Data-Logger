@@ -9,9 +9,9 @@ import html
 import math
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, QSignalBlocker, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtGui import (
-    QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient, QValidator,
+    QBrush, QColor, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient, QValidator,
 )
 from PySide6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QGraphicsObject,
@@ -209,6 +209,27 @@ class AtlasTreeView(QGraphicsView):
 
 class GearRaritySpinBox(QDoubleSpinBox):
     """Reserve the negative sentinel for unknown, never a displayed gear stat."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.lineEdit().installEventFilter(self)
+
+    def _prepare_number_entry(self, event):
+        if (self.value() < 0 and self.text() == self.specialValueText() and
+                (event.text().isprintable() or event.matches(QKeySequence.StandardKey.Paste))):
+            # A mouse click places the caret inside "Not set". Replace that
+            # label on the first typed character, while leaving numeric edits
+            # and incomplete decimal input to the normal spinbox validator.
+            self.selectAll()
+
+    def eventFilter(self, source, event):
+        if source is self.lineEdit() and event.type() == QEvent.Type.KeyPress:
+            self._prepare_number_entry(event)
+        return super().eventFilter(source, event)
+
+    def keyPressEvent(self, event):
+        self._prepare_number_entry(event)
+        super().keyPressEvent(event)
 
     def validate(self, text, position):
         if text.lstrip().startswith("-"):

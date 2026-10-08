@@ -97,7 +97,7 @@ def _numeric_column(name):
         "Remnants Detonated (Scan)",
         "Scan Commit #", "Family ID", "Quantity", "Ritual Page", "Tribute", "Tablet Slot Capacity",
         "Start Count", "End Count", "Net Change", "Normal Kills", "Magic Kills", "Rare Kills", "Unique Kills", "Total Kills",
-        "New Find Quantity", "Ritual Tribute Available", "Ritual Rerolls Remaining", "Visible Seed Sockets",
+        "New Find Quantity", "Session Found Quantity", "Ritual Tribute Available", "Ritual Rerolls Remaining", "Visible Seed Sockets",
         "Page", "Currency Commit #", "Ritual Commit #", "Start Scan Commit #", "End Scan Commit #",
         "Gear Item Rarity %", "Points"}
         or re.fullmatch(r"Tablet \d Mod \d (?:%|Value)", name)
