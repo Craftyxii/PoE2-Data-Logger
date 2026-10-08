@@ -25,6 +25,7 @@ OCR_SOURCES = (
     "ocr/ritual_grid.py",
     "ocr/opened_scan.py",
     "ocr/propagation_scan.py",
+    "ocr/propagation_marks.py",
     "ocr/runehelper_ocr.py",
     "ocr/scan.py",
     "ocr/prototype.py",
