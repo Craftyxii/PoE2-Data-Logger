@@ -14,7 +14,7 @@ Scans and records are processed and stored locally. **The app does not upload yo
 
 ## Download
 
-Download **PoE2-Data-Logger-Setup-v1.3-beta.exe** from the [1.3 Beta release page](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3-beta). The installer includes the libraries and resources needed to run the app.
+Download **PoE2-Data-Logger-Setup-v1.3.1-beta.exe** from the [1.3.1 Beta release page](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.1-beta). The installer includes the libraries and resources needed to run the app.
 
 The separate **Atlas / Character Settings** tab provides a clickable PoE2 atlas with numbered effect dropdowns, immediate hover descriptions, Autofill and gear item rarity. Excel exports include a companion atlas worksheet linked to each map through its saved Atlas Setup ID.
 
@@ -59,7 +59,7 @@ py -3.12 -m PoE2_Data_Logger
 
 ## Build on Windows
 
-Install Python 3.12 and NSIS, add `makensis` to PATH, then run **Build.bat** from the repository folder. It installs the build dependencies, packages the app, checks the bundled runtime and OCR models, and creates **PoE2-Data-Logger-Setup-v1.3-beta.exe**.
+Install Python 3.12 and NSIS, add `makensis` to PATH, then run **Build.bat** from the repository folder. It installs the build dependencies, packages the app, checks the bundled runtime and OCR models, and creates **PoE2-Data-Logger-Setup-v1.3.1-beta.exe**.
 
 The source groups in [packaging/sources.py](packaging/sources.py) feed the PyInstaller specification. Add a new app module or resource there when changing the build.
 

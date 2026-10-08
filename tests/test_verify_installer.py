@@ -115,7 +115,7 @@ class ReleasePackagingTests(unittest.TestCase):
         for name in (".onInit", "un.onInit"):
             with self.subTest(function=name):
                 body = installer.split(f"Function {name}\n", 1)[1].split("FunctionEnd", 1)[0]
-                for title in ("PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta", "PoE2 Data Logger 1.2.2 Beta"):
+                for title in ("PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta", "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta"):
                     self.assertIn(f'FindWindowW(p 0, w "{title}")', body)
                 running = body.split("  running:\n", 1)[1].split("  ready:", 1)[0]
                 self.assertIn("/SD IDOK", running)

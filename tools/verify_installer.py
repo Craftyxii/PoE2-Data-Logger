@@ -96,7 +96,7 @@ def verify_running_guards(installer, directory, check_saved):
     window = QWidget()
     window.resize(320, 120)
     try:
-        for title in ("PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta", "PoE2 Data Logger 1.2.2 Beta"):
+        for title in ("PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta", "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta"):
             window.setWindowTitle(title)
             window.show()
             deadline = time.monotonic() + 5
