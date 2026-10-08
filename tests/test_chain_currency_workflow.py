@@ -13,7 +13,7 @@ from zipfile import ZipFile
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from PoE2_Data_Logger.core import logger_store as logger, store, workbook_export
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, select
@@ -62,6 +62,24 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
         self.assertTrue(all(len(row) == len(rows[0]) for row in rows))
         return [dict(zip(rows[0], row)) for row in rows[1:]]
 
+    def recipe_prefix(self, name, *runes):
+        """Give an isolated synthetic reading a matching database rune order."""
+        with logger._connect() as db:
+            entry = db.execute("SELECT combo FROM recipes WHERE name=?", (name,)).fetchone()
+            original = [rune.strip() for rune in entry["combo"].split("+")]
+            db.execute("UPDATE recipes SET combo=? WHERE name=?",
+                       (" + ".join([*runes, *original[len(runes):]]), name))
+
+    def approve_row_runes(self, row, *runes):
+        """Select this recipe's marked runes and accept its row through Review."""
+        fields = self.window._propagation_row_inputs[row]
+        for index, field in enumerate(fields):
+            field.setCurrentIndex(field.findText(runes[index]) if index < len(runes) else 0)
+        approve = self.window.propagation_recipe_table.cellWidget(row, 2).findChild(
+            QPushButton, "approvePropagationRecipe")
+        self.assertTrue(approve.isEnabled())
+        approve.click()
+
     def assert_workbook_matches_csv(self):
         ns = {"s": workbook_export.NS}
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
@@ -84,6 +102,8 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
                 self.assertEqual(actual, self.rows(csv_data))
 
     def test_review_choice_and_manual_pair_commit_without_crossing_currency_map_ids(self):
+        self.recipe_prefix("Greater Jeweller's Orb", "Death", "Power")
+        self.recipe_prefix("Chaos Orb", "Rage", "Time")
         result = {"mode": "propagation", "can_use": False, "runes": [],
                   "status": "Confirm the propagated recipe", "choices": [
                       {"selected_recipe": "Greater Jeweller's Orb", "runes": ["Death", "Power"], "can_use": True},
@@ -91,10 +111,12 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
                   **logger.scan_context()}
         self.window._propagation_read(result, self.raw)
         self.window.deny_propagation_recipe(1)
-        self.window.approve_propagation_recipe(0)
-        for field, rune in zip(self.window.propagation_rune_inputs, ("Rage", "Time")):
-            field.setEditText(rune)
-        self.window.propagation_add_button.click()
+        self.approve_row_runes(0, "Death", "Power")
+        self.window._propagation_read({"mode": "propagation", "can_use": False, "runes": [],
+            "status": "Confirm marked runes", "choices": [
+                {"selected_recipe": "Chaos Orb", "runes": [], "can_use": False}],
+            **logger.scan_context()}, self.raw)
+        self.approve_row_runes(0, "Rage", "Time")
         self.assertEqual(logger.get_state()["detonated"], 2)
         self.assertEqual(self.window._chain_steps(), [
             {"rune1": "Death", "rune2": "Power"}, {"rune1": "Rage", "rune2": "Time"}])
@@ -227,6 +249,8 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
         self.assert_workbook_matches_csv()
 
     def test_uncertain_recipe_accepts_manual_runes_and_keeps_recipe_in_saved_audit(self):
+        self.recipe_prefix("Greater Jeweller's Orb", "Death", "Rebirth")
+        self.recipe_prefix("Chaos Orb", "Rage")
         result = {"mode": "propagation", "can_use": False, "runes": [],
                   "status": "Confirm marked runes", "choices": [
                       {"selected_recipe": "Greater Jeweller's Orb", "runes": [], "can_use": False,
@@ -235,9 +259,7 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
                   **logger.scan_context()}
         self.window._propagation_read(result, self.raw)
         self.window.propagation_recipe_table.setCurrentCell(0, 0)
-        for field, rune in zip(self.window.propagation_rune_inputs, ("Death", "Rebirth")):
-            field.setEditText(rune)
-        self.window.approve_propagation_recipe(0)
+        self.approve_row_runes(0, "Death", "Rebirth")
         self.assertEqual(self.window._chain_steps(), [{"rune1": "Death", "rune2": "Rebirth"}])
         self.assertEqual(logger.get_state()["detonated"], 1)
         self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "Greater Jeweller's Orb")

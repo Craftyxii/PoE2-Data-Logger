@@ -561,10 +561,11 @@ class HundredMapSession(unittest.TestCase):
                 self.w.propagation_recipe_table.cellWidget(1, 2).findChildren(QPushButton)[0].click()
                 self.coverage["held recipe row approval creates draft"] += 1
             else:
-                self.w.propagation_rune_inputs[0].setEditText("Death")
-                self.w.propagation_rune_inputs[1].setEditText("Power")
-                self.w.propagation_add_button.click()
-                self.coverage["held recipe manually entered runes create draft"] += 1
+                for field, rune in zip(self.w._propagation_row_inputs[1], ("Death", "Power")):
+                    self.choose(field, rune)
+                self.w.propagation_recipe_table.cellWidget(1, 2).findChild(
+                    QPushButton, "approvePropagationRecipe").click()
+                self.coverage["held recipe dropdown corrections create draft"] += 1
             self.record("Propagation", {"runes": ["Death", "Power"], "recipe": "Divine Orb x2", "detonated": 1},
                         context, reference="Divine Orb x2")
             self.check(logger.get_state()["chain"], [], "propagation:manual-part-awaits-commit")
@@ -573,7 +574,7 @@ class HundredMapSession(unittest.TestCase):
                        "propagation:cannot-complete-uncommitted-draft")
             self.w.review_commit_chain_button.click()
             self.record("Chain", {"steps": steps[:1], "detonated": 1}, context, reference="Steps 1–1")
-            self.coverage["propagation deny/manual fallback"] += 1
+            self.coverage["propagation deny and row approval"] += 1
         self.check(logger.get_state()["current_expedition_id"], eid, "propagation:first-part-stays-in-expedition")
         self.check(logger.get_state()["chain"], steps[:1], "propagation:first-saved-paired-part")
         self.check(self.w.chain_review_table.rowCount(), 0, "propagation:saved-part-clears-draft")
