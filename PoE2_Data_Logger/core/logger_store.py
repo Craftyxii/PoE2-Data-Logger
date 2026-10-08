@@ -22,8 +22,15 @@ from PoE2_Data_Logger.ocr.affix_capture import affix_catalog, affix_key, affix_u
 
 HERE = Path(__file__).resolve().parent.parent
 _INIT_LOCK = threading.Lock()
+_EXPORT_WRITE_LOCK = threading.Lock()
 _READY = False
 _UNSET = object()
+_RETIRED_CURRENCY_DEFAULTS = frozenset(name.casefold() for name in (
+    "Omen of Corruption", "Omen of Dextral Alchemy", "Omen of Dextral Coronation",
+    "Omen of Recombination", "Omen of Sinistral Alchemy", "Omen of Sinistral Coronation",
+    "Black Scythe Artifact", "Broken Circle Artifact", "Exotic Coinage", "Order Artifact",
+    "Sun Artifact", "Aldur's Saga",
+))
 BIOMES = ("None", "Water", "Mountain", "Grass", "Forest", "Swamp", "Desert", "Ocean", "Island")
 CITY_TYPES = ("None", "Faridun", "Ezomyte", "Vaal")
 ALDUR_AFFIXES = ("None", "All +5", "All +6", "All +7", "Lucky",
@@ -462,13 +469,13 @@ def initialize():
                 names = {re.sub(r"\s+x\d+$", "", name).strip()
                          for name, in db.execute("SELECT name FROM recipes WHERE category='Currency'")}
                 db.executemany("INSERT OR IGNORE INTO currency_items(name) VALUES(?)",
-                               ((name,) for name in sorted(names) if name))
+                               ((name,) for name in sorted(names) if name and not _retired_currency_default(name)))
                 _set_meta(db, "currency_items_initialized", True)
             from PoE2_Data_Logger.ocr.currency_ocr import catalog_names, catalog_version
             catalog_key = catalog_version()
             if _meta(db, "currency_inventory_catalog_version") != catalog_key:
                 db.executemany("INSERT OR IGNORE INTO currency_items(name) VALUES(?)",
-                               ((name,) for name in catalog_names()))
+                               ((name,) for name in catalog_names() if not _retired_currency_default(name)))
                 _set_meta(db, "currency_overlay_catalog_initialized", True)
                 _set_meta(db, "currency_inventory_catalog_version", catalog_key)
             db.execute("INSERT OR IGNORE INTO affixes(name) VALUES(?)", ("Chance to Contain Essences",))
@@ -510,7 +517,7 @@ def initialize():
             if not _meta(db, "ritual_names_initialized"):
                 from PoE2_Data_Logger.core.ritual_catalog import OMEN_NAMES
                 db.executemany("INSERT OR IGNORE INTO ritual_names(name) VALUES(?)",
-                               ((name,) for name in OMEN_NAMES))
+                               ((name,) for name in OMEN_NAMES if not _retired_currency_default(name)))
                 _set_meta(db, "ritual_names_initialized", True)
             config = _meta(db, "settings")
             waystone = _waystone_settings(config)
@@ -1779,9 +1786,37 @@ def clear_export_and_reset_ids():
     return get_state()
 
 
+def _retired_currency_default(name):
+    return str(name).strip().replace("’", "'").casefold() in _RETIRED_CURRENCY_DEFAULTS
+
+
+def _retain_local_catalog_name(db, name):
+    """An explicit registration may reuse a retired default's name."""
+    if not _retired_currency_default(name):
+        return
+    names = set(_meta(db, "active_retired_currency_names", []))
+    names.add(name.replace("’", "'").casefold())
+    _set_meta(db, "active_retired_currency_names", sorted(names))
+
+
+def _active_catalog_names(db, table):
+    """Hide obsolete seeds without deleting saved labels or reference artwork."""
+    if table not in ("currency_items", "ritual_names", "item_names"):
+        raise ValueError("Choose the Currency, Omen or Item catalog.")
+    names = [row[0] for row in db.execute(f"SELECT name FROM {table} ORDER BY name")]
+    if table == "item_names":
+        return names
+    local_names = set(_meta(db, "active_retired_currency_names", []))
+    for icon_table in ("currency_icons", "omen_icons", "review_icon_examples"):
+        local_names.update(row[0].replace("’", "'").casefold()
+                           for row in db.execute(f"SELECT DISTINCT name FROM {icon_table}"))
+    return [name for name in names if not _retired_currency_default(name) or
+            name.replace("’", "'").casefold() in local_names]
+
+
 def currency_names():
     with _connect() as db:
-        return [row[0] for row in db.execute("SELECT name FROM currency_items ORDER BY name")]
+        return _active_catalog_names(db, "currency_items")
 
 
 def add_currency_item(name):
@@ -1790,10 +1825,12 @@ def add_currency_item(name):
     with _connect() as db:
         existing = _catalog_name(db, "currency_items", name)
         if existing:
+            _retain_local_catalog_name(db, existing)
             return existing
         if _catalog_name(db, "item_names", name):
             raise ValueError("This name already exists in the Item database.")
         db.execute("INSERT OR IGNORE INTO currency_items(name) VALUES(?)", (name,))
+        _retain_local_catalog_name(db, name)
     return name
 
 
@@ -1911,6 +1948,8 @@ def _canonical_registered_name(db, name, category, *, register=True):
     omen = registered_omen
     if currency and item:
         raise ValueError("This name occurs in both Currency and Item databases. Correct the catalog first.")
+    if register and not item:
+        _retain_local_catalog_name(db, currency or omen or name)
     if category == "Omen":
         if item:
             raise ValueError("This name already exists in the Item database and cannot be labelled Omen.")
@@ -2205,7 +2244,7 @@ def export_currency_csv():
 
 def ritual_names():
     with _connect() as db:
-        return [row[0] for row in db.execute("SELECT name FROM ritual_names ORDER BY name")]
+        return _active_catalog_names(db, "ritual_names")
 
 
 def add_ritual_name(name):
@@ -2329,7 +2368,7 @@ def _total_kills(kills, unique=None):
     return sum(known) if known else ""
 
 
-def export_maps_csv():
+def export_maps_csv(*, _db=None):
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     headers = ["Map ID", "Tier", "Area Level", "Waystone %", "Map Mods",
@@ -2344,8 +2383,9 @@ def export_maps_csv():
                      "Perk 1", "Perk 2", "Perk 3", "Perk 4", "Master +Mods", "Base Map Mods",
                      "# +2 Mod Tablets", "Tablets Used", *TABLET_EXPORT_HEADERS, *TABLET_DETAIL_HEADERS,
                      *ATLAS_EXPORT_HEADERS, "Deli", "Wisp"]
-    with _connect() as db:
-        db.execute("BEGIN")
+    with (nullcontext(_db) if _db is not None else _connect()) as db:
+        if _db is None:
+            db.execute("BEGIN")
         extra_expeditions = [row[0] for row in db.execute(
             "SELECT DISTINCT number FROM expeditions WHERE number>2 ORDER BY number")]
         writer.writerow([*headers, *(f"Expedition {number} Detonated" for number in extra_expeditions),
@@ -2407,6 +2447,185 @@ def export_maps_csv():
                                      unique if unique is not None else "", _total_kills(kills, unique)]
             writer.writerow(_csv_row([int(v) if isinstance(v, float) and v.is_integer() else v
                                      for v in values]))
+    return output.getvalue().encode("utf-8-sig")
+
+
+MAP_SUMMARY_SCAN_HEADERS = ("Start Baseline", "Currency Scan Status", "Start Commit #", "End Commit #",
+                            "Start Recorded UTC", "End Recorded UTC")
+
+
+def _map_summary_item_sort(name, kind):
+    """Use the dashboard's family/tier order without loading the Qt UI."""
+    normalized = name.casefold().replace("’", "'")
+    if kind == "Omen" or normalized.startswith("omen of "):
+        group = 5
+    elif kind == "Item":
+        group = 12
+    elif "essence of " in normalized:
+        group = 4
+    elif re.search(r"\brune\b", normalized) or "soul core" in normalized or "talisman" in normalized:
+        group = 6
+    elif "chaos orb" in normalized:
+        group = 0
+    elif "exalted orb" in normalized:
+        group = 1
+    elif "divine orb" in normalized:
+        group = 2
+    elif "orb" in normalized:
+        group = 3
+    elif "catalyst" in normalized:
+        group = 7
+    elif "alloy" in normalized:
+        group = 8
+    elif "liquid" in normalized or "simulacrum" in normalized:
+        group = 9
+    elif "artifact" in normalized or "coinage" in normalized:
+        group = 10
+    else:
+        group = 11
+    match = re.match(r"^(lesser|greater|perfect|refined|ancient)\s+(.+)$", normalized)
+    tier, base = (match.group(1), match.group(2)) if match else ("", normalized)
+    natural = tuple((0, int(part)) if part.isdigit() else (1, part)
+                    for part in re.split(r"(\d+)", base))
+    tiers = {"lesser": 0, "": 1, "greater": 2, "perfect": 3, "refined": 2, "ancient": 2}
+    return group, natural, tiers[tier], normalized
+
+
+def _map_summary_records(db):
+    commits = [{**dict(row), "details": _load(row["details_json"]),
+                "context": _load(row["snapshot_json"])}
+               for row in db.execute("SELECT number,kind,map_id,reference,recorded_at,details_json,snapshot_json "
+                                     "FROM commits ORDER BY number")]
+    snapshots = [{**dict(row), "items": _load(row["items_json"]),
+                  "context": _load(row["snapshot_json"])}
+                 for row in db.execute("SELECT map_id,phase,items_json,recorded_at,snapshot_json "
+                                       "FROM currency_snapshots ORDER BY map_id,phase")]
+    return commits, snapshots
+
+
+def _map_summary_item_columns(db, reserved, commits, snapshots):
+    labels = {}
+    for table, kind in (("currency_items", "Currency"), ("item_names", "Item"), ("ritual_names", "Omen")):
+        for entry in _active_catalog_names(db, table):
+            name = entry.strip()
+            if name:
+                labels[name.casefold()] = (name, kind)
+    # Retiring a catalog entry must not erase an already approved field.
+    for commit in reversed(commits):
+        details = commit["details"]
+        if commit["kind"] == "Currency":
+            kinds = details.get("item_kinds", {})
+            entries = ((name, kinds.get(name, "Currency")) for name in details.get("items", {}))
+        elif commit["kind"] == "Ritual":
+            entries = ((item.get("name"), item.get("category", "Item")) for item in details.get("items", []))
+        else:
+            continue
+        for name, kind in entries:
+            if isinstance(name, str) and name.strip():
+                name = name.strip()
+                labels.setdefault(name.casefold(), (name, kind))
+    for snapshot in snapshots:
+        for name in snapshot["items"]:
+            if isinstance(name, str) and name.strip():
+                name = name.strip()
+                labels.setdefault(name.casefold(), (name, "Currency"))
+    legacy_headers = [*_meta(db, "export_headers", []), *EXPORT_EXTRA_HEADERS, *ATLAS_EXPORT_HEADERS,
+                      *KILL_EXPORT_HEADERS, "Type", "Map Modifiers"]
+    used = {header.casefold() for header in [*reserved, *legacy_headers]}
+    columns = []
+    for key, (name, kind) in sorted(labels.items(), key=lambda entry: _map_summary_item_sort(*entry[1])):
+        header = _csv_row([name])[0]
+        # Full names are readable; only collisions need a category qualifier.
+        # This also keeps a literal apostrophe distinct from CSV's safety prefix.
+        while header.casefold() in used:
+            header = f"{kind}: {header}"
+        used.add(header.casefold())
+        columns.append((key, header))
+    return columns
+
+
+def map_summary_item_headers(*, _db=None):
+    """Return the exact numeric item headers used by the map summary CSV."""
+    with (nullcontext(_db) if _db is not None else _connect()) as db:
+        if _db is None:
+            db.execute("BEGIN")
+        headers = next(csv.reader(io.StringIO(export_maps_csv(_db=db).decode("utf-8-sig"))))
+        commits, snapshots = _map_summary_records(db)
+        return [header for _, header in _map_summary_item_columns(
+            db, [*headers, *MAP_SUMMARY_SCAN_HEADERS], commits, snapshots)]
+
+
+def _map_summary_unstarted_row(map_id, context, recorded_at, last_commit):
+    """Retain approved start scans made before the map record is created."""
+    values = dict(zip(CONFIG_EXPORT_HEADERS, _config_export_values(context)))
+    values.update({"Map ID": map_id, "Map Recorded UTC": recorded_at, "Last Commit #": last_commit,
+                   "+2 Tablet Mods": context.get("tablet_mods", ""),
+                   "Aldur's Saga": context.get("aldur", "")})
+    return {header: value if value is not None else "" for header, value in values.items()}
+
+
+def export_map_summary_csv(*, _db=None):
+    """One acquired-item count per map, from its latest approved inventories.
+
+    End-only maps assume an empty starting inventory. A missing end scan leaves
+    counts blank; an approved empty end produces zeros. Ritual offers and prior
+    approvals remain in History and never inflate these acquisition totals.
+    """
+    with (nullcontext(_db) if _db is not None else _connect()) as db:
+        if _db is None:
+            db.execute("BEGIN")
+        maps = csv.DictReader(io.StringIO(export_maps_csv(_db=db).decode("utf-8-sig")))
+        headers = [*maps.fieldnames, *MAP_SUMMARY_SCAN_HEADERS]
+        rows = {row["Map ID"]: row for row in maps}
+        commits, snapshots = _map_summary_records(db)
+        columns = _map_summary_item_columns(db, headers, commits, snapshots)
+        headers.extend(header for _, header in columns)
+        latest, inventory_commits = {}, {}
+        for commit in commits:
+            map_id = commit["map_id"]
+            if not map_id:
+                continue
+            latest[map_id] = commit
+            if commit["kind"] == "Currency":
+                phase = commit["details"].get("phase") or str(commit["reference"] or "").split(" ", 1)[0].lower()
+                if phase in ("start", "end"):
+                    inventory_commits[map_id, phase] = commit["number"]
+        inventories = {}
+        for snapshot in snapshots:
+            items = {}
+            for name, quantity in snapshot["items"].items():
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                key = name.strip().casefold()
+                items[key] = items.get(key, 0) + _integer(quantity, "Saved inventory count", 0)
+            inventories.setdefault(snapshot["map_id"], {})[snapshot["phase"]] = {**snapshot, "counts": items}
+        for map_id in set(latest) | set(inventories):
+            if map_id not in rows:
+                commit = latest.get(map_id, {})
+                phases = inventories.get(map_id, {})
+                snapshot = phases.get("end", phases.get("start", {}))
+                rows[map_id] = _map_summary_unstarted_row(map_id,
+                    snapshot.get("context", commit.get("context", {})),
+                    snapshot.get("recorded_at", commit.get("recorded_at", "")), commit.get("number", ""))
+        output = io.StringIO(newline="")
+        writer = csv.DictWriter(output, fieldnames=headers, extrasaction="ignore")
+        writer.writeheader()
+        for map_id, row in sorted(rows.items()):
+            phases = inventories.get(map_id, {})
+            start, end = phases.get("start"), phases.get("end")
+            row.update({"Start Baseline": "Scanned" if start is not None else "Assumed empty" if end is not None else "",
+                        "Currency Scan Status": "End scanned" if end is not None else
+                                                "Awaiting end scan" if start is not None else "Not scanned"})
+            for phase in ("start", "end"):
+                snapshot = phases.get(phase)
+                row[f"{phase.title()} Commit #"] = inventory_commits.get((map_id, phase), "") if snapshot is not None else ""
+                row[f"{phase.title()} Recorded UTC"] = snapshot["recorded_at"] if snapshot is not None else ""
+            baseline = start["counts"] if start is not None else {}
+            for key, header in columns:
+                row[header] = max(0, end["counts"].get(key, 0) - baseline.get(key, 0)) if end is not None else ""
+            # Existing map CSV strings are already escaped. Escape only the raw
+            # fallback metadata here, and never reinterpret numeric count cells.
+            writer.writerow({key: _csv_row([value])[0] for key, value in row.items()})
     return output.getvalue().encode("utf-8-sig")
 
 
@@ -2809,13 +3028,82 @@ def export_all_csv(*, _db=None):
     return output.getvalue().encode("utf-8-sig")
 
 
-ATLAS_SHEET_HEADERS = ("Atlas Setup ID", "Map IDs", "Atlas Data Version", "Gear Item Rarity %", "Activity",
-                       "Node ID", "Node Name", "Allocated", "Points", "Selected Option ID",
-                       "Selected Option", "Effects", "Stats", "Applied Effects", "Applied Stats")
+def export_primary_csv(*, _db=None):
+    """Extend the recipe layout with current scans and item totals once per map."""
+    with (nullcontext(_db) if _db is not None else _connect()) as db:
+        if _db is None:
+            db.execute("BEGIN")
+        legacy = csv.DictReader(io.StringIO(export_csv(_db=db).decode("utf-8-sig")))
+        summaries = csv.DictReader(io.StringIO(export_map_summary_csv(_db=db).decode("utf-8-sig")))
+        obsolete = {"Map Mods", "# +2 Mod Tablets", "Tablet Mods", "Total Mods", "Master +Mods",
+                    "Base Map Mods", "+2 Tablet Mods"}
+        legacy_headers = ["Map Modifiers" if header == "Waystone %" else header
+                          for header in legacy.fieldnames
+                          if header not in obsolete and header != "Waystone Modifiers"]
+        item_headers = map_summary_item_headers(_db=db)
+        aliases = {"Aldur's Saga": "Aldur's Saga Affix", "Waystone Modifiers": "Map Modifiers",
+                   "Last Commit #": "Scan Commit #", "Normal Kills": "Normal Kills (Map)",
+                   "Magic Kills": "Magic Kills (Map)", "Rare Kills": "Rare Kills (Map)",
+                   "Unique Kills": "Unique Kills (Map)"}
+        supplemental = [header for header in summaries.fieldnames
+                        if header not in item_headers and header not in legacy_headers
+                        and aliases.get(header) not in legacy_headers
+                        and header not in obsolete and header != "Waystone %"]
+        headers = [*legacy_headers, "Type", *supplemental, *item_headers]
+        by_map = {row["Map ID"]: row for row in summaries}
+        once_per_map = {header for header in headers if header.startswith(("Tablet ", "Map Mod ", "Expedition "))
+                        and header not in ("Expedition #", "Expedition ID")}
+        once_per_map.update({"Map Modifiers", "Tablets Used", "Item Rarity %", "Monster Rarity %",
+                             "Pack Size %", "Effectiveness %", "Normal Kills (Map)", "Magic Kills (Map)",
+                             "Rare Kills (Map)", "Unique Kills (Map)", "Total Kills", "Scan Commit #",
+                             "Map Recorded UTC", *MAP_SUMMARY_SCAN_HEADERS, *item_headers})
+        rows, counted = [], set()
+        for original in legacy:
+            row = dict(original)
+            row["Map Modifiers"] = original.get("Waystone Modifiers", "")
+            row["Type"] = ("Chain" if row.get("Chain Step #") else
+                           "Remnant" if row.get("Remnant ID") or row.get("Matched Recipe") else "Map totals")
+            map_id = row.get("Map ID")
+            if map_id in by_map and map_id not in counted:
+                summary = by_map[map_id]
+                row.update({header: summary.get(header, "") for header in supplemental})
+                row.update({header: summary.get(header, "") for header in item_headers})
+                row.update({header: summary.get(header, row.get(header, ""))
+                            for header in once_per_map if header not in item_headers})
+                for source, target in aliases.items():
+                    if target in once_per_map:
+                        row[target] = summary.get(source, row.get(target, ""))
+                counted.add(map_id)
+            elif map_id in counted:
+                row.update({header: "" for header in once_per_map})
+            rows.append(row)
+        # Inventory-only maps have no recipe rows to extend. They still need
+        # their single Map ID row, including an approved empty inventory.
+        for map_id in sorted(set(by_map) - counted):
+            summary = by_map[map_id]
+            row = {**summary, "Type": "Map totals", "New Map (X)": "X"}
+            row.update({target: summary.get(source, "") for source, target in aliases.items()})
+            rows.append(row)
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow([row.get(header, "") for header in headers])
+    return output.getvalue().encode("utf-8-sig")
+
+
+ATLAS_SHEET_HEADERS = ("Atlas Setup ID", "Map IDs", "Atlas Data Version", "Gear Item Rarity %",
+                       "Atlas Catalog ID")
 
 
 def export_atlas_csv(*, _db=None):
-    """Export each referenced setup once, resolving effects against its frozen dataset."""
+    """Export one row per setup with numbered choices and dynamic unchecked nodes.
+
+    Nodes checked in every referenced setup need no allocation column. A node
+    absent from a setup's frozen catalog stays blank rather than becoming No.
+    Choice numbers follow that catalog's option order; zero means no selection.
+    Allocation and remembered choices remain independent, as in the editor.
+    """
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     with (nullcontext(_db) if _db is not None else _connect()) as db:
@@ -2833,17 +3121,9 @@ def export_atlas_csv(*, _db=None):
                         map_ids.setdefault(setup_id, set()).add(row["map_id"])
         catalogs = {row["catalog_id"]: _load(row["catalog_json"])
                     for row in db.execute("SELECT catalog_id,catalog_json FROM atlas_catalogs")}
-        stat_ids = set()
-        for catalog in [*catalogs.values(), _atlas_catalog_data()]:
-            for node in catalog["nodes"].values():
-                if not node.get("allocatable"):
-                    continue
-                stat_ids.update(node.get("stats", {}))
-                for option in node.get("choices", []):
-                    stat_ids.update(option.get("stats", {}))
-        stat_ids = sorted(stat_ids)
-        writer.writerow([*ATLAS_SHEET_HEADERS, *(f"Stat: {name}" for name in stat_ids),
-                         *(f"Applied Stat: {name}" for name in stat_ids)])
+        setups = []
+        columns = {}
+        current_nodes = _atlas_catalog_data()["nodes"]
         for setup_id in sorted(referenced):
             saved = db.execute("SELECT catalog_id,settings_json FROM atlas_setups WHERE setup_id=?",
                                (setup_id,)).fetchone()
@@ -2854,30 +3134,40 @@ def export_atlas_csv(*, _db=None):
             if catalog_id not in catalogs:
                 raise ValueError("A saved Atlas dataset is missing from the local database.")
             allocated = set(settings["allocated"])
-            for node_id, node in sorted(catalogs[catalog_id]["nodes"].items(),
-                                         key=lambda pair: (pair[1]["activity"], pair[0])):
+            nodes = catalogs[catalog_id]["nodes"]
+            setups.append((setup_id, catalog_id, settings, allocated, nodes))
+            for node_id, node in nodes.items():
                 if not node.get("allocatable"):
                     continue
-                active = node_id in allocated
-                option_id = settings["choices"].get(node_id, "")
-                option = next((choice for choice in node.get("choices", [])
-                               if choice["id"] == option_id), None)
-                effects = list(node.get("effects", []))
-                stats = dict(node.get("stats", {}))
-                if option:
-                    effects.extend(option.get("effects", []))
-                    for key, amount in option.get("stats", {}).items():
-                        stats[key] = stats.get(key, 0) + amount
-                rarity = settings.get("gear_item_rarity")
-                writer.writerow(_csv_row([setup_id, ", ".join(sorted(map_ids.get(setup_id, set()))),
-                    settings["catalog_version"],
-                    "" if rarity is None else rarity, node["activity"], node_id, node["name"],
-                    "Yes" if active else "No", 1 if active else 0, option_id,
-                    option["name"] if option else "", "\n".join(effects),
-                    _dump(stats) if stats else "", "\n".join(effects) if active else "",
-                    _dump(stats) if active and stats else "",
-                    *(stats.get(name, "") for name in stat_ids),
-                    *(stats.get(name, "") if active else "" for name in stat_ids)]))
+                label = current_nodes.get(node_id, node)
+                if node_id not in allocated:
+                    columns.setdefault(("Node", node_id), label)
+                if node.get("choices"):
+                    columns.setdefault(("Choice", node_id), label)
+        keys = sorted(columns, key=lambda key: (columns[key]["activity"], key[1], key[0]))
+        writer.writerow([*ATLAS_SHEET_HEADERS,
+            *(f"Atlas {kind}: {columns[kind, node_id]['activity']} | "
+              f"{columns[kind, node_id]['name']} [{node_id}]" for kind, node_id in keys)])
+        for setup_id, catalog_id, settings, allocated, nodes in setups:
+            values = []
+            for kind, node_id in keys:
+                node = nodes.get(node_id)
+                if not node or not node.get("allocatable"):
+                    values.append("")
+                elif kind == "Node":
+                    values.append("Yes" if node_id in allocated else "No")
+                elif not node.get("choices"):
+                    values.append("")
+                else:
+                    option_id = settings["choices"].get(node_id)
+                    number = next((index for index, choice in enumerate(node["choices"], 1)
+                                   if choice["id"] == option_id), None) if option_id else 0
+                    if number is None:
+                        raise ValueError("A saved Atlas choice is missing from its dataset.")
+                    values.append(number)
+            rarity = settings.get("gear_item_rarity")
+            writer.writerow(_csv_row([setup_id, ", ".join(sorted(map_ids.get(setup_id, set()))),
+                settings["catalog_version"], "" if rarity is None else rarity, catalog_id, *values]))
     return output.getvalue().encode("utf-8-sig")
 
 
@@ -2908,6 +3198,10 @@ def save_reference_export_folder(folder):
     return str(path.resolve())
 
 
+def export_filename(kind="xlsx"):
+    return f"PoE2_Export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{kind}"
+
+
 def save_export_file(kind="xlsx"):
     if kind not in ("xlsx", "csv"):
         raise ValueError("Choose XLSX or Export CSV.")
@@ -2920,23 +3214,40 @@ def save_export_file(kind="xlsx"):
         raise ValueError("The export folder no longer exists. Choose another folder.")
     if kind == "xlsx":
         from PoE2_Data_Logger.core.workbook_export import export_xlsx
-        data = export_xlsx()
-        filename = "PoE2_Export.xlsx"
+        contents = {".xlsx": export_xlsx()}
     else:
         with _connect() as db:
             db.execute("BEGIN")
-            data = export_all_csv(_db=db)
-            atlas_data = export_atlas_csv(_db=db)
-        filename = "PoE2_Export.csv"
-    destination = directory / filename
-    result = {"path": str(destination), "bytes": len(data)}
+            contents = {".csv": export_primary_csv(_db=db),
+                        "_Atlas.csv": export_atlas_csv(_db=db),
+                        "_Scan_History.csv": export_all_csv(_db=db)}
+    from PoE2_Data_Logger.core.export_files import ExportWriteError, write_export_files
+    stem = Path(export_filename(kind)).stem
+    with _EXPORT_WRITE_LOCK:
+        number = 1
+        while True:
+            candidate = stem if number == 1 else f"{stem}_{number}"
+            destinations = {suffix: directory / (candidate + suffix) for suffix in contents}
+            if any(path.exists() or path.is_symlink() for path in destinations.values()):
+                number += 1
+                continue
+            try:
+                write_export_files({destinations[suffix]: data for suffix, data in contents.items()},
+                                   replace=False)
+            except ExportWriteError as error:
+                # Another process may reserve a name after the existence check.
+                # Its file stays untouched; retry the entire related export.
+                if isinstance(error.__cause__, FileExistsError):
+                    number += 1
+                    continue
+                raise
+            break
+    result = {"path": str(destinations[f".{kind}"]), "bytes": len(contents[f".{kind}"])}
     if kind == "csv":
-        from PoE2_Data_Logger.core.export_files import write_export_files
-        atlas_destination = directory / "PoE2_Atlas.csv"
-        write_export_files({destination: data, atlas_destination: atlas_data})
-        result.update(atlas_path=str(atlas_destination), atlas_bytes=len(atlas_data))
-    else:
-        _write_export_bytes(destination, data)
+        result.update(atlas_path=str(destinations["_Atlas.csv"]),
+                      atlas_bytes=len(contents["_Atlas.csv"]),
+                      history_path=str(destinations["_Scan_History.csv"]),
+                      history_bytes=len(contents["_Scan_History.csv"]))
     return result
 
 

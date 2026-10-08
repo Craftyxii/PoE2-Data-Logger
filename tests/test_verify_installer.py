@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from tools.verify_installer import check_version, verify, verify_blocked_launch
+from tools.verify_installer import check_version, running_client_titles, verify, verify_blocked_launch
 
 
 class InstallerReleaseTests(unittest.TestCase):
@@ -50,8 +50,8 @@ class InstallerReleaseTests(unittest.TestCase):
                     verify(Path("PoE2-Data-Logger-Setup-v33.3-beta.exe"))
                 launch.assert_not_called()
 
-    def test_stable_and_beta_versions_with_or_without_patch_reach_metadata_check(self):
-        for version in ("1.2", "1.1", "33.3", "33.34", "33.34.1"):
+    def test_stable_and_beta_two_to_four_part_versions_reach_metadata_check(self):
+        for version in ("1.2", "1.1", "33.3", "33.34", "33.34.1", "1.3.1", "1.3.1.1", "33.34.1.0"):
             for beta in (False, True):
                 with self.subTest(version=version, beta=beta):
                     name = f"PoE2-Data-Logger-Setup-v{version}{'-beta' if beta else ''}.exe"
@@ -64,7 +64,8 @@ class InstallerReleaseTests(unittest.TestCase):
                             launch.assert_not_called()
 
     def test_malformed_patch_version_is_rejected_before_metadata_or_launch(self):
-        for version in ("33", "33.34.", "33.34.1.0", "33.34.1-rc", "33.34.1-beta-beta"):
+        for version in ("33", "33.34.", "33.34.1.0.1", "1..3.1", "1.3.1.1.",
+                        "33.34.1-rc", "33.34.1-beta-beta"):
             with self.subTest(version=version):
                 with patch("tools.verify_installer.check_version") as check:
                     with patch("tools.verify_installer.launch") as launch:
@@ -97,16 +98,16 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertEqual(strings["ProductVersion"], f"{version} Beta")
         self.assertEqual(strings["ProductName"], f"PoE2 Data Logger {version} Beta")
 
-    def test_release_workflow_accepts_patch_version_and_previous_two_part_versions(self):
+    def test_release_workflow_accepts_two_to_four_part_versions(self):
         workflow = (self.root / ".github/workflows/release.yml").read_text(encoding="utf-8")
         pattern = next(line.split("-Pattern '", 1)[1].rsplit("'", 1)[0]
                        for line in workflow.splitlines() if "$match = Select-String" in line)
-        for version in ("1.2", "1.1", "33.3", "33.34", "33.34.1"):
+        for version in ("1.2", "1.1", "33.3", "33.34", "33.34.1", "1.3.1", "1.3.1.1", "33.34.1.0"):
             with self.subTest(version=version):
                 match = re.fullmatch(pattern, f'!define APP_VERSION "{version}"')
                 self.assertIsNotNone(match)
                 self.assertEqual(match.group(1), version)
-        for version in ("33", "33.34.", "33.34.1.0", "33.34.1-beta"):
+        for version in ("33", "33.34.", "33.34.1.0.1", "1..3.1", "1.3.1.1.", "33.34.1-beta"):
             with self.subTest(version=version):
                 self.assertIsNone(re.fullmatch(pattern, f'!define APP_VERSION "{version}"'))
 
@@ -115,11 +116,22 @@ class ReleasePackagingTests(unittest.TestCase):
         for name in (".onInit", "un.onInit"):
             with self.subTest(function=name):
                 body = installer.split(f"Function {name}\n", 1)[1].split("FunctionEnd", 1)[0]
-                for title in ("PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta", "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta"):
+                for title in ("PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta", "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta", "PoE2 Data Logger 1.3.1 Beta", "${APP_NAME}"):
                     self.assertIn(f'FindWindowW(p 0, w "{title}")', body)
                 running = body.split("  running:\n", 1)[1].split("  ready:", 1)[0]
                 self.assertIn("/SD IDOK", running)
                 self.assertIn("SetErrorLevel 2\n    Abort", running)
+
+    def test_native_guard_probe_includes_previous_release_and_current_beta(self):
+        titles = running_client_titles("1.3.1.1", True)
+        self.assertEqual(titles, (
+            "PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta",
+            "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta",
+            "PoE2 Data Logger 1.3.1 Beta", "PoE2 Data Logger 1.3.1.1 Beta",
+        ))
+        self.assertEqual(running_client_titles("1.3.1.1", False)[-1], "PoE2 Data Logger")
+        prior = running_client_titles("1.3.1", True)
+        self.assertEqual(prior.count("PoE2 Data Logger 1.3.1 Beta"), 1)
 
 
 class RunningClientGuardTests(unittest.TestCase):

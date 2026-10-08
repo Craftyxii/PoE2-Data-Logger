@@ -9,6 +9,7 @@ from PIL import Image
 
 from PoE2_Data_Logger.core import logger_store as logger
 from PoE2_Data_Logger.ocr import opened_scan, runehelper_ocr
+from PoE2_Data_Logger.ocr.propagation_marks import supported_partial_peak_boxes, supported_peak_boxes
 
 
 def _result(status, **values):
@@ -22,10 +23,17 @@ def _panel(image):
         return None
     candidate = image.resize((575, max(1, round(image.height * 575 / image.width))),
                              Image.Resampling.LANCZOS)
-    marked, _ = _marked_boxes(_gold_mask(candidate))
+    _, marked, _ = _marked_image(candidate)
     if marked:
         # Already-cropped panels can omit the arrow margin. The generic frame
         # finder may otherwise mistake a recipe border for the panel header.
+        return candidate
+    detections, title = _read_panel_rows(candidate)
+    if (title is not None and title["x2"] - title["x1"] >= candidate.width * .28
+            and title["y2"] - title["y1"] >= 15):
+        # A verified cropped recipe panel remains usable when only the
+        # crown peaks are visible. Its marked tiles need no gold frame.
+        candidate.info["propagation_rows"] = (detections, title)
         return candidate
     width = image.width
     if image.width > image.height * 1.3:
@@ -71,6 +79,67 @@ def _gold_mask(image):
             & (rgb[:, :, 0].astype(np.int16) - rgb[:, :, 2] >= 55)).astype(np.uint8)
 
 
+def _marked_image(image):
+    # Exposure changes can fragment the gold frame. Keep the same colour and
+    # three-peak geometry checks while looking at a small exposure bracket.
+    pixels = np.asarray(image, dtype=np.float32)
+    marked, partials, supplementary = [], [], []
+    cursor_mask = None
+    base_mask = None
+    for factor in (1, .9, 1.1, .8, 1.2, 1.35, 1.5, .95, 1.05, 1.25):
+        shown = image if factor == 1 else Image.fromarray(np.clip(pixels * factor, 0, 255).astype(np.uint8))
+        mask = _gold_mask(shown)
+        rgb = np.asarray(shown)
+        hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+        # Bright captures can make the frame almost white. This additional
+        # mask locates the tile only; all three crown peaks still require
+        # the original gold mask.
+        pale_frame = ((hsv[:, :, 0] >= 15) & (hsv[:, :, 0] <= 40)
+                      & (hsv[:, :, 1] >= 25) & (hsv[:, :, 2] >= 225)
+                      & (rgb[:, :, 0].astype(np.int16) - rgb[:, :, 2] >= 25))
+        found, uncertain = _marked_boxes(mask)
+        pale_found, _ = _marked_boxes(mask, mask | pale_frame.astype(np.uint8))
+        for box in pale_found:
+            same = next((entry for entry in supplementary if abs(box[0] - entry[0][0]) < 7
+                         and abs(box[1] - entry[0][1]) < 7), None)
+            if same is None:
+                supplementary.append([box, 1])
+            else:
+                same[1] += 1
+        if base_mask is None:
+            base_mask = mask
+        if cursor_mask is None and _cursors(mask):
+            cursor_mask = mask
+        # Different rows can lose their frame at different exposures. Keep
+        # each independently verified three-peak marker, preferring the
+        # original exposure's bounds when it is already readable.
+        for box in found:
+            if not any(abs(box[0] - old[0]) < 7 and abs(box[1] - old[1]) < 7
+                       for old in marked):
+                marked.append(box)
+        for box in uncertain:
+            same = next((entry for entry in partials if abs(box[0] - entry[0][0]) < 7
+                         and abs(box[1] - entry[0][1]) < 7), None)
+            if same is None:
+                partials.append([box, 1, factor == 1])
+            else:
+                same[1] += 1
+    for box, votes in supplementary:
+        if votes < 2 or any(abs(box[0] - old[0]) < 7 and abs(box[1] - old[1]) < 7
+                            for old in marked):
+            continue
+        same_row = [old for old in marked if abs(box[1] - old[1]) < old[3] * .5]
+        if same_row and (min(abs(box[1] - old[1]) for old in same_row) > 2 or
+                         box[2] < .85 * float(np.median([old[2] for old in same_row]))):
+            continue
+        marked.append(box)
+    # Exposure alone can turn an ordinary frame into a partial crown. Keep
+    # native partials and those supported at more than one adjusted exposure.
+    incomplete = [box for box, votes, native in partials if (native or votes >= 2) and not any(
+        abs(box[0] - valid[0]) < 7 and abs(box[1] - valid[1]) < 7 for valid in marked)]
+    return cursor_mask if cursor_mask is not None else base_mask, marked, incomplete
+
+
 def _cursors(mask):
     strip = cv2.morphologyEx(mask[:, :46], cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
     _, labels, components, centres = cv2.connectedComponentsWithStats(strip)
@@ -91,8 +160,9 @@ def _cursors(mask):
     return found
 
 
-def _marked_boxes(mask):
-    joined = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 1), np.uint8))
+def _marked_boxes(mask, frame_mask=None):
+    joined = cv2.morphologyEx(mask if frame_mask is None else frame_mask,
+                            cv2.MORPH_CLOSE, np.ones((3, 1), np.uint8))
     _, labels, components, _ = cv2.connectedComponentsWithStats(joined)
     found, uncertain = [], []
     for index, (x, y, width, height, _) in enumerate(components[1:], 1):
@@ -107,14 +177,20 @@ def _marked_boxes(mask):
         if not horizontal.size:
             continue
         border_y = int(horizontal[0])
-        band = mask[y + max(0, border_y - 7):y + border_y, x:x + width]
+        # Resampling can separate a crown peak from the frame by one pixel.
+        # Examine its actual position above the border, including pixels
+        # outside the frame's connected component.
+        band = mask[max(0, y + border_y - 7):y + border_y, x:x + width]
         peaks = []
         for centre in (.24, .49, .74):
             start, end = max(0, round(width * (centre - .07))), min(width, round(width * (centre + .07)))
             peaks.append(int(band[:, start:end].sum()) if band.size else 0)
         box = (float(x + width / 2), int(y + border_y), int(width), int(height - border_y))
-        if border_y < 2 or min(peaks) < 2:
-            uncertain.append(box)
+        if min(peaks) < 2:
+            # An ordinary gold/brown frame has no crown above its border.
+            # A partly visible crown must still block automatic acceptance.
+            if max(peaks) >= 2:
+                uncertain.append(box)
         else:
             found.append(box)
     return found, uncertain
@@ -143,7 +219,7 @@ def _tile_layout(image, tile_top, tile_height, marked, min_first_x=15):
         return None
     edges = cv2.Canny(gray[top:bottom], 50, 100)
     contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-    width = float(np.median([box[2] for box in marked]))
+    width = float(np.median([box[2] for box in marked])) if marked else 38.
     centres = [box[0] for box in marked]
     for contour in contours:
         x, _, w, h = cv2.boundingRect(contour)
@@ -162,7 +238,11 @@ def _tile_layout(image, tile_top, tile_height, marked, min_first_x=15):
             grouped.append(centre)
     if not grouped:
         return None
-    gaps = [b - a for a, b in zip(grouped, grouped[1:]) if .96 * width <= b - a <= 1.22 * width]
+    gaps = []
+    for a, b in zip(grouped, grouped[1:]):
+        steps = round((b - a) / (width * 41 / 38))
+        if 1 <= steps <= 9 and .90 * width <= (b - a) / steps <= 1.22 * width:
+            gaps.append((b - a) / steps)
     pitch = float(np.median(gaps)) if gaps else width * 41 / 38
     if any(abs((centre - grouped[0]) / pitch - round((centre - grouped[0]) / pitch)) > .16
            for centre in grouped):
@@ -220,25 +300,6 @@ def _family_candidates(db, rows):
     return sorted(matches)
 
 
-def _visible_tile_count(image, tile_top, tile_height, first_x=71, pitch=41):
-    gray = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2GRAY)
-    values = []
-    for position in range(10):
-        x = round(first_x + pitch * position)
-        top, bottom = max(0, round(tile_top + tile_height * .18)), min(image.height, round(tile_top + tile_height * .83))
-        half = round(pitch * 12 / 41)
-        sample = gray[top:bottom, max(0, x - half):x + half]
-        values.append(float(sample.std()) if sample.size else 0)
-    count = 0
-    for value in values:
-        if value < 28:
-            break
-        count += 1
-    if any(value >= 35 for value in values[count + 1:]):
-        return None
-    return count
-
-
 def _row_reading(db, panel, marked, incomplete, row, all_rows, candidates, shared_layout, min_first_x):
     recipe = row["recipe"]
     info = {"selected_recipe": recipe, "reward_text": row["text"], "candidates": candidates,
@@ -246,9 +307,6 @@ def _row_reading(db, panel, marked, incomplete, row, all_rows, candidates, share
             "visible_recipes": [item["recipe"] for item in all_rows]}
     if not recipe or row["score"] < .85 or row["match_score"] < .9:
         return _result("Reward was unclear — enter its propagated runes manually.", **info)
-    if not candidates:
-        return _result("Visible rewards do not match the family database — enter the propagated runes manually.",
-                       **info)
     entry = db.execute("SELECT sockets,combo FROM recipes WHERE name=?", (recipe,)).fetchone()
     runes = [rune.strip() for rune in entry["combo"].split("+")] if entry else []
     if not entry or len(runes) != entry["sockets"] or any(not rune or rune.lower() == "unresolved" for rune in runes):
@@ -259,14 +317,14 @@ def _row_reading(db, panel, marked, incomplete, row, all_rows, candidates, share
         return _result("One or two crown-marked rune positions were not clear — enter them manually.", **info)
     tile_top = float(np.median([tile[1] for tile in selected]))
     tile_height = float(np.median([tile[3] for tile in selected]))
-    layout = _tile_layout(panel, tile_top, tile_height, selected, min_first_x) or shared_layout or (71, 41)
+    # All recipe rows share one lattice. Several agreeing rows are stronger
+    # spacing evidence than one exposure-expanded frame on an isolated row.
+    layout = shared_layout or _tile_layout(panel, tile_top, tile_height, selected, min_first_x) or (71, 41)
     first_x, pitch = layout
     positions = sorted(round((box[0] - first_x) / pitch) + 1 for box in selected)
     if (len(set(positions)) != len(positions) or any(position < 1 or position > len(runes) for position in positions)
             or any(abs(box[0] - first_x - round((box[0] - first_x) / pitch) * pitch) > 6 for box in selected)):
         return _result("Marked rune positions conflict with the recipe's rune order — enter them manually.", **info)
-    if _visible_tile_count(panel, tile_top, tile_height, first_x, pitch) != len(runes):
-        return _result("Visible rune count conflicts with the recipe — enter the propagated runes manually.", **info)
     return _result("Propagation runes detected — approve this recipe to add them to the chain.",
                    **info, positions=positions, runes=[runes[position - 1] for position in positions], can_use=True)
 
@@ -280,16 +338,52 @@ def scan_propagation(image: Image.Image | Path):
     panel = _panel(source)
     if panel is None:
         return _result("Runeshape panel is too small — capture the full recipe list and cursor.")
-    mask = _gold_mask(panel)
+    mask, marked, incomplete = _marked_image(panel)
     cursors = _cursors(mask)
-    detections, title = _read_panel_rows(panel)
+    detections, title = panel.info.get("propagation_rows") or _read_panel_rows(panel)
     if title is None:
         return _result("Runeshape Combinations panel was not found — review the capture.")
     with logger._connect() as db:
         rows = _reward_rows(db, detections)
         candidates = _family_candidates(db, rows)
-        marked, incomplete = _marked_boxes(mask)
         min_first_x = 46 if cursors else 15
+        # Plain tile geometry locates the rune positions. The three crown
+        # peaks identify propagation; a surrounding gold frame is optional.
+        peak_masks = None
+        for row in rows:
+            entry = db.execute("SELECT sockets FROM recipes WHERE name=?", (row["recipe"],)).fetchone()
+            if entry is None:
+                continue
+            gray_layout = _tile_layout(panel, row["y1"] - 41, 38, [], min_first_x)
+            if gray_layout is None:
+                # The standard full-margin panel has a fixed native lattice.
+                # A crop without that margin needs recoverable gray geometry.
+                if not cursors:
+                    continue
+                gray_layout = (71., 41.)
+            if peak_masks is None:
+                pixels = np.asarray(panel, dtype=np.float32)
+                peak_masks = [(factor, _gold_mask(panel if factor == 1 else Image.fromarray(
+                    np.clip(pixels * factor, 0, 255).astype(np.uint8))))
+                    for factor in (1, .9, 1.1, .8, 1.2, 1.35, 1.5, .95, 1.05, 1.25)]
+            crown_rows = [{**row, "sockets": entry["sockets"]}]
+            crowns = supported_peak_boxes(peak_masks, crown_rows,
+                                          tile_layout=gray_layout,
+                                          tile_size=gray_layout[1] * 38 / 41)
+            for box in crowns:
+                if not any(abs(box[0] - old[0]) < 7 and abs(box[1] - old[1]) < 7 for old in marked):
+                    marked.append(box)
+            row_crowns = [box for box in marked if 3 <= row["y1"] - box[1] - box[3] / 2 <= 62]
+            if row_crowns:
+                # A clear crown anchors its paired partial crown more
+                # accurately than the OCR text's occasionally shifted top.
+                crown_rows[0]["crown_top"] = float(np.median([box[1] for box in row_crowns]))
+            for box in supported_partial_peak_boxes(peak_masks, crown_rows, tile_layout=gray_layout,
+                                                     tile_size=gray_layout[1] * 38 / 41):
+                if not any(abs(box[0] - old[0]) < 7 and abs(box[1] - old[1]) < 7 for old in incomplete):
+                    incomplete.append(box)
+        incomplete = [box for box in incomplete if not any(
+            abs(box[0] - valid[0]) < 7 and abs(box[1] - valid[1]) < 7 for valid in marked)]
         layouts = []
         for row in rows:
             boxes = [box for box in marked if 3 <= row["y1"] - box[1] - box[3] / 2 <= 62]
@@ -298,7 +392,11 @@ def scan_propagation(image: Image.Image | Path):
                                       float(np.median([box[3] for box in boxes])), boxes, min_first_x)
                 if layout:
                     layouts.append(layout)
-        shared = tuple(float(np.median([layout[index] for layout in layouts])) for index in range(2)) if layouts else None
+        agreeing = max(([other for other in layouts if abs(other[0] - layout[0]) <= 2
+                         and abs(other[1] - layout[1]) <= 2] for layout in layouts),
+                       key=len, default=[])
+        shared = tuple(float(np.median([layout[index] for layout in agreeing]))
+                       for index in range(2)) if len(agreeing) >= 2 else None
         choices = [_row_reading(db, panel, marked, incomplete, row, rows, candidates, shared, min_first_x)
                    for row in rows]
     if len(cursors) == 1:

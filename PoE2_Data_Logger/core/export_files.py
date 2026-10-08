@@ -2,7 +2,7 @@
 
 The filesystem cannot replace two files atomically.  Keeping recovery copies
 until every replacement succeeds prevents a locked second spreadsheet from
-leaving the first export silently updated on its own.
+    leaving the first export silently updated on its own.
 """
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def _backup_file(destination: Path) -> Path:
     return backup
 
 
-def write_export_files(files: Mapping[Path, bytes]) -> None:
+def write_export_files(files: Mapping[Path, bytes], *, replace: bool = True) -> None:
     """Write all files, restoring previous files if any replacement fails.
 
     Data and recovery copies are fully written and closed before any target is
@@ -82,11 +82,18 @@ def write_export_files(files: Mapping[Path, bytes]) -> None:
         for destination, data in destinations:
             staged[destination] = _stage_bytes(destination, data)
         for destination, _ in destinations:
-            if destination.exists() or destination.is_symlink():
+            if not replace:
+                # Reserve each new name exclusively before replacing it with
+                # the staged bytes. Another export cannot claim the same name.
+                with destination.open("xb"):
+                    pass
+                changed.append(destination)
+            elif destination.exists() or destination.is_symlink():
                 backups[destination] = _backup_file(destination)
         for destination, _ in destinations:
             os.replace(staged[destination], destination)
-            changed.append(destination)
+            if replace:
+                changed.append(destination)
     except BaseException as error:
         failures = []
         for destination in reversed(changed):

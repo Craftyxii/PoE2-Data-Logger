@@ -36,8 +36,6 @@ def ncc_find_all(
         - sums * sums
     )
     score = numerator / (h * w * np.sqrt(np.maximum(vars_, 1)) * zero.std())
-    score[:35, :] = -1
-    score[:, :180] = -1
     peaks = []
     for _ in range(limit):
         y, x = np.unravel_index(np.argmax(score), score.shape)
@@ -47,6 +45,50 @@ def ncc_find_all(
         peaks.append((int(x), int(y), confidence))
         score[max(0, y - h) : y + h + 1, max(0, x - w) : x + w + 1] = -1
     return peaks
+
+
+def find_books(im: Image.Image, templates, threshold=0.65, limit=24):
+    """Locate book anchors and their UI scale, including tightly cropped bars."""
+    import cv2
+
+    gray = np.asarray(im.convert("L"), dtype=np.float32)
+    found = []
+    for scale in [round(value, 2) for value in np.arange(.5, 1.51, .05)] + [1.75, 2.0]:
+        for template in templates:
+            width, height = round(template.width * scale), round(template.height * scale)
+            if width > im.width or height > im.height:
+                continue
+            resized = template.resize((width, height), Image.Resampling.LANCZOS)
+            values = np.asarray(resized.convert("L"), dtype=np.float32)
+            scores = cv2.matchTemplate(gray, values, cv2.TM_CCOEFF_NORMED)
+            for _ in range(limit):
+                y, x = np.unravel_index(np.argmax(scores), scores.shape)
+                confidence = float(scores[y, x])
+                if confidence < threshold:
+                    break
+                found.append((int(x), int(y), confidence, scale))
+                scores[max(0, y - height):y + height + 1,
+                       max(0, x - width):x + width + 1] = -1
+    unique = []
+    for peak in sorted(found, key=lambda item: item[2], reverse=True):
+        if not any(abs(peak[0] - other[0]) < 26 * max(peak[3], other[3]) and
+                   abs(peak[1] - other[1]) < 38 * max(peak[3], other[3]) for other in unique):
+            unique.append(peak)
+            if len(unique) == limit:
+                break
+    return unique
+
+
+def normalize_book(im: Image.Image, book):
+    """Return model-size pixels and anchor; book coordinates remain capture-based."""
+    x, y, confidence, scale = book
+    left, top = max(0, round(x - 640 * scale)), max(0, round(y - 25 * scale))
+    right, bottom = min(im.width, round(x + 40 * scale)), min(im.height, round(y + 90 * scale))
+    image = im.crop((left, top, right, bottom))
+    if scale != 1:
+        image = image.resize((round(image.width / scale), round(image.height / scale)), Image.Resampling.LANCZOS)
+    image.info["seed_origin"] = (left, top)
+    return image, (round((x - left) / scale), round((y - top) / scale), confidence)
 
 
 def ncc_find(

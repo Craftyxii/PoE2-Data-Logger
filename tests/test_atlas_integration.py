@@ -126,7 +126,7 @@ class AtlasIntegrationTests(unittest.TestCase):
         self.window.refresh()
         self.assertEqual(self.page.gear_rarity.value(), 187.25)
 
-    def test_csv_save_as_writes_linked_companion(self):
+    def test_csv_save_as_writes_linked_companions(self):
         self.configure(0)
         destination = Path(self.tmp.name) / "my-log.csv"
         self.window._submit = lambda label, work, done: done(work())
@@ -135,11 +135,15 @@ class AtlasIntegrationTests(unittest.TestCase):
         main = list(csv.DictReader(io.StringIO(destination.read_text(encoding="utf-8-sig"))))
         companion = destination.with_name("my-log_Atlas.csv")
         atlas = list(csv.DictReader(io.StringIO(companion.read_text(encoding="utf-8-sig"))))
-        record = next(row for row in main if row["Type"] == "Atlas settings")
+        record = next(row for row in main if row["Map ID"] == "M0001")
         matching = [row for row in atlas if row["Atlas Setup ID"] == record["Atlas Setup ID"]]
-        self.assertEqual(len(matching), 530)
+        self.assertEqual(len(matching), 1)
         self.assertTrue(all("M0001" in row["Map IDs"] for row in matching))
         self.assertEqual({row["Gear Item Rarity %"] for row in matching}, {"0"})
+        history = list(csv.DictReader(io.StringIO(destination.with_name("my-log_Scan_History.csv")
+                                                 .read_text(encoding="utf-8-sig"))))
+        saved = next(row for row in history if row["Type"] == "Atlas settings")
+        self.assertEqual(saved["Atlas Setup ID"], record["Atlas Setup ID"])
 
 
 if __name__ == "__main__":

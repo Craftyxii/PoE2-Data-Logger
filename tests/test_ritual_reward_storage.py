@@ -155,7 +155,7 @@ class RitualRewardStorageTests(unittest.TestCase):
         self.assertEqual(row["OCR Source"], "'@unexpected source")
         self.assertEqual(row["Page OCR Text"], "'+captured text")
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
-            sheet = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+            sheet = ET.fromstring(archive.read("xl/worksheets/sheet3.xml"))
             ns = {"s": workbook_export.NS}
             self.assertEqual(sheet.findall(".//s:f", ns), [])
             texts = [node.text or "" for node in sheet.findall(".//s:t", ns)]

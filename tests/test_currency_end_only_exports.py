@@ -42,7 +42,7 @@ class CurrencyEndOnlyExportTests(unittest.TestCase):
         main = self.rows(logger.export_all_csv())
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
             self.assertIsNone(archive.testzip())
-            root = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+            root = ET.fromstring(archive.read("xl/worksheets/sheet3.xml"))
         ns = {"s": workbook_export.NS}
         rows = root.findall("s:sheetData/s:row", ns)
         headers = {cell.get("r").rstrip("0123456789"): "".join(cell.itertext()) for cell in rows[0]}

@@ -34,7 +34,7 @@ class ReviewLearningExportTests(unittest.TestCase):
     def main_workbook(self):
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
             self.assertIsNone(archive.testzip())
-            root = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+            root = ET.fromstring(archive.read("xl/worksheets/sheet3.xml"))
         ns = {"s": workbook_export.NS}
         self.assertEqual(root.findall(".//s:f", ns), [])
         rows = root.findall("s:sheetData/s:row", ns)

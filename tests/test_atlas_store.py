@@ -11,6 +11,12 @@ from unittest.mock import patch
 from PoE2_Data_Logger.core import logger_store as logger, store
 
 
+CHOICE_COLUMN = "Atlas Choice: Atlas | Biome Choice [choice]"
+CHOICE_NODE_COLUMN = "Atlas Node: Atlas | Biome Choice [choice]"
+RARITY_COLUMN = "Atlas Node: Atlas | Item Rarity [rarity]"
+RITUAL_COLUMN = "Atlas Node: Ritual | Ritual Rewards [ritual]"
+
+
 def fixture_catalog():
     return {"version": "test-atlas-1", "nodes": {
         "root": {"name": "Atlas", "kind": "root", "activity": "Atlas", "allocatable": False},
@@ -89,10 +95,9 @@ class AtlasStoreTests(unittest.TestCase):
                 logger.save_atlas_settings(data)
         # Autofill need not invent an effect for an unanswered dropdown.
         logger.save_atlas_settings(self.settings(["choice"]))
-        row = next(row for row in self.rows(logger.export_atlas_csv()) if row["Node ID"] == "choice")
-        self.assertEqual(row["Allocated"], "Yes")
-        self.assertEqual(row["Selected Option"], "")
-        self.assertEqual(row["Applied Effects"], "Choose a biome effect")
+        row, = self.rows(logger.export_atlas_csv())
+        self.assertNotIn(CHOICE_NODE_COLUMN, row)
+        self.assertEqual(row[CHOICE_COLUMN], "0")
 
     def test_same_setup_has_stable_id_independent_of_input_order(self):
         logger.save_atlas_settings(self.settings(["ritual", "rarity"], {"choice": "swamp"}, 12.5))
@@ -167,13 +172,19 @@ class AtlasStoreTests(unittest.TestCase):
         revised = self.setup_id()
         self.assertNotEqual(original, revised)
         rows = self.rows(logger.export_atlas_csv())
-        old = next(row for row in rows if row["Atlas Setup ID"] == original and row["Node ID"] == "rarity")
-        new = next(row for row in rows if row["Atlas Setup ID"] == revised and row["Node ID"] == "rarity")
-        self.assertIn("5% increased", old["Effects"])
-        self.assertIn("15% rarity", new["Effects"])
+        old = next(row for row in rows if row["Atlas Setup ID"] == original)
+        new = next(row for row in rows if row["Atlas Setup ID"] == revised)
         self.assertEqual(old["Atlas Data Version"], "test-atlas-1")
+        self.assertEqual(new["Atlas Data Version"], "test-atlas-2")
+        self.assertNotEqual(old["Atlas Catalog ID"], new["Atlas Catalog ID"])
         with logger._connect() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM atlas_catalogs").fetchone()[0], 2)
+            old_catalog = json.loads(db.execute("SELECT catalog_json FROM atlas_catalogs WHERE catalog_id=?",
+                                               (old["Atlas Catalog ID"],)).fetchone()[0])
+            new_catalog = json.loads(db.execute("SELECT catalog_json FROM atlas_catalogs WHERE catalog_id=?",
+                                               (new["Atlas Catalog ID"],)).fetchone()[0])
+            self.assertIn("5% increased", old_catalog["nodes"]["rarity"]["effects"][0])
+            self.assertIn("15% rarity", new_catalog["nodes"]["rarity"]["effects"][0])
 
     def test_atlas_rows_deduplicate_setups_link_maps_and_preserve_off_choices(self):
         logger.save_atlas_settings(self.settings(["rarity"], {"choice": "swamp"}, 0))
@@ -183,16 +194,13 @@ class AtlasStoreTests(unittest.TestCase):
         logger.start_map()
         logger.commit_chain("Time")
         rows = self.rows(logger.export_atlas_csv())
-        self.assertEqual(len(rows), 3)
+        self.assertEqual(len(rows), 1)
         self.assertEqual({row["Atlas Setup ID"] for row in rows}, {setup_id})
         self.assertEqual({row["Map IDs"] for row in rows}, {"M0001, M0002"})
-        choice = next(row for row in rows if row["Node ID"] == "choice")
-        self.assertEqual(choice["Allocated"], "No")
-        self.assertEqual(choice["Points"], "0")
-        self.assertEqual(choice["Selected Option ID"], "swamp")
-        self.assertIn("Swamp Maps", choice["Effects"])
-        self.assertEqual(choice["Applied Effects"], "")
-        self.assertEqual(choice["Applied Stats"], "")
+        self.assertEqual(rows[0][CHOICE_NODE_COLUMN], "No")
+        self.assertEqual(rows[0][CHOICE_COLUMN], "1")
+        self.assertNotIn(RARITY_COLUMN, rows[0])
+        self.assertEqual(rows[0][RITUAL_COLUMN], "No")
 
     def test_old_snapshots_remain_unknown_and_are_not_rewritten_on_upgrade(self):
         logger.commit_chain("Rage")
@@ -226,22 +234,117 @@ class AtlasStoreTests(unittest.TestCase):
         current_id = self.setup_id()
         logger.clear_export_and_reset_ids()
         rows = self.rows(logger.export_atlas_csv())
-        self.assertEqual(len(rows), 3)
+        self.assertEqual(len(rows), 1)
         self.assertEqual({row["Atlas Setup ID"] for row in rows}, {current_id})
         self.assertEqual({row["Map IDs"] for row in rows}, {""})
 
-    def test_csv_folder_exports_both_sheets_from_same_transaction(self):
+    def test_checked_nodes_are_omitted_until_another_setup_unchecks_them(self):
+        logger.save_atlas_settings(self.settings(["rarity", "choice", "ritual"], {"choice": "forest"}, 12.5))
+        original = self.setup_id()
+        row, = self.rows(logger.export_atlas_csv())
+        self.assertEqual(set(row), {*logger.ATLAS_SHEET_HEADERS, CHOICE_COLUMN})
+        self.assertEqual(row[CHOICE_COLUMN], "2")
+        logger.commit_chain("Rage")
+        logger.save_atlas_settings(self.settings(["rarity", "choice"], {"choice": "forest"}, 25))
+        revised = self.setup_id()
+        rows = {row["Atlas Setup ID"]: row for row in self.rows(logger.export_atlas_csv())}
+        self.assertEqual(set(rows), {original, revised})
+        self.assertEqual(set(rows[original]), {*logger.ATLAS_SHEET_HEADERS, CHOICE_COLUMN, RITUAL_COLUMN})
+        self.assertEqual(rows[original][RITUAL_COLUMN], "Yes")
+        self.assertEqual(rows[revised][RITUAL_COLUMN], "No")
+        self.assertEqual(rows[original]["Map IDs"], "M0001")
+        self.assertEqual(rows[revised]["Map IDs"], "M0002")
+
+    def test_choice_selection_and_allocation_remain_independent(self):
+        expected = {}
+        for allocated, choices, rarity, allocation, selection in (
+                ([], {}, 1, "No", "0"),
+                ([], {"choice": "swamp"}, 2, "No", "1"),
+                (["choice"], {}, 3, "Yes", "0"),
+                (["choice"], {"choice": "forest"}, 4, "Yes", "2")):
+            logger.save_atlas_settings(self.settings(allocated, choices, rarity))
+            expected[self.setup_id()] = (allocation, selection)
+        rows = self.rows(logger.export_atlas_csv())
+        self.assertEqual(len(rows), 4)
+        self.assertEqual({row["Atlas Setup ID"]: (row[CHOICE_NODE_COLUMN], row[CHOICE_COLUMN])
+                          for row in rows}, expected)
+
+    def test_choice_numbers_use_frozen_order_even_when_version_text_is_unchanged(self):
+        logger.save_atlas_settings(self.settings(["choice"], {"choice": "forest"}, 25))
+        original = self.setup_id()
+        logger.commit_chain("Rage")
+        self.catalog = copy.deepcopy(self.catalog)
+        self.catalog["nodes"]["choice"]["choices"].reverse()
+        logger.save_atlas_settings(self.settings(["choice"], {"choice": "forest"}, 25))
+        revised = self.setup_id()
+        rows = {row["Atlas Setup ID"]: row for row in self.rows(logger.export_atlas_csv())}
+        self.assertEqual(rows[original][CHOICE_COLUMN], "2")
+        self.assertEqual(rows[revised][CHOICE_COLUMN], "1")
+        self.assertEqual(rows[original]["Atlas Data Version"], rows[revised]["Atlas Data Version"])
+        self.assertNotEqual(rows[original]["Atlas Catalog ID"], rows[revised]["Atlas Catalog ID"])
+
+    def test_missing_nodes_stay_blank_across_catalog_changes_and_duplicate_names_are_distinct(self):
+        logger.save_atlas_settings(self.settings(rarity=25))
+        original = self.setup_id()
+        logger.commit_chain("Rage")
+        self.catalog = copy.deepcopy(self.catalog)
+        del self.catalog["nodes"]["ritual"]
+        self.catalog["nodes"]["rarity-copy"] = copy.deepcopy(self.catalog["nodes"]["rarity"])
+        logger.save_atlas_settings(self.settings(rarity=25))
+        revised = self.setup_id()
+        rows = {row["Atlas Setup ID"]: row for row in self.rows(logger.export_atlas_csv())}
+        copied_column = "Atlas Node: Atlas | Item Rarity [rarity-copy]"
+        self.assertEqual(rows[original][copied_column], "")
+        self.assertEqual(rows[revised][copied_column], "No")
+        self.assertEqual(rows[original][RITUAL_COLUMN], "No")
+        self.assertEqual(rows[revised][RITUAL_COLUMN], "")
+        self.assertEqual(rows[original][RARITY_COLUMN], "No")
+
+    def test_twenty_setups_produce_twenty_rows_instead_of_per_node_repetition(self):
+        for rarity in range(20):
+            logger.save_atlas_settings(self.settings(["rarity", "choice", "ritual"],
+                                                     {"choice": "forest"}, rarity))
+        rows = self.rows(logger.export_atlas_csv())
+        self.assertEqual(len(rows), 20)
+        self.assertEqual({row["Gear Item Rarity %"] for row in rows}, {str(rarity) for rarity in range(20)})
+        self.assertTrue(all(set(row) == {*logger.ATLAS_SHEET_HEADERS, CHOICE_COLUMN} for row in rows))
+
+    def test_csv_folder_exports_all_sheets_from_same_transaction(self):
         logger.save_atlas_settings(self.settings(["rarity"], rarity=0))
         logger.commit_chain("Rage")
         logger.save_export_folder(self.tmp.name)
         captured = {}
         with patch("PoE2_Data_Logger.core.export_files.write_export_files",
-                   side_effect=lambda files: captured.update(files)):
+                   side_effect=lambda files, **options: captured.update(files)):
             result = logger.save_export_file("csv")
-        self.assertEqual({path.name for path in captured}, {"PoE2_Export.csv", "PoE2_Atlas.csv"})
+        main_path = Path(result["path"])
+        self.assertEqual(set(captured), {main_path, Path(result["atlas_path"]),
+                                        Path(result["history_path"])})
+        self.assertEqual(Path(result["atlas_path"]).stem, main_path.stem + "_Atlas")
+        self.assertEqual(Path(result["history_path"]).stem, main_path.stem + "_Scan_History")
         main_ids = {row["Atlas Setup ID"] for row in self.rows(captured[Path(result["path"])])}
         atlas_ids = {row["Atlas Setup ID"] for row in self.rows(captured[Path(result["atlas_path"])])}
         self.assertEqual(main_ids, atlas_ids)
+        history_ids = {row["Atlas Setup ID"] for row in self.rows(captured[Path(result["history_path"])])}
+        self.assertEqual(history_ids, atlas_ids)
+
+    def test_repeated_folder_exports_preserve_previous_data_even_in_same_second(self):
+        logger.save_currency_snapshot("end", [{"name": "Chaos Orb", "quantity": 7}])
+        logger.save_export_folder(self.tmp.name)
+        with patch.object(logger, "export_filename", return_value="PoE2_Export_20261007_123456.csv"):
+            first = logger.save_export_file("csv")
+            originals = {key: Path(first[key]).read_bytes()
+                         for key in ("path", "atlas_path", "history_path")}
+            logger.save_currency_snapshot("end", [{"name": "Chaos Orb", "quantity": 11}])
+            second = logger.save_export_file("csv")
+        for key, data in originals.items():
+            self.assertNotEqual(first[key], second[key])
+            self.assertEqual(Path(first[key]).read_bytes(), data)
+        first_rows = self.rows(originals["path"])
+        second_rows = self.rows(Path(second["path"]).read_bytes())
+        self.assertEqual(first_rows[0]["Chaos Orb"], "7")
+        self.assertEqual(second_rows[0]["Chaos Orb"], "11")
+        self.assertEqual(len(list(Path(self.tmp.name).glob("PoE2_Export*.csv"))), 6)
 
 
 if __name__ == "__main__":

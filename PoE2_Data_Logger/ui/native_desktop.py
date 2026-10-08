@@ -38,7 +38,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.1 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.1.1 Beta"
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
                             if getattr(sys, "frozen", False) else
@@ -801,6 +801,7 @@ class LoggerWindow(QMainWindow):
                                   "waystone": "Waystone", "tablet": "Tablet",
                                   "currency": "Currency inventory", "ritual": "Ritual rewards",
                                   "propagation": "Propagation scan"}[kind])
+        self.review_kind.setProperty("scanKind", kind)
         set_message(self.review_summary, summary)
         self.found_table.setRowCount(0)
         for label, detail, check in rows or []:
@@ -837,9 +838,16 @@ class LoggerWindow(QMainWindow):
     def _review_controls(self, kind):
         self.approve_scan_button.setVisible(kind is not None)
         self.reject_scan_button.setVisible(kind is not None)
+        if kind != "currency":
+            self.approve_scan_button.setToolTip("")
         self.review_clear_tablets_button.setVisible(kind == "tablet")
+        if hasattr(self, "manual_propagation_button"):
+            displayed = kind or self.review_kind.property("scanKind")
+            self.manual_propagation_button.setVisible(displayed in (None, "remnant", "seed", "propagation"))
         if not hasattr(self, "ritual_table"):
             return
+        self.inventory_phase.setEnabled(kind != "currency" or
+                                        self._inventory_reading is None and self.approve_scan_button.isEnabled())
         for review_kind, table, actions in (
                 ("currency", self.inventory_table, (self.inventory_add_row_button,)),
                 ("ritual", self.ritual_table, (self.ritual_add_row_button, self.ritual_remove_row_button))):
@@ -1187,6 +1195,12 @@ class LoggerWindow(QMainWindow):
         page, content = self._page()
         self.tabs.addTab(page, "Expedition")
         self._build_chain_controls(content)
+        manual = QHBoxLayout()
+        self.expedition_manual_propagation_button = button(
+            "Enter propagation manually", lambda: self.run(self.start_manual_propagation))
+        manual.addWidget(self.expedition_manual_propagation_button)
+        manual.addStretch()
+        content.addLayout(manual)
         content.addStretch()
 
     def _build_scan_settings(self):
@@ -2624,6 +2638,8 @@ class LoggerWindow(QMainWindow):
 
     def start_manual_propagation(self):
         self._load_chain_context()
+        if self.pending_review_kind not in ("remnant", "seed"):
+            self._review_pending("propagation", "Enter the marked runes, then add the chain part.", False)
         self._prepare_manual_propagation(logger.scan_context())
         self.tabs.setCurrentIndex(0)
 
@@ -3519,8 +3535,15 @@ class LoggerWindow(QMainWindow):
                                **{key: reading.get(key) for key in ("sockets", "seed_slot", "seed_rune")}})
         payload = {**result, "remnants": self._seed_readings}
         saved = logger.commit_seed_batch(payload, selections, automatic=automatic)
+        training_errors = []
         for entry in saved["saved"]:
-            self._seed_readings[entry["index"]]["saved"] = entry
+            reading = self._seed_readings[entry["index"]]
+            reading["saved"] = entry
+            if not automatic:
+                try:
+                    self._learn_approved_seed(reading, entry["remnant_id"])
+                except (ValueError, OSError) as error:
+                    training_errors.append(str(error))
         remaining = any(not reading.get("saved") and not reading.get("rejected") for reading in self._seed_readings)
         result["remnants"] = self._seed_readings
         if remaining:
@@ -3534,7 +3557,25 @@ class LoggerWindow(QMainWindow):
         self.refresh()
         self._set_commit_badge(saved["scan_commit_number"])
         ids = ", ".join(entry["remnant_id"] for entry in saved["saved"])
-        self.note(f"{ids} saved to {saved['saved'][0]['map_id']}.", True)
+        self.note(f"{ids} saved to {saved['saved'][0]['map_id']}." +
+                  (" Seed reference could not be saved: " + training_errors[0] if training_errors else ""),
+                  not training_errors)
+
+    def _learn_approved_seed(self, reading, remnant_id):
+        raw, bounds = self.images.get("seed"), reading.get("bar_bounds")
+        if not raw or not bounds:
+            return
+        with Image.open(io.BytesIO(raw)) as source:
+            crop = source.crop((max(0, bounds["x"] - 35), max(0, bounds["y"] - 10),
+                                min(source.width, bounds["x"] + bounds["width"] + 35),
+                                min(source.height, bounds["y"] + bounds["height"] + 10))).convert("RGB")
+        image = io.BytesIO()
+        crop.save(image, format="PNG")
+        reference = store.save_scan(image.getvalue(), "reviewed-seed.png", reading["sockets"],
+                                    reading["seed_slot"], reading["seed_rune"],
+                                    str(reading["family"]).replace("Family ", ""))
+        with logger._connect() as db:
+            db.execute("INSERT OR REPLACE INTO scan_links VALUES(?,?)", (remnant_id, reference["id"]))
 
     @staticmethod
     def _opened_identity(opened):
@@ -4266,8 +4307,33 @@ class LoggerWindow(QMainWindow):
             self._inventory_captured(image, live=False)
 
     def _inventory_phase_changed(self):
+        phase = value(self.inventory_phase)
+        if self.pending_review_kind == "currency" and self._pending_currency_phase:
+            previous = self._pending_currency_phase
+            if self._inventory_reading is not None:
+                with QSignalBlocker(self.inventory_phase):
+                    select(self.inventory_phase, previous)
+                return
+            try:
+                if self._inventory_capture_context is not None:
+                    logger.validate_scan_context(self._inventory_capture_context["context"])
+                if logger.currency_target_map(phase) != self._pending_currency_map:
+                    raise ValueError("Changing the snapshot would assign it to another map. "
+                                     "Reject this reading and scan that map again.")
+            except ValueError as error:
+                with QSignalBlocker(self.inventory_phase):
+                    select(self.inventory_phase, previous)
+                self.error(str(error))
+                return
+            self._pending_currency_phase = phase
+            if self._inventory_capture_context is not None:
+                self._inventory_capture_context["phase"] = phase
+            summary = self.review_summary.text().partition(" inventory · ")[2]
+            if summary:
+                set_message(self.review_summary, f"{phase.title()} inventory · {summary}")
+            self.approve_scan_button.setToolTip(f"Save {phase} inventory to {self._pending_currency_map}.")
         with logger._connect() as db:
-            logger._set_meta(db, "inventory_scan_phase", value(self.inventory_phase))
+            logger._set_meta(db, "inventory_scan_phase", phase)
         self.refresh_currency_summary()
 
     def _inventory_captured(self, image, live=True, expected_map_id=None, expected_phase=None):
@@ -4283,6 +4349,8 @@ class LoggerWindow(QMainWindow):
         self._inventory_capture_context = self._inventory_reading = capture
         self._pending_currency_map = map_id
         self._pending_currency_phase = phase
+        with QSignalBlocker(self.inventory_phase):
+            select(self.inventory_phase, phase)
         self._show_review_capture(image)
         self.inventory_table.setRowCount(0)
         self.inventory_table.hide()
@@ -4330,6 +4398,8 @@ class LoggerWindow(QMainWindow):
         self._inventory_reading = None
         self._pending_currency_map = map_id
         self._pending_currency_phase = phase
+        with QSignalBlocker(self.inventory_phase):
+            select(self.inventory_phase, phase)
         if capture is not None:
             self._inventory_capture = capture["image"]
             self._show_review_capture(capture["image"])
@@ -4338,6 +4408,7 @@ class LoggerWindow(QMainWindow):
         for item in result["items"]:
             self.add_inventory_row(item, image=capture["image"] if capture is not None else None)
         unknown = result["unknown"]
+        uncertain = len(unknown) + sum(bool(item.get("count_needs_review")) for item in result["items"])
         for item in unknown:
             candidate = item.get("candidate", "")
             self.add_inventory_row({"slot": item["slot"],
@@ -4348,13 +4419,14 @@ class LoggerWindow(QMainWindow):
             self.icon_slot.setValue(unknown[0]["slot"])
         set_message(self.inventory_status,
                     f"{len(result['items'])} inventory stacks matched. "
-                    f"{len(unknown)} uncertain slots or shared-icon tiers. Enter names and counts, then Approve. "
+                    f"{uncertain} uncertain slots or shared-icon tiers. Enter names and counts, then Approve. "
                     "Unnamed rows are rejected. Approved name corrections teach future icon scans. "
                     "Approve saves the reviewed snapshot.",
-                    "success" if result["items"] and not unknown else "message")
+                    "success" if result["items"] and not uncertain else "message")
         self._review_pending("currency",
-                             f"{phase.title()} inventory · {len(result['items'])} stacks · {len(unknown)} uncertain slots. "
+                             f"{phase.title()} inventory · {len(result['items'])} stacks · {uncertain} uncertain slots. "
                              "Review the editable list below.")
+        self.approve_scan_button.setToolTip(f"Save {phase} inventory to {map_id}.")
         if live and self.state["settings"].get("ocr_auto_commit"):
             if clear_currency_read(result):
                 self.save_inventory()
@@ -4363,7 +4435,7 @@ class LoggerWindow(QMainWindow):
                             "success")
             else:
                 set_message(self.inventory_status,
-                            "Auto-commit held: approve or reject the uncertain rows to save the snapshot.")
+                            "Auto-commit held: review the uncertain rows, then use the bottom Approve to save the snapshot.")
 
     def add_inventory_row(self, item=None, *, image=None):
         item = item if isinstance(item, dict) else {}
@@ -4417,7 +4489,7 @@ class LoggerWindow(QMainWindow):
             action.setStyleSheet("padding:3px 8px;")
             actions.addWidget(action)
         layout.addLayout(actions)
-        controls.setProperty("requiresApproval", bool(item.get("count_needs_review") or not item))
+        controls.setProperty("requiresApproval", bool(item.get("count_needs_review") or not item.get("name")))
         self.inventory_table.setCellWidget(row, 3, controls)
         self.inventory_table.setRowHeight(row, 62)
         self._set_currency_review(controls, "pending" if controls.property("requiresApproval") else "approved")
@@ -4435,11 +4507,8 @@ class LoggerWindow(QMainWindow):
         if item.column() not in (1, 2):
             return
         controls = self.inventory_table.cellWidget(item.row(), 3)
-        if controls and controls.property("unnamedRejected") and item.column() == 1 and item.text().strip():
+        if controls:
             controls.setProperty("requiresApproval", True)
-            self._set_currency_review(controls, "pending")
-            return
-        if controls and controls.property("requiresApproval") and controls.property("reviewStatus") != "rejected":
             self._set_currency_review(controls, "pending")
 
     def review_currency_row(self, controls, approve):
@@ -4459,14 +4528,6 @@ class LoggerWindow(QMainWindow):
                 review_learning.validate_name(name, "Omen" if name.casefold() in omen_names else "Currency")
                 logger._integer(quantity, name + " stack count", 0, 1000000)
         self._set_currency_review(controls, "approved" if approve else "rejected", unnamed=unnamed)
-        if self.pending_review_kind == "currency":
-            states = [self.inventory_table.cellWidget(i, 3).property("reviewStatus")
-                      for i in range(self.inventory_table.rowCount())]
-            if states and "pending" not in states:
-                if all(state == "rejected" for state in states):
-                    self.reject_review()
-                else:
-                    self.save_inventory()
 
     def save_icon_example(self):
         if self._inventory_capture is None:
@@ -4529,6 +4590,9 @@ class LoggerWindow(QMainWindow):
             logger.validate_scan_context(self._inventory_capture_context["context"])
         phase = self._pending_currency_phase if reviewing else value(self.inventory_phase)
         phase = phase or value(self.inventory_phase)
+        if reviewing and phase != value(self.inventory_phase):
+            raise ValueError("The snapshot selection no longer matches this reading. "
+                             "Select its start/end phase again before saving.")
         rows, examples = [], []
         item_names = {name.casefold() for name in logger.item_names()}
         for row in range(self.inventory_table.rowCount()):
@@ -4573,8 +4637,8 @@ class LoggerWindow(QMainWindow):
             db.execute("BEGIN")
             names = {}
             for table, kind in (("currency_items", "Currency"), ("item_names", "Item"), ("ritual_names", "Omen")):
-                for row in db.execute(f"SELECT name FROM {table} ORDER BY name"):
-                    names[row[0].casefold()] = {"name": row[0], "kind": kind}
+                for name in logger._active_catalog_names(db, table):
+                    names[name.casefold()] = {"name": name, "kind": kind}
         catalog = sorted(names.values(), key=lambda item: item["name"].casefold())
         key = (logger.session_generation(), tuple((item["name"], item["kind"], item["quantity"])
                                                   for item in data["items"]),
@@ -4871,6 +4935,10 @@ class LoggerWindow(QMainWindow):
                                   f"{rewards} reward entries")
 
     def write_export(self, kind):
+        page = getattr(self, "atlas_settings_page", None)
+        if kind in ("csv", "xlsx") and page is not None and page.dirty:
+            self.tabs.setCurrentWidget(page)
+            raise ValueError("Save Atlas / Character Settings before exporting CSV or XLSX.")
         logger.save_export_folder(value(self.export_folder))
         self._submit(f"Writing {kind.upper()}…",
                      lambda: logger.save_export_file(kind),
@@ -4881,45 +4949,58 @@ class LoggerWindow(QMainWindow):
         paths = [result["path"]]
         if result.get("atlas_path"):
             paths.append(result["atlas_path"])
+        if result.get("history_path"):
+            paths.append(result["history_path"])
         self.note("Export saved: " + " and ".join(paths), True)
 
     def save_as(self, kind):
+        page = getattr(self, "atlas_settings_page", None)
+        if kind in ("csv", "xlsx") and page is not None and page.dirty:
+            self.tabs.setCurrentWidget(page)
+            raise ValueError("Save Atlas / Character Settings before exporting CSV or XLSX.")
         choices = {
-            "csv": ("PoE2_Export.csv", "CSV (*.csv)", logger.export_all_csv),
-            "xlsx": ("PoE2_Export.xlsx", "Excel workbook (*.xlsx)", export_xlsx),
+            "csv": (logger.export_filename("csv"), "CSV (*.csv)", logger.export_primary_csv),
+            "xlsx": (logger.export_filename("xlsx"), "Excel workbook (*.xlsx)", export_xlsx),
             "backup": ("PoE2_Data_Backup.sqlite3", "SQLite database (*.sqlite3)", logger.backup_bytes),
         }
         name, extension, produce = choices[kind]
-        title = "Save CSV and Atlas companion" if kind == "csv" else "Save file"
+        title = "Save CSV with Atlas and Scan History companions" if kind == "csv" else "Save file"
         path, _ = QFileDialog.getSaveFileName(self, title, str(Path.home() / name), extension)
         if path:
             destination = Path(path)
             atlas_path = destination.with_name(destination.stem + "_Atlas.csv")
-            if kind == "csv" and (atlas_path.exists() or atlas_path.is_symlink()):
+            history_path = destination.with_name(destination.stem + "_Scan_History.csv")
+            existing = [companion for companion in (atlas_path, history_path)
+                        if companion.exists() or companion.is_symlink()] if kind == "csv" else []
+            if existing:
                 answer = QMessageBox.question(
-                    self, "Replace Atlas companion?",
-                    "This CSV export also saves its Atlas settings to:\n\n"
-                    f"{atlas_path}\n\nThat file already exists. Replace it?",
+                    self, "Replace CSV companion files?",
+                    "These companion files already exist:\n\n" +
+                    "\n".join(str(companion) for companion in existing) + "\n\nReplace them?",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.No)
                 if answer != QMessageBox.StandardButton.Yes:
                     return
             def write():
                 atlas_data = None
+                history_data = None
                 if kind == "csv":
                     with logger._connect() as db:
                         db.execute("BEGIN")
-                        data = logger.export_all_csv(_db=db)
+                        data = logger.export_primary_csv(_db=db)
                         atlas_data = logger.export_atlas_csv(_db=db)
+                        history_data = logger.export_all_csv(_db=db)
                 else:
                     data = produce()
                 if atlas_data is not None:
-                    write_export_files({destination: data, atlas_path: atlas_data})
+                    write_export_files({destination: data, atlas_path: atlas_data,
+                                        history_path: history_data})
                 else:
                     logger._write_export_bytes(destination, data)
                 result = {"path": str(destination), "bytes": len(data)}
                 if atlas_data is not None:
                     result["atlas_path"] = str(atlas_path)
+                    result["history_path"] = str(history_path)
                 return result
             self._submit(f"Writing {kind.upper()}…", write, self._export_saved)
 

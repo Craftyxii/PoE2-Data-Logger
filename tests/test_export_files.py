@@ -125,6 +125,21 @@ class RelatedExportFilesTests(unittest.TestCase):
             export_files.write_export_files({self.main: b"main", self.atlas: "atlas"})
         self.assertEqual(list(self.directory.iterdir()), [])
 
+    def test_new_export_cannot_overwrite_a_file_created_before_reservation(self):
+        self.atlas.write_bytes(b"other export")
+        with self.assertRaises(export_files.ExportWriteError) as raised:
+            export_files.write_export_files(self.data, replace=False)
+        self.assertIsInstance(raised.exception.__cause__, FileExistsError)
+        self.assertEqual(self.atlas.read_bytes(), b"other export")
+        self.assertEqual(list(self.directory.iterdir()), [self.atlas])
+
+    def test_failed_new_export_removes_all_reserved_names(self):
+        self.real_replace = os.replace
+        with patch.object(export_files.os, "replace", side_effect=self.fail_second_replacement):
+            with self.assertRaises(export_files.ExportWriteError):
+                export_files.write_export_files(self.data, replace=False)
+        self.assertEqual(list(self.directory.iterdir()), [])
+
 
 if __name__ == "__main__":
     unittest.main()

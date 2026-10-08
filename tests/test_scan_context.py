@@ -1,4 +1,6 @@
+import csv
 import hashlib
+import io
 import os
 import tempfile
 import unittest
@@ -8,7 +10,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from PoE2_Data_Logger.core import logger_store as logger, store
 from PoE2_Data_Logger.ui import native_desktop
@@ -54,6 +56,10 @@ class ScanContextTests(unittest.TestCase):
         self.window._inventory_captured(Image.new("RGB", (480, 200), color), live=live)
         return self.callbacks[-1]
 
+    def choose_inventory_phase(self, phase):
+        # Emit the actual combo-box signal; select() deliberately blocks it.
+        self.window.inventory_phase.setCurrentIndex(self.window.inventory_phase.findData(phase))
+
     def capture_ritual(self, color=(10, 20, 30), live=False):
         image = Image.new("RGB", (200, 100), color)
         self.window._ritual_captured(image, live=live)
@@ -65,24 +71,77 @@ class ScanContextTests(unittest.TestCase):
 
     def test_inventory_preserves_phase_changed_during_ocr(self):
         callback = self.capture_inventory()
-        select(self.window.inventory_phase, "end")
+        self.assertFalse(self.window.inventory_phase.isEnabled())
+        self.choose_inventory_phase("end")
+        self.assertEqual(self.window.inventory_phase.currentData(), "start")
         callback(self.inventory_result())
+        self.assertTrue(self.window.inventory_phase.isEnabled())
+        self.assertEqual(self.window.inventory_phase.currentData(), "start")
         saved = self.window.save_inventory()
         self.assertEqual(saved["start"], {"Chaos Orb": 7})
         self.assertEqual(saved["end"], {})
 
-    def test_inventory_preserves_phase_changed_after_ocr(self):
+    def test_completed_review_explicit_phase_change_updates_visible_and_saved_phase(self):
         callback = self.capture_inventory("end")
         callback(self.inventory_result())
-        select(self.window.inventory_phase, "start")
+        self.choose_inventory_phase("start")
+        self.assertEqual(self.window._pending_currency_phase, "start")
+        self.assertEqual(self.window._inventory_capture_context["phase"], "start")
+        self.assertTrue(self.window.review_summary.text().startswith("Start inventory"))
+        self.assertIn("start inventory", self.window.approve_scan_button.toolTip())
         saved = self.window.save_inventory()
-        self.assertEqual(saved["end"], {"Chaos Orb": 7})
-        self.assertEqual(saved["start"], {})
+        self.assertEqual(saved["start"], {"Chaos Orb": 7})
+        self.assertEqual(saved["end"], {})
+
+    def test_end_selection_and_bottom_approval_feed_counter_and_export_without_start_baseline(self):
+        callback = self.capture_inventory("start")
+        result = self.inventory_result()
+        result["items"][0]["count_needs_review"] = True
+        callback(result)
+        self.choose_inventory_phase("end")
+        self.assertTrue(self.window.review_summary.text().startswith("End inventory"))
+        row = self.window.inventory_table.cellWidget(0, 3)
+        row.findChild(QPushButton, "approveCurrency").click()
+        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+        self.assertEqual(logger.session_currency_totals()["items"], [])
+        self.window.approve_scan_button.click()
+        saved = logger.currency_for_map("M0001")
+        self.assertEqual((saved["start"], saved["end"], saved["net"]),
+                         ({}, {"Chaos Orb": 7}, {"Chaos Orb": 7}))
+        self.assertEqual(saved["start_baseline"], "Assumed empty")
+        self.assertEqual(self.window.session_currency.cards["Chaos Orb"].quantity, 7)
+        exported = list(csv.DictReader(io.StringIO(logger.export_currency_csv().decode("utf-8-sig"))))
+        self.assertEqual(len(exported), 1)
+        self.assertEqual((exported[0]["Map ID"], exported[0]["Start Count"], exported[0]["End Count"],
+                          exported[0]["Session Found Quantity"]), ("M0001", "0", "7", "7"))
+        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
+
+    def test_pending_next_map_snapshot_cannot_change_phase_to_previous_map(self):
+        logger.finish_map(0, 0, 0, 0)
+        callback = self.capture_inventory("start")
+        callback(self.inventory_result())
+        self.assertEqual(self.window._pending_currency_map, "M0002")
+        self.choose_inventory_phase("end")
+        self.assertEqual(self.window.inventory_phase.currentData(), "start")
+        self.assertEqual(self.window._pending_currency_phase, "start")
+        self.assertIn("another map", self.window.statusBar().currentMessage())
+        self.window.approve_scan_button.click()
+        self.assertEqual(logger.currency_for_map("M0002")["start"], {"Chaos Orb": 7})
+        self.assertEqual(logger.currency_for_map("M0001")["end"], {})
+
+    def test_silent_phase_changes_cannot_save_a_mislabelled_snapshot(self):
+        self.capture_inventory("start")(self.inventory_result())
+        # A blocked programmatic change must not bypass the explicit phase policy.
+        select(self.window.inventory_phase, "end")
+        with self.assertRaisesRegex(ValueError, "selection no longer matches"):
+            self.window.save_inventory()
+        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+        self.assertEqual(logger.currency_for_map("M0001")["start"], {})
 
     def test_inventory_auto_commit_preserves_phase(self):
         self.window.state["settings"]["ocr_auto_commit"] = True
         callback = self.capture_inventory(live=True)
-        select(self.window.inventory_phase, "end")
+        self.choose_inventory_phase("end")
         callback(self.inventory_result())
         saved = logger.currency_for_map("M0001")
         self.assertEqual(saved["start"], {"Chaos Orb": 7})
@@ -91,7 +150,7 @@ class ScanContextTests(unittest.TestCase):
 
     def test_manual_inventory_save_uses_selected_phase(self):
         self.window.add_inventory_row({"name": "Chaos Orb", "quantity": 4})
-        select(self.window.inventory_phase, "end")
+        self.choose_inventory_phase("end")
         saved = self.window.save_inventory()
         self.assertEqual(saved["end"], {"Chaos Orb": 4})
         self.assertEqual(saved["start"], {})
@@ -99,7 +158,7 @@ class ScanContextTests(unittest.TestCase):
     def test_saved_inventory_releases_capture_phase_for_manual_save(self):
         self.capture_inventory()(self.inventory_result())
         self.window.save_inventory()
-        select(self.window.inventory_phase, "end")
+        self.choose_inventory_phase("end")
         saved = self.window.save_inventory()
         self.assertEqual(saved["start"], {"Chaos Orb": 7})
         self.assertEqual(saved["end"], {"Chaos Orb": 7})
@@ -185,7 +244,7 @@ class ScanContextTests(unittest.TestCase):
     def test_inventory_map_guard_uses_capture_phase(self):
         callback = self.capture_inventory()
         logger.finish_map(0, 0, 0, 0)
-        select(self.window.inventory_phase, "end")
+        self.choose_inventory_phase("end")
         with self.assertRaisesRegex(ValueError, "map ended"):
             callback(self.inventory_result())
         self.assertEqual(logger.currency_for_map("M0001")["start"], {})
@@ -215,16 +274,16 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(self.ritual_fingerprints(), [fingerprint])
         self.assertEqual(logger.currency_for_map("M0001")["start"], {})
 
-    def test_icon_reference_rescan_keeps_capture_phase(self):
+    def test_icon_reference_rescan_keeps_explicitly_corrected_review_phase(self):
         self.capture_inventory()(self.inventory_result())
-        select(self.window.inventory_phase, "end")
+        self.choose_inventory_phase("end")
         select(self.window.icon_name, "Chaos Orb")
         with patch.object(logger, "save_currency_icon", return_value=1):
             self.window.save_icon_example()
         self.callbacks[-1](self.inventory_result(9))
         saved = self.window.save_inventory()
-        self.assertEqual(saved["start"], {"Chaos Orb": 9})
-        self.assertEqual(saved["end"], {})
+        self.assertEqual(saved["end"], {"Chaos Orb": 9})
+        self.assertEqual(saved["start"], {})
 
     def test_direct_read_helpers_remain_supported(self):
         self.window._inventory_read(self.inventory_result(), live=False, expected_map_id="M0001")

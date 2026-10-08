@@ -46,6 +46,62 @@ def _selected_choice(choices, choice_id):
     return None, None
 
 
+class AtlasChoiceBadgeItem(QGraphicsObject):
+    """Keep selectable nodes and their option numbers readable at any zoom."""
+
+    def __init__(self, node_item):
+        super().__init__(node_item)
+        self.node_item = node_item
+        # Only this small overlay ignores zoom. Node artwork and tree bounds
+        # retain the catalog's geometry, including when fitting the whole tree.
+        self.setFlag(QGraphicsObject.GraphicsItemFlag.ItemIgnoresTransformations)
+        self.setPos(node_item.radius * .78, node_item.radius * .78)
+        self.setZValue(20)
+        self.setAcceptHoverEvents(True)
+        self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def boundingRect(self):
+        return QRectF(-15, -15, 30, 30)
+
+    def shape(self):
+        path = QPainterPath()
+        path.addEllipse(self.boundingRect())
+        return path
+
+    def paint(self, painter, option, widget=None):
+        item = self.node_item
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor("#fff0ba") if item.selected or item.hovered else GOLD, 2))
+        painter.setBrush(QColor("#3c2a13") if item.allocated else QColor("#171a19"))
+        face = QRectF(-12, -12, 24, 24)
+        painter.drawEllipse(face)
+        if item.allocated and item.choice_number is not None:
+            font = painter.font()
+            font.setBold(True)
+            font.setPixelSize(15)
+            painter.setFont(font)
+            painter.setPen(QColor("#fff5d2"))
+            painter.drawText(face, Qt.AlignmentFlag.AlignCenter, str(item.choice_number))
+        else:
+            # An unset/inactive node shows a choice marker, never a default
+            # option number. The circle also provides a 30-pixel click target.
+            painter.setPen(QPen(GOLD, 2.5))
+            painter.drawLine(QPointF(-5, -2), QPointF(0, 3))
+            painter.drawLine(QPointF(0, 3), QPointF(5, -2))
+
+    def mousePressEvent(self, event):
+        QToolTip.hideText()
+        self._pressed_at = event.screenPos()
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        start = getattr(self, "_pressed_at", event.screenPos())
+        if (event.screenPos() - start).manhattanLength() <= 6 and self.shape().contains(event.pos()):
+            self.node_item.clicked.emit(self.node_item.node_id)
+        event.accept()
+
+
 class AtlasNodeItem(QGraphicsObject):
     clicked = Signal(str)
 
@@ -66,6 +122,7 @@ class AtlasNodeItem(QGraphicsObject):
         self.setAcceptHoverEvents(True)
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.choice_badge = AtlasChoiceBadgeItem(self) if node.get("choices") else None
 
     def boundingRect(self):
         radius = self.radius + 15
@@ -118,31 +175,6 @@ class AtlasNodeItem(QGraphicsObject):
             painter.drawPixmap(QRectF(-radius - 5, -radius - 5,
                                      radius * 2 + 10, radius * 2 + 10),
                                frame, QRectF(frame.rect()))
-        if self.node.get("choices"):
-            # A small chevron marks selectable passives without replacing their
-            # game icon or implying that an unset choice has a default effect.
-            painter.setPen(QPen(GOLD if self.allocated else BRONZE, 4))
-            y = radius + 7
-            painter.drawLine(QPointF(-6, y - 3), QPointF(0, y + 3))
-            painter.drawLine(QPointF(0, y + 3), QPointF(6, y - 3))
-            if self.allocated and self.choice_number is not None:
-                # Paint on the node itself so the badge retains the existing
-                # hover/click target. Its number is an option, never a rank.
-                painter.save()
-                badge_radius = min(16, radius * .32)
-                badge = QRectF(-badge_radius, radius * .4 - badge_radius,
-                               badge_radius * 2, badge_radius * 2)
-                painter.setPen(QPen(GOLD, 1.5))
-                painter.setBrush(QColor("#16130e"))
-                painter.drawEllipse(badge)
-                font = painter.font()
-                font.setBold(True)
-                font.setPixelSize(round(badge_radius * 1.45))
-                painter.setFont(font)
-                painter.setPen(QColor("#fff5d2"))
-                painter.drawText(badge, Qt.AlignmentFlag.AlignCenter,
-                                 str(self.choice_number))
-                painter.restore()
         if self.selected:
             painter.setPen(QPen(QColor("#ded4bd"), 1))
             painter.drawEllipse(QRectF(-radius - 8, -radius - 8,
@@ -151,6 +183,8 @@ class AtlasNodeItem(QGraphicsObject):
     def hoverEnterEvent(self, event):
         self.hovered = True
         self.update()
+        if self.choice_badge is not None:
+            self.choice_badge.update()
         super().hoverEnterEvent(event)
         if self.toolTip():
             QToolTip.showText(event.screenPos(), self.toolTip(), event.widget())
@@ -158,6 +192,8 @@ class AtlasNodeItem(QGraphicsObject):
     def hoverLeaveEvent(self, event):
         self.hovered = False
         self.update()
+        if self.choice_badge is not None:
+            self.choice_badge.update()
         QToolTip.hideText()
         super().hoverLeaveEvent(event)
 
@@ -321,7 +357,7 @@ class AtlasSettingsPage(QWidget):
         self.node_effects.setOpenExternalLinks(False)
         self.node_effects.setStyleSheet("QTextBrowser { background:#121412; border:1px solid #443a29; padding:6px; }")
         details.addWidget(self.node_effects, 1)
-        self._node_hint = QLabel("Hover a node to read its effects. Drag the background to move the tree. Scroll to zoom.")
+        self._node_hint = QLabel("Gold circles mark nodes with a choice of effects; their number is the selected option. Hover to read effects. Drag to move the tree. Scroll to zoom.")
         self._node_hint.setWordWrap(True)
         self._node_hint.setProperty("role", "note")
         details.addWidget(self._node_hint)
@@ -590,10 +626,20 @@ class AtlasSettingsPage(QWidget):
         text = "".join(f"<p>{html.escape(str(effect)).replace(chr(10), '<br>')}</p>" for effect in effects)
         if choices:
             if chosen:
-                text += f"<p><b>{number}. {html.escape(chosen.get('name') or 'Selected effect')}</b></p>"
+                label = "Selected effect" if self._selected_node in self._allocated else "Saved choice (inactive)"
+                text += f"<p><b>{label}: {number}. {html.escape(chosen.get('name') or 'Effect')}</b></p>"
                 text += "".join(f"<p>{html.escape(str(effect)).replace(chr(10), '<br>')}</p>" for effect in chosen.get("effects", []))
             else:
                 text += "<p style='color:#e5b660'>Choose one effect from the dropdown.</p>"
+            text += "<hr><p><b>Available effects</b></p>"
+            for option_number, option in enumerate(choices, 1):
+                selected = chosen is option
+                marker = " (selected)" if selected else ""
+                color = " style='color:#e5b660'" if selected else ""
+                text += (f"<p{color}><b>{option_number}. "
+                         f"{html.escape(option.get('name') or 'Effect')}{marker}</b><br>")
+                text += "<br>".join(html.escape(str(effect)).replace(chr(10), "<br>")
+                                   for effect in option.get("effects") or []) + "</p>"
         self.node_effects.setHtml(text or "<p>No effect description is provided for this node.</p>")
 
     def _node_tooltip(self, node_id):
@@ -642,6 +688,9 @@ class AtlasSettingsPage(QWidget):
             item.selected = node_id == self._selected_node
             item.setToolTip(self._node_tooltip(node_id))
             item.update()
+            if item.choice_badge is not None:
+                item.choice_badge.setToolTip(item.toolTip())
+                item.choice_badge.update()
         for left, right, item in self.edge_items:
             illuminated = left in self._allocated and right in self._allocated
             if self._nodes[left].get("kind") == "root":
@@ -686,7 +735,13 @@ class AtlasSettingsPage(QWidget):
                 rect = rect.united(item.sceneBoundingRect())
         if rect.isNull():
             return
-        rect = rect.adjusted(-140, -140, 140, 140)
+        # Scene units alone shrink to a few pixels on the entire Atlas. Leave
+        # room at the viewport edges for the screen-fixed choice markers too.
+        viewport = self.view.viewport().rect()
+        fit_scale = min(max(1, viewport.width() - 40) / rect.width(),
+                        max(1, viewport.height() - 40) / rect.height())
+        padding = max(140, 20 / fit_scale)
+        rect = rect.adjusted(-padding, -padding, padding, padding)
         self.scene.setSceneRect(rect)
         self.view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
 

@@ -1,12 +1,17 @@
 import os
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Smoke readers consult OCR settings before an individual test fixture starts.
+# Keep that initialization away from the user's saved application profile.
+test_data = tempfile.TemporaryDirectory(prefix="poe2-regression-data-", ignore_cleanup_errors=True)
+os.environ.setdefault("RUNESHAPE_SCAN_DATA_DIR", test_data.name)
 suite = unittest.defaultTestLoader.discover(str(root / "tests"))
 result = unittest.TextTestRunner(verbosity=2).run(suite)
 if os.environ.get("GITHUB_ACTIONS") == "true":

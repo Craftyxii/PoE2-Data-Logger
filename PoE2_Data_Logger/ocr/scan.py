@@ -14,7 +14,7 @@ from PIL import Image
 from PoE2_Data_Logger.core import store
 from PoE2_Data_Logger.ocr.cv_eval import decode, features
 from PoE2_Data_Logger.ocr.glyph_eval import vector
-from PoE2_Data_Logger.ocr.prototype import center_for, crop_at, ncc_find_all
+from PoE2_Data_Logger.ocr.prototype import center_for, crop_at, find_books, normalize_book
 
 
 HERE = Path(__file__).resolve().parent.parent
@@ -38,23 +38,7 @@ def scan(path: Path):
     with Image.open(path) as image:
         im = image.convert("RGB")
     assets = _assets()
-    gray = np.asarray(im.convert("L"), dtype=np.float32)
-    books = sorted(
-        (
-            peak
-            for template in assets[3]
-            for peak in ncc_find_all(im, template, gray=gray)
-        ),
-        key=lambda item: item[2],
-        reverse=True,
-    )
-    unique = []
-    for peak in books:
-        if not any(
-            abs(peak[0] - other[0]) < 32 and abs(peak[1] - other[1]) < 40
-            for other in unique
-        ):
-            unique.append(peak)
+    unique = find_books(im, assets[3])
     if not unique:
         return {"status": "No reliable pre-open rune bar found", "remnants": []}
     states = store.states()
@@ -64,15 +48,15 @@ def scan(path: Path):
         names = np.concatenate((names, np.array([rune for rune, _ in local])))
         vectors = np.concatenate((vectors, np.stack([glyph for _, glyph in local])))
     readings = []
-    for bx, by, confidence in sorted(unique, key=lambda item: (item[1], item[0])):
-        reading = _scan_bar(im, (bx, by, confidence), model, names, vectors, states)
-        if reading.get("sockets"):
+    for book in sorted(unique, key=lambda item: (item[1], item[0])):
+        reading = _scan_scaled_bar(im, book, model, names, vectors, states)
+        if reading.get("sockets") and reading.get("socket_confidence", 0) >= .80:
             reading["scan_index"] = len(readings) + 1
             readings.append(reading)
             if len(readings) == 24:
                 break
     if not readings:
-        result = _scan_bar(im, unique[0], model, names, vectors, states)
+        result = _scan_scaled_bar(im, unique[0], model, names, vectors, states)
         return {**result, "remnants": []}
     if len(readings) == 1:
         return {**readings[0], "remnants": readings}
@@ -80,6 +64,39 @@ def scan(path: Path):
         "status": f"{len(readings)} visible remnants found — review each match.",
         "remnants": readings,
     }
+
+
+def _scan_scaled_bar(im, book, model, names, vectors, all_states):
+    alternatives = []
+    for delta in (0, -.025, .025, -.05, .05, -.075, .075):
+        scale = round(book[3] + delta, 3)
+        if scale < .4:
+            continue
+        # Keep the detected book centre when refining its physical scale.
+        adjusted = (book[0] + 13 * (book[3] - scale),
+                    book[1] + 19 * (book[3] - scale), book[2], scale)
+        normalized, anchor = normalize_book(im, adjusted)
+        result = _scan_bar(normalized, anchor, model, names, vectors, all_states)
+        alternatives.append((result, normalized.info["seed_origin"], scale))
+    reading, origin, scale = max(alternatives, key=lambda item: item[0].get("socket_confidence", 0))
+    if not reading.get("bar_bounds"):
+        return reading
+    conflicting = [trial for trial, _, _ in alternatives if trial.get("sockets") and
+                   trial.get("socket_confidence", 0) >= reading.get("socket_confidence", 0) - .02 and
+                   (trial.get("sockets"), trial.get("seed_slot"), trial.get("seed_rune")) !=
+                   (reading.get("sockets"), reading.get("seed_slot"), reading.get("seed_rune"))]
+    if conflicting:
+        reading.update(can_commit=False, status="Seed reading changes with alignment — confirm it manually.")
+    if "bar_bounds" in reading:
+        bounds = reading["bar_bounds"]
+        x, y = origin[0] + round(bounds["x"] * scale), origin[1] + round(bounds["y"] * scale)
+        reading["bar_bounds"] = {"x": x, "y": y,
+            "width": min(im.width - x, round(bounds["width"] * scale)),
+            "height": min(im.height - y, round(bounds["height"] * scale))}
+    if "seed_center" in reading:
+        reading["seed_center"] = {axis: origin[index] + round(value * scale)
+                                  for index, (axis, value) in enumerate(reading["seed_center"].items())}
+    return reading
 
 
 def _scan_bar(im, book, model, names, vectors, all_states):
@@ -104,7 +121,8 @@ def _scan_bar(im, book, model, names, vectors, all_states):
             "bar_score": round(bar_score, 2),
         }
     score, rune_j, n = decoded
-    if float(np.exp(score / len(indices))) < 0.60:
+    socket_confidence = float(np.exp(score / len(indices)))
+    if socket_confidence < 0.60:
         return {
             "status": "Cannot confirm a single visible seed",
             "bar_score": round(bar_score, 2),
@@ -143,12 +161,7 @@ def _scan_bar(im, book, model, names, vectors, all_states):
     positions.sort(reverse=True)
     position_unclear = False
     if positions and positions[0][1] != slot:
-        best = positions[0]
-        runner = positions[1][0] if len(positions) > 1 else 0
-        if best[0] >= 0.90 and best[0] - runner >= 0.08:
-            slot = best[1]
-        else:
-            position_unclear = True
+        position_unclear = True
     scores = next(
         (scores for similarity, position, scores in positions if position == slot), []
     )
@@ -161,6 +174,7 @@ def _scan_bar(im, book, model, names, vectors, all_states):
             "seed_slot": f"P{slot}",
             "bar_score": round(bar_score, 2),
             "bar_bounds": bar_bounds,
+            "socket_confidence": socket_confidence,
         }
     glyph_score, rune = scores[0]
     matches = [s for s in entries if s["seed_rune"] == rune]
@@ -185,6 +199,7 @@ def _scan_bar(im, book, model, names, vectors, all_states):
         "rune_similarity": round(glyph_score, 2),
         "rune_margin": round(margin, 2),
         "bar_bounds": bar_bounds,
+        "socket_confidence": socket_confidence,
         "seed_center": {"x": cx, "y": cy},
         "can_commit": bool(
             stage

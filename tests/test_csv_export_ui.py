@@ -29,6 +29,7 @@ class CsvExportConfirmationTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="poe2-csv-save-as-")
         self.destination = Path(self.temporary.name) / "research.csv"
         self.companion = self.destination.with_name("research_Atlas.csv")
+        self.history = self.destination.with_name("research_Scan_History.csv")
         self.submissions = []
         self.saved = []
         self.window = SimpleNamespace(_export_saved=self.saved.append)
@@ -62,27 +63,43 @@ class CsvExportConfirmationTests(unittest.TestCase):
         with patch.object(QFileDialog, "getSaveFileName", return_value=(str(self.destination), "CSV (*.csv)")), \
                 patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes) as question, \
                 patch.object(logger, "_connect", export_database), \
-                patch.object(logger, "export_all_csv", return_value=b"new main") as main_export, \
-                patch.object(logger, "export_atlas_csv", return_value=b"new Atlas") as atlas_export:
+                patch.object(logger, "export_primary_csv", return_value=b"new main") as main_export, \
+                patch.object(logger, "export_atlas_csv", return_value=b"new Atlas") as atlas_export, \
+                patch.object(logger, "export_all_csv", return_value=b"new history") as history_export:
             LoggerWindow.save_as(self.window, "csv")
         question.assert_called_once()
         self.assertEqual(self.destination.read_bytes(), b"new main")
         self.assertEqual(self.companion.read_bytes(), b"new Atlas")
+        self.assertEqual(self.history.read_bytes(), b"new history")
         self.assertEqual(len(self.submissions), 1)
         self.assertEqual(self.saved[0]["atlas_path"], str(self.companion))
         self.assertIs(main_export.call_args.kwargs["_db"], atlas_export.call_args.kwargs["_db"])
+        self.assertIs(main_export.call_args.kwargs["_db"], history_export.call_args.kwargs["_db"])
 
     def test_new_pair_is_saved_without_overwrite_question(self):
         with patch.object(QFileDialog, "getSaveFileName", return_value=(str(self.destination), "CSV (*.csv)")) as chooser, \
                 patch.object(QMessageBox, "question") as question, \
                 patch.object(logger, "_connect", export_database), \
-                patch.object(logger, "export_all_csv", return_value=b"new main"), \
-                patch.object(logger, "export_atlas_csv", return_value=b"new Atlas"):
+                patch.object(logger, "export_primary_csv", return_value=b"new main"), \
+                patch.object(logger, "export_atlas_csv", return_value=b"new Atlas"), \
+                patch.object(logger, "export_all_csv", return_value=b"new history"):
             LoggerWindow.save_as(self.window, "csv")
         question.assert_not_called()
-        self.assertIn("Atlas companion", chooser.call_args.args[1])
+        self.assertIn("Atlas and Scan History", chooser.call_args.args[1])
         self.assertEqual(self.destination.read_bytes(), b"new main")
         self.assertEqual(self.companion.read_bytes(), b"new Atlas")
+        self.assertEqual(self.history.read_bytes(), b"new history")
+
+    def test_declining_history_overwrite_preserves_all_files(self):
+        self.history.write_bytes(b"previous history")
+        with patch.object(QFileDialog, "getSaveFileName", return_value=(str(self.destination), "CSV (*.csv)")), \
+                patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No) as question:
+            LoggerWindow.save_as(self.window, "csv")
+        self.assertEqual(self.history.read_bytes(), b"previous history")
+        self.assertFalse(self.destination.exists())
+        self.assertFalse(self.companion.exists())
+        self.assertEqual(self.submissions, [])
+        self.assertIn(str(self.history), question.call_args.args[2])
 
     def test_canceling_file_chooser_does_not_prompt_or_submit(self):
         with patch.object(QFileDialog, "getSaveFileName", return_value=("", "")), \

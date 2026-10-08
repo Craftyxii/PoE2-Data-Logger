@@ -33,7 +33,7 @@ jobs:
       - name: Check release version
         shell: pwsh
         run: |
-          $match = Select-String -Path packaging/installer.nsi -Pattern '^!define APP_VERSION "([0-9]+\.[0-9]+(?:\.[0-9]+)?)"$'
+          $match = Select-String -Path packaging/installer.nsi -Pattern '^!define APP_VERSION "([0-9]+\.[0-9]+(?:\.[0-9]+){0,2})"$'
           if (-not $match) { throw 'Installer version is missing.' }
           $version = $match.Matches[0].Groups[1].Value
           $channel = Select-String -Path packaging/installer.nsi -Pattern '^!define APP_CHANNEL "(beta)"$'
@@ -51,7 +51,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Build tool update failed.' }
           python -m pip install -r requirements-build.txt
       - name: Run regression tests
+        env:
+          POE2_RUN_HUNDRED_MAP_SESSION: '1'
+          POE2_SESSION_ARTIFACTS: ${{ runner.temp }}/poe2-release-session
         run: python tools/run_tests.py
+      - name: Retain session verification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-session-verification
+          path: ${{ runner.temp }}/poe2-release-session
+          if-no-files-found: ignore
       - name: Prepare NSIS
         shell: pwsh
         run: |

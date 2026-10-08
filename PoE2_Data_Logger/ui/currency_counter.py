@@ -210,8 +210,13 @@ class SessionCurrencyCounter(QWidget):
         groups = {}
         for name, item in tracked.items():
             groups.setdefault(_group_for(item), []).append(name)
-        self.groups = {group: tuple(sorted(groups[group], key=_variant_key))
-                       for group in sorted(groups, key=_group_key)}
+        self.groups = {
+            group: tuple(sorted(groups[group], key=lambda name: (
+                tracked[name]["quantity"] == 0, _variant_key(name))))
+            for group in sorted(groups, key=lambda group: (
+                not any(tracked[name]["quantity"] > 0 for name in groups[group]),
+                _group_key(group)))
+        }
         for group in set(self.group_labels) - set(self.groups):
             label = self.group_labels.pop(group)
             self.grid.removeWidget(label)
@@ -242,6 +247,9 @@ class SessionCurrencyCounter(QWidget):
             (group, tuple(name for name in names if query in name.casefold() or query in group.casefold()))
             for group, names in self.groups.items())
         self._visible_groups = tuple((group, names) for group, names in self._visible_groups if names)
+        self._visible_groups = tuple(sorted(self._visible_groups, key=lambda entry: (
+            not any(self._items[name]["quantity"] > 0 for name in entry[1]),
+            _group_key(entry[0]))))
         self._visible = tuple(name for _, names in self._visible_groups for name in names)
         self.empty.setVisible(not self._visible)
         self.empty.setText("No currency matches your search." if self.cards else

@@ -1,3 +1,14 @@
+# PoE2 Data Logger 1.3.1.1 Beta
+
+- Keep currency row approval separate from the final Start/End inventory commit; preserve the captured map and phase through review.
+- Reconcile the currency counter and exports with the latest approved End snapshot, subtracting Start when present and treating a missing Start as empty.
+- Export clean map and recipe records with named item columns, compact Atlas setups, and a separate scan history sheet. Log map totals and scanned modifiers once per map; preserve older folder exports.
+- Require saved Atlas and gear settings before CSV or workbook export, and show clear choice badges and all numbered node effects.
+- Preserve library and historical records when removing obsolete default currency cards; show found currencies first within their groups.
+- Improve scaled inventory, Ritual rewards, deferred markers and seed capture recognition. Learn manually approved seed artwork without training rejected scans.
+- Resolve propagation from three crown marks, their rune positions and the cursor-selected recipe, using the database for rune order. Gold frames and readable unmarked sockets are not prerequisites. Retain explicit recipe approval when the cursor is absent and keep unrelated scans independent.
+- Add a 100-map GUI workflow gate with custom labels, inventory corrections, chain commits, automatic kill saves, restarts, backups and independently reopened CSV/XLSX exports.
+
 # PoE2 Data Logger v33.3
 
 - Prevent hotkey changes and region navigation from waiting on the logger's own window-title response.

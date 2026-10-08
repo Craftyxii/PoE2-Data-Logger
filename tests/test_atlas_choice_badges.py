@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPoint, QRectF, Qt
 from PySide6.QtGui import QImage, QPainter, QTextDocument
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QToolTip
@@ -69,7 +69,8 @@ class AtlasChoiceBadgeTests(unittest.TestCase):
         painter = RecordingPainter(image)
         try:
             painter.translate(100, 100)
-            self.page.node_items[node_id].paint(painter, None)
+            item = self.page.node_items[node_id]
+            (item.choice_badge or item).paint(painter, None)
             return painter.labels
         finally:
             painter.end()
@@ -81,9 +82,8 @@ class AtlasChoiceBadgeTests(unittest.TestCase):
 
     def click_choice_face(self):
         item = self.page.node_items[CHOICE_ID]
-        # Click where the number is painted, not just the icon's center.
-        face = item.mapToScene(QPointF(0, item.radius * .4))
-        point = self.page.view.mapFromScene(face)
+        # Click the screen-fixed number, not just the icon's center.
+        point = self.page.view.mapFromScene(item.choice_badge.scenePos())
         QTest.mouseClick(self.page.view.viewport(), Qt.MouseButton.LeftButton, pos=point)
         self.app.processEvents()
 
@@ -163,6 +163,107 @@ class AtlasChoiceBadgeTests(unittest.TestCase):
                                 "choices": {CHOICE_ID: "AtlasMonsterPackSizeSelector1a"}}, force=True)
         self.assertEqual(self.painted_labels(), ["2"])
         self.assertIn("Selected effect: 2. Pack Size", self.tooltip_text())
+
+    def test_sidepanel_keeps_actual_seven_and_eight_option_lists(self):
+        for node_id in ("AtlasEssenceNotable13", "AtlasEssenceNotable11"):
+            with self.subTest(node_id=node_id):
+                options = copy.deepcopy(bundled_catalog()["nodes"][node_id]["choices"])
+                self.data["nodes"][CHOICE_ID]["choices"][:] = options
+                self.page.set_settings({}, force=True)
+                self.click_choice_face()
+                self.page.choice_combo.hidePopup()
+                self.page.choice_combo.setCurrentIndex(len(options))
+                self.assertEqual(self.painted_labels(), [str(len(options))])
+                self.assertEqual(self.page.choice_combo.currentData(), options[-1]["id"])
+                text = self.page.node_effects.toPlainText()
+                self.assertIn(f"Selected effect: {len(options)}.", text)
+                self.assertIn("Available effects", text)
+                for number, option in enumerate(options, 1):
+                    self.assertIn(f"{number}. {option['name']}", text)
+                    for effect in option["effects"]:
+                        self.assertIn(effect, text)
+                self.click_choice_face()
+                self.assertIn(f"Saved choice (inactive): {len(options)}.", self.page.node_effects.toPlainText())
+                for number, option in enumerate(options, 1):
+                    self.assertIn(f"{number}. {option['name']}", self.page.node_effects.toPlainText())
+
+    def test_hovering_between_badge_and_icon_keeps_node_hovered(self):
+        item = self.page.node_items[CHOICE_ID]
+        self.page.view.resetTransform()
+        self.page.view.centerOn(item)
+        viewport = self.page.view.viewport()
+        QTest.mouseMove(viewport, QPoint(5, 5))
+        self.app.processEvents()
+        for scene_point in (item.choice_badge.scenePos(), item.scenePos()):
+            QTest.mouseMove(viewport, self.page.view.mapFromScene(scene_point))
+            self.app.processEvents()
+            self.assertTrue(item.hovered)
+            self.assertTrue(QToolTip.isVisible())
+
+    def test_fitted_bundled_tree_badge_is_readable_clickable_and_tracks_zoom(self):
+        # Exercise the real 8,000-unit tree where scene-scaled option labels
+        # used to shrink below two pixels, and click outside the tiny icon.
+        # The offscreen Qt platform routes hover to overlapping top-level
+        # windows inconsistently. Keep only the page under test visible,
+        # as it is when opened inside the logger's single window.
+        self.page.hide()
+        data = bundled_catalog()
+        with patch("PoE2_Data_Logger.ui.atlas_settings.catalog", return_value=data):
+            page = AtlasSettingsPage()
+        try:
+            page.resize(1200, 760)
+            page.show()
+            self.app.processEvents()
+            page.fit_button.click()
+            item = page.node_items[CHOICE_ID]
+            badge = item.choice_badge
+            self.assertLess(page.view.transform().m11(), .1)
+            original_bounds = item.sceneBoundingRect()
+            for zoom in (1, 2.5, .4):
+                page.view.zoom(zoom)
+                device_bounds = badge.deviceTransform(page.view.viewportTransform()).mapRect(badge.boundingRect())
+                self.assertEqual(round(device_bounds.width()), 30)
+                self.assertEqual(round(device_bounds.height()), 30)
+                self.assertEqual(item.sceneBoundingRect(), original_bounds)
+            page.fit_button.click()
+            point = page.view.mapFromScene(badge.scenePos()) + QPoint(11, 0)
+            self.assertFalse(item.shape().contains(item.mapFromScene(page.view.mapToScene(point))))
+            QTest.mouseMove(page.view.viewport(), QPoint(5, 5))
+            QTest.mouseMove(page.view.viewport(), point)
+            self.app.processEvents()
+            self.assertTrue(item.hovered)
+            self.assertTrue(QToolTip.isVisible())
+            self.assertEqual(page.settings()["allocated"], [])
+            QTest.mouseClick(page.view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+            self.app.processEvents()
+            self.assertEqual(page._selected_node, CHOICE_ID)
+            self.assertIn(CHOICE_ID, page.settings()["allocated"])
+            self.assertTrue(page.choice_combo.view().isVisible())
+            index = page.choice_combo.model().index(3, 0)
+            QTest.mouseClick(page.choice_combo.view().viewport(), Qt.MouseButton.LeftButton,
+                             pos=page.choice_combo.view().visualRect(index).center())
+            self.app.processEvents()
+            self.assertEqual(item.choice_number, 3)
+            self.assertEqual(page.choice_combo.currentData(), data["nodes"][CHOICE_ID]["choices"][2]["id"])
+            self.assertIn("Selected effect: 3.", page.node_effects.toPlainText())
+            for passive in page.node_items.values():
+                if not passive.node.get("choices"):
+                    self.assertIsNone(passive.choice_badge)
+            page.resize(1000, 600)
+            page.activity_filter.setCurrentIndex(0)
+            self.app.processEvents()
+            page.fit_button.click()
+            viewport = QRectF(page.view.viewport().rect())
+            for passive in page.node_items.values():
+                if passive.choice_badge is not None:
+                    marker = passive.choice_badge
+                    device_bounds = marker.deviceTransform(page.view.viewportTransform()).mapRect(marker.boundingRect())
+                    self.assertTrue(viewport.contains(device_bounds), passive.node_id)
+        finally:
+            page.choice_combo.hidePopup()
+            page.close()
+            page.deleteLater()
+            self.app.processEvents()
 
 
 if __name__ == "__main__":

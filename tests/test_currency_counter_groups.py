@@ -39,6 +39,11 @@ class CurrencyCounterGroupsTests(unittest.TestCase):
                 "maps_counted": int(bool(quantities)), "maps_pending_end": 0,
                 "maps_pending_baseline": 0, "maps_assumed_empty": int(bool(quantities))}
 
+    def position(self, widget):
+        index = self.counter.grid.indexOf(widget)
+        self.assertGreaterEqual(index, 0)
+        return self.counter.grid.getItemPosition(index)[:2]
+
     def test_every_catalog_item_is_visible_at_zero_in_family_order(self):
         self.counter.set_totals(self.data(), catalog=self.catalog)
         self.assertEqual(set(self.counter.cards), {item["name"] for item in self.catalog})
@@ -66,6 +71,58 @@ class CurrencyCounterGroupsTests(unittest.TestCase):
         self.assertTrue(all(card.quantity == 0 for card in self.counter.cards.values()))
         self.assertEqual(set(self.counter._visible), set(cards))
         self.assertNotIn("assumed", self.counter.summary.text())
+
+    def test_found_groups_and_variants_move_in_the_actual_grid_and_return_after_correction(self):
+        self.counter.set_totals(self.data(), catalog=self.catalog)
+        cards = dict(self.counter.cards)
+        self.assertEqual(self.position(self.counter.group_labels["Chaos orbs"]), (0, 0))
+        self.counter.set_totals(self.data(**{
+            "Perfect Exalted Orb": 4, "Divine Orb": 1,
+            "Lesser Essence of Haste": 2, "Perfect Essence of Haste": 3}))
+        self.assertEqual(tuple(self.counter.groups)[:4],
+                         ("Exalted orbs", "Divine orbs", "Essences", "Chaos orbs"))
+        self.assertEqual(self.counter.groups["Exalted orbs"],
+                         ("Perfect Exalted Orb", "Exalted Orb", "Greater Exalted Orb"))
+        self.assertEqual(self.counter.groups["Essences"],
+                         ("Lesser Essence of Haste", "Perfect Essence of Haste",
+                          "Essence of Haste", "Greater Essence of Haste", "Essence of Ice"))
+        self.assertEqual(self.position(cards["Perfect Exalted Orb"]), (1, 0))
+        self.assertLess(self.position(self.counter.group_labels["Essences"]),
+                        self.position(self.counter.group_labels["Chaos orbs"]))
+        before = self.counter._layout_key
+        self.counter.set_totals(self.data(**{"Exalted Orb": 1}))
+        self.assertNotEqual(before, self.counter._layout_key)
+        self.assertEqual(self.position(cards["Exalted Orb"]), (1, 0))
+        self.assertEqual(self.position(cards["Perfect Exalted Orb"]), (1, 2))
+        self.assertTrue(all(self.counter.cards[name] is card for name, card in cards.items()))
+        self.counter.set_totals(self.data())
+        self.assertEqual(self.position(self.counter.group_labels["Chaos orbs"]), (0, 0))
+        self.assertLess(self.position(cards["Exalted Orb"]), self.position(cards["Perfect Exalted Orb"]))
+
+    def test_found_variants_keep_tier_and_natural_level_order_in_the_grid(self):
+        self.counter.set_totals(self.data(**{
+            "Perfect Exalted Orb": 90, "Greater Exalted Orb": 1, "Exalted Orb": 2,
+            "Flux (Level 10)": 12, "Flux (Level 9)": 1}), catalog=[
+                *self.catalog, {"name": "Flux (Level 10)", "group": "Fluxes"},
+                {"name": "Flux (Level 9)", "group": "Fluxes"}])
+        self.assertEqual(self.counter.groups["Exalted orbs"],
+                         ("Exalted Orb", "Greater Exalted Orb", "Perfect Exalted Orb"))
+        self.assertLess(self.position(self.counter.cards["Exalted Orb"]),
+                        self.position(self.counter.cards["Greater Exalted Orb"]))
+        self.assertLess(self.position(self.counter.cards["Flux (Level 9)"]),
+                        self.position(self.counter.cards["Flux (Level 10)"]))
+        self.assertLess(self.position(self.counter.group_labels["Fluxes"]),
+                        self.position(self.counter.group_labels["Chaos orbs"]))
+
+    def test_filter_prioritizes_groups_with_a_visible_found_match(self):
+        self.counter.set_totals(self.data(**{"Chaos Orb": 1, "Greater Exalted Orb": 1}),
+                                catalog=self.catalog)
+        self.counter.search.setText("Greater")
+        self.assertEqual(tuple(group for group, _ in self.counter._visible_groups),
+                         ("Exalted orbs", "Chaos orbs", "Other orbs", "Essences", "Omens"))
+        self.assertEqual(self.position(self.counter.cards["Greater Exalted Orb"]), (1, 0))
+        self.assertTrue(self.counter.cards["Chaos Orb"].isHidden())
+        self.assertIn("Greater Chaos Orb", self.counter._visible)
 
     def test_catalog_spelling_merges_totals_and_preserves_unknown_learned_item(self):
         self.counter.set_totals({**self.data(), "items": [

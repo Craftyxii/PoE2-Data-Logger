@@ -377,8 +377,19 @@ def _inventory_labels(image):
 def _inventory_equipment_slots(image):
     pixels = np.asarray(image.convert("RGB"), dtype=np.float32)
     groups = [{slot} for slot in range(1, 61)]
+    occupied = set()
+    for slot in range(1, 61):
+        cell = np.asarray(inventory_cell(image, slot), dtype=np.float32)
+        dx, dy = max(1, round(cell.shape[1] * .18)), max(1, round(cell.shape[0] * .18))
+        core = cell[dy:-dy, dx:-dx]
+        if float(np.percentile(core, 95)) >= 32 and float(core.std(axis=(0, 1)).mean()) >= 8:
+            occupied.add(slot)
 
     def join(first, second):
+        # Empty neighbouring cells can have the same flat background. They
+        # are not evidence that a single stack spans several inventory slots.
+        if first not in occupied and second not in occupied:
+            return
         a = next(group for group in groups if first in group)
         b = next(group for group in groups if second in group)
         if a is not b:
@@ -411,7 +422,10 @@ def _inventory_equipment_slots(image):
         columns = [(slot - 1) % 12 for slot in group]
         rows = [(slot - 1) // 12 for slot in group]
         width, height = max(columns) - min(columns) + 1, max(rows) - min(rows) + 1
-        if 2 <= len(group) <= 8 and width <= 2 and height <= 4 and len(group) == width * height:
+        content_columns = {(slot - 1) % 12 for slot in group & occupied}
+        content_rows = {(slot - 1) // 12 for slot in group & occupied}
+        if (2 <= len(group) <= 8 and width <= 2 and height <= 4 and len(group) == width * height
+                and len(content_columns) == width and len(content_rows) == height):
             equipment.update(group)
     return equipment
 
@@ -425,6 +439,10 @@ def scan_inventory_grid(image, references=(), read=None):
     image = inventory_grid(image)
     equipment = _inventory_equipment_slots(image)
     labels = _inventory_labels(image) if read is None else None
+    if labels is not None:
+        # Similar colours can make separate stacks appear continuous across a
+        # grid boundary. A visible stack label keeps that cell reviewable.
+        equipment.difference_update(slot for slot, label in labels.items() if label["count_present"])
     read = read or ocr_lines
     reader = currency_ocr.get_reader()
     references = list(references)
@@ -502,6 +520,9 @@ def scan_inventory_grid(image, references=(), read=None):
         elif slot not in equipment and icon.get("all") and (icon.get("uncertain") or score >= .55):
             unknown.append({"slot": slot, "candidate": icon["all"][0]["name"],
                             "score": round(score, 3)})
+        elif slot not in equipment and icon.get("ignored"):
+            unknown.append({"slot": slot, "candidate": icon.get("candidate", "Unrecognized item"),
+                            "score": round(score, 3), "reason": "label if tracked"})
     return {"items": found, "unknown": unknown, "status": "review"}
 
 
@@ -608,13 +629,17 @@ def parse_ritual(lines, omen_names):
             "status": "review"}
 
 
-def deferred_markers(image):
+def deferred_markers(image, *, grid=None):
     with Image.open(Path(__file__).resolve().parent.parent / "deferred_marker.png") as reference:
         marker = np.asarray(reference.convert("L"))
     gray = np.asarray(image.convert("L"))
     scale = 1.0
     found = []
-    for factor in (.67, .85, 1.0, 1.25, 1.5, 2.0):
+    factors = {.5, .67, .75, .85, 1.0, 1.15, 1.25, 1.5, 2.0}
+    if grid is not None:
+        left, _, right, _ = grid["bounds"]
+        factors.add((right - left) / (12 * 52.65))
+    for factor in sorted(factors):
         size = max(8, round(marker.shape[0] * factor * scale))
         if size >= min(gray.shape):
             continue
@@ -631,6 +656,47 @@ def deferred_markers(image):
                               "box": (round(actual_x - 1.85 * unit), round(actual_y - 2 * unit),
                                       round(actual_x + unit), round(actual_y + unit))})
             scores[max(0, y - size):y + size + 1, max(0, x - size):x + size + 1] = -1
+    if grid is not None and grid.get("evidence", {}).get("complete"):
+        # A resize moves an eighteen-pixel gold marker onto fractional pixel
+        # coordinates. Integer-sized reference resizing alone can miss that
+        # marker. Keep the same score threshold and compare its sampling
+        # phases only in the lower-right corner of verified reward boxes.
+        # This avoids an expensive phase search across the whole screenshot.
+        factor = (grid["bounds"][2] - grid["bounds"][0]) / (12 * 52.65)
+        base_size = marker.shape[0] * factor
+        sizes = sorted({max(8, int(np.floor(base_size))), max(8, round(base_size)),
+                        max(8, int(np.ceil(base_size)) + 1)})
+        templates = []
+        for size in sizes:
+            for dx in (-.75, -.5, -.25, 0., .25, .5, .75):
+                for dy in (-.75, -.5, -.25, 0., .25, .5, .75):
+                    matrix = np.asarray(((factor, 0., dx), (0., factor, dy)), dtype=np.float32)
+                    sample = cv2.warpAffine(marker, matrix, (size, size),
+                                            flags=cv2.INTER_LANCZOS4,
+                                            borderMode=cv2.BORDER_REPLICATE)
+                    templates.append(sample)
+        radius = max(2, round(factor * 3))
+        for reward in grid["rewards"]:
+            left, top, right, bottom = reward["box"]
+            if any(left <= old["x"] <= right and top <= old["y"] <= bottom for old in found):
+                continue
+            x1, y1 = max(0, left, right - sizes[-1] - radius), max(0, top, bottom - sizes[-1] - radius)
+            x2, y2 = min(gray.shape[1], right + radius), min(gray.shape[0], bottom + radius)
+            corner = gray[y1:y2, x1:x2]
+            best = None
+            for sample in templates:
+                size = sample.shape[0]
+                if min(corner.shape[:2]) < size:
+                    continue
+                _, score, _, point = cv2.minMaxLoc(cv2.matchTemplate(corner, sample, cv2.TM_CCOEFF_NORMED))
+                if score >= .86 and (best is None or score > best[0]):
+                    best = score, x1 + point[0], y1 + point[1], size
+            if best is None:
+                continue
+            score, x, y, size = best
+            if not any(abs(x - old["x"]) < size and abs(y - old["y"]) < size for old in found):
+                found.append({"x": float(x), "y": float(y), "size": float(size), "score": score,
+                              "box": (round(x - 1.85 * size), round(y - 2 * size), x + size, y + size)})
     return sorted(found, key=lambda item: (item["y"], item["x"]))
 
 
@@ -987,13 +1053,13 @@ def scan_ritual_page(image, omen_names, references=()):
             image = source.convert("RGB")
     rows = ocr_lines(image)
     result = parse_ritual(rows, omen_names)
-    markers = deferred_markers(image)
     from PoE2_Data_Logger.ocr.ritual_grid import detect_reward_grid, has_grid_structure
     header = next((row for row in rows if re.fullmatch(r"favou?rs", row["text"].strip(), re.I)
                    and float(row.get("score", 0)) >= .75), None)
     box_keys = ("x", "y", "right", "bottom")
     header_box = tuple(header[key] for key in box_keys) if header and all(key in header for key in box_keys) else None
     grid = detect_reward_grid(image, header_box=header_box)
+    markers = deferred_markers(image, grid=grid)
     result.update(ritual_totals(rows, image, grid=grid))
     if grid is not None:
         result["items"] = _ritual_grid_items(image, grid, result["items"], markers, omen_names, references)

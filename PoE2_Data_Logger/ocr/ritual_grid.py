@@ -266,16 +266,6 @@ def _corner_template(bottom_right):
 
 def _corner_strength(pixels, box, pitch, bottom_right=False):
     left, top, right, bottom = box
-    size = max(3, round(pitch * .16))
-    patch = (pixels[bottom - size:bottom, right - size:right] if bottom_right
-             else pixels[top:top + size, left:left + size])
-    if not patch.size:
-        return 0.
-    red, green, blue = patch.astype(np.float32).transpose(2, 0, 1)
-    ornate = ((red > green * 1.17) & (green > blue * 1.15) &
-              (red > 65) & (blue < red * .65))
-    if float(ornate.mean()) < .35:
-        return 0.
     # Brown equipment artwork alone is not an ornate frame.  Verify the
     # actual curled corner shape before using it to join multiple cells.
     template_size = max(3, round(pitch * 8 / 52.65))
@@ -287,7 +277,16 @@ def _corner_strength(pixels, box, pitch, bottom_right=False):
                     max(0, x - radius):x + template_size + radius]
     if min(search.shape[:2]) < template_size:
         return 0.
-    score = float(cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED).max())
+    _, score, _, at = cv2.minMaxLoc(cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED))
+    # Divider coordinates are rounded independently from the resampled art.
+    # Check the colour of the actual matched ornament, rather than a fixed
+    # patch which can include an extra row of background at another scale.
+    patch = search[at[1]:at[1] + template_size, at[0]:at[0] + template_size]
+    red, green, blue = patch.astype(np.float32).transpose(2, 0, 1)
+    ornate = ((red > green * 1.17) & (green > blue * 1.15) &
+              (red > 65) & (blue < red * .65))
+    if float(ornate.mean()) < .35:
+        return 0.
     # Icon artwork sometimes overlaps the lower ornament.  At small capture
     # scales the upper eight-pixel ornament also loses detail to resampling.
     threshold = .60 if bottom_right else (.65 if pitch < 35 else .72)
@@ -316,6 +315,29 @@ def _no_divider(pixels, edges, origin, pitch, row, column, vertical):
 
 
 def _rewards(pixels, geometry):
+    scale = 52.65 / geometry["pitch"]
+    if abs(scale - 1) > .05:
+        # The ornament samples are eight pixels wide at the game's standard
+        # grid scale. Compare at that scale so resampling cannot turn an item
+        # detail into a false lower corner or hide a genuine upper corner.
+        normalized = cv2.resize(pixels, None, fx=scale, fy=scale,
+                                interpolation=cv2.INTER_LANCZOS4)
+        normalized_geometry = dict(geometry)
+        normalized_geometry["origin"] = tuple(value * scale for value in geometry["origin"])
+        normalized_geometry["pitch"] *= scale
+        normalized_geometry["edges"] = cv2.Canny(normalized, 12, 35)
+        groups = _rewards_at_scale(normalized, normalized_geometry)
+        for reward in groups:
+            row, column = divmod(min(reward["slots"]) - 1, COLUMNS)
+            width = max((part - 1) % COLUMNS for part in reward["slots"]) - column + 1
+            height = max((part - 1) // COLUMNS for part in reward["slots"]) - row + 1
+            reward["box"] = _cell_box(geometry["origin"], geometry["pitch"], column, row,
+                                      width, height)
+        return groups
+    return _rewards_at_scale(pixels, geometry)
+
+
+def _rewards_at_scale(pixels, geometry):
     origin, pitch = geometry["origin"], geometry["pitch"]
     boxes = {row * COLUMNS + column + 1: _cell_box(origin, pitch, column, row)
              for row in range(ROWS) for column in range(COLUMNS)}
@@ -405,6 +427,30 @@ def detect_reward_grid(image: Image.Image, header_box=None) -> dict | None:
         return None
     pixels = np.asarray(image.convert("RGB"))
     geometry = _locate(pixels, header_box)
+    if geometry is None and max(image.size) <= 1800:
+        # At smaller capture scales, thin dividers can alternate between
+        # neighbouring pixels. A full screenshot's Hough vote then misses
+        # lines which remain visible in the reward grid. Search at a larger
+        # sampling scale with the same complete-grid requirements; identify
+        # item footprints from the original pixels afterwards.
+        for scale in (4 / 3, 1.5):
+            enlarged = image.resize((round(image.width * scale), round(image.height * scale)),
+                                    Image.Resampling.LANCZOS)
+            scale_x, scale_y = enlarged.width / image.width, enlarged.height / image.height
+            enlarged_header = (tuple(value * (scale_x if index % 2 == 0 else scale_y)
+                                     for index, value in enumerate(header_box))
+                               if header_box is not None else None)
+            candidate = _locate(np.asarray(enlarged.convert("RGB")), enlarged_header)
+            if candidate is None:
+                continue
+            candidate["origin"] = (candidate["origin"][0] / scale_x,
+                                   candidate["origin"][1] / scale_y)
+            candidate["pitch"] /= (scale_x + scale_y) / 2
+            candidate["bounds"] = tuple(round(value / (scale_x if index % 2 == 0 else scale_y))
+                                        for index, value in enumerate(candidate["bounds"]))
+            candidate["edges"] = cv2.Canny(pixels, 12, 35)
+            geometry = candidate
+            break
     if geometry is None:
         return None
     return {

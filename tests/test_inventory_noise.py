@@ -1,11 +1,13 @@
 import json
 from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
 import numpy as np
 from PIL import Image
 
+from PoE2_Data_Logger.core import store, logger_store as logger
 from PoE2_Data_Logger.ocr import currency_ocr, inventory_labels, item_ocr
 
 
@@ -35,6 +37,23 @@ class InventoryNoiseTests(unittest.TestCase):
                 result = item_ocr.scan_inventory_grid(image.resize(size))
                 self.assertEqual(result["items"], [])
                 self.assertEqual(result["unknown"], [])
+
+    def test_real_populated_inventory_keeps_all_three_stacks_reviewable(self):
+        source = Image.open(Path(item_ocr.__file__).resolve().parent.parent /
+                            "region_examples" / "ritual.jpg").convert("RGB")
+        image = source.crop((1153, 657, 1804, 937))
+        # Visible stacks: Simulacrum Splinter 14, liquid 1, and a stack of 10.
+        # Uncertain identification/counts must reach review instead of vanishing.
+        with tempfile.TemporaryDirectory() as folder, patch.object(store, "DATA_DIR", Path(folder)), \
+                patch.object(logger, "_READY", False):
+            for scale in (.75, 1, 1.25):
+                with self.subTest(scale=scale), patch.object(currency_ocr, "get_reader", return_value=self.reader):
+                    result = item_ocr.scan_inventory_grid(image.resize(
+                        (round(image.width * scale), round(image.height * scale)), Image.Resampling.LANCZOS))
+                    visible = {row["slot"] for row in result["items"] + result["unknown"]}
+                    self.assertEqual(visible, {1, 13, 25})
+                    liquid = next(row for row in result["items"] if row["slot"] == 13)
+                    self.assertEqual(liquid["quantity"], 1)
 
     def test_selected_empty_glow_never_reaches_the_matcher(self):
         image = item_ocr.inventory_grid(self.source.crop((1153, 657, 1804, 937)))

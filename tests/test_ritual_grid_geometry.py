@@ -117,6 +117,61 @@ class RitualGridGeometryTests(unittest.TestCase):
                 if expected["bottom_at_image_edge"]:
                     self.assertTrue(grid["evidence"]["image_boundary"])
 
+    def test_scaled_supplied_pages_keep_all_reward_footprints(self):
+        fixtures = Path(__file__).resolve().parent / "fixtures/ritual_rewards"
+        cases = json.loads((fixtures / "expected.json").read_text(encoding="utf-8"))
+        for expected in cases:
+            with Image.open(fixtures / expected["file"]) as source:
+                original = source.convert("RGB")
+            for scale in (.75, 1.25):
+                with self.subTest(capture=expected["source"], scale=scale):
+                    image = original.resize((round(original.width * scale),
+                                             round(original.height * scale)),
+                                            Image.Resampling.LANCZOS)
+                    grid = detect_reward_grid(image)
+                    self.assertIsNotNone(grid)
+                    self.assertEqual([reward["slots"] for reward in grid["rewards"]],
+                                     expected["footprints"])
+                    for reward in grid["rewards"]:
+                        self.assertGreaterEqual(min(reward["box"]), 0)
+                        self.assertLessEqual(reward["box"][2], image.width)
+                        self.assertLessEqual(reward["box"][3], image.height)
+
+    def test_small_full_captures_and_image_edge_keep_complete_grid(self):
+        fixtures = Path(__file__).resolve().parent / "fixtures/ritual_rewards"
+        cases = json.loads((fixtures / "expected.json").read_text(encoding="utf-8"))
+        for name in ("03.png", "11.png"):
+            expected = next(case for case in cases if case["file"] == name)
+            with Image.open(fixtures / (Path(name).stem + "_context.webp")) as source:
+                original = source.convert("RGB")
+            for scale in (.75, 1, 1.25):
+                with self.subTest(capture=name, scale=scale):
+                    image = original.resize((round(original.width * scale),
+                                             round(original.height * scale)),
+                                            Image.Resampling.LANCZOS)
+                    grid = detect_reward_grid(image)
+                    self.assertIsNotNone(grid, "Full-image line detection must retain the visible grid")
+                    self.assertEqual([reward["slots"] for reward in grid["rewards"]],
+                                     expected["footprints"])
+                    if expected["bottom_at_image_edge"]:
+                        self.assertTrue(grid["evidence"]["image_boundary"])
+
+    def test_resampling_never_completes_clipped_supplied_pages(self):
+        fixtures = Path(__file__).resolve().parent / "fixtures/ritual_rewards"
+        cases = json.loads((fixtures / "expected.json").read_text(encoding="utf-8"))
+        for expected in cases:
+            with Image.open(fixtures / expected["file"]) as source:
+                original = source.convert("RGB")
+            for box in ((0, 0, original.width, original.height - 54),
+                        (54, 0, original.width, original.height)):
+                clipped = original.crop(box)
+                for scale in (.75, 1.25):
+                    with self.subTest(capture=expected["source"], clip=box, scale=scale):
+                        image = clipped.resize((round(clipped.width * scale),
+                                                round(clipped.height * scale)),
+                                               Image.Resampling.LANCZOS)
+                        self.assertIsNone(detect_reward_grid(image))
+
     def test_image_edge_does_not_allow_a_missing_bottom_reward_row(self):
         fixtures = Path(__file__).resolve().parent / "fixtures/ritual_rewards"
         with Image.open(fixtures / "11.png") as image:

@@ -95,7 +95,7 @@ class UniquePropagationExportTests(unittest.TestCase):
         logger.increment_propagation_detonated(logger.scan_context(), runes=["Rage", "Time"], recipe="Example")
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
             ns = {"s": workbook_export.NS}
-            sheet = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+            sheet = ET.fromstring(archive.read("xl/worksheets/sheet3.xml"))
             rows = sheet.findall("s:sheetData/s:row", ns)
             headers = {cell.get("r").rstrip("1"): "".join(cell.itertext()) for cell in rows[0]}
             found = {}

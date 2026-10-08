@@ -90,7 +90,7 @@ class Sheet:
 
 
 def _numeric_column(name):
-    return (name.startswith(("Item: ", "Currency: ", "Omen: ", "Stat: ", "Applied Stat: ")) or name in {"Socket Count", "Tier", "Area Level", "Base Map Mods", "Map Mods", "# +2 Mod Tablets",
+    return (name.startswith(("Item: ", "Currency: ", "Omen: ", "Stat: ", "Applied Stat: ", "Atlas Choice: ")) or name in {"Socket Count", "Tier", "Area Level", "Base Map Mods", "Map Mods", "# +2 Mod Tablets",
         "Tablet Mods", "Total Mods", "Master +Mods", "Waystone %", "Tablets Used", "Item Rarity %",
         "Monster Rarity %", "Pack Size %", "Effectiveness %", "Source Row", "Chain Step #", "Expedition #",
         "Normal Kills (Map)", "Magic Kills (Map)", "Rare Kills (Map)", "Unique Kills (Map)", "Remnants Detonated (Expedition)",
@@ -133,7 +133,7 @@ def _atlas_setup_hyperlinks(data, atlas_data, target_sheet):
     return hyperlinks
 
 
-def _data_sheet(data, *, hyperlinks=None):
+def _data_sheet(data, *, hyperlinks=None, numeric_columns=()):
     rows = csv.reader(io.StringIO(data.decode("utf-8-sig")))
     headers = next(rows)
     root = ET.Element(f"{{{NS}}}worksheet")
@@ -144,8 +144,11 @@ def _data_sheet(data, *, hyperlinks=None):
     ET.SubElement(view, f"{{{NS}}}selection", {"pane": "bottomLeft", "activeCell": "A2", "sqref": "A2"})
     ET.SubElement(root, f"{{{NS}}}sheetFormatPr", {"defaultRowHeight": "15"})
     cols = ET.SubElement(root, f"{{{NS}}}cols")
+    numeric_columns = set(numeric_columns)
     for col, header in enumerate(headers, 1):
         width = 38 if any(word in header for word in ("Recipe", "Affix", "Modifiers", "Name", "Perk", "Combo", "Effects", "Stats")) else 19
+        if header in numeric_columns:
+            width = min(48, max(19, len(header) + 2))
         ET.SubElement(cols, f"{{{NS}}}col", {"min": str(col), "max": str(col), "width": str(width), "customWidth": "1"})
     ET.SubElement(root, f"{{{NS}}}sheetData")
     sheet = Sheet(ET.tostring(root))
@@ -158,7 +161,7 @@ def _data_sheet(data, *, hyperlinks=None):
         for column, value in enumerate(values, 1):
             if value == "":
                 continue
-            if _numeric_column(headers[column - 1]) and value and re.fullmatch(r"-?\d+(?:\.\d+)?", value):
+            if (headers[column - 1] in numeric_columns or _numeric_column(headers[column - 1])) and value and re.fullmatch(r"-?\d+(?:\.\d+)?", value):
                 value = float(value) if "." in value else int(value)
             address = f"{_column(column)}{last}"
             sheet.set(last, column, value, style="2" if hyperlinks and address in hyperlinks else None)
@@ -178,9 +181,12 @@ def export_xlsx():
     # atlas edit or scan commit that happens while the workbook is generated.
     with logger._connect() as db:
         db.execute("BEGIN")
-        data_sheets = [("Export", logger.export_all_csv(_db=db)),
-                       ("Atlas Character Settings", logger.export_atlas_csv(_db=db))]
-    setup_links = _atlas_setup_hyperlinks(data_sheets[0][1], data_sheets[1][1], data_sheets[1][0])
+        data_sheets = [("Export", logger.export_primary_csv(_db=db)),
+                       ("Atlas Character Settings", logger.export_atlas_csv(_db=db)),
+                       ("Scan History", logger.export_all_csv(_db=db))]
+        item_headers = logger.map_summary_item_headers(_db=db)
+    setup_links = {number: _atlas_setup_hyperlinks(data, data_sheets[1][1], data_sheets[1][0])
+                   for number, (_, data) in enumerate(data_sheets, 1) if number != 2}
     content = ET.Element(f"{{{TYPES}}}Types")
     for extension, kind in (("rels", "application/vnd.openxmlformats-package.relationships+xml"), ("xml", "application/xml")):
         ET.SubElement(content, f"{{{TYPES}}}Default", {"Extension": extension, "ContentType": kind})
@@ -195,7 +201,8 @@ def export_xlsx():
     parts = {}
     for number, (name, data) in enumerate(data_sheets, 1):
         path = f"xl/worksheets/sheet{number}.xml"
-        parts[path] = _data_sheet(data, hyperlinks=setup_links if number == 1 else None)
+        parts[path] = _data_sheet(data, hyperlinks=setup_links.get(number),
+                                 numeric_columns=item_headers if number == 1 else ())
         ET.SubElement(content, f"{{{TYPES}}}Override", {"PartName": "/" + path,
             "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"})
         ET.SubElement(sheets, f"{{{NS}}}sheet", {"name": name, "sheetId": str(number), f"{{{DOC_REL}}}id": f"rId{number}"})

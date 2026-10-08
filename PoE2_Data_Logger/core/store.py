@@ -130,17 +130,18 @@ def _reviewed_vector(raw: bytes, sockets: int, slot: str):
     import numpy as np
     from PIL import Image
     from PoE2_Data_Logger.ocr.glyph_eval import vector
-    from PoE2_Data_Logger.ocr.prototype import center_for, crop_at, ncc_find
+    from PoE2_Data_Logger.ocr.prototype import center_for, crop_at, find_books, normalize_book
 
     with Image.open(io.BytesIO(raw)) as source:
         im = source.convert("RGB")
-    scores = []
+    templates = []
     for name in ("book_bronze.png", "book_purple.png"):
         with Image.open(HERE / name) as template:
-            scores.append(ncc_find(im, template))
-    bx, by, score = max(scores, key=lambda found: found[2])
-    if score < .65:
+            templates.append(template.convert("RGB"))
+    books = find_books(im, templates)
+    if not books:
         return None
+    im, (bx, by, score) = normalize_book(im, books[0])
     cx, cy = center_for(bx, by, sockets, int(slot[1:]))
     if cx < 18 or cy < 18 or cx + 18 > im.width or cy + 18 > im.height:
         return None

@@ -61,7 +61,7 @@ class MetricExportAuditTests(unittest.TestCase):
         self.assertTrue(all(len(row) == len(rows[0]) for row in rows), "Every cell must keep its column")
         return [dict(zip(rows[0], row)) for row in rows[1:]]
 
-    def workbook_rows(self, number=1):
+    def workbook_rows(self, number=3):
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
             self.assertIsNone(archive.testzip())
             root = ET.fromstring(archive.read(f"xl/worksheets/sheet{number}.xml"))
@@ -200,7 +200,7 @@ class MetricExportAuditTests(unittest.TestCase):
                            "Ritual Tribute Available", "Ritual Rerolls Remaining", "New Find Quantity"):
                 self.assertEqual(found[header], row[header])
 
-    def test_atlas_stats_each_have_columns_and_keep_historical_catalogs(self):
+    def test_compact_atlas_setups_keep_allocations_choices_and_frozen_catalog_stats(self):
         self.save_atlas(allocated=("0007",))
         logger.commit_chain("Rage")
         original = logger._atlas_snapshot(logger.get_state()["settings"])["atlas_setup_id"]
@@ -209,35 +209,74 @@ class MetricExportAuditTests(unittest.TestCase):
         self.catalog["nodes"]["0007"]["stats"] = {"item_rarity": 15, "future_stat": 17}
         self.save_atlas(rarity=None)
         rows = self.csv_rows(logger.export_atlas_csv())
-        old = next(row for row in rows if row["Atlas Setup ID"] == original and row["Node ID"] == "0007")
-        self.assertEqual(old["Stat: item_rarity"], "5")
-        self.assertEqual(old["Applied Stat: item_rarity"], "5")
-        self.assertEqual(old["Stat: zero_stat"], "0")
-        self.assertEqual(old["Applied Stat: zero_stat"], "0")
-        self.assertEqual(old["Stat: future_stat"], "")
+        self.assertEqual(len(rows), 2, "Each referenced setup gets one row")
+        self.assertEqual(len({row["Atlas Setup ID"] for row in rows}), 2)
+        choice_node = "Atlas Node: Expedition | Expedition Choice [0008]"
+        choice = "Atlas Choice: Expedition | Expedition Choice [0008]"
+        ritual_node = "Atlas Node: Ritual | Ritual Tribute [0009]"
+        old = next(row for row in rows if row["Atlas Setup ID"] == original)
         self.assertEqual(old["Gear Item Rarity %"], "0")
-        disabled = next(row for row in rows if row["Atlas Setup ID"] == original and row["Node ID"] == "0008")
-        self.assertEqual(disabled["Selected Option ID"], "001")
-        self.assertEqual(disabled["Stat: choice_stat"], "7")
-        self.assertEqual(disabled["Applied Stat: choice_stat"], "")
-        self.assertEqual(disabled["Points"], "0")
-        revised = next(row for row in rows if row["Atlas Setup ID"] != original and row["Node ID"] == "0008")
-        self.assertEqual(revised["Stat: base_stat"], "3")
-        self.assertEqual(revised["Applied Stat: choice_stat"], "7")
-        self.assertEqual(revised["Stat: other_choice"], "")
-        self.assertEqual(revised["Allocated"], "Yes")
+        self.assertEqual((old[choice_node], old[choice], old[ritual_node]), ("No", "1", "No"))
+        revised = next(row for row in rows if row["Atlas Setup ID"] != original)
+        self.assertEqual((revised[choice_node], revised[choice], revised[ritual_node]), ("Yes", "1", "No"))
         self.assertEqual(revised["Gear Item Rarity %"], "")
+        self.assertNotEqual(old["Atlas Catalog ID"], revised["Atlas Catalog ID"])
+        self.assertNotIn("Atlas Node: Main Atlas | Map Rarity [0007]", old,
+                         "Ordinary nodes checked in every setup need no column")
+        self.assertEqual(len(old), 8, "Compact export uses five metadata and three dynamic columns")
+        # Stats and their option IDs remain in each immutable dataset. The
+        # compact sheet stores allocation plus option number instead of
+        # repeating hundreds of stat columns for every node.
+        with logger._connect() as db:
+            saved = {row["setup_id"]: (json.loads(row["settings_json"]), json.loads(row["catalog_json"]))
+                     for row in db.execute("SELECT s.setup_id,s.settings_json,c.catalog_json "
+                         "FROM atlas_setups s JOIN atlas_catalogs c ON c.catalog_id=s.catalog_id")}
+        old_settings, old_catalog = saved[original]
+        new_settings, new_catalog = saved[revised["Atlas Setup ID"]]
+        self.assertEqual(old_catalog["nodes"]["0007"]["stats"], {"item_rarity": 5, "zero_stat": 0})
+        self.assertEqual(old_catalog["nodes"]["0007"]["effects"], ["5% map rarity"])
+        self.assertNotIn("future_stat", old_catalog["nodes"]["0007"]["stats"])
+        self.assertEqual(new_catalog["nodes"]["0007"]["stats"], {"item_rarity": 15, "future_stat": 17})
+        self.assertIn("0007", old_settings["allocated"])
+        self.assertNotIn("0008", old_settings["allocated"])
+        self.assertIn("0008", new_settings["allocated"])
+        for settings, catalog in ((old_settings, old_catalog), (new_settings, new_catalog)):
+            self.assertEqual(settings["choices"]["0008"], "001")
+            node = catalog["nodes"]["0008"]
+            self.assertEqual(node["stats"], {"base_stat": 3})
+            self.assertEqual([option["id"] for option in node["choices"]], ["001", "002"])
+            self.assertEqual(node["choices"][0]["stats"], {"choice_stat": 7})
+            self.assertEqual(node["choices"][0]["effects"], ["7% chosen effect"])
+            self.assertEqual(node["choices"][1]["stats"], {"other_choice": 11})
         workbook, types = self.workbook_rows(2)
         for row in rows:
-            index = next(index for index, item in enumerate(workbook) if
-                         (item["Atlas Setup ID"], item["Node ID"]) == (row["Atlas Setup ID"], row["Node ID"]))
+            index = next(index for index, item in enumerate(workbook) if item["Atlas Setup ID"] == row["Atlas Setup ID"])
             self.assertEqual(workbook[index], row)
-            self.assertEqual(types[index]["Node ID"], "inlineStr")
-            if row["Selected Option ID"]:
-                self.assertEqual(types[index]["Selected Option ID"], "inlineStr")
-            for header, amount in row.items():
-                if header.startswith(("Stat: ", "Applied Stat: ")) and amount:
-                    self.assertIsNone(types[index][header])
+            self.assertEqual(types[index]["Atlas Catalog ID"], "inlineStr")
+            self.assertEqual(types[index][choice_node], "inlineStr")
+            self.assertIsNone(types[index][choice])
+
+    def test_primary_map_fields_and_item_totals_are_logged_once_with_recipe_rows(self):
+        self.save_atlas()
+        config, _ = self.configure_map()
+        logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
+        logger.save_currency_snapshot("end", [{"name": "Chaos Orb", "quantity": 9},
+                                              {"name": "Exalted Orb", "quantity": 4}])
+        primary = self.csv_rows(logger.export_primary_csv())
+        self.assertGreater(len(primary), 1)
+        self.assertTrue(all(row["Map ID"] == "M0001" for row in primary))
+        first = primary[0]
+        self.assertEqual((first["Chaos Orb"], first["Exalted Orb"]), ("9", "4"))
+        self.assertEqual(first["Map Modifiers"], "\n".join(config["waystone_mods"]))
+        for header in ("Chaos Orb", "Exalted Orb", "Map Modifiers", "Tablet 1 Mod 1 Value"):
+            self.assertTrue(first[header], header)
+            self.assertTrue(all(row[header] == "" for row in primary[1:]), header)
+        self.assertNotIn("Map Mods", first)
+        self.assertNotIn("Waystone %", first)
+        workbook, types = self.workbook_rows(1)
+        self.assertEqual(workbook, primary)
+        for header in ("Chaos Orb", "Exalted Orb", "Tablet 1 Mod 1 Value"):
+            self.assertIsNone(types[0][header])
 
     def test_propagation_two_runes_count_one_scan_and_chain_keeps_order(self):
         self.save_atlas()

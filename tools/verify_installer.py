@@ -78,7 +78,16 @@ def verify_blocked_launch(executable, arguments, protected_files, check_saved):
     check_saved()
 
 
-def verify_running_guards(installer, directory, check_saved):
+def running_client_titles(version, beta):
+    current = f"PoE2 Data Logger {version} Beta" if beta else "PoE2 Data Logger"
+    return tuple(dict.fromkeys((
+        "PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta",
+        "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta",
+        "PoE2 Data Logger 1.3.1 Beta", current,
+    )))
+
+
+def verify_running_guards(installer, directory, check_saved, version, beta):
     import ctypes
     from PySide6.QtCore import QEvent
     from PySide6.QtWidgets import QApplication, QWidget
@@ -96,7 +105,7 @@ def verify_running_guards(installer, directory, check_saved):
     window = QWidget()
     window.resize(320, 120)
     try:
-        for title in ("PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta", "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta"):
+        for title in running_client_titles(version, beta):
             window.setWindowTitle(title)
             window.show()
             deadline = time.monotonic() + 5
@@ -120,7 +129,7 @@ def verify_running_guards(installer, directory, check_saved):
 
 
 def verify(installer):
-    match = re.fullmatch(r"PoE2-Data-Logger-Setup-v([0-9]+\.[0-9]+(?:\.[0-9]+)?)(-beta)?\.exe", installer.name)
+    match = re.fullmatch(r"PoE2-Data-Logger-Setup-v([0-9]+\.[0-9]+(?:\.[0-9]+){0,2})(-beta)?\.exe", installer.name)
     if not match:
         raise RuntimeError("Installer filename does not contain a valid release version.")
     version, beta = match.group(1), bool(match.group(2))
@@ -157,7 +166,7 @@ def verify(installer):
                     raise RuntimeError("Installed version does not match the release.")
                 if winreg.QueryValueEx(key, "DisplayName")[0] != expected_name:
                     raise RuntimeError("Installed application label does not match the release.")
-        verify_running_guards(installer, directory, check_saved)
+        verify_running_guards(installer, directory, check_saved, version, beta)
         environment = dict(os.environ, QT_QPA_PLATFORM="windows",
                            POE2_SMOKE_REPORT=str(directory / "startup-check.txt"))
         try:

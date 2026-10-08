@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageEnhance
 
 from PoE2_Data_Logger.core import logger_store as logger, store
 from PoE2_Data_Logger.ocr import propagation_scan, runehelper_ocr
@@ -207,18 +207,30 @@ class PropagationOCRTests(unittest.TestCase):
             self.assertFalse(result["can_use"], result)
             self.assertFalse(result["choices"][0]["can_use"], result)
 
-    def test_inconsistent_visible_recipe_sequence_is_not_accepted(self):
+    def test_unrelated_visible_recipe_does_not_block_the_selected_recipe(self):
         image, rows = self.panel(["Medved's Saga", "Divine Orb"], marks={0: [1]})
         result = self.scan(image, rows)
-        self.assertFalse(result["can_use"])
-        self.assertEqual(result["runes"], [])
+        self.assertTrue(result["can_use"], result)
+        self.assertEqual(result["selected_recipe"], "Medved's Saga")
+        self.assertEqual(result["runes"], ["Rage"])
+        self.assertFalse(result["choices"][1]["can_use"])
 
-    def test_visible_tile_count_must_match_recipe(self):
+    def test_unreadable_other_reward_does_not_block_clear_cursor_recipe(self):
+        image, rows = self.panel(["Medved's Saga", "Greater Regal Orb x3"], marks={0: [1]})
+        rows[1]["text"] = "1x Unreadable ?? reward"
+        result = self.scan(image, rows)
+        self.assertTrue(result["can_use"], result)
+        self.assertEqual(result["selected_recipe"], "Medved's Saga")
+        self.assertEqual(result["runes"], ["Rage"])
+        self.assertFalse(result["choices"][1]["can_use"])
+
+    def test_recipe_database_supplies_socket_count_and_rune_order(self):
         image, rows = self.panel(["Greater Exalted Orb x3"], marks={0: [4]})
         rows[0]["text"] = "1x Greater Exalted Orb"
         result = self.scan(image, rows)
-        self.assertFalse(result["can_use"], result)
-        self.assertEqual(result["runes"], [])
+        self.assertTrue(result["can_use"], result)
+        self.assertEqual(result["selected_recipe"], "Greater Exalted Orb")
+        self.assertEqual(result["runes"], ["Prismatic"])
 
     def test_selected_reward_low_confidence_is_not_accepted(self):
         image, rows = self.panel(["Medved's Saga"], marks={0: [1]})
@@ -325,6 +337,114 @@ class PropagationOCRTests(unittest.TestCase):
                 self.assertEqual(result["choices"][1]["positions"], [3])
                 self.assertTrue(result["choices"][0]["can_use"], result)
                 self.assertTrue(result["choices"][1]["can_use"], result)
+
+    def test_real_crowns_survive_exposure_and_tight_crops_on_every_row(self):
+        for left in (0, 20, 35, 46):
+            for brightness in (.85, 1, 1.15):
+                with self.subTest(left=left, brightness=brightness):
+                    image = self.source.crop((left, 0, self.source.width, self.source.height))
+                    result = propagation_scan.scan_propagation(
+                        ImageEnhance.Brightness(image).enhance(brightness))
+                    self.assertFalse(result["can_use"], result)
+                    self.assertEqual([choice["runes"] for choice in result["choices"]],
+                                     [["Cyclonic"], ["Tidal"], ["Tidal"]], result)
+                    self.assertEqual([choice["positions"] for choice in result["choices"]],
+                                     [[3], [3], [3]], result)
+
+    def remove_gold_frame(self, image, centre_x, top, width=38, height=38):
+        left, right = round(centre_x - width / 2), round(centre_x + width / 2) - 1
+        draw = ImageDraw.Draw(image)
+        for box in ((left, top, right, top + 2),
+                    (left, top, left + 3, top + height - 1),
+                    (right - 3, top, right, top + height - 1),
+                    (left, top + height - 4, right, top + height - 1)):
+            draw.rectangle(box, fill=(176, 161, 130))
+
+    def test_selected_recipe_needs_three_marks_and_position_without_any_gold_frame(self):
+        image, rows = self.panel(["Greater Exalted Orb x3"], marks={0: [4]})
+        self.remove_gold_frame(image, 71 + 41 * 3, 68)
+        # The database supplies the other runes. Their visible tiles are not
+        # required to log the selected recipe's marked fourth rune.
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((50, 68, 173, 105), fill=(176, 161, 130))
+        self.assertEqual(propagation_scan._marked_boxes(propagation_scan._gold_mask(image))[0], [])
+        result = self.scan(image, rows)
+        self.assertTrue(result["can_use"], result)
+        self.assertEqual(result["positions"], [4])
+        self.assertEqual(result["runes"], ["Electrocuting"])
+
+    def test_frameless_marks_without_arrow_keep_explicit_recipe_approval(self):
+        image, rows = self.panel(["Medved's Saga"], selected=None, marks={0: [1, 5]})
+        for position in (1, 5):
+            self.remove_gold_frame(image, 71 + 41 * (position - 1), 68)
+        result = self.scan(image, rows)
+        self.assertFalse(result["can_use"])
+        self.assertEqual(result["runes"], [])
+        self.assertTrue(result["choices"][0]["can_use"], result)
+        self.assertEqual(result["choices"][0]["runes"], ["Rage", "Time"])
+
+    def test_frameless_one_or_two_marks_hold_for_manual_entry(self):
+        for offsets in ((0,), (-9, 9)):
+            with self.subTest(offsets=offsets):
+                image, rows = self.panel(["Medved's Saga"], marks={0: []})
+                draw = ImageDraw.Draw(image)
+                for offset in offsets:
+                    draw.polygon(((71 + offset, 63), (69 + offset, 67), (73 + offset, 67)),
+                                 fill=(242, 213, 144))
+                result = self.scan(image, rows)
+                self.assertFalse(result["can_use"], result)
+                self.assertFalse(result["choices"][0]["can_use"], result)
+
+    def test_clear_frameless_crown_cannot_hide_an_incomplete_second_crown(self):
+        for offsets in ((0,), (-9, 9)):
+            with self.subTest(offsets=offsets):
+                image, rows = self.panel(["Medved's Saga"], marks={0: [1]})
+                self.remove_gold_frame(image, 71, 68)
+                centre = 71 + 41 * 4
+                draw = ImageDraw.Draw(image)
+                for offset in offsets:
+                    draw.polygon(((centre + offset, 63), (centre + offset - 2, 67),
+                                  (centre + offset + 2, 67)), fill=(242, 213, 144))
+                self.assertEqual(propagation_scan._marked_boxes(propagation_scan._gold_mask(image))[0], [])
+                result = self.scan(image, rows)
+                self.assertFalse(result["can_use"], result)
+                self.assertFalse(result["choices"][0]["can_use"], result)
+                self.assertEqual(result["runes"], [])
+
+    def test_isolated_gold_glint_does_not_block_a_clear_frameless_crown(self):
+        image, rows = self.panel(["Medved's Saga"], marks={0: [1]})
+        self.remove_gold_frame(image, 71, 68)
+        centre = 71 + 41 * 4
+        ImageDraw.Draw(image).line((centre - 9, 67, centre - 8, 67), fill=(242, 213, 144))
+        result = self.scan(image, rows)
+        self.assertTrue(result["can_use"], result)
+        self.assertEqual(result["runes"], ["Rage"])
+
+    def test_real_frameless_short_panel_preserves_header_recipe_cursor_and_three_marks(self):
+        image = self.source.copy()
+        for top in (68, 149, 230):
+            self.remove_gold_frame(image, 153, top)
+        self.assertEqual(propagation_scan._marked_boxes(propagation_scan._gold_mask(image))[0], [])
+        self.cursor(image, 167)
+        result = propagation_scan.scan_propagation(image.crop((0, 0, image.width, 300)))
+        self.assertTrue(result["can_use"], result)
+        self.assertEqual(result["selected_recipe"], "Regal Orb x3")
+        self.assertEqual(result["positions"], [3])
+        self.assertEqual(result["runes"], ["Tidal"])
+
+    def test_partial_second_crown_cannot_be_hidden_by_a_clear_first_mark(self):
+        for brightness in (.85, 1, 1.15):
+            image, rows = self.panel(["Medved's Saga"], marks={0: [1]})
+            draw = ImageDraw.Draw(image)
+            cx, y = 71 + 41 * 4, 86
+            draw.rectangle((cx - 19, y - 18, cx + 18, y + 18),
+                           outline=(242, 213, 144), width=2)
+            for offset in (-9, 9):
+                draw.polygon([(cx + offset, y - 23), (cx + offset - 2, y - 19),
+                              (cx + offset + 2, y - 19)], fill=(242, 213, 144))
+            result = self.scan(ImageEnhance.Brightness(image).enhance(brightness), rows)
+            self.assertFalse(result["can_use"], result)
+            self.assertFalse(result["choices"][0]["can_use"], result)
 
 
 if __name__ == "__main__":

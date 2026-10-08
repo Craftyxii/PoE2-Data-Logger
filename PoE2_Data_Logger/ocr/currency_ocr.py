@@ -213,9 +213,10 @@ class CurrencyReader:
                 margin = top["score"] - ranked[1]["score"] if len(ranked) > 1 else float("inf")
                 clear_match = ((top["score"] > -3000 and margin > 300) or
                                (top["score"] > -3200 and margin > 1500))
-                if top["name"] in self.inventory_ignored and (clear_match or count_digits is None):
+                if top["name"] in self.inventory_ignored and clear_match:
                     return {"family": None, "members": [], "score": 0,
                             "margin": margin, "all": [], "ignored": True,
+                            "candidate": " / ".join(self.inventory_members[top["name"]]),
                             "shared_icon": len(self.inventory_members[top["name"]]) > 1}
                 if clear_match:
                     return {"family": top["name"], "members": self.inventory_members[top["name"]],

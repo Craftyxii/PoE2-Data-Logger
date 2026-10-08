@@ -66,7 +66,11 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
         ns = {"s": workbook_export.NS}
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
             self.assertIsNone(archive.testzip())
-            for index, csv_data in enumerate((logger.export_all_csv(), logger.export_atlas_csv()), 1):
+            manifest = ET.fromstring(archive.read("xl/workbook.xml"))
+            self.assertEqual([sheet.get("name") for sheet in manifest.findall("s:sheets/s:sheet", ns)],
+                             ["Export", "Atlas Character Settings", "Scan History"])
+            for index, csv_data in enumerate((logger.export_primary_csv(), logger.export_atlas_csv(),
+                                              logger.export_all_csv()), 1):
                 root = ET.fromstring(archive.read(f"xl/worksheets/sheet{index}.xml"))
                 rows = root.findall("s:sheetData/s:row", ns)
                 headers = {cell.get("r").rstrip("0123456789"): "".join(cell.itertext()) for cell in rows[0]}

@@ -144,14 +144,26 @@ def _reference_icon_count(image, reward_y):
 
 def _icon_count(image, reward_y, expected=None):
     import cv2
+    if image.width >= 900 and image.height >= 600 and image.width >= image.height * 1.25:
+        window = image.crop((0, 0, min(image.width, round(image.height * .70)), image.height))
+        gray = cv2.cvtColor(np.asarray(window.convert("RGB")), cv2.COLOR_RGB2GRAY)
+        left, top, right, bottom = runehelper_ocr._find_panel(gray)
+        if right < window.width:
+            # Socket geometry belongs to the panel, not the full game window.
+            # Normalize its width before sampling the icon row.
+            panel = window.crop((left, top, right, bottom))
+            scale = 575 / panel.width
+            panel = panel.resize((575, round(panel.height * scale)), Image.Resampling.LANCZOS)
+            return _icon_count(panel, (reward_y - top) * scale, expected)
     reference = _reference_icon_count(image, reward_y)
-    if expected is not None and reference == expected:
-        return reference
     gray = cv2.cvtColor(np.asarray(image.convert("RGB")), cv2.COLOR_RGB2GRAY)
     left, _, right, _ = runehelper_ocr._find_panel(gray)
     tile = (right - left) * .07
     if tile < 10:
         return None
+    # Text row bounds move a few pixels when the OCR line is resized. Leave
+    # enough room for the bottom of the icon frames; clipping that border
+    # breaks their contours and can count parchment texture as another rune.
     top, bottom = max(0, round(reward_y - tile * 1.8)), min(image.height, round(reward_y - 2))
     if bottom <= top:
         return None
@@ -170,7 +182,15 @@ def _icon_count(image, reward_y, expected=None):
     for x, y in sorted(centres):
         if not left <= x <= left + tile * 2:
             continue
-        row = sorted(a for a, b in centres if abs(b - y) < tile * .25 and a >= x - tile * .2)
+        candidates = sorted(a for a, b in centres if abs(b - y) < tile * .25 and a >= x - tile * .2)
+        row = []
+        for centre in candidates:
+            # A reward label can contain a tile-sized text contour in the
+            # same vertical band. Its distant bounding box is not another
+            # socket and must not invalidate the contiguous rune frames.
+            if row and centre - row[-1] > tile * 1.65:
+                break
+            row.append(centre)
         if not 3 <= len(row) <= 10:
             continue
         gaps = np.diff(row)
