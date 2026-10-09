@@ -86,4 +86,4 @@ DESKTOP_RESOURCES = (
 
 FILE_RESOURCES = DATABASE_RESOURCES + SCANNER_RESOURCES + DESKTOP_RESOURCES
 # These directories retain their relative layout for runtime asset lookups.
-DIRECTORY_RESOURCES = ("fonts", "region_examples", "third_party", "atlas", "ocr/ritual_assets")
+DIRECTORY_RESOURCES = ("fonts", "region_examples", "third_party", "atlas", "ocr/ritual_assets", "rune_icons")

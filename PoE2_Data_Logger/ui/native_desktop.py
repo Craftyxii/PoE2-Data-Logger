@@ -2985,7 +2985,7 @@ class LoggerWindow(QMainWindow):
         return [field.currentText() for field in fields if field.currentData() is not None]
 
     def _build_propagation_recipe_inputs(self, row, choice):
-        """Build noneditable choices from this recipe's complete stored combo, retaining slot order."""
+        """Build recipe-ordered choices with local rune PNGs, preserving labels and numeric slot IDs."""
         with logger._connect() as db:
             recipe = db.execute("SELECT sockets,combo FROM recipes WHERE name=? COLLATE NOCASE",
                                 (choice.get("selected_recipe") or "",)).fetchone()
@@ -3002,6 +3002,12 @@ class LoggerWindow(QMainWindow):
             column.setSpacing(2)
             column.addWidget(QLabel("First rune" if not fields else "Second (optional)"))
             field = combo([(None, "")] + list(enumerate(names)))
+            field.setIconSize(QSize(20, 20))
+            for index, name in enumerate(names, 1):
+                icon_name = re.sub(r"[^a-z0-9]+", "_", name.casefold())
+                icon_path = HERE / "rune_icons" / f"{icon_name}.png"
+                if icon_path.is_file():
+                    field.setItemIcon(index, QIcon(str(icon_path)))
             field.setAccessibleName(f"{choice['selected_recipe']} · {caption}")
             field.setToolTip(caption + " · choose only runes with three gold marks.")
             field.setMinimumWidth(0)

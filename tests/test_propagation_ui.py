@@ -506,6 +506,9 @@ class PropagationUITests(unittest.TestCase):
                 self.assertEqual(table.cellWidget(row, 1).findChildren(QComboBox), list(fields))
                 for field in fields:
                     self.assertFalse(field.isEditable())
+                    self.assertTrue(field.itemIcon(0).isNull())
+                    self.assertTrue(all(not field.itemIcon(index).isNull()
+                                        for index in range(1, field.count())))
                     self.assertEqual([field.itemText(index) for index in range(field.count())],
                                      ["", *expected])
                     self.assertEqual([field.itemData(index) for index in range(field.count())],

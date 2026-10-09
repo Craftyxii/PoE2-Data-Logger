@@ -1,0 +1,385 @@
+{
+  "source_page": "https://poe2db.tw/us/Runeshape_Combinations",
+  "purpose": "Offline dropdown artwork only; PNG encoding preserves the downloaded texture pixels.",
+  "artwork": "Path of Exile 2 game artwork by Grinding Gear Games.",
+  "aliases": {
+    "Gasp": "Volcanic"
+  },
+  "runes": {
+    "Adaptive": {
+      "page": "https://poe2db.tw/us/Adaptive_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneAdaptive.webp",
+      "source_sha256": "e7f74cd7bee392d489d9645d8608321de856cc1bb7c6c9f859c258ac3aec4954",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "adaptive.png",
+      "png_sha256": "4295eaf10eaae598e4a549da07f2a559a927c0f5a66ef07a533e4735984355d7"
+    },
+    "Arcane": {
+      "page": "https://poe2db.tw/us/Arcane_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneArcane.webp",
+      "source_sha256": "5408abffc6759d2e63d18e12959d803f3b5d87b1fd9e9a27b561303dec70aef9",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "arcane.png",
+      "png_sha256": "a8fa8b95195a88e238957b396e9d14168c6f888a8c4c9dcbc108e73064380af3"
+    },
+    "Bloodletting": {
+      "page": "https://poe2db.tw/us/Bloodletting_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneBloodletting.webp",
+      "source_sha256": "0a46c99c41c9f926f22ede796882128142e7690f4d13838b3dd0d93bde19c3b8",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "bloodletting.png",
+      "png_sha256": "9c314de5a2d5c7ba6fe137593071c595f8fa08170bea3f000a1264e4db1f74bf"
+    },
+    "Bond": {
+      "page": "https://poe2db.tw/us/Bond_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRareRuneBond.webp",
+      "source_sha256": "53e4aa3e3ba91390a770756ed36095d48a77385d87fef06ff626a7cc34aff91d",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "bond.png",
+      "png_sha256": "36fe02f30477cdd86be0d610e0769c785926358a7d3295e62861855477a87d74"
+    },
+    "Celestial": {
+      "page": "https://poe2db.tw/us/Celestial_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneCelestial.webp",
+      "source_sha256": "545ff267c2f3e8cd4554e59ae4ed622dc5f36babfbd4cdd95ea545c96b506d0c",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "celestial.png",
+      "png_sha256": "55523e8b06e9f2de53775496c176a5272ff469bf5c3ac37ffaa8598960c4af9c"
+    },
+    "Cold": {
+      "page": "https://poe2db.tw/us/Cold_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneCold.webp",
+      "source_sha256": "ca296d06f4a0d16040a94d06684950a4f0cf64ffff9c522f5d22b160e2b07e44",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "cold.png",
+      "png_sha256": "f6642061afb41c837aeacccd0b931395bda4fba7ca403372079716f41f7f7fc7"
+    },
+    "Cyclonic": {
+      "page": "https://poe2db.tw/us/Cyclonic_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneCyclonic.webp",
+      "source_sha256": "c8b4f0c488f3ea63e3ae055fe99f8fde28a080cf5a11683f093b3bb8f452925d",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "cyclonic.png",
+      "png_sha256": "ffe6ff4d6b0ddf66b2da2d1de689cb46ae76be13592ca45cb5c1dcda4593dfdd"
+    },
+    "Death": {
+      "page": "https://poe2db.tw/us/Death_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRareRuneDeath.webp",
+      "source_sha256": "5f739d5bbc48f860bd6c5cf81c3e5d8f1f76bae9f6b1223c8cc8aac9b16237d4",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "death.png",
+      "png_sha256": "d169a1453a5d99fe874cbecf8c3cdc7903d6bf14c1467098cca4e7afd296935a"
+    },
+    "Earth": {
+      "page": "https://poe2db.tw/us/Earth_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRareRuneEarth.webp",
+      "source_sha256": "93dd8ae39326d24680f1f9c318a38edda8292b4583eb8af0d20435ace41df4c3",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "earth.png",
+      "png_sha256": "c4b87bfefe6ffeb228b12cac4c2ad8d21632ae7548bd7f942c14b825c8884641"
+    },
+    "Electrocuting": {
+      "page": "https://poe2db.tw/us/Electrocuting_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneElectrocuting.webp",
+      "source_sha256": "2e4fd23f6b941702982fd1dd69b0642f9595a1c1c0503d25d12af5225d0433ab",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "electrocuting.png",
+      "png_sha256": "81ce2cd2388ebe2b6825b6041d8d05c390931e70df1e77fedbba9202be27d48b"
+    },
+    "Fire": {
+      "page": "https://poe2db.tw/us/Fire_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneFire.webp",
+      "source_sha256": "61585f940d6ea209ccaac21f857eec752c33ee546f1dc51cfe870036b9e4e146",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "fire.png",
+      "png_sha256": "855f9bb6b5429dfd87257b35dd37aa624bde1c060551e3bc011a49393a318860"
+    },
+    "Gasp": {
+      "page": "https://poe2db.tw/us/Volcanic_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneGasp.webp",
+      "note": "Legacy local recipe label. Local Gemcutter's Prism x3 is Prismatic + Soul + Vision + Gasp; the current source page lists the same reward and order as Prismatic + Soul + Vision + Volcanic, using texture RemnantRuneGasp.webp. Display only; preserve the local recipe label.",
+      "source_sha256": "954284e2d3c012e93441eae0ba26312b63e5cb71575d5dfe249495473143ebd2",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "gasp.png",
+      "png_sha256": "920809c44068315c8e90a382d533a1103fbf8d1d6d5b6c2e2819f977e61df4e9"
+    },
+    "Life": {
+      "page": "https://poe2db.tw/us/Life_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRareRuneLife.webp",
+      "source_sha256": "e629034181b0332861a26db37767cf24ef5d2257b8894aedafd25774d84d4e92",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "life.png",
+      "png_sha256": "080d9e3678dd9b1eaa46cefb2015a7f55593a3e1a61db4c0a1cea65efdc3a841"
+    },
+    "Lightning": {
+      "page": "https://poe2db.tw/us/Lightning_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneLightning.webp",
+      "source_sha256": "a88f0f40a9cd9d44e4c1f8b5643b30224b1e12e859bc90d2814708cfe734e65e",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "lightning.png",
+      "png_sha256": "c01a192050e91f22134be529fd2bb2f091d3409d316b5c1901feb2867d15bb69"
+    },
+    "Momentum": {
+      "page": "https://poe2db.tw/us/Momentum_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneMomentum.webp",
+      "source_sha256": "1fe2bf3fc65882176f88b8e477d28b7ab33725c0641b092ce52c7a7dd6bf41e2",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "momentum.png",
+      "png_sha256": "22e6ddd43b5e30e1d245b4fb9f74ab5264ee0f09e8b76bd80d9d2cd00f1d76ae"
+    },
+    "Moon": {
+      "page": "https://poe2db.tw/us/Moon_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneMoon.webp",
+      "source_sha256": "81d1b59ccaf2dde5a91fb0b744dc54c4f70d0dc07cb461dd80bd03ef6f86272a",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "moon.png",
+      "png_sha256": "84724b576324cc18a44e0386cd16cfdb0695446785bde20da07490afda0f0fae"
+    },
+    "Oath": {
+      "page": "https://poe2db.tw/us/Oath_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRareRuneOath.webp",
+      "source_sha256": "121bd925f56cf35b2fd22092ebbdcb19b9c2a0a596718760b81b2ea69c7cd975",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "oath.png",
+      "png_sha256": "0205b00272cff01d9b76603b96204616bce77ba266f627cc22c7601db5665780"
+    },
+    "Opulent": {
+      "page": "https://poe2db.tw/us/Opulent_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneOpulent.webp",
+      "source_sha256": "59173e515a7b1e0d24576616774468c4be7edfebf4c1d717df3d9cd303c1c33e",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "opulent.png",
+      "png_sha256": "8c07daa120e7abbc61ae465e9f38031c8f0444132b200e2213007d8c1f9ee773"
+    },
+    "Power": {
+      "page": "https://poe2db.tw/us/Power_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRareRunePower.webp",
+      "source_sha256": "031f7b4edaba62bbd043394a4508788439ea9944816f3f92196909d434aa2534",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "power.png",
+      "png_sha256": "dead2bfab65b47fcb32bda6389a9945c10f0bf92fd6a176277857a8550c60b36"
+    },
+    "Prismatic": {
+      "page": "https://poe2db.tw/us/Prismatic_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRunePrismatic.webp",
+      "source_sha256": "7a63667901370ccbb4ef9c5cb81a9e5bc778a10788b921214f8c61704fb33512",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "prismatic.png",
+      "png_sha256": "d7991793ac12d522f593d14d9e7b34e3812db9d71568fba7c47c74b289b1eb8e"
+    },
+    "Protective": {
+      "page": "https://poe2db.tw/us/Protective_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneProtective.webp",
+      "source_sha256": "8e6ccd8db9c72a95397771293bf0bf9bb1f5e33441381035bfe23ce681e498c7",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "protective.png",
+      "png_sha256": "c1ac6ce61654acb27908f4456c4836a4a0cbc92eee01baaad3a90bc444328549"
+    },
+    "Rage": {
+      "page": "https://poe2db.tw/us/Rage_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneEnrage.webp",
+      "source_sha256": "3a4c02a0fad4263685c989d65358f1822914ff7dd017291e8434091b428af797",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "rage.png",
+      "png_sha256": "9405b4c7b454d2be8a65ea6b5dc99f0376b1fd235f40198fabc1e962a0044c6f"
+    },
+    "Rebirth": {
+      "page": "https://poe2db.tw/us/Rebirth_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneRebirth.webp",
+      "source_sha256": "1ab2d3543845d5a45a8d23216ffa9191715124ffda4c13dfed837a4c9b273710",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "rebirth.png",
+      "png_sha256": "7c6ddbdab20530a08bbe3aaabd329751ad430b9685688d01f3f18d334aa61511"
+    },
+    "Sky": {
+      "page": "https://poe2db.tw/us/Sky_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRareRuneSky.webp",
+      "source_sha256": "1deee487cc20e67ecc7902010e18416adc8850db217011f9aaf724bb5eee9913",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "sky.png",
+      "png_sha256": "bee88cba4ba495b0e635a461eb9647e28f0ff0beb8fbd74b74d377d4a91fb9ad"
+    },
+    "Soul": {
+      "page": "https://poe2db.tw/us/Soul_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRareRuneSoul.webp",
+      "source_sha256": "38feb60a5e46004ff3ce06adaa5d58fe222882266bdd6a179ca5efb21707daa0",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "soul.png",
+      "png_sha256": "c130e4f1921821464f1a15e3ed2ee5712d671eda5a96d50cfe4ffc7b407993c8"
+    },
+    "Stone": {
+      "page": "https://poe2db.tw/us/Stone_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneStone.webp",
+      "source_sha256": "b91d9a6fca2f42be2dc3c312f8b26d83ebdec7670d0af4f39b7def28807c5c2a",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "stone.png",
+      "png_sha256": "4f1730e4ad6a685dc3c26bfda1ce91e20da482fdc45a9725831579e56029ee77"
+    },
+    "Tempest": {
+      "page": "https://poe2db.tw/us/Tempest_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneTempest.webp",
+      "source_sha256": "47db59e13e2c05594eca0f43b4fa0ff61d9262636301f2fed078f877a2f71b96",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "tempest.png",
+      "png_sha256": "1b84d014f2e3659069d3009ba86766f216da113e7e5b9d0961036d7cdca28772"
+    },
+    "Tidal": {
+      "page": "https://poe2db.tw/us/Tidal_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneTidal.webp",
+      "source_sha256": "6644a5f94cdf8125fe740e75a52e903e6f098c06ea39507d9b0df0a00bd9b020",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "tidal.png",
+      "png_sha256": "2bfb66f3e1f6d38ac2f3976b4f20dd4e47fa4ab9ece722a5baa86a0278ec248e"
+    },
+    "Time": {
+      "page": "https://poe2db.tw/us/Time_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRareRuneTime.webp",
+      "source_sha256": "bb4f7b8f44ec5800cf15ac061ad0d830e8201e3c89ed24497a97a48cae6bd1d4",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "time.png",
+      "png_sha256": "f8eb2768074a045a4ccc17f7ea42f5d13ca95d689bbdd34bf2c3a5e06b18a053"
+    },
+    "Toxic": {
+      "page": "https://poe2db.tw/us/Toxic_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneToxic.webp",
+      "source_sha256": "80a5f3a59d0af3cd4e1d78725a5f0c49de44bad8ac5bf3eeb358df66d5d6c778",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "toxic.png",
+      "png_sha256": "1112b45fa550c1a3bd6c2fa53024470112ca884e3850b55a3e68a89613d92da3"
+    },
+    "Vision": {
+      "page": "https://poe2db.tw/us/Vision_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneVision.webp",
+      "source_sha256": "46e1f496aef5d9556170bc9813be2027786d8a596d6a515b15bf775a8200bc9e",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "vision.png",
+      "png_sha256": "778b4ed3b1aac174721efa561c31237304cd77294a9573bd98f45b3429dceff6"
+    },
+    "Volcanic": {
+      "page": "https://poe2db.tw/us/Volcanic_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneGasp.webp",
+      "source_sha256": "954284e2d3c012e93441eae0ba26312b63e5cb71575d5dfe249495473143ebd2",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "volcanic.png",
+      "png_sha256": "920809c44068315c8e90a382d533a1103fbf8d1d6d5b6c2e2819f977e61df4e9"
+    },
+    "Ward": {
+      "page": "https://poe2db.tw/us/Ward_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRareRuneWard.webp",
+      "source_sha256": "782cbb041ad9981ca4fbcf01ff52ac712fb26c0ba2155e651465f4df1ba58c7d",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "ward.png",
+      "png_sha256": "33540e9ed5b54fea06ed00322a636bf845a21ce71f75f5a0cb9c6d5ea4862de1"
+    },
+    "Wisdom": {
+      "page": "https://poe2db.tw/us/Wisdom_Rune",
+      "url": "https://cdn.poe2db.tw/image/Art/2DArt/UIImages/InGame/Expedition/Remnant/RemnantRuneWisdom.webp",
+      "source_sha256": "59e3d6d422f25778921b8506b0a37f6fdb87ec1aeb6adb921a216c8eee979143",
+      "dimensions": [
+        59,
+        59
+      ],
+      "file": "wisdom.png",
+      "png_sha256": "d4c59c0f64a8cb18f608ab8a3f429c53a322ce99bfed1ca98de0ab4f32a53dbf"
+    }
+  }
+}
