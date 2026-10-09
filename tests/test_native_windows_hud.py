@@ -20,7 +20,7 @@ import unittest
 from unittest.mock import patch
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageGrab, ImageStat
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QEvent, QObject, QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from PoE2_Data_Logger.core import logger_store as logger, ocr_sensitivity, reference_pack, service, store
@@ -31,6 +31,52 @@ from PoE2_Data_Logger.platform.live_watch import game_foreground
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 from PoE2_Data_Logger.ui import native_desktop
 from tools.native_hud_input import NativeWindowsInput
+
+
+class NativeActivationProbe(QObject):
+    """Keep bounded native Qt activation evidence even when an acceptance assertion fails."""
+
+    def __init__(self, case):
+        """Observe only the application's, main widget's and backing window's activation events."""
+        super().__init__(case.app)
+        self.case = case
+        self.started = time.monotonic()
+        self.types = {getattr(QEvent.Type,name):name for name in (
+            "WindowActivate", "WindowDeactivate", "ActivationChange", "ApplicationActivate",
+            "ApplicationDeactivate", "ApplicationStateChange", "WindowStateChange")}
+        case.report["activation_events"] = []
+
+    def eventFilter(self, source, event):
+        """Record observed event targets, Qt/native activation and overlay state without changing them."""
+        if event.type() not in self.types:
+            return False
+        case = self.case
+        window = case.window
+        handle = window.windowHandle() if window is not None else None
+        if source is case.app:
+            target = "QApplication"
+        elif source is window:
+            target = "QWidget"
+        elif handle is not None and source is handle:
+            target = "QWindow"
+        else:
+            return False
+        entry = {"seconds":round(time.monotonic()-self.started,3), "target":target,
+                 "event":self.types[event.type()], "application_state":str(case.app.applicationState()),
+                 "foreground_hwnd":case.native.foreground()}
+        if window is not None:
+            entry.update({"widget_active":window.isActiveWindow(),
+                          "qwindow_active":handle.isActive() if handle is not None else None,
+                          "window_state":str(window.windowState()), "opacity":window.windowOpacity(),
+                          "overlay_revealed":window._overlay_revealed,
+                          "overlay_activation_pending":getattr(window,"_overlay_activation_pending",None),
+                          "overlay_transition":getattr(window,"_overlay_window_transition",None)})
+        if event.type() == QEvent.Type.WindowStateChange:
+            entry["old_window_state"] = str(event.oldState())
+        events = case.report["activation_events"]
+        events.append(entry)
+        del events[:-160]
+        return False
 
 
 @unittest.skipUnless(sys.platform == "win32" and os.environ.get("QT_QPA_PLATFORM", "").lower() == "windows",
@@ -68,6 +114,9 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.window = None
         self.host = None
         self.addCleanup(self.close_windows)
+        self.activation_probe = NativeActivationProbe(self)
+        self.app.installEventFilter(self.activation_probe)
+        self.addCleanup(self.app.removeEventFilter,self.activation_probe)
         self.open_logger()
         self.raw = (Path(__file__).resolve().parents[1] / "PoE2_Data_Logger/region_examples/opened.jpg").read_bytes()
 
@@ -611,7 +660,9 @@ class NativeWindowsHUDTests(unittest.TestCase):
                     self.native.key(0x09,(0x12,))
                     route = "SendInput Alt+Tab from external fixture to background main HWND"
                 self.native.wait(lambda:self.window.isVisible() and not self.window.isMinimized() and
-                                 self.native.foreground()==hwnd, f"ordinary {mode} application restore")
+                                 self.native.foreground()==hwnd and
+                                 abs(self.window.windowOpacity()-1.0)<.005,
+                                 f"opaque ordinary {mode} application restore",timeout=10)
                 self.assertAlmostEqual(self.window.windowOpacity(),1.0,places=2)
                 self.assertFalse(self.window._overlay_revealed)
                 self.assertTrue(self.window._overlay_enabled)

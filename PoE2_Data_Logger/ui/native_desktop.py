@@ -4272,13 +4272,17 @@ class LoggerWindow(QMainWindow):
         if source is self and event.type() in (QEvent.Type.Show, QEvent.Type.Hide):
             self._overlay_visible = event.type() == QEvent.Type.Show
         if source is self and self._overlay_enabled:
-            if event.type() == QEvent.Type.WindowActivate:
+            if (event.type() == QEvent.Type.WindowActivate or
+                    event.type() == QEvent.Type.ActivationChange and self.isActiveWindow()):
                 if (self._overlay_window_transition or
                         self._overlay_activation_pending and time.monotonic() <= self._overlay_activation_deadline):
-                    self._overlay_activation_pending = False
+                    # Qt can send both activation event types for the same native focus request.
+                    pass
                 else:
                     self._restore_application_view()
-            elif event.type() == QEvent.Type.WindowDeactivate and not self._overlay_window_transition:
+            elif ((event.type() == QEvent.Type.WindowDeactivate or
+                   event.type() == QEvent.Type.ActivationChange and not self.isActiveWindow()) and
+                  not self._overlay_window_transition):
                 self._overlay_activation_pending = False
             elif (event.type() == QEvent.Type.WindowStateChange and not self._overlay_window_transition and
                   (self.isMinimized() or event.oldState() & Qt.WindowState.WindowMinimized)):
