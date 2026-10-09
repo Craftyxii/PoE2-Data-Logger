@@ -22,11 +22,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
 class PropagationUITests(unittest.TestCase):
+    """Check propagation recipe review, manual rune corrections, ordered chain persistence and retained remnant context."""
     @classmethod
     def setUpClass(cls):
+        """Create or reuse the QApplication required by the Qt test fixtures."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Open an isolated logger window with polling stopped and a reusable propagation screenshot."""
         self.tmp = tempfile.TemporaryDirectory()
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -38,6 +41,7 @@ class PropagationUITests(unittest.TestCase):
         Image.new("RGB", (575, 720), "tan").save(self.raw, format="PNG")
 
     def tearDown(self):
+        """Close the logger window, stop workers and restore the original data directory."""
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -46,6 +50,7 @@ class PropagationUITests(unittest.TestCase):
         self.tmp.cleanup()
 
     def scan(self, runes, recipe="Medved's Saga", clear=True, context=None, manual=False):
+        """Deliver a propagation reading, optionally configuring and approving a manual recipe-choice fixture."""
         result = {"mode": "propagation", "runes": runes, "positions": list(range(1, len(runes) + 1)),
                   "selected_recipe": recipe, "can_use": clear, "status": "Propagation read",
                   **(logger.scan_context() if context is None else context)}
@@ -63,13 +68,16 @@ class PropagationUITests(unittest.TestCase):
             self.window.approve_propagation_recipe(0)
 
     def saved_parts(self):
+        """Return the persisted rune pairs for the currently selected chain."""
         return [(part["rune1"], part["rune2"]) for part in logger.get_state()["chain"]]
 
     def draft(self):
+        """Return displayed chain part numbers and rune names from the review table."""
         table = self.window.chain_review_table
         return [(table.item(row, 0).text(), table.item(row, 1).text()) for row in range(table.rowCount())]
 
     def review_state(self):
+        """Snapshot review controls, images, recipes and chain draft/context for preservation assertions."""
         window = self.window
         return {
             "kind": window.pending_review_kind,
@@ -99,6 +107,7 @@ class PropagationUITests(unittest.TestCase):
         }
 
     def assert_remnant_review_preserved(self, before):
+        """Assert propagation displays its own controls while retaining the pending remnant data and corrections."""
         after = self.review_state()
         # Propagation has its own display while the captured remnant and typed
         # corrections remain pending. Compare the retained data independently
@@ -118,6 +127,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.window.manual_remnant_button.text(), "Return to remnant review")
 
     def return_to_remnant_review(self, before):
+        """Return to retained remnant review and assert its controls restore without altering propagation drafts."""
         pending = copy.deepcopy(logger.get_state()["ocr_pending"])
         propagation = self.review_state()
         self.assertEqual(self.window.manual_remnant_button.text(), "Return to remnant review")
@@ -144,6 +154,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
 
     def test_scans_append_in_scan_order_with_left_to_right_pairs(self):
+        """Verify scans append in scan order with left to right pairs."""
         before = logger.get_state()["scan_commit_count"]
         self.scan(["Death", "Power"], "Divine Orb x2")
         self.scan(["Opulent"], "Greater Regal Orb x3")
@@ -164,6 +175,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.saved_parts(), [("Death", "Power"), ("Opulent", "")])
 
     def test_review_completion_advances_only_after_confident_pairs_are_saved(self):
+        """Verify review completion advances only after confident pairs are saved."""
         self.scan(["Rage", "Time"])
         self.scan(["Opulent"])
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
@@ -183,6 +195,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.window.expedition.currentData(), 3)
 
     def test_keyboard_correction_preserves_pair_in_review_and_export(self):
+        """Verify keyboard correction preserves pair in review and export."""
         self.scan(["Death", "Power"], "Divine Orb x2", manual=True)
         self.scan(["Opulent"], "Greater Regal Orb x3", manual=True)
         field = self.window.rune_inputs[1]
@@ -204,6 +217,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
 
     def test_empty_paired_correction_survives_expedition_switch(self):
+        """Verify empty paired correction survives expedition switch."""
         self.scan(["Death", "Power"], "Divine Orb x2", manual=True)
         self.window.rune_inputs[1].clear()
         self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
@@ -214,6 +228,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.window.chain_review_table.item(1, 2).text(), "Divine Orb x2")
 
     def test_clearing_all_runes_discards_old_scan_grouping(self):
+        """Verify clearing all runes discards old scan grouping."""
         self.scan(["Death", "Power"], "Divine Orb x2", manual=True)
         for field in self.window.rune_inputs:
             field.clear()
@@ -224,6 +239,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.window.chain_review_table.item(1, 2).text(), "")
 
     def test_new_scan_replaces_cleared_trailing_pair_member(self):
+        """Verify new scan replaces cleared trailing pair member."""
         self.scan(["Death", "Power"], "Divine Orb x2", manual=True)
         self.window.rune_inputs[1].clear()
         self.scan(["Opulent"], "Greater Regal Orb x3")
@@ -233,6 +249,7 @@ class PropagationUITests(unittest.TestCase):
             {"rune1": "Death", "rune2": ""}, {"rune1": "Opulent", "rune2": ""}])
 
     def test_switching_expedition_preserves_separate_drafts(self):
+        """Verify switching expedition preserves separate drafts."""
         self.scan(["Rage", "Time"], manual=True)
         self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
         self.assertEqual(self.draft(), [])
@@ -243,6 +260,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.draft(), [("1", "Death")])
 
     def test_stale_scan_does_not_append_after_completion_or_new_map(self):
+        """Verify stale scan does not append after completion or new map."""
         context = logger.scan_context()
         self.scan(["Rage"])
         self.window.complete_chain()
@@ -256,6 +274,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.draft(), [])
 
     def test_unclear_scan_stays_reviewable_without_adding_a_part(self):
+        """Verify unclear scan stays reviewable without adding a part."""
         self.scan([], clear=False)
         self.assertEqual(self.window.pending_review_kind, "propagation")
         self.assertFalse(self.window.approve_scan_button.isEnabled())
@@ -265,11 +284,13 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
     def enter_manual(self, *runes):
+        """Fill the manual propagation rune inputs and click Add."""
         for index, field in enumerate(self.window.propagation_rune_inputs):
             field.setEditText(runes[index] if index < len(runes) else "")
         self.window.propagation_add_button.click()
 
     def test_failed_scan_manual_pair_counts_once_and_commits_in_order(self):
+        """Verify failed scan manual pair counts once and commits in order."""
         self.scan([], clear=False)
         self.assertFalse(self.window.chain_review_group.isHidden())
         self.enter_manual("Death", "Rebirth")
@@ -289,6 +310,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertTrue(any("Power" in row.values() for row in rows))
 
     def test_manual_pair_preserves_pending_remnant_and_its_expedition(self):
+        """Verify manual pair preserves pending remnant and its expedition."""
         self.window.manual_remnant_button.click()
         self.window.first_recipe.setText("Reward being corrected")
         pending = logger.get_state()["ocr_pending"]
@@ -304,6 +326,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
 
     def test_manual_fields_clear_on_map_or_expedition_change(self):
+        """Verify manual fields clear on map or expedition change."""
         self.scan([], clear=False)
         self.window.propagation_rune_inputs[0].setEditText("Death")
         stale = dict(self.window._manual_propagation_context)
@@ -320,6 +343,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.window.propagation_rune_inputs[0].currentText(), "")
 
     def test_review_table_correction_preserves_pair_without_extra_detonation(self):
+        """Verify review table correction preserves pair without extra detonation."""
         self.scan(["Death", "Power"], manual=True)
         self.window.chain_review_table.item(1, 1).setText("Rebirth")
         self.assertEqual(self.draft(), [("1", "Death"), ("1", "Rebirth")])
@@ -327,6 +351,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.window._chain_steps(), [{"rune1": "Death", "rune2": "Rebirth"}])
 
     def test_manual_entry_is_accessible_without_a_scan_and_typo_cannot_be_committed(self):
+        """Verify manual entry is accessible without a scan and typo cannot be committed."""
         self.window.manual_propagation_button.click()
         self.assertFalse(self.window.chain_review_group.isHidden())
         self.enter_manual("Death", "Rebirth")
@@ -342,6 +367,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["chain"][0]["rune1"], "Death")
 
     def test_new_map_commits_header_kills_to_finished_map_and_clears_next_map(self):
+        """Verify new map commits header kills to finished map and clears next map."""
         from PySide6.QtWidgets import QPushButton
         for field, text in zip((self.window.normal, self.window.magic, self.window.rare, self.window.unique),
                                ("11", "22", "33", "44")):
@@ -358,6 +384,7 @@ class PropagationUITests(unittest.TestCase):
                             (self.window.normal, self.window.magic, self.window.rare, self.window.unique)))
 
     def test_invalid_kill_count_keeps_current_map_and_typed_counts(self):
+        """Verify invalid kill count keeps current map and typed counts."""
         self.window.normal.setText("10")
         self.window.unique.setText("not a number")
         before = logger.get_state()["scan_commit_count"]
@@ -369,6 +396,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.window.unique.text(), "not a number")
 
     def test_missing_arrow_recipe_approve_and_deny_choose_one_part(self):
+        """Verify missing arrow recipe approve and deny choose one part."""
         for name, runes in (("Recipe A", ["Death", "Power"]), ("Recipe B", ["Rage", "Time"])):
             logger.save_recipe({"name": name, "sockets": 2, "combo": " + ".join(runes)})
         result = {"mode": "propagation", "can_use": False, "runes": [], "status": "Select a recipe",
@@ -391,6 +419,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["detonated"], 1)
 
     def held_recipe_list(self):
+        """Display three recipe candidates with unclear runes and one readable Swift Alloy selection."""
         self.window._propagation_read({
             "mode": "propagation", "can_use": False, "runes": [],
             "status": "Marked rune positions were not clear",
@@ -402,27 +431,35 @@ class PropagationUITests(unittest.TestCase):
         return self.window.propagation_recipe_table
 
     def recipe_action(self, row):
+        """Return a recipe row approve button for click and enablement assertions."""
         return self.window.propagation_recipe_table.cellWidget(row, 2).findChild(
             QPushButton, "approvePropagationRecipe")
 
     def row_fields(self, row):
+        """Return the recipe row rune-slot selectors."""
         return self.window._propagation_row_inputs[row]
 
     def select_row_slots(self, row, first, second=None):
+        """Select optional zero-based rune slots in a recipe row."""
         for field, slot in zip(self.row_fields(row), (first, second)):
             field.setCurrentIndex(0 if slot is None else field.findData(slot))
 
     def hold_recipes(self, *choices):
+        """Display the supplied propagation recipe choices as a pending review."""
         self.window._propagation_read({
             "mode": "propagation", "can_use": False, "runes": [],
             "status": "Check the marked runes", "choices": list(choices),
             **logger.scan_context()}, self.raw.getvalue())
 
     def test_unclear_recipe_inline_entry_approves_only_its_recipe(self):
+        """Verify unclear recipe inline entry approves only its recipe."""
         table = self.held_recipe_list()
         self.window.resize(1400, 700)
         self.window.show()
         self.app.processEvents()
+        self.assertTrue(self.window.manual_propagation_button.isHidden())
+        self.window._review_controls("propagation")
+        self.assertTrue(self.window.manual_propagation_button.isHidden())
         action = self.recipe_action(1)
         self.assertFalse(action.isEnabled())
         self.assertEqual(action.text(), "Approve")
@@ -454,6 +491,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertTrue(self.window.review_complete_chain_button.isEnabled())
 
     def test_inline_runes_stay_with_their_recipe_when_selection_changes(self):
+        """Verify inline runes stay with their recipe when selection changes."""
         table = self.held_recipe_list()
         table.setCurrentCell(1, 0)
         self.select_row_slots(1, 3)
@@ -470,6 +508,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["detonated"], 1)
 
     def test_inline_recipe_entry_requires_first_rune_and_cannot_approve_denied_row(self):
+        """Verify inline recipe entry requires first rune and cannot approve denied row."""
         table = self.held_recipe_list()
         self.assertEqual(table.currentRow(), -1)
         self.assertFalse(self.window.propagation_add_button.isEnabled())
@@ -490,6 +529,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
     def test_farrul_dropdowns_contain_only_each_recipe_in_database_order(self):
+        """Verify Farrul's dropdowns contain only each recipe in database order."""
         names = ("Farrul's Rune of Grace", "Farrul's Rune of the Hunt")
         orders = (("Momentum", "Bloodletting", "Adaptive", "Time", "Life"),
                   ("Vision", "Bloodletting", "Bond", "Time", "Rage"))
@@ -521,6 +561,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
     def test_inline_correction_is_saved_and_exported_with_its_recipe(self):
+        """Verify inline correction is saved and exported with its recipe."""
         recipe = "Farrul's Rune of Grace"
         self.hold_recipes({"selected_recipe": recipe, "runes": ["Momentum", "Time"],
                            "positions": [1, 4], "can_use": True})
@@ -544,6 +585,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertTrue(self.window.review_complete_chain_button.isEnabled())
 
     def test_duplicate_rune_names_keep_distinct_slots_and_require_left_to_right_order(self):
+        """Verify duplicate rune names keep distinct slots and require left to right order."""
         self.hold_recipes({"selected_recipe": "Swift Alloy", "runes": [], "can_use": False})
         first, second = self.row_fields(0)
         self.assertEqual([first.itemText(index) for index in range(first.count())],
@@ -568,6 +610,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["detonated"], 1)
 
     def test_ocr_preselects_only_compatible_recipe_runes_and_keeps_unclear_rows_blank(self):
+        """Verify OCR preselects only compatible recipe runes and keeps unclear rows blank."""
         self.hold_recipes(
             {"selected_recipe": "Farrul's Rune of Grace", "runes": ["Momentum", "Life"],
              "positions": [1, 5], "can_use": True},
@@ -585,11 +628,13 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.draft(), [])
 
     def test_unavailable_recipe_order_keeps_manual_fallback_outside_recipe_row(self):
+        """Verify unavailable recipe order keeps manual fallback outside recipe row."""
         self.hold_recipes(
             {"selected_recipe": "Farrul's Rune of Grace", "runes": [], "can_use": False},
             {"selected_recipe": "Missing recipe", "runes": [], "can_use": False})
         self.window.show()
         self.app.processEvents()
+        self.assertFalse(self.window.manual_propagation_button.isHidden())
         self.assertIsNone(self.row_fields(1))
         cell = self.window.propagation_recipe_table.cellWidget(1, 1)
         self.assertTrue(cell is None or not cell.findChildren(QComboBox))
@@ -606,6 +651,7 @@ class PropagationUITests(unittest.TestCase):
     def test_replacing_recipe_scan_closes_manual_popup_before_its_selection_can_transfer(self):
         """Retire an open fallback popup with its scan while allowing fresh input for the replacement."""
         def review(recipe):
+            """Deliver an unclear unknown-recipe reading and process events before popup interaction."""
             self.window._propagation_read({
                 "mode": "propagation", "can_use": False, "runes": [],
                 "selected_recipe": recipe, "status": "Check the marked runes",
@@ -661,6 +707,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["detonated"], 1)
 
     def test_clear_rescan_replaces_unclear_review_and_enables_chain_completion(self):
+        """Verify clear rescan replaces unclear review and enables chain completion."""
         self.scan(["Death"])
         self.scan(["Tidal"])
         table = self.held_recipe_list()
@@ -679,6 +726,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.saved_parts(), [])
 
     def test_real_scaled_capture_saves_correct_rune_and_supports_manual_correction(self):
+        """Verify real scaled capture saves correct rune and supports manual correction."""
         from PIL import ImageDraw, ImageEnhance
         from PoE2_Data_Logger.ocr import propagation_scan, runehelper_ocr
 
@@ -723,10 +771,12 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
 
     def test_review_reject_remnant_button_keeps_inflight_propagation_result(self):
+        """Verify review reject remnant button keeps inflight propagation result."""
         self.window.manual_remnant_button.click()
         self.assertEqual(self.window.pending_review_kind, "remnant")
 
         def read(image):
+            """Reject pending remnant review during propagation reading and return a valid rune pair."""
             self.assertEqual(manager._active_capture_mode, "propagation")
             self.window.reject_scan_button.click()
             self.assertIsNone(logger.get_state()["ocr_pending"])
@@ -747,10 +797,12 @@ class PropagationUITests(unittest.TestCase):
         self.assertIsNone(logger.get_state()["ocr_pending"])
 
     def test_review_reject_propagation_button_keeps_inflight_opened_result(self):
+        """Verify review reject propagation button keeps inflight opened result."""
         self.scan([], clear=False)
         self.assertEqual(self.window.pending_review_kind, "propagation")
 
         def read(path):
+            """Reject pending propagation review during opened reading and return a reviewable remnant."""
             self.assertEqual(manager._active_capture_mode, "opened")
             self.window.reject_scan_button.click()
             self.assertIsNone(self.window.pending_review_kind)
@@ -770,12 +822,14 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.draft(), [])
 
     def test_starting_remnant_file_review_keeps_inflight_propagation_result(self):
+        """Verify starting remnant file review keeps inflight propagation result."""
         path = Path(self.tmp.name) / "remnant.png"
         path.write_bytes(self.raw.getvalue())
         self.window.mode = "opened"
         jobs = []
 
         def read(image):
+            """Start a queued remnant file scan during propagation reading and return a valid rune."""
             self.assertEqual(manager._active_capture_mode, "propagation")
             self.window.scan_file()
             self.assertEqual(self.window.pending_review_kind, "remnant")
@@ -800,6 +854,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertIs(self.window._remnant_reading, pending_capture)
 
     def test_propagation_restores_hidden_hud_with_pending_remnant_review(self):
+        """Verify propagation restores hidden HUD with pending remnant review."""
         self.window._overlay_enabled = True
         for clear in (True, False):
             with self.subTest(clear=clear):
@@ -818,6 +873,7 @@ class PropagationUITests(unittest.TestCase):
                 self.assertEqual(self.window.first_recipe.text(), "A reward being corrected")
 
     def test_pending_opened_remnant_allows_saved_propagation_without_losing_previous_parts(self):
+        """Verify pending opened remnant allows saved propagation without losing previous parts."""
         self.scan(["Death", "Power"], "Divine Orb x2")
         result = {"mode": "opened", "status": "The first reward needs review.",
                   "can_use": False, "first_recipe": None,
@@ -868,6 +924,7 @@ class PropagationUITests(unittest.TestCase):
                          [("Death", "Power"), ("Opulent", "")])
 
     def test_manual_remnant_keeps_original_expedition_while_propagation_advances(self):
+        """Verify manual remnant keeps original expedition while propagation advances."""
         self.scan(["Rage", "Time"])
         self.window.manual_remnant_button.click()
         self.window.first_recipe.setText("Reward being corrected")
@@ -902,6 +959,7 @@ class PropagationUITests(unittest.TestCase):
                              "M0001-E01")
 
     def test_pending_seed_review_without_database_token_allows_propagation(self):
+        """Verify pending seed review without database token allows propagation."""
         self.scan(["Rage"])
         self.window._review_pending("seed", "Visible remnant still needs review.", False)
         self.assertIsNone(logger.get_state()["ocr_pending"])
@@ -916,6 +974,7 @@ class PropagationUITests(unittest.TestCase):
         self.return_to_remnant_review(before)
 
     def test_same_chain_orphan_database_remnant_token_is_preserved_during_propagation(self):
+        """Verify same chain orphan database remnant token is preserved during propagation."""
         self.scan(["Death", "Power"])
         pending = logger.assign_ocr_id("opened")
         self.assertIsNone(self.window.pending_review_kind)
@@ -947,6 +1006,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.saved_parts(), [("Death", "Power"), ("Opulent", "")])
 
     def test_unclear_propagation_keeps_pending_remnant_edits_and_reports_problem(self):
+        """Verify unclear propagation keeps pending remnant edits and reports problem."""
         self.window.manual_remnant_button.click()
         self.window.first_recipe.setText("A reward being corrected")
         before = self.review_state()
@@ -963,6 +1023,7 @@ class PropagationUITests(unittest.TestCase):
         self.return_to_remnant_review(before)
 
     def test_pending_opened_remnant_can_still_save_after_propagation(self):
+        """Verify pending opened remnant can still save after propagation."""
         result = {"mode": "opened", "status": "Reward needs review.", "can_use": False,
                   "first_recipe": None, "opened_recipes": [], **logger.scan_context()}
         self.window.show_result("opened", result, self.raw.getvalue())
@@ -983,6 +1044,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
 
     def test_pending_opened_review_survives_chain_commit_and_next_chain_scan(self):
+        """Verify pending opened review survives chain commit and next chain scan."""
         result = {"mode": "opened", "status": "Reward needs review.", "can_use": False,
                   "first_recipe": None, "opened_recipes": [], **logger.scan_context()}
         self.window.show_result("opened", result, self.raw.getvalue())
@@ -1010,6 +1072,7 @@ class PropagationUITests(unittest.TestCase):
                 [("M0001-E01", 1), ("M0001-E02", 1)])
 
     def test_delayed_remnant_result_arrives_after_chain_advance(self):
+        """Verify delayed remnant result arrives after chain advance."""
         capture = object()
         context = logger.scan_context()
         self.window._remnant_reading = capture
@@ -1025,9 +1088,11 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
 
     def test_remnant_file_scan_can_finish_while_service_chain_advances(self):
+        """Verify remnant file scan can finish while service chain advances."""
         context = logger.scan_context()
 
         def slow_read(path):
+            """Advance the chain during opened-remnant reading before returning a reviewable result."""
             logger.commit_chain_draft([{"rune1": "Rage"}], context)
             logger.complete_chain(context)
             return {"status": "Reward needs review.", "opened_recipes": [], "first_recipe": None}
@@ -1041,6 +1106,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
 
     def test_manual_runes_and_scans_keep_existing_order(self):
+        """Verify manual runes and scans keep existing order."""
         self.window.rune_inputs[0].setText("Death")
         self.window.rune_inputs[1].setText("Power")
         self.scan(["Opulent"])
@@ -1051,6 +1117,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
 
     def test_poll_routes_propagation_without_remnant_assignment(self):
+        """Verify poll routes propagation without remnant assignment."""
         event = {"id": 101, "mode": "propagation", "error": None,
                  "result": {"runes": ["Rage"], "selected_recipe": "Medved's Saga",
                             "can_use": True, **logger.scan_context()}}
@@ -1065,6 +1132,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 2)
 
     def test_propagation_binding_is_in_settings_and_ocr_indicator(self):
+        """Verify propagation binding is in settings and OCR indicator."""
         self.assertIn("propagation", self.window.direct_hotkey_labels)
         old_combo, old_combos = service.HOTKEY.combo, dict(service.HOTKEY.combos)
         try:

@@ -918,15 +918,16 @@ class LoggerWindow(QMainWindow):
         QTimer.singleShot(0, lambda: self._reveal_review_overlay(token))
 
     def _review_controls(self, kind):
-        """Expose only the actions belonging to the displayed scan type."""
+        """Expose the displayed scan's actions and required correction fields."""
+        if hasattr(self, "developer_mode"):
+            self._apply_developer_mode()
         self.approve_scan_button.setVisible(kind is not None)
         self.reject_scan_button.setVisible(kind is not None)
         if kind != "currency":
             self.approve_scan_button.setToolTip("")
         self.review_clear_tablets_button.setVisible(kind == "tablet")
         if hasattr(self, "manual_propagation_button"):
-            displayed = kind or self.review_kind.property("scanKind")
-            self.manual_propagation_button.setVisible(displayed in (None, "propagation"))
+            self._update_manual_propagation_shortcut(kind)
         if not hasattr(self, "ritual_table"):
             return
         self.inventory_phase.setEnabled(kind != "currency" or
@@ -1407,7 +1408,7 @@ class LoggerWindow(QMainWindow):
         row.addWidget(self.mode_select)
         row.addStretch()
         mode.addLayout(row)
-        mode.addWidget(QLabel("Hover a waystone or tablet and press the hotkey to read its copied item text."
+        mode.addWidget(QLabel("Hover a waystone or tablet and press its scan hotkey."
                               " Results open on Review."))
         mode.addWidget(QLabel("Each scan is triggered by a hotkey press."))
         self.tablet_scan_number = combo([1, 2, 3, 4])
@@ -1581,7 +1582,7 @@ class LoggerWindow(QMainWindow):
         head.addStretch()
         tablets.addLayout(head)
         self.tablets_used.currentIndexChanged.connect(self.tablet_active)
-        self.tablet_scan_status = message("OCR fills the selected tablet for review. Save Tablet Config after checking the values.")
+        self.tablet_scan_status = message("Tablet scans fill slots 1–4 in order. Review held readings, then Approve.")
         tablets.addWidget(self.tablet_scan_status)
         self.tablet_raw_preview = QTextEdit()
         self.tablet_raw_preview.setReadOnly(True)
@@ -1603,6 +1604,10 @@ class LoggerWindow(QMainWindow):
                 amount = line("Value")
                 affix.currentIndexChanged.connect(
                     lambda _, a=affix, v=amount: v.setPlaceholderText(affix_unit(value(a)) if value(a) else "Value"))
+                affix.currentIndexChanged.connect(
+                    lambda _, number=tablet + 1: self._tablet_review_edit_changed(number))
+                amount.textChanged.connect(
+                    lambda _, number=tablet + 1: self._tablet_review_edit_changed(number))
                 layout.addWidget(QLabel(f"Mod {slot + 1}"), slot, 0)
                 layout.addWidget(affix, slot, 1)
                 layout.addWidget(amount, slot, 2)
@@ -1786,9 +1791,6 @@ class LoggerWindow(QMainWindow):
         review.addWidget(QLabel("Type is Omen or Item. Correct quantity and Tribute if visible; "
                                 "leave Tribute blank if unreadable. Unnamed rows are rejected when you Approve. "
                                 "Approved name corrections teach future icon scans."))
-        self.new_ritual_name = line("New Omen name")
-        self.new_ritual_name.setParent(self)
-        self.new_ritual_name.hide()
         self.ritual_saved = message("")
         review.addWidget(self.ritual_saved)
 
@@ -2004,9 +2006,9 @@ class LoggerWindow(QMainWindow):
         self._apply_developer_mode()
 
     def _apply_developer_mode(self):
-        """Toggle diagnostic controls, with raw Ritual evidence confined to the data/debug page."""
+        """Show held waystone corrections and keep other diagnostics in developer mode."""
         enabled = self.developer_mode.isChecked()
-        self.map_ocr_overrides.setVisible(enabled)
+        self.map_ocr_overrides.setVisible(enabled or self.pending_review_kind == "waystone")
         for label in self.findChildren(QLabel):
             if label.property("guidance"):
                 label.setVisible(enabled)
@@ -2399,6 +2401,15 @@ class LoggerWindow(QMainWindow):
         """Show only the tablet groups within the selected capacity."""
         for i, group in enumerate(self.tablet_groups):
             group.setVisible(i < int(value(self.tablets_used)))
+
+    def _tablet_review_edit_changed(self, number):
+        """Allow approval after the user enters affixes for the scan's bound tablet slot."""
+        if (self.pending_review_kind != "tablet" or self._pending_tablet_slot != number or
+                self._failed_review):
+            return
+        start = (number - 1) * 4
+        self.approve_scan_button.setEnabled(any(
+            value(field) for field in self.tablet_affixes[start:start + 4]))
 
     def render_perks(self):
         """Preserve each master's unsaved selections while browsing other masters."""
@@ -2972,7 +2983,16 @@ class LoggerWindow(QMainWindow):
                         0 <= selected < len(self._propagation_row_inputs) and
                         self._propagation_row_inputs[selected] is None)
             self.propagation_manual_group.setVisible(fallback)
+            self._update_manual_propagation_shortcut()
             self._update_chain_completion_controls()
+
+    def _update_manual_propagation_shortcut(self, kind=None):
+        """Hide redundant manual entry for recipe-only reviews while preserving unresolved fallback access."""
+        displayed = kind or self.review_kind.property("scanKind")
+        inline_only = bool(self._manual_propagation_context and self._propagation_choices and
+                           len(self._propagation_row_inputs) == len(self._propagation_choices) and
+                           all(self._propagation_row_inputs))
+        self.manual_propagation_button.setVisible(displayed in (None, "propagation") and not inline_only)
 
     def _propagation_recipe_runes(self, row):
         """Read only this recipe's selected slots, requiring first then optional later second."""
@@ -4201,8 +4221,7 @@ class LoggerWindow(QMainWindow):
         self._seed_commit_enabled()
 
     def _seed_fields_changed(self, family_only=False):
-        """Copy seed-field edits into the selected unsaved reading and invalidate automatic
-        commit eligibility.
+        """Refresh corrected seed candidates and invalidate incompatible both-view approval.
         """
         row = self.seed_table.currentRow()
         if self._seed_loading or not 0 <= row < len(self._seed_readings):
@@ -4219,7 +4238,8 @@ class LoggerWindow(QMainWindow):
             reading["seed_slot"] = value(self.seed_slot)
             reading["seed_rune"] = value(self.seed_rune)
             self._seed_loading = True
-            self.update_seed_candidates()
+            candidates = self.update_seed_candidates()
+            reading["candidates"] = [candidate["family"] for candidate in candidates]
             self._seed_loading = False
         family = value(self.seed_family)
         reading["family"] = f"Family {family}" if family else None
@@ -4228,6 +4248,8 @@ class LoggerWindow(QMainWindow):
         if family_only and family:
             self.seed_table.item(row, 0).setCheckState(Qt.CheckState.Checked)
         self._seed_commit_enabled()
+        if self.mode == "both" and self.pending_review_kind == "remnant":
+            self._link_opened_to_seed(self.results["opened"], chosen=row)
 
     def _seed_commit_enabled(self):
         """Enable approval for a waiting selected seed with a family and summarize queue
@@ -4350,9 +4372,17 @@ class LoggerWindow(QMainWindow):
             return
         family = self.resolved["family"]
         sockets = opened.get("sockets") or self.resolved["rows"][0]["sockets"]
-        matches = [i for i, r in enumerate(self._seed_readings) if not r.get("saved") and
-                   not r.get("rejected") and r.get("sockets") == sockets and
-                   family in (r.get("candidates") or [])]
+        matches = []
+        for index, reading in enumerate(self._seed_readings):
+            if (reading.get("saved") or reading.get("rejected") or
+                    reading.get("sockets") != sockets or family not in (reading.get("candidates") or [])):
+                continue
+            try:
+                store.validate(reading.get("sockets"), reading.get("seed_slot"),
+                               reading.get("seed_rune"), family)
+            except ValueError:
+                continue
+            matches.append(index)
         if chosen in matches:
             matches = [chosen]
         if len(matches) != 1:
@@ -4476,8 +4506,7 @@ class LoggerWindow(QMainWindow):
         self.seed_table.hide()
 
     def update_seed_candidates(self, preferred=None):
-        """Resolve visible-seed family choices from corrected sockets, slot and rune, then show
-        stage rewards.
+        """Return exact seed candidates, populate family choices and show selected rewards.
         """
         try:
             candidates = store.candidates(int(value(self.seed_sockets)), value(self.seed_slot),
@@ -4497,6 +4526,7 @@ class LoggerWindow(QMainWindow):
         family = value(self.seed_family)
         selected = next((c for c in candidates if c["family"] == family), None)
         self.seed_rewards.setText(" · ".join(selected["rewards"]) if selected else "")
+        return candidates
 
     def maybe_auto_commit(self, opened):
         """Attempt configured remnant auto-save, requiring a linked approved seed in both-view
@@ -5015,8 +5045,8 @@ class LoggerWindow(QMainWindow):
 
     def _tablet_read(self, number, result):
         """Validate scan context, register candidate affixes, and stage the next tablet slot
-        for review. Automatically commit only ready reads whose matched affixes meet the
-        confidence threshold.
+        for review, including empty readings that can be corrected manually. Automatically
+        commit only ready reads whose matched affixes meet the confidence threshold.
         """
         logger.validate_scan_context(result)
         self._require_remnant_review_finished()
@@ -5066,11 +5096,10 @@ class LoggerWindow(QMainWindow):
         preview_matches.sort(key=lambda item: original_mods.index(item["raw"])
                              if item["raw"] in original_mods else len(original_mods))
         preview_matches = preview_matches[:4]
-        if preview_matches:
-            select(self.tablets_used, max(int(value(self.tablets_used)), number))
-            select(self.tablet_scan_number, number)
-        if preview_matches:
-            self._fill_tablet_slot(number, preview_matches, original_mods)
+        select(self.tablets_used, max(int(value(self.tablets_used)), number))
+        select(self.tablet_scan_number, number)
+        self._fill_tablet_slot(number, preview_matches, original_mods)
+        self.tablet_active()
         self.show_tablet_raw()
         rows = [(f"Affix {i + 1}" if item["score"] >= .94 else "Uncertain", item["affix"],
                  f"{item['value']}%" if item["unit"] == "%" else f"{item['value']} {item['unit']}")
@@ -5081,8 +5110,9 @@ class LoggerWindow(QMainWindow):
             rows = [("OCR text", item["text"], "No affix recognized")
                     for item in ocr_rows[:12] if item.get("text")]
         summary = (f"Tablet {number} · {len(preview_matches)} affixes" if preview_matches else
-                   "No tablet affixes read. Check that the captured preview includes the full tooltip and adjust its region.")
-        self._pending_tablet_slot = number if preview_matches else None
+                   "No tablet affixes read. Use Edit activity settings to enter modifiers, "
+                   "or check the captured tooltip and scan again.")
+        self._pending_tablet_slot = number
         self._review_pending("tablet", summary, bool(preview_matches), rows)
         if auto and result["status"] == "ready" and all(
                 item["score"] >= .94 for item in result["matches"]):
@@ -5117,21 +5147,6 @@ class LoggerWindow(QMainWindow):
             self.tablet_raw_preview.setPlainText("\n".join(self.tablet_raw_mods[number]))
             self.tablet_raw_preview.setVisible(self.developer_mode.isChecked() and
                                                bool(self.tablet_raw_mods[number]))
-
-    def test_inventory_image(self):
-        """Open a size-limited inventory image and submit it for review without automatic
-        saving.
-        """
-        path, _ = QFileDialog.getOpenFileName(self, "Open a cropped inventory grid", str(Path.home()),
-                                               "Images (*.png *.jpg *.jpeg)")
-        if path:
-            if Path(path).stat().st_size > service.MAX_UPLOAD:
-                raise ValueError("Inventory test image exceeds 16 MB.")
-            with Image.open(path) as source:
-                if source.width * source.height > 12_000_000:
-                    raise ValueError("Inventory test image exceeds 12 megapixels.")
-                image = source.convert("RGB")
-            self._inventory_captured(image, live=False)
 
     def _inventory_phase_changed(self):
         """Keep a held inventory reading on its captured map when changing start/end phase,
@@ -5544,19 +5559,6 @@ class LoggerWindow(QMainWindow):
             f"{map_id} · start {len(data['start'])} item types · end {len(data['end'])} item types"
             + (" · net: " + ", ".join(parts[:8]) if parts else ""))
 
-    def test_ritual_image(self):
-        """Open a size-limited Ritual image and submit it for review without automatic saving."""
-        path, _ = QFileDialog.getOpenFileName(self, "Open a Ritual reward page", str(Path.home()),
-                                              "Images (*.png *.jpg *.jpeg)")
-        if path:
-            if Path(path).stat().st_size > 16_000_000:
-                raise ValueError("Ritual test image exceeds 16 MB.")
-            with Image.open(path) as source:
-                if source.width * source.height > 12_000_000:
-                    raise ValueError("Ritual test image exceeds 12 megapixels.")
-                image = source.convert("RGB")
-            self._ritual_captured(image, live=False)
-
     def _ritual_captured(self, image, live=True, expected_map_id=None):
         """Bind a Ritual capture and image hash to the current map and session context before
         queueing reward recognition and opening the held review.
@@ -5818,12 +5820,6 @@ class LoggerWindow(QMainWindow):
         self.note(f"{saved['map_id']} Ritual page {saved['page_number']} "
                   f"{'updated' if saved['updated'] else 'saved'} · {saved['count']} rewards.", True)
         return saved
-
-    def add_ritual_name(self):
-        """Register a local Omen name and clear the entry field after saving it."""
-        name = logger.add_ritual_name(value(self.new_ritual_name))
-        self.new_ritual_name.clear()
-        self.note(f"Added {name} to local Omen names.", True)
 
     def refresh_ritual_summary(self):
         """Display the current map's saved Ritual page count and total reward entries."""

@@ -22,7 +22,7 @@ New maps clear waystone settings. Tablets, Atlas Master settings and map tags—
 
 On **Review**, correct anything held for review, then **Approve** to save it. **Reject** skips it. Waystones and tablets update their settings; other scans save to the log.
 
-**Chains:** the dedicated **Propagation scan** key reads the selected recipe and adds its marked runes from left to right. The general key cannot activate it. Each accepted scan adds one remnant detonation, even with two runes; uncertain or rejected scans add none. Review shows each chain part in scan order. **Commit chain** saves the chain and advances the expedition number for this map without counting its scans again. You can also enter runes manually.
+**Chains:** the dedicated **Propagation scan** key reads the selected recipe and its marked runes from left to right. The general key cannot activate it. Each accepted scan adds one remnant detonation, even with two runes. Confident scans save their chain parts automatically. For a held recipe, choose its marked runes from the recipe-only dropdowns, then **Approve** and **Commit to chain**. The dropdowns show each rune's icon and name in recipe order. **Complete chain**, on Review or Expedition, finishes the saved chain and advances this map's expedition number. Saved parts remain editable on Expedition until completion.
 
 The three peaks above each propagated rune identify its mark. Include the gold arrow beside the selected recipe in the capture. Remnant review and propagation remain separate: a pending remnant can be reviewed later and still saves to the expedition it was captured for.
 
@@ -30,9 +30,11 @@ The three peaks above each propagated rune identify its mark. Include the gold a
 
 **Currency/items:** select **Start of map** or **End of map** before scanning the inventory. These snapshots measure the change in item quantities.
 
-**Kills / Currency** shows session gains as icon, name and count cards. Every approved end scan updates the positive end-minus-start gains across maps. Rescans replace that map's contribution; maps without a start baseline wait for it. Only items with positive gains appear. Use the search to find a type. Resetting IDs clears the totals. Manual inventory icon-reference tools are under **Data export → Developer Mode**.
+**Currency** shows tracked item types in groups as icon, name and count cards, including zero totals. Found items move ahead of zero-count items while keeping their groups. Every approved end scan updates the positive end-minus-start gains across maps. If no start scan was taken, the map starts with an assumed empty inventory. Rescans replace that map's contribution. Use the search to find a type. Resetting IDs clears the totals. Manual inventory icon-reference tools are under **Data export → Developer Mode**.
 
-Double-click an item name in Currency or Ritual review to correct it. Approving a changed name saves its captured artwork as a local recognition example for later scans and adds its item-count column to exports. Rows left unnamed are rejected. Confirm other critical fields before approval. Local recognition examples can be exported in an OCR reference pack.
+Currency review lists confident items first, possible matches next, then unknown items. Confident rows are approved automatically. Double-click a name or count to correct it; editing requires a fresh row **Approve**. The bottom **Approve** saves approved rows and rejects all remaining pending rows. Possible matches stay suggestions until you enter and confirm their name and count.
+
+Double-click an item name in Currency or Ritual review to correct it. Committing an accepted name correction saves its captured artwork as a local recognition example for later scans and adds its item-count column to exports. Rows left unnamed are rejected. Confirm other critical fields before approval. Local recognition examples can be exported in an OCR reference pack.
 
 **Ritual:** deferred rewards are marked **Deferred** and contribute zero new finds. Available tribute and remaining rerolls are saved with the scan.
 
@@ -50,7 +52,7 @@ The page shows which Map ID will receive your saved settings. Once a map has rec
 
 Choose an export folder in **Data export**. Saved entries keep their original settings.
 
-Excel exports contain **Export** and **Atlas Character Settings** sheets. The shared **Atlas Setup ID** links each Map ID to its saved allocations, choice effects and gear item rarity. Numeric atlas stats and their applied values have individual columns. Click that setup ID in the main sheet to open its atlas rows. CSV export saves a companion atlas CSV alongside the main CSV.
+Excel exports contain **Export**, **Atlas Character Settings** and **Scan History** sheets. The main sheet includes map totals and activity rows tied to Map ID; each tracked item has a numeric count column. The shared **Atlas Setup ID** links each Map ID to its saved setup and gear item rarity. The compact Atlas sheet uses separate columns for unchecked nodes and numbered choices. Click a setup ID in the main sheet to open its Atlas row. **Scan History** retains the audit records for scans, corrections and commits. CSV export saves a companion Atlas CSV alongside the main CSV. Folder exports receive unique filenames so earlier exports remain available.
 
 **Start fresh session / reset IDs** clears logs and restarts IDs. Settings and databases are kept. Export first to keep your recorded data.
 

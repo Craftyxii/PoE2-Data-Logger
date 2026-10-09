@@ -1346,7 +1346,7 @@ def commit_remnant(first, next_recipe=None, family=None, scan_id=None, expected_
 
 def _commit_remnant(db, first, next_recipe=None, family=None, scan_id=None, visible_seed=None,
                     seed_rows=None, captured_expedition=None):
-    """Append recipe rows and a commit for one remnant on the caller's transaction.
+    """Validate an optional linked seed and append one remnant in the caller's transaction.
 
     Create map and expedition records as needed, retain captured expedition
     identity, consume the remnant number and clear its pending reservation.
@@ -1386,7 +1386,18 @@ def _commit_remnant(db, first, next_recipe=None, family=None, scan_id=None, visi
         context["waystone_setup_fields"] = sorted(fields)
         context["waystone_setup_saved"] = WAYSTONE_SETUP_FIELDS <= fields
     details = {"family": result["family"], "recipes": result["rows"]}
-    if visible_seed:
+    if visible_seed is not None:
+        if not isinstance(visible_seed, dict):
+            raise ValueError("The linked visible seed is invalid.")
+        sockets = _integer(visible_seed.get("sockets"), "Visible seed sockets", 3, 10)
+        stage = db.execute("SELECT 1 FROM seed_states WHERE family=? AND sockets=? AND "
+                           "seed_slot=? AND seed_rune=?",
+                           (result["family"], sockets, visible_seed.get("slot"),
+                            visible_seed.get("rune"))).fetchone()
+        if not stage:
+            raise ValueError("The linked visible seed does not match the resolved family and socket stage.")
+        if visible_seed.get("mode") == "both" and sockets != result["rows"][0]["sockets"]:
+            raise ValueError("The linked visible seed and opened rewards have different socket counts.")
         details["visible_seed"] = visible_seed
     commit_number = _record_commit(db, "Remnant", mid, eid, rid, context=context, details=details)
     first_remnant = not _has_remnant(db, mid)
