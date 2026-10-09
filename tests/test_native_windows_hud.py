@@ -424,9 +424,10 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.assertEqual(table.cellWidget(55,3).property("reviewStatus"),"pending")
         self.phase("08a-native-currency-possible-match-dropdown")
         original_width = table.columnWidth(3)
-        # A wide Review column creates real horizontal scrolling on every CI
-        # desktop size; the original layout is restored before final saving.
-        table.setColumnWidth(3,max(self.window.width(),900))
+        # Leave both action labels inside the actual table viewport at the
+        # horizontal endpoint, including the CI desktop's narrow window.
+        # The other columns still create genuine horizontal scrolling.
+        table.setColumnWidth(3,max(original_width,table.viewport().width()-40))
         self.native.pump()
         self.native_currency_horizontal_scroll(True)
         self.native_currency_decision(54,True)
