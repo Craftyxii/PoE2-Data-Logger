@@ -12,9 +12,11 @@ import io
 import json
 import os
 import re
+import sqlite3
 import sys
 import tempfile
 import threading
+import time
 from uuid import uuid4
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -373,6 +375,7 @@ class LoggerWindow(QMainWindow):
         self._both_last_opened = None
         self.resolved = None
         self._pending_tasks = {}
+        self._chain_save_pending = None
         self._task_id = 0
         self._latest_hotkey = 0
         self._latest_overlay = service.HOTKEY.status().get("overlay_sequence", 0)
@@ -387,6 +390,10 @@ class LoggerWindow(QMainWindow):
         self._overlay_revealed = False
         self._overlay_visible = False
         self._overlay_auto_review = False
+        self._overlay_window_transition = False
+        self._overlay_activation_pending = False
+        self._overlay_activation_deadline = 0.0
+        self._overlay_restore_repaint_pending = False
         self._overlay_review_token = 0
         self._overlay_capture_restore = None
         self._saved_badge = None
@@ -1169,6 +1176,8 @@ class LoggerWindow(QMainWindow):
         """
         self._failed_review = False
         kind = self.pending_review_kind
+        if kind == "propagation":
+            self._cancel_pending_chain_save()
         if kind in ("seed", "remnant"):
             return self.reject_remnant_scan()
         if kind is None:
@@ -2969,6 +2978,7 @@ class LoggerWindow(QMainWindow):
         """
         context = logger.scan_context()
         if self._chain_context != context:
+            self._cancel_pending_chain_save()
             self._clear_manual_propagation()
             if (self._chain_context is not None and
                     self._chain_context["_scan_generation"] != context["_scan_generation"]):
@@ -3106,6 +3116,7 @@ class LoggerWindow(QMainWindow):
                tuple((entry["step"], entry["rune1"], entry["rune2"]) for entry in entries), closed)
         if key == self._saved_chain_view_key:
             return
+        previous_view = self._saved_chain_view_key
         if self._saved_chain_view_key and not self._saved_chain_view_key[2]:
             baseline = {step: (rune1, rune2) for step, rune1, rune2 in self._saved_chain_view_key[1]}
             edits = {entry["step"]: entry for entry in self._saved_chain_edits()
@@ -3125,10 +3136,17 @@ class LoggerWindow(QMainWindow):
         self._saved_chain_view_key = key
         self._saved_chain_edit_context = dict(self._chain_context) if self._chain_context else None
         table = self.expedition_chain_table
-        table.setRowCount(0)
+        # Appending one accepted part must retain existing dropdowns and their correction drafts.
+        append_only = bool(previous_view and previous_view[0] == key[0] and
+                           not previous_view[2] and not closed and
+                           key[1][:len(previous_view[1])] == previous_view[1] and
+                           table.rowCount() == len(previous_view[1]))
+        first_row = table.rowCount() if append_only else 0
+        if not append_only:
+            table.setRowCount(0)
         names = [self.propagation_rune_inputs[0].itemText(index)
                  for index in range(1, self.propagation_rune_inputs[0].count())]
-        for row, entry in enumerate(entries):
+        for row, entry in enumerate(entries[first_row:], first_row):
             table.insertRow(row)
             item = QTableWidgetItem(str(entry["step"]))
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -3549,21 +3567,12 @@ class LoggerWindow(QMainWindow):
         """Save accepted manual runes while retaining any held remnant review, then retire
         propagation-only controls.
         """
-        held_propagation = self.pending_review_kind == "propagation"
         self._append_propagation(result, preserve_remnant_review=True, auto_save=True)
-        self._clear_manual_propagation()
-        if held_propagation:
-            self._propagation_reading = None
-            self.pending_review_kind = None
-            self.approve_scan_button.setEnabled(False)
-            self._review_controls(None)
-            self.found_table.hide()
-            self.found_label.hide()
-            set_message(self.review_summary, " → ".join(result["runes"]) +
-                        " saved to the expedition. Scan the next part, or Complete chain when finished.", "success")
 
     def _propagation_read(self, result, raw=None):
         """Hold every propagation capture for explicit approval, regardless of OCR confidence or settings."""
+        if self._chain_save_pending:
+            raise ValueError("Wait for the approved chain part to save before scanning propagation again.")
         logger.validate_scan_context(result)
         runes = result.get("runes") or []
         if (not isinstance(runes, (list, tuple)) or
@@ -3610,35 +3619,16 @@ class LoggerWindow(QMainWindow):
         # Accepted scans persist independently of an unrelated manual draft in this expedition.
         # This flag saves explicitly reviewed parts immediately; OCR ingress never uses it.
         if auto_save:
+            if self._chain_save_pending:
+                return
             request_id = result.setdefault("_chain_accept_request", uuid4().hex)
-            saved = logger.accept_propagation_part(self._chain_context, runes=runes,
-                recipe=result.get("selected_recipe") or "", request_id=request_id)
-            self._accepted_propagation_requests.add(request_id)
-            self._propagation_reading = None
-            if self.pending_review_kind == "propagation":
-                self.pending_review_kind = None
-                self._review_controls(None)
-            self._clear_manual_propagation()
-            self.refresh()
-            self._set_commit_badge(saved["scan_commit_number"])
-            self._propagation_review_active = True
-            self._refresh_chain_review()
-            text = (f"{result.get('selected_recipe') or 'Selected recipe'} · " + " → ".join(runes) +
-                    f" saved to {saved['expedition_id']}. Scan the next part, or Complete chain when finished.")
-            if preserve_remnant_review:
-                self.statusBar().showMessage(text, 15000)
-                if self.review_kind.property("scanKind") == "propagation":
-                    set_message(self.review_summary, text, "success")
-            else:
-                self.found_table.hide()
-                self.found_label.hide()
-                self.approve_scan_button.setEnabled(False)
-                set_message(self.review_summary, text, "success")
-                self._overlay_review_token += 1
-                token = self._overlay_review_token
-                QTimer.singleShot(0, lambda: self.show_overlay() if self._overlay_enabled and
-                                  not self._editing_regions and not self._region_selection_pending and
-                                  token == self._overlay_review_token and self.tabs.currentIndex() == 0 else None)
+            if self._manual_propagation_context is not None:
+                self._manual_propagation_context.setdefault("_chain_accept_request", request_id)
+            pending = {"result": {**result, "runes": list(runes)},
+                       "context": dict(self._chain_context), "preserve_review": preserve_remnant_review,
+                       "deadline": time.monotonic() + 10}
+            self._chain_save_pending = pending
+            self._retry_approved_chain_save(pending)
             return
         occupied = [index for index, field in enumerate(self.rune_inputs) if value(field)]
         start = occupied[-1] + 1 if occupied else 0
@@ -3723,6 +3713,83 @@ class LoggerWindow(QMainWindow):
         if not preserve_remnant or self.review_kind.property("scanKind") == "propagation":
             set_message(self.review_summary, text, "success")
         self.note(text, True)
+
+    def _cancel_pending_chain_save(self):
+        """Retire deferred acceptance on cancellation or a changed map/session, restoring its controls."""
+        self._chain_save_pending = None
+        if hasattr(self, "propagation_recipe_table"):
+            self.propagation_recipe_table.setEnabled(True)
+
+    def _retry_approved_chain_save(self, pending):
+        """Retry a frozen, explicitly approved part without waiting for SQLite locks on the GUI thread."""
+        if self._closed or self._chain_save_pending is not pending:
+            return
+        result = pending["result"]
+        try:
+            if time.monotonic() >= pending["deadline"]:
+                raise TimeoutError("The database is busy. The chain part was not saved; Approve again.")
+            saved = logger.accept_propagation_part(pending["context"], runes=result["runes"],
+                recipe=result.get("selected_recipe") or "", request_id=result["_chain_accept_request"],
+                wait_for_lock=False)
+        except sqlite3.OperationalError as error:
+            if (getattr(error, "sqlite_errorcode", 0) & 255) not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+                self._cancel_pending_chain_save()
+                raise
+            self.propagation_recipe_table.setEnabled(False)
+            self.statusBar().showMessage("Saving the approved chain part; waiting for the database.")
+            QTimer.singleShot(50, lambda: self.run(lambda: self._retry_approved_chain_save(pending)))
+            return
+        except Exception:
+            self._cancel_pending_chain_save()
+            raise
+        self._cancel_pending_chain_save()
+        self._finish_approved_chain_save(result, saved, pending["preserve_review"])
+
+    def _finish_approved_chain_save(self, result, saved, preserve_review):
+        """Show a completed save while retaining any newer independent review and its typed corrections."""
+        request_id = result["_chain_accept_request"]
+        self._accepted_propagation_requests.add(request_id)
+        owned = any(reading and reading.get("_chain_accept_request") == request_id
+                    for reading in (self._manual_propagation_context, self._propagation_reading))
+        if owned:
+            self._propagation_reading = None
+            if self.pending_review_kind == "propagation":
+                self.pending_review_kind = None
+                self._review_controls(None)
+                self.found_table.hide()
+                self.found_label.hide()
+                self.approve_scan_button.setEnabled(False)
+            self._clear_manual_propagation()
+            self._propagation_review_active = True
+        self._refresh_after_chain_save()
+        self._set_commit_badge(saved["scan_commit_number"])
+        text = (f"{result.get('selected_recipe') or 'Selected recipe'} · " + " → ".join(result["runes"]) +
+                f" saved to {saved['expedition_id']}. Scan the next part, or Complete chain when finished.")
+        self.statusBar().showMessage(text, 15000)
+        if owned and self.review_kind.property("scanKind") == "propagation":
+            set_message(self.review_summary, text, "success")
+        if owned and not preserve_review:
+            self._overlay_review_token += 1
+            token = self._overlay_review_token
+            QTimer.singleShot(0, lambda: self.show_overlay() if self._overlay_enabled and
+                              not self._editing_regions and not self._region_selection_pending and
+                              token == self._overlay_review_token and self.tabs.currentIndex() == 0 else None)
+
+    def _refresh_after_chain_save(self):
+        """Refresh saved chain state and counters without rebuilding unrelated pages or overwriting drafts."""
+        state = logger.get_state()
+        context = (logger.session_generation(), state["current_map_id"])
+        # A first save can create the map; changed settings still need the complete synchronization.
+        if context != self._form_map_context or state["settings"] != self.state["settings"]:
+            self.refresh()
+            return
+        self.state = state
+        self._sync_header_ids(state)
+        self._load_chain_context()
+        counts = state["counts"]
+        set_message(self.counts, f"{counts['historical_rows']} imported rows · {counts['new_rows']} new rows · "
+                    f"{state['ritual_pages']} Ritual pages · {counts['saved_scans']} saved scans · "
+                    f"{counts['rune_references']} rune references")
 
     def complete_chain(self):
         """Finish the saved chain and advance the expedition once while retaining separate reviews."""
@@ -3833,6 +3900,7 @@ class LoggerWindow(QMainWindow):
         self._overlay_enabled = bool(enabled)
         self._overlay_auto_review = False
         self._overlay_revealed = False
+        self._overlay_activation_pending = False
         self._overlay_review_token += 1
         visible, minimized = self.isVisible(), self.isMinimized()
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False)
@@ -3865,17 +3933,46 @@ class LoggerWindow(QMainWindow):
             return
         self._overlay_revealed = True
         self._overlay_auto_review = automatic
+        self._overlay_activation_pending = not self.isActiveWindow()
+        # A denied Windows focus request must not suppress a later taskbar activation.
+        self._overlay_activation_deadline = time.monotonic() + .15
         self.tabs.setCurrentIndex(0)
         # Confirmation needs a normal interactive window. Keep transparency
         # for the manually revealed HUD, and preserve maximized geometry when
         # a capture hides and restores the window.
-        self.setWindowOpacity(1.0 if automatic else self._overlay_opacity / 100)
-        if self.windowState() & Qt.WindowState.WindowMaximized:
-            self.showMaximized()
-        else:
-            self.showNormal()
-        self.raise_()
-        self.activateWindow()
+        self._overlay_window_transition = True
+        try:
+            self.setWindowOpacity(1.0 if automatic else self._overlay_opacity / 100)
+            if self.windowState() & Qt.WindowState.WindowMaximized:
+                self.showMaximized()
+            else:
+                self.showNormal()
+            self.raise_()
+            self.activateWindow()
+        finally:
+            self._overlay_window_transition = False
+
+    def _restore_application_view(self):
+        """Restore opaque app painting after an external activation or native minimized-window restore."""
+        self._overlay_activation_pending = False
+        if self._overlay_revealed or self._overlay_auto_review:
+            self._overlay_review_token += 1
+            self._overlay_capture_restore = None
+        self._overlay_revealed = False
+        self._overlay_auto_review = False
+        self.setWindowOpacity(1.0)
+        if not self._overlay_restore_repaint_pending and self.isVisible() and not self.isMinimized():
+            self._overlay_restore_repaint_pending = True
+            QTimer.singleShot(0, self._repaint_restored_application)
+
+    def _repaint_restored_application(self):
+        """Invalidate the restored client area after Windows and Qt finish their native state transition."""
+        self._overlay_restore_repaint_pending = False
+        if self._closed or not self.isVisible() or self.isMinimized():
+            return
+        self.update()
+        if self.centralWidget() is not None:
+            self.centralWidget().update()
 
     def hide_overlay(self):
         """Return to the game and restore normal application opacity."""
@@ -3885,6 +3982,7 @@ class LoggerWindow(QMainWindow):
             self._overlay_review_token += 1
             self._overlay_revealed = False
             self._overlay_auto_review = False
+            self._overlay_activation_pending = False
             self.setWindowOpacity(1.0)
             hotkey = service.HOTKEY.status()
             if (not self._editing_regions and hotkey["supported"] and
@@ -4168,11 +4266,23 @@ class LoggerWindow(QMainWindow):
                   "Tablet scans will wait for manual review before saving.", True)
 
     def eventFilter(self, source, event):
-        """Track HUD visibility, protect fields from stray wheel edits, capture shortcut keys
+        """Track HUD visibility and external restore, protect wheel edits, capture shortcut keys
         and select preview slots.
         """
         if source is self and event.type() in (QEvent.Type.Show, QEvent.Type.Hide):
             self._overlay_visible = event.type() == QEvent.Type.Show
+        if source is self and self._overlay_enabled:
+            if event.type() == QEvent.Type.WindowActivate:
+                if (self._overlay_window_transition or
+                        self._overlay_activation_pending and time.monotonic() <= self._overlay_activation_deadline):
+                    self._overlay_activation_pending = False
+                else:
+                    self._restore_application_view()
+            elif event.type() == QEvent.Type.WindowDeactivate and not self._overlay_window_transition:
+                self._overlay_activation_pending = False
+            elif (event.type() == QEvent.Type.WindowStateChange and not self._overlay_window_transition and
+                  (self.isMinimized() or event.oldState() & Qt.WindowState.WindowMinimized)):
+                self._restore_application_view()
         if event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.Hide, QEvent.Type.Wheel):
             field = source if isinstance(source, QWidget) else None
             while field is not None and not isinstance(field, (QComboBox, QAbstractSpinBox, QSlider)):

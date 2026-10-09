@@ -5,6 +5,8 @@ check and cannot produce a passing native report. This checks native GUI use on 
 simulated external game view; it is neither human testing nor PoE2 integration.
 """
 
+import ctypes
+from ctypes import wintypes
 import io
 import json
 import os
@@ -420,6 +422,7 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.native.wait(lambda:self.window.isVisible() and not self.window.isMinimized(),"global OS shortcut reveals HUD")
         self.native.wait(lambda:self.native.foreground()==int(self.window.winId()),"HUD activation after real global shortcut")
         self.assertEqual(self.native.rect(int(self.window.winId())),bounds)
+        self.check_taskbar_restore_and_native_paint(host_hwnd)
         self.tab(13)
         self.tab(0)
         captures = []
@@ -532,6 +535,131 @@ class NativeWindowsHUDTests(unittest.TestCase):
             pass  # Deleting the obsolete Qt popup is also a valid retirement.
         self.native.choose(self.window._propagation_row_inputs[0][0],2)
         self.phase("13-replacement-scan-retires-popup")
+
+    def check_taskbar_restore_and_native_paint(self, host_hwnd):
+        """Exercise native activation/restore with overlay enabled and compare real client pixels."""
+        hwnd = int(self.window.winId())
+        incoming_maximized = self.window.isMaximized()
+        incoming_bounds = self.native.rect(hwnd)
+        self.tab(6)
+        self.native.click(self.window.overlay_opacity_slider)
+        self.native.key(0x24)
+        for _ in range(9):
+            self.native.key(0x21)
+        self.assertEqual(self.window.overlay_opacity_slider.value(), 65)
+        self.tab(0)
+        reading = {"mode":"propagation", "can_use":False, "runes":[],
+                   "status":"Held native taskbar restoration review",
+                   "choices":[{"selected_recipe":"Regal Orb x3", "runes":[], "can_use":False}],
+                   **logger.scan_context()}
+        self.deliver("taskbar restoration review", reading,
+                     lambda result:self.window._propagation_read(result,self.raw),
+                     lambda:self.window.pending_review_kind == "propagation")
+        rune = self.window._propagation_row_inputs[0][0]
+        self.native.choose(rune,2)
+        context = dict(self.window._manual_propagation_context)
+        original_kills = self.window.normal.text()
+        evidence = []
+
+        def reveal_hud():
+            """Use the real registered shortcut and retain its configured transparency."""
+            self.native.key(0x1B)
+            self.native.wait(lambda:not self.window.isVisible() or self.window.isMinimized(),
+                             "Escape hides HUD before native restoration")
+            self.native.focus_setup(host_hwnd)
+            self.native.key(ord("H"),(0x11,0x10))
+            self.native.wait(lambda:self.window.isVisible() and not self.window.isMinimized() and
+                             self.native.foreground()==hwnd, "real HUD shortcut activation")
+            self.assertAlmostEqual(self.window.windowOpacity(),.65,places=2)
+            self.native.click(rune)
+            self.native.wait(rune.view().isVisible,"manual HUD's native rune popup")
+            self.native.key(0x1B)
+            self.native.wait(lambda:not rune.view().isVisible(),"Escape closes only the native rune popup")
+            self.assertTrue(self.window.isVisible())
+            self.assertAlmostEqual(self.window.windowOpacity(),.65,places=2,
+                                   msg="Returning from an owned popup must preserve manual HUD opacity.")
+
+        for maximized in (False, True):
+            mode = "maximized" if maximized else "normal"
+            self.native.user.ShowWindow(hwnd,3 if maximized else 9)
+            self.native.user.SetForegroundWindow(hwnd)
+            self.native.wait(lambda:self.window.isMaximized()==maximized and
+                             self.native.foreground()==hwnd, f"native {mode} baseline")
+            self.native.pump(.25)
+            bounds = self.native.rect(hwnd)
+            baseline = self.capture_native_client()
+            baseline_name = f"10-taskbar-{mode}-opaque-client-baseline.png"
+            baseline.save(self.artifacts / baseline_name)
+            self.native.screenshots.append(baseline_name)
+            self.assertGreater(max(ImageStat.Stat(baseline).var),1,
+                               "The native baseline must contain painted application controls.")
+            for minimized in (False, True):
+                reveal_hud()
+                if minimized:
+                    # SW_MINIMIZE/SW_RESTORE follow the native taskbar restore
+                    # path. Subsequent clicks and typing use actual SendInput.
+                    self.native.user.ShowWindow(hwnd,6)
+                    self.native.wait(self.window.isMinimized, "native main-window minimization")
+                    self.native.focus_setup(host_hwnd)
+                    self.native.user.ShowWindow(hwnd,9)
+                    self.native.user.SetForegroundWindow(hwnd)
+                    route = "ShowWindow(SW_MINIMIZE/SW_RESTORE), SetForegroundWindow, SendInput controls"
+                else:
+                    # Actual Alt+Tab activates the background main HWND;
+                    # neither Qt activateWindow nor HUD restoration is invoked.
+                    self.native.focus_setup(host_hwnd)
+                    self.native.key(0x09,(0x12,))
+                    route = "SendInput Alt+Tab from external fixture to background main HWND"
+                self.native.wait(lambda:self.window.isVisible() and not self.window.isMinimized() and
+                                 self.native.foreground()==hwnd, f"ordinary {mode} application restore")
+                self.assertAlmostEqual(self.window.windowOpacity(),1.0,places=2)
+                self.assertFalse(self.window._overlay_revealed)
+                self.assertTrue(self.window._overlay_enabled)
+                self.assertEqual(self.window.isMaximized(),maximized)
+                self.assertEqual(self.native.rect(hwnd),bounds)
+                self.assertEqual(self.window.tabs.currentIndex(),0)
+                self.assertEqual(self.window.pending_review_kind,"propagation")
+                self.assertEqual(self.window._manual_propagation_context,context)
+                self.assertEqual(rune.currentData(),2)
+                self.native.pump(.25)
+                painted = self.capture_native_client()
+                phase = f"10-taskbar-{mode}-{'minimized-restore' if minimized else 'activation'}"
+                painted_name = phase + "-client.png"
+                painted.save(self.artifacts / painted_name)
+                self.native.screenshots.append(painted_name)
+                self.assertEqual(painted.size,baseline.size)
+                difference = ImageStat.Stat(ImageChops.difference(baseline,painted)).mean
+                self.assertLess(max(difference),6,
+                                "Restored native client pixels differ from the painted opaque application.")
+                self.native.edit(self.window.normal,"123")
+                self.assertEqual(self.window.normal.text(),"123")
+                self.native.choose(rune,2)
+                self.native.edit(self.window.normal,original_kills)
+                self.phase(phase)
+                evidence.append({"mode":mode, "minimized":minimized, "route":route,
+                                 "client_mean_pixel_difference":difference,
+                                 "baseline_client":baseline_name, "restored_client":painted_name,
+                                 "opacity":self.window.windowOpacity(), "foreground_hwnd":self.native.foreground(),
+                                 "held_review_preserved":True, "native_controls_usable":True})
+        self.report["taskbar_equivalent_restore"] = evidence
+        self.save_report()
+        self.native.click(self.window.reject_scan_button)
+        self.native.wait(lambda:self.window.pending_review_kind is None,"reject native restoration fixture")
+        self.native.user.ShowWindow(hwnd,3 if incoming_maximized else 9)
+        self.native.user.SetForegroundWindow(hwnd)
+        self.native.wait(lambda:self.window.isMaximized()==incoming_maximized and
+                         not self.window.isMinimized() and self.native.foreground()==hwnd,
+                         "restore native geometry for the following acceptance phases")
+        self.assertEqual(self.native.rect(hwnd),incoming_bounds)
+
+    def capture_native_client(self):
+        """Read actual desktop client pixels without using QWidget.grab or offscreen rendering."""
+        hwnd = int(self.window.winId())
+        origin = wintypes.POINT(0,0)
+        self.assertTrue(self.native.user.ClientToScreen(hwnd,ctypes.byref(origin)))
+        left,top,right,bottom = self.native.rect(hwnd,client=True)
+        return ImageGrab.grab(bbox=(origin.x,origin.y,origin.x+right-left,origin.y+bottom-top),
+                              all_screens=True).convert("RGB")
 
     def database_rows(self, db):
         """Read every table, including settings and ID sequences, for exact preservation checks."""

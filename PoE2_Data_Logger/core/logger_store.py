@@ -1915,8 +1915,9 @@ def increment_propagation_detonated(expected_context, *, current_value=_UNSET, r
         return result
 
 
-def accept_propagation_part(expected_context, *, runes=None, recipe="", request_id=None, current_value=_UNSET):
-    """Atomically count and append a propagation part; a matching request ID reuses its result."""
+def accept_propagation_part(expected_context, *, runes=None, recipe="", request_id=None,
+                            current_value=_UNSET, wait_for_lock=True):
+    """Count and append once; optionally return SQLite contention immediately for a GUI retry."""
     cleaned, recipe = _clean_propagation_part(runes, recipe)
     if not isinstance(expected_context, dict):
         raise ValueError("The propagation capture context is invalid. Scan again.")
@@ -1925,6 +1926,9 @@ def accept_propagation_part(expected_context, *, runes=None, recipe="", request_
                "current_value": None if current_value is _UNSET else current_value,
                "count_from_saved": current_value is _UNSET}
     with _connect() as db:
+        if not wait_for_lock:
+            # This connection alone must not block Qt while another writer finishes.
+            db.execute("PRAGMA busy_timeout=0")
         db.execute("BEGIN IMMEDIATE")
         previous = _chain_receipt(db, request_id, payload, expected_context)
         if previous is not None:

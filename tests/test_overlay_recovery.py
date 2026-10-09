@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QEvent, QTimer, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QAbstractItemView, QPushButton
 from PIL import Image
@@ -189,6 +189,68 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.window.show_overlay()
         self.window.set_overlay_enabled(False)
         self.assertEqual(self.window.windowOpacity(), 1.0)
+
+    def test_external_activation_restores_opaque_app_without_losing_review(self):
+        """Check activation state and held edits; native client painting is verified separately on Windows."""
+        self.window.overlay_opacity_slider.setValue(40)
+        self.window.show_overlay(automatic=True)
+        self.app.processEvents()
+        self.window._review_pending("currency", "Held inventory correction", False)
+        self.window.normal.setText("123")
+        QApplication.sendEvent(self.window, QEvent(QEvent.Type.WindowDeactivate))
+        QApplication.sendEvent(self.window, QEvent(QEvent.Type.WindowActivate))
+        self.app.processEvents()
+        self.assertEqual(self.window.windowOpacity(), 1.0)
+        self.assertFalse(self.window._overlay_revealed)
+        self.assertFalse(self.window._overlay_auto_review)
+        self.assertEqual(self.window.pending_review_kind, "currency")
+        self.assertEqual(self.window.normal.text(), "123")
+        self.window.poll()
+        self.assertTrue(self.window.isVisible())
+
+    def test_native_minimize_restore_clears_overlay_opacity_and_hotkey_can_reveal_again(self):
+        """Keep taskbar restores opaque without changing the configured HUD opacity or enable state."""
+        self.window.overlay_opacity_slider.setValue(40)
+        self.window.show_overlay()
+        self.app.processEvents()
+        self.window.showMinimized()
+        self.app.processEvents()
+        self.assertEqual(self.window.windowOpacity(), 1.0)
+        self.assertFalse(self.window._overlay_revealed)
+        self.window.showNormal()
+        self.app.processEvents()
+        self.assertEqual(self.window.windowOpacity(), 1.0)
+        self.assertTrue(self.window._overlay_enabled)
+        self.window.show_overlay()
+        self.app.processEvents()
+        self.assertAlmostEqual(self.window.windowOpacity(), .4, delta=.01)
+        self.assertTrue(self.window._overlay_revealed)
+
+    def test_explicit_hud_activation_keeps_configured_transparency(self):
+        """Distinguish the HUD shortcut's activation from a later ordinary app activation."""
+        self.window.overlay_opacity_slider.setValue(40)
+        self.window.show_overlay()
+        self.app.processEvents()
+        self.assertAlmostEqual(self.window.windowOpacity(), .4, delta=.01)
+        self.assertTrue(self.window._overlay_revealed)
+        QApplication.sendEvent(self.window, QEvent(QEvent.Type.WindowDeactivate))
+        QApplication.sendEvent(self.window, QEvent(QEvent.Type.WindowActivate))
+        self.app.processEvents()
+        self.assertEqual(self.window.windowOpacity(), 1.0)
+        self.assertFalse(self.window._overlay_revealed)
+
+    def test_denied_focus_request_cannot_suppress_a_later_taskbar_activation(self):
+        """Retire an unfulfilled HUD focus request before a user later activates the app."""
+        self.window.overlay_opacity_slider.setValue(40)
+        self.window.show_overlay()
+        self.app.processEvents()
+        self.window._overlay_activation_pending = True
+        self.window._overlay_activation_deadline = time.monotonic() - 1
+        QApplication.sendEvent(self.window, QEvent(QEvent.Type.WindowActivate))
+        self.app.processEvents()
+        self.assertEqual(self.window.windowOpacity(), 1.0)
+        self.assertFalse(self.window._overlay_revealed)
+        self.assertFalse(self.window._overlay_activation_pending)
 
     def test_background_scan_keeps_hud_controls_and_event_loop_responsive(self):
         """Verify a background scan leaves HUD controls and the Qt event loop responsive."""
