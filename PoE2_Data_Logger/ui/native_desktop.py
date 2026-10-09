@@ -326,6 +326,21 @@ class Tasks(QObject):
     scan_ready = Signal()
 
 
+class WorkspaceTabs(QTabWidget):
+    """Size the selected page without reserving the largest unrelated tab's wrapped height."""
+
+    def heightForWidth(self, width):
+        """Let scroll pages fill available space and use only the active standalone page's height."""
+        page = self.currentWidget()
+        if page is None or isinstance(page, QScrollArea):
+            return self.minimumHeight()
+        margins = self.contentsMargins()
+        height = page.heightForWidth(max(0, width - margins.left() - margins.right()))
+        if height < 0:
+            height = page.minimumSizeHint().height()
+        return max(self.minimumHeight(), height + margins.top() + margins.bottom())
+
+
 class LoggerWindow(QMainWindow):
     """Coordinate map-scoped UI drafts, scan review and persistence through the logger service."""
     def __init__(self):
@@ -746,7 +761,7 @@ class LoggerWindow(QMainWindow):
                                        self.header_city_type)[index])
             cards.addWidget(card, 1)
         main_layout.addLayout(cards)
-        self.tabs = QTabWidget()
+        self.tabs = WorkspaceTabs()
         self.tabs.tabBar().hide()
         # Scroll pages manage their own content bounds. Standalone page
         # minimums are applied on navigation so the workspace can scroll them.
@@ -800,7 +815,8 @@ class LoggerWindow(QMainWindow):
         """Center large live counters and keep chain completion reachable at either header width."""
         if not hasattr(self, "_header_actions"):
             return
-        compact = self.width() < 1200
+        # Keep long page headings from wrapping excessively beside the wider counters and actions.
+        compact = self.width() < 1600
         if self._header_arrangement == compact:
             return
         self._header_arrangement = compact

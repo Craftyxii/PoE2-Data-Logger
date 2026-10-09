@@ -245,14 +245,28 @@ class UniquePropagationCountsUITests(unittest.TestCase):
                 self.window.reject_review()
 
     def test_full_chain_draft_does_not_count_an_unaccepted_scan(self):
-        """Verify a full chain draft rejects extra scan runes without counting the rejected scan."""
+        """Save confident OCR independently while rejecting additions beyond the manual draft limit."""
         self.window.add_runes(96 - len(self.window.rune_inputs))
         for field in self.window.rune_inputs:
             field.setText("Death")
         before = [field.text() for field in self.window.rune_inputs]
+        self.scan(["Rage", "Time"])
+        self.assert_current_detonated(1)
+        saved = [{"step": 1, "rune1": "Rage", "rune2": "Time"}]
+        self.assertEqual(logger.get_state()["chain"], saved)
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.assertEqual(len(self.window.rune_inputs), 96)
+        self.assertEqual([field.text() for field in self.window.rune_inputs], before)
+        commit_count = logger.get_state()["scan_commit_count"]
+        draft_reading = {"mode": "propagation", "runes": ["Rage", "Time"],
+                         "selected_recipe": "Medved's Saga", "can_use": True,
+                         **logger.scan_context()}
         with self.assertRaisesRegex(ValueError, "maximum of 96"):
-            self.scan(["Rage", "Time"])
-        self.assert_current_detonated(None)
+            self.window._append_propagation(draft_reading, preserve_remnant_review=True, auto_save=False)
+        self.assert_current_detonated(1)
+        self.assertEqual(logger.get_state()["chain"], saved)
+        self.assertEqual(logger.get_state()["scan_commit_count"], commit_count)
+        self.assertEqual(len(self.window.rune_inputs), 96)
         self.assertEqual([field.text() for field in self.window.rune_inputs], before)
 
     def test_pending_remnant_allows_propagation_count_and_keeps_binding(self):

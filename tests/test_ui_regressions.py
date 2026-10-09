@@ -90,7 +90,8 @@ class UIRegressionTests(unittest.TestCase):
         for target in (self.window.scan_regions.game_resolution, self.window.scan_regions.canvas, save_regions):
             rect = QRect(target.mapTo(self.window, QPoint()), target.size())
             self.assertTrue(target.isVisible())
-            self.assertTrue(self.window.rect().contains(rect))
+            self.assertTrue(self.window.rect().contains(rect),
+                            f"{type(target).__name__} {target.accessibleName() or getattr(target, 'text', lambda: '')()}: {rect}")
         self.assertEqual(self.window.height(), 720)
 
     def opened_result(self):

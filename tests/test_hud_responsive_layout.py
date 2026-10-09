@@ -110,6 +110,7 @@ class ResponsiveHUDTests(unittest.TestCase):
     def test_large_counters_and_global_chain_completion_fit_both_header_layouts(self):
         """Keep 48/64-pixel counters and Complete chain reachable at compact and wide sizes."""
         for width, height, size, caption_size in ((900, 650, 48, 12), (1024, 768, 48, 12),
+                                                 (1366, 720, 48, 12),
                                                  (1920, 1080, 64, 14)):
             with self.subTest(size=(width, height)):
                 self.window.resize(width, height)
