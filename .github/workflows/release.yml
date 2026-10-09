@@ -58,6 +58,30 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Platform fixture checks failed.' }
           python tools/run_tests.py --pattern test_user_review_navigation.py
           if ($LASTEXITCODE -ne 0) { throw 'Review navigation fixture checks failed.' }
+      - name: Check native Windows HUD interaction
+        # Real Windows input and hit testing complement offscreen workflow checks.
+        # A failed native pass blocks installer publication and retains screenshots.
+        timeout-minutes: 8
+        env:
+          QT_QPA_PLATFORM: windows
+          POE2_NATIVE_HUD_ARTIFACTS: ${{ runner.temp }}/poe2-native-hud
+        run: |
+          python tools/run_tests.py --pattern test_native_windows_hud.py
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows HUD checks failed.' }
+          $report = Join-Path $env:POE2_NATIVE_HUD_ARTIFACTS 'native-hud-report.json'
+          if (-not (Test-Path $report)) { throw 'Native HUD proof is missing; skipped tests cannot publish.' }
+          $hud = Get-Content $report -Raw | ConvertFrom-Json
+          if ($hud.status -ne 'passed' -or $hud.qt_platform -ne 'windows' -or
+              $hud.input_backend -ne 'Win32 SendInput' -or $hud.native_input_events -le 0) {
+            throw 'Native Windows interaction was not verified.'
+          }
+      - name: Retain native HUD screenshots and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-hud-verification
+          path: ${{ runner.temp }}/poe2-native-hud
+          if-no-files-found: ignore
       - name: Verify 100-map user workflow
         # This simulation injects scan results at the UI boundary; capture OCR
         # regressions are separate checks, not evidence from this simulation.

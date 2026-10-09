@@ -1,0 +1,432 @@
+"""Windows desktop HUD acceptance through real OS input, with honest scan fixtures.
+
+Run separately with QT_QPA_PLATFORM=windows. Linux/offscreen discovery skips this
+check and cannot produce a passing native report. This checks native GUI use on a
+simulated external game view; it is neither human testing nor PoE2 integration.
+"""
+
+import io
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageGrab, ImageStat
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication, QPushButton
+
+from PoE2_Data_Logger.core import logger_store as logger, ocr_sensitivity, service, store
+from PoE2_Data_Logger.ocr import propagation_scan, runehelper_ocr
+from PoE2_Data_Logger.ocr.item_text import parse_item_text
+from PoE2_Data_Logger.platform.hotkey import HotkeyManager
+from PoE2_Data_Logger.platform.live_watch import game_foreground
+from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
+from tools.native_hud_input import NativeWindowsInput
+
+
+@unittest.skipUnless(sys.platform == "win32" and os.environ.get("QT_QPA_PLATFORM", "").lower() == "windows",
+                     "Requires a separate real Windows desktop run with QT_QPA_PLATFORM=windows")
+class NativeWindowsHUDTests(unittest.TestCase):
+    """Exercise actual HWND input and state changes instead of an offscreen widget simulation."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Create a Windows-plugin QApplication without falling back to offscreen rendering."""
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        """Isolate storage and start real native input/reporting before showing the logger."""
+        self.artifacts = Path(os.environ.get("POE2_NATIVE_HUD_ARTIFACTS", "artifacts/native-hud"))
+        self.artifacts.mkdir(parents=True, exist_ok=True)
+        self.report = {"status":"running", "qt_platform":self.app.platformName(),
+                       "input_backend":"Win32 SendInput", "native_input_events":0, "phases":[],
+                       "screenshots":[], "game_integration":False, "human_end_user_pass":False,
+                       "scan_evidence":"Async injected item/remnant results; real OCR of a bundled scaled propagation PNG; external simulated game view"}
+        self.addCleanup(self.finish_report)
+        self.save_report()
+        self.native = NativeWindowsInput(self.app, self.artifacts)
+        self.tmp = tempfile.TemporaryDirectory(prefix="poe2-native-hud-")
+        self.addCleanup(self.tmp.cleanup)
+        self.previous_data, self.previous_hotkey = store.DATA_DIR, service.HOTKEY
+        self.addCleanup(self.restore_globals)
+        store.DATA_DIR = Path(self.tmp.name)
+        logger._READY = False
+        logger.initialize()
+        logger.save_settings({"tablets_used":1, "ocr_auto_commit":True})
+        service.HOTKEY = HotkeyManager(supported=True)
+        self.window = None
+        self.host = None
+        self.addCleanup(self.close_windows)
+        self.open_logger()
+        self.raw = (Path(__file__).resolve().parents[1] / "PoE2_Data_Logger/region_examples/opened.jpg").read_bytes()
+
+    def save_report(self):
+        """Write reviewable evidence incrementally so crashes cannot masquerade as a pass."""
+        (self.artifacts / "native-hud-report.json").write_text(json.dumps(self.report, indent=2), encoding="utf-8")
+
+    def finish_report(self):
+        """Mark incomplete checks failed and include actual input/screenshot evidence."""
+        if self.report["status"] != "passed":
+            self.report["status"] = "failed"
+            self.report["failure"] = "Native acceptance did not finish; see unittest traceback and last completed phase."
+        if hasattr(self, "native"):
+            self.report["native_input_events"] = sum(event.get("count", 0) for event in self.native.events)
+            self.report["events"] = self.native.events
+            self.report["screenshots"] = self.native.screenshots
+            self.report["desktop"] = self.native.desktop_name
+        self.save_report()
+
+    def restore_globals(self):
+        """Restore the caller's database and shortcut manager after native checks."""
+        store.DATA_DIR, service.HOTKEY = self.previous_data, self.previous_hotkey
+        logger._READY = False
+
+    def close_windows(self):
+        """Close only this test's native windows, workers and external fixture process."""
+        if self.report["status"] != "passed":
+            try:
+                self.native.screenshot("failure-desktop")
+            except Exception as error:
+                self.report["failure_screenshot_error"] = str(error)
+        if self.window:
+            self.window.close()
+            self.window.pool.shutdown(wait=True, cancel_futures=True)
+        service.HOTKEY._unregister()
+        if self.host:
+            self.host.terminate()
+            self.host.wait(timeout=10)
+        self.app.processEvents()
+
+    def open_logger(self):
+        """Show the real logger maximized and establish initial OS foreground ownership."""
+        self.window = LoggerWindow()
+        self.window.showMaximized()
+        self.native.wait(lambda: self.window.isVisible(), "visible logger")
+        self.native.focus_setup(int(self.window.winId()))
+        self.assertEqual(self.native.foreground(),int(self.window.winId()),
+                         "A shown logger must own the Windows foreground before native input")
+
+    def phase(self, name):
+        """Record completed assertions together with a real desktop screenshot."""
+        self.native.screenshot(name, int(self.window.winId()))
+        self.report["phases"].append(name)
+        self.save_report()
+
+    def tab(self, index):
+        """Navigate sidebar pages through OS mouse input and check GUI responsiveness."""
+        nav = next(button for position, button in enumerate(self.window.nav_buttons)
+                   if (position if button.property("page_index") is None else button.property("page_index")) == index)
+        self.native.click(nav)
+        self.native.wait(lambda: self.window.tabs.currentIndex() == index, f"sidebar page {index}")
+        tick = []
+        QTimer.singleShot(0, lambda: tick.append(True))
+        self.native.wait(lambda: bool(tick), "responsive Qt event loop")
+
+    def table_edit(self, table, row, column, text):
+        """Edit a table cell with a physical double click and Windows Unicode keyboard input."""
+        table.scrollToItem(table.item(row, column))
+        self.native.click(table.viewport(), table.visualItemRect(table.item(row, column)).center(), double=True)
+        self.native.key(ord("A"), (0x11,))
+        self.native.type_text(text)
+        self.native.key(0x0D)
+        self.native.wait(lambda: table.item(row, column).text() == text, "native table correction")
+
+    def deliver(self, label, reading, callback, predicate):
+        """Deliver explicit fixture results through the real worker and queued GUI callback."""
+        self.window._submit(f"Native fixture: {label}", lambda: reading, callback)
+        self.native.wait(predicate, f"asynchronous {label} review", timeout=30)
+
+    def test_native_hud_user_flow(self):
+        """Verify navigation, corrections, saves, counters and overlay interaction with Win32 input."""
+        self.check_navigation_and_preferences()
+        self.check_propagation_and_counters()
+        self.check_tablet_and_waystone()
+        self.check_currency_and_ritual()
+        self.check_overlay_capture_and_confirmation()
+        self.report["status"] = "passed"
+
+    def check_navigation_and_preferences(self):
+        """Visit every page and persist/reset all seven sliders using native input."""
+        for index in (0,1,2,3,4,5,6,7,8,13,12):
+            self.tab(index)
+        menu = self.window.help_menu
+        for index, action in zip((9,10,11), menu.actions()):
+            bar = self.window.menuBar()
+            self.native.click(bar, bar.actionGeometry(menu.menuAction()).center())
+            self.native.wait(menu.isVisible, "native Help menu")
+            self.native.click(menu, menu.actionGeometry(action).center())
+            self.native.wait(lambda: self.window.tabs.currentIndex() == index, f"Help page {index}")
+        self.tab(13)
+        expected = {}
+        for index, (kind, _) in enumerate(ocr_sensitivity.SCAN_TYPES):
+            slider = self.window.ocr_sensitivity_sliders[kind]
+            self.assertEqual(slider.value(), 50)
+            self.native.click(slider)
+            self.native.key(0x24 if index % 2 == 0 else 0x23)
+            expected[kind] = 0 if index % 2 == 0 else 100
+            self.native.wait(lambda: slider.value() == expected[kind], f"{kind} native slider")
+            self.assertEqual(self.window.ocr_sensitivity_labels[kind].text(), str(expected[kind]))
+        self.assertEqual(ocr_sensitivity.saved_values(), expected)
+        self.phase("01-seven-sliders-and-navigation")
+        self.window.close()
+        self.window.pool.shutdown(wait=True, cancel_futures=True)
+        self.open_logger()
+        self.tab(13)
+        self.assertEqual({key:slider.value() for key,slider in self.window.ocr_sensitivity_sliders.items()}, expected)
+        self.native.click(self.window.ocr_sensitivity_reset)
+        self.assertEqual(ocr_sensitivity.saved_values(), {key:50 for key in expected})
+        self.phase("02-persisted-preferences-reset")
+
+    def check_propagation_and_counters(self):
+        """Correct a held scaled capture with a real PNG dropdown and save once before advancing."""
+        self.tab(0)
+        with Image.open(io.BytesIO(self.raw)) as opened:
+            source = runehelper_ocr.default_frame(opened.convert("RGB"))
+        image = Image.new("RGB", source.size, (176,161,130))
+        image.paste(source.resize((round(source.width*.75),round(source.height*.75)), Image.Resampling.LANCZOS))
+        image = ImageEnhance.Brightness(image).enhance(1.2)
+        y = round(167*.75)
+        ImageDraw.Draw(image).polygon([(1,y),(15,y-10),(35,y),(15,y+10)], fill=(242,209,124))
+        png = io.BytesIO()
+        image.save(png, format="PNG")
+        context = logger.scan_context()
+        self.window._submit("Native real .75 propagation fixture",
+                            lambda: {**propagation_scan.scan_propagation(image), **context},
+                            lambda result:self.window._propagation_read(result, png.getvalue()))
+        self.native.wait(lambda:self.window.pending_review_kind == "propagation" and
+                         self.window.propagation_recipe_table.rowCount() > 0, "held real propagation OCR", timeout=90)
+        row = self.window.propagation_recipe_table.currentRow()
+        self.assertEqual(self.window.propagation_recipe_table.item(row,0).text(), "Regal Orb x3")
+        first, _ = self.window._propagation_row_inputs[row]
+        slot = first.findData(2)
+        self.assertEqual(first.itemText(slot), "Tidal")
+        self.assertFalse(first.itemIcon(slot).isNull())
+        self.native.choose(first, 2)
+        action = self.window.propagation_recipe_table.cellWidget(row,2).findChild(QPushButton,"approvePropagationRecipe")
+        before_expedition = logger.get_state()["current_expedition_id"]
+        self.native.click(action)
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.assertEqual(logger.get_state()["current_expedition_id"], before_expedition)
+        self.assertEqual([(part["rune1"], part["rune2"]) for part in logger.get_state()["chain"]], [("Tidal", "")])
+        self.assertEqual(self.window.propagation_recipe_table.rowCount(),0)
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertTrue(self.window.approve_scan_button.isHidden())
+        self.phase("03-propagation-direct-approve")
+        self.native.click(self.window.review_complete_chain_button)
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertEqual(logger.get_state()["chain"], [])
+        result = {"mode":"opened", "status":"Injected opened rewards", "can_use":True,
+                  "family":"Family 3", "candidates":[3], "sockets":10, "recipe_sockets":10,
+                  "socket_source":"opened icons", "first_line_gap":60, "list_complete":False,
+                  "first_recipe":"Perfect Chaos Orb x3", "next_recipe":"Perfect Exalted Orb x3",
+                  "opened_recipes":[{"recipe":name,"ocr_score":.99,"match_score":1}
+                                    for name in ("Perfect Chaos Orb x3","Perfect Exalted Orb x3")],
+                  "_ocr_strictness":100, **logger.scan_context()}
+        self.window.mode = "opened"
+        self.deliver("opened remnant", result, lambda r:self.window._scan_done("opened",r,self.raw),
+                     lambda:self.window.pending_review_kind == "remnant")
+        self.assertEqual(self.window.header_remnant_id.text(), "#1")
+        self.native.click(self.window.approve_scan_button)
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertEqual(self.window.header_map_id.text(), "#1")
+        self.assertEqual(self.window.header_remnant_id.text(), "#1")
+        self.assertIn("32px", self.window.header_map_id.styleSheet())
+        self.assertGreaterEqual(self.window.header_map_id.height(), 32)
+        self.phase("04-large-map-remnant-counters")
+        new_map = next(button for button in self.window.findChildren(QPushButton) if button.text() == "+ New map")
+        undo = next(button for button in self.window.findChildren(QPushButton) if button.text() == "Undo new map")
+        self.native.click(new_map)
+        self.assertEqual(self.window.header_map_id.text(), "#2")
+        self.assertEqual(self.window.header_remnant_id.text(), "—")
+        self.native.click(undo)
+        self.assertEqual(self.window.header_map_id.text(), "#1")
+        self.assertEqual(self.window.header_remnant_id.text(), "#1")
+        self.phase("05-map-advance-and-undo")
+
+    def check_tablet_and_waystone(self):
+        """Recover incomplete tooltip OCR using native form corrections and explicit approval."""
+        tablet = {"kind":"tablet", "source":"screen OCR", "mods":["The tooltip could not be read"],
+                  "matches":[], "uncertain":[], "_ocr_strictness":100, **logger.scan_context()}
+        self.deliver("tablet", tablet, lambda r:self.window._hover_item_read(r,self.raw),
+                     lambda:self.window.pending_review_kind == "tablet")
+        self.assertFalse(self.window.approve_scan_button.isEnabled())
+        self.native.click(self.window.review_edit_button)
+        self.native.choose(self.window.tablet_affixes[0], "Pack Size")
+        self.native.edit(self.window.tablet_values[0], "31")
+        self.tab(0)
+        before = logger.get_state()["scan_commit_count"]
+        self.native.click(self.window.approve_scan_button)
+        self.assertEqual(logger.get_state()["settings"]["tablet_affixes"][0]["value"],31)
+        self.assertEqual(logger.get_state()["scan_commit_count"],before+1)
+        self.assertEqual(logger.tablet_next_slot(),2)
+        self.phase("06-tablet-manual-review")
+        reading = parse_item_text("Item Class: Waystones\nRarity: Rare\nReview Waystone\nWaystone\n"
+                                  "Item Level:82\nMonsters have 20% increased maximum Life", self.window.state["affixes"])
+        reading.update({"source":"screen OCR", "_ocr_strictness":100, **logger.scan_context()})
+        self.deliver("waystone", reading, lambda r:self.window._hover_item_read(r,self.raw),
+                     lambda:self.window.pending_review_kind == "waystone")
+        self.native.click(self.window.review_edit_button)
+        self.native.choose(self.window.tier,16)
+        self.native.edit(self.window.waystone,"93.5")
+        self.native.edit(self.window.map_mods,"1")
+        self.native.edit(self.window.waystone_mod_fields[0],"Monsters have 25% increased maximum Life")
+        self.tab(0)
+        before = logger.get_state()["scan_commit_count"]
+        self.native.click(self.window.approve_scan_button)
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertEqual(logger.get_state()["scan_commit_count"],before+1)
+        self.assertEqual(logger.get_state()["settings"]["tier"],16)
+        self.assertEqual(logger.get_state()["settings"]["waystone"],93.5)
+        self.phase("07-waystone-manual-review")
+
+    def check_currency_and_ritual(self):
+        """Approve corrected rows and ensure only the final end-inventory save updates totals."""
+        self.tab(4)
+        reading = {"items":[{"slot":1,"name":"Chaos Orb","quantity":4}],
+                   "unknown":[{"slot":2,"candidate":"Divine Orb"}], "_ocr_strictness":100}
+        self.deliver("currency",reading,lambda r:self.window._inventory_read(r,live=True,expected_map_id="M0001"),
+                     lambda:self.window.pending_review_kind == "currency" and self.window.inventory_table.rowCount()==2)
+        # The phase selector is on the held Review page; select End before saving.
+        self.native.choose(self.window.inventory_phase,"end")
+        self.assertEqual(self.window._pending_currency_phase,"end")
+        table = self.window.inventory_table
+        self.assertFalse(table.cellWidget(0,3).findChild(QPushButton,"approveCurrency").isEnabled())
+        self.assertTrue(table.cellWidget(1,3).findChild(QPushButton,"approveCurrency").isEnabled())
+        self.table_edit(table,1,1,"Divine Orb")
+        self.table_edit(table,1,2,"2")
+        self.native.click(table.cellWidget(1,3).findChild(QPushButton,"approveCurrency"))
+        self.assertEqual(logger.currency_for_map("M0001")["end"],{})
+        before = logger.get_state()["scan_commit_count"]
+        self.native.click(self.window.approve_scan_button)
+        self.assertEqual(logger.currency_for_map("M0001")["end"],{"Chaos Orb":4,"Divine Orb":2})
+        self.assertEqual(logger.get_state()["scan_commit_count"],before+1)
+        self.assertEqual(self.window.session_currency.cards["Chaos Orb"].quantity,4)
+        self.assertEqual(self.window.session_currency.cards["Divine Orb"].quantity,2)
+        self.phase("08-currency-row-and-final-approval")
+        ritual = {"items":[{"category":"Item", "category_verified":True, "name":"", "quantity":1,
+                            "tribute":None, "source":"Injected reward evidence", "unresolved":True,
+                            "name_needs_review":True, "needs_review":True, "deferred":False,"grid_slots":[14]}],
+                  "raw_text":"Injected Ritual raw", "unmatched":[], "tribute_available":5430,
+                  "rerolls_remaining":2,"_ocr_strictness":100}
+        self.deliver("Ritual",ritual,lambda r:self.window._ritual_read(r,live=True,expected_map_id="M0001"),
+                     lambda:self.window.pending_review_kind == "ritual" and self.window.ritual_table.rowCount()==1)
+        self.table_edit(self.window.ritual_table,0,1,"A manually identified rare belt")
+        before = logger.get_state()["scan_commit_count"]
+        self.native.click(self.window.approve_scan_button)
+        saved = logger.ritual_pages_for_map("M0001")[-1]["items"][0]
+        self.assertEqual((saved["category"],saved["name"],saved["quantity"]),("Item","A manually identified rare belt",1))
+        self.assertEqual(logger.get_state()["scan_commit_count"],before+1)
+        self.assertIsNone(self.window.pending_review_kind)
+        self.phase("09-ritual-correction-and-approval")
+
+    def start_external_fixture(self):
+        """Launch an external PID with a real capture image and the game's exact focus title."""
+        ready = Path(self.tmp.name) / "fixture-ready.json"
+        helper = Path(__file__).resolve().parents[1] / "tools/native_hud_input.py"
+        image = Path(__file__).resolve().parents[1] / "PoE2_Data_Logger/region_examples/opened.jpg"
+        self.host = subprocess.Popen([sys.executable,str(helper),"--fixture-window",str(image),"--ready-file",str(ready)])
+        self.native.wait(lambda:ready.exists() or self.host.poll() is not None,"external fixture startup",timeout=30)
+        self.assertIsNone(self.host.poll(),"External fixture could not start on the Windows desktop")
+        host = json.loads(ready.read_text(encoding="utf-8"))
+        self.assertNotEqual(host["pid"],os.getpid())
+        self.native.focus_setup(host["hwnd"])
+        self.assertTrue(game_foreground(),"An external simulated game view must satisfy the actual title/PID focus guard")
+        self.report["external_fixture"] = {**host,"description":"Simulated game view; not Path of Exile 2 gameplay"}
+        return host["hwnd"]
+
+    def check_overlay_capture_and_confirmation(self):
+        """Verify native hide/capture/reveal and uncertain confirmation retain usable HWND input."""
+        self.tab(6)
+        self.native.click(self.window.overlay_checkbox)
+        self.native.wait(lambda:service.HOTKEY.status()["registered"],"real registered HUD shortcut")
+        self.assertTrue(self.window._overlay_enabled)
+        self.assertEqual(service.HOTKEY.status()["combos"]["overlay"],"Ctrl+Shift+H")
+        self.tab(0)
+        self.assertTrue(self.window.isMaximized())
+        bounds = self.native.rect(int(self.window.winId()))
+        self.native.key(0x1B)
+        self.native.wait(lambda:not self.window.isVisible() or self.window.isMinimized(),"native Escape hides HUD")
+        host_hwnd = self.start_external_fixture()
+        left,top,right,bottom = self.native.rect(host_hwnd)
+        sample = (left+25,top+100,left+125,min(bottom-50,top+200))
+        self.native.pump(.25)
+        baseline = ImageGrab.grab(bbox=sample,all_screens=True).convert("RGB")
+        self.assertLess(max(abs(channel-target) for channel,target in
+                            zip(ImageStat.Stat(baseline).mean,(37,72,95))),5,
+                        "The baseline must contain the external fixture's visible background pixels")
+        self.native.key(ord("H"),(0x11,0x10))
+        self.native.wait(lambda:self.window.isVisible() and not self.window.isMinimized(),"global OS shortcut reveals HUD")
+        self.native.wait(lambda:self.native.foreground()==int(self.window.winId()),"HUD activation after real global shortcut")
+        self.assertEqual(self.native.rect(int(self.window.winId())),bounds)
+        self.tab(13)
+        self.tab(0)
+        captures = []
+
+        def immediate_capture():
+            """Capture immediately after the actual GUI hide handoff, without compositor mocks."""
+            self.window._prepare_overlay_capture()
+            captured = ImageGrab.grab(bbox=sample,all_screens=True).convert("RGB")
+            captured.save(self.artifacts / "10-immediate-hide-handoff.png")
+            return captured
+
+        self.window._submit("Native capture-hide handoff",immediate_capture,captures.append)
+        self.native.wait(lambda:bool(captures),"actual capture-hide worker handoff")
+        difference = ImageStat.Stat(ImageChops.difference(baseline,captures[0])).mean
+        self.assertLess(max(difference),3,"HUD pixels remained over the external fixture at capture handoff")
+        self.report["capture_handoff_mean_pixel_difference"] = difference
+        self.native.screenshots.append("10-immediate-hide-handoff.png")
+        self.native.focus_setup(host_hwnd)
+        reading = {"items":[{"slot":1,"name":"Chaos Orb","quantity":4,"count_needs_review":True}],
+                   "unknown":[],"_ocr_strictness":100}
+        self.deliver("uncertain overlay confirmation",reading,
+                     lambda r:self.window._inventory_read(r,live=True,expected_map_id="M0001"),
+                     lambda:self.window.pending_review_kind=="currency" and self.window.isVisible())
+        # No SetForegroundWindow here: the logger must reveal and activate itself.
+        self.native.wait(lambda:self.native.foreground()==int(self.window.winId()),"automatic confirmation OS foreground")
+        self.assertEqual(self.native.rect(int(self.window.winId())),bounds)
+        self.assertEqual(self.window.windowOpacity(),1.0)
+        self.table_edit(self.window.inventory_table,0,2,"7")
+        self.native.click(self.window.inventory_table.cellWidget(0,3).findChild(QPushButton,"approveCurrency"))
+        self.phase("11-interactive-uncertain-overlay-confirmation")
+        self.native.click(self.window.approve_scan_button)
+        self.assertEqual(logger.currency_for_map("M0001")["end"]["Chaos Orb"],7)
+        self.native.wait(lambda:not self.window.isVisible() or self.window.isMinimized(),"approved HUD hides")
+        self.native.focus_setup(host_hwnd)
+        self.native.key(ord("H"),(0x11,0x10))
+        self.native.wait(lambda:self.window.isVisible() and self.native.foreground()==int(self.window.winId()),"HUD can be restored again")
+        self.assertEqual(self.native.rect(int(self.window.winId())),bounds)
+        held = {"mode":"propagation","can_use":False,"runes":[],"status":"Injected held popup review",
+                "choices":[{"selected_recipe":"Regal Orb x3","runes":[],"can_use":False}],**logger.scan_context()}
+        self.deliver("popup review",held,lambda r:self.window._propagation_read(r,self.raw),
+                     lambda:self.window.pending_review_kind=="propagation")
+        combo = self.window._propagation_row_inputs[0][0]
+        self.native.click(combo)
+        self.native.wait(combo.view().isVisible,"real rune PNG popup")
+        self.native.key(0x1B)
+        self.native.wait(lambda:not combo.view().isVisible(),"first Escape closes popup")
+        self.assertTrue(self.window.isVisible())
+        self.native.key(0x1B)
+        self.native.wait(lambda:not self.window.isVisible() or self.window.isMinimized(),"second Escape hides HUD")
+        self.native.focus_setup(host_hwnd)
+        self.native.key(ord("H"),(0x11,0x10))
+        self.native.wait(lambda:self.window.isVisible() and self.native.foreground()==int(self.window.winId()),"HUD reveals after popup Escape")
+        self.native.choose(combo,2)
+        self.phase("12-popup-escape-and-restored-native-input")
+        self.native.click(combo)
+        popup = combo.view().window()
+        self.native.wait(combo.view().isVisible,"popup before replacement scan")
+        self.deliver("replacement propagation review",held,lambda r:self.window._propagation_read(r,self.raw),
+                     lambda:self.window._propagation_row_inputs[0][0] is not combo)
+        try:
+            self.assertFalse(popup.isVisible(),"A replacement scan must retire its obsolete dropdown popup")
+        except RuntimeError:
+            pass  # Deleting the obsolete Qt popup is also a valid retirement.
+        self.native.choose(self.window._propagation_row_inputs[0][0],2)
+        self.phase("13-replacement-scan-retires-popup")
+
+
+if __name__ == "__main__":
+    unittest.main()
