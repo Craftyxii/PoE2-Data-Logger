@@ -556,14 +556,17 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.assertGreater(table.verticalScrollBar().value(),0,"Exercise a row below the initial table view")
         self.assertGreater(table.horizontalScrollBar().value(),0,"Exercise horizontal inner scrolling")
         self.assertTrue(any(bar.value()>0 for bar in bars[2:]),"Exercise the enclosing Review page's scroll")
-        current = table.currentRow()
-        selected = {index.row() for index in table.selectedIndexes()}
         slot = table.item(row,0).data(Qt.ItemDataRole.UserRole)
         point = self.native.point(table.viewport(),table.visualItemRect(table.item(row,3)).center())[:2]
         self.native.click(action)
         state = "approved" if approved else "rejected"
         self.assertEqual(controls.property("reviewStatus"),state)
         self.assertEqual([bar.value() for bar in bars],positions)
+        # Native input makes the clicked row current, even when another row
+        # was edited last. Retain that user-selected row through queued work.
+        current = table.currentRow()
+        self.assertEqual(current,row)
+        selected = {index.row() for index in table.selectedIndexes()}
         queued = []
 
         def settle_layout():
