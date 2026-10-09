@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageGrab, ImageStat
 from PySide6.QtCore import QTimer
@@ -24,6 +25,7 @@ from PoE2_Data_Logger.ocr.item_text import parse_item_text
 from PoE2_Data_Logger.platform.hotkey import HotkeyManager
 from PoE2_Data_Logger.platform.live_watch import game_foreground
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
+from PoE2_Data_Logger.ui import native_desktop
 from tools.native_hud_input import NativeWindowsInput
 
 
@@ -44,7 +46,7 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.report = {"status":"running", "qt_platform":self.app.platformName(),
                        "input_backend":"Win32 SendInput", "native_input_events":0, "phases":[],
                        "screenshots":[], "game_integration":False, "human_end_user_pass":False,
-                       "scan_evidence":"Async injected item/remnant results; real OCR of a bundled scaled propagation PNG; external simulated game view"}
+                       "scan_evidence":"Async injected item/remnant results; real propagation PNG OCR; real currency hotkey/capture with injected recognition; external simulated game view"}
         self.addCleanup(self.finish_report)
         self.save_report()
         self.native = NativeWindowsInput(self.app, self.artifacts)
@@ -340,6 +342,7 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.native.focus_setup(host["hwnd"])
         self.assertTrue(game_foreground(),"An external simulated game view must satisfy the actual title/PID focus guard")
         self.report["external_fixture"] = {**host,"description":"Simulated game view; not Path of Exile 2 gameplay"}
+        self.fixture_ready = ready
         return host["hwnd"]
 
     def check_overlay_capture_and_confirmation(self):
@@ -386,9 +389,56 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.native.focus_setup(host_hwnd)
         reading = {"items":[{"slot":1,"name":"Chaos Orb","quantity":4,"count_needs_review":True}],
                    "unknown":[],"_ocr_strictness":100}
-        self.deliver("uncertain overlay confirmation",reading,
-                     lambda r:self.window._inventory_read(r,live=True,expected_map_id="M0001"),
-                     lambda:self.window.pending_review_kind=="currency" and self.window.isVisible())
+        # Exercise the real capture/listener/GUI route after fresh input reaches
+        # the external process. Only the recognition boundary is injected.
+        ocr_sensitivity.save_values({**ocr_sensitivity.saved_values(),"currency":100})
+        with logger._connect() as db:
+            regions = logger._meta(db,"scan_region_boxes",{})
+            logger._set_meta(db,"scan_region_boxes",{**regions,"inventory_region":[0,0,1,1]})
+            logger._set_meta(db,"scan_region_resolution","auto")
+        # Ctrl+C chords are reserved by the existing shortcut validator.
+        service.HOTKEY.configure_for("currency","Ctrl+Shift+I")
+        self.native.wait(lambda:service.HOTKEY.status()["registered"],"real registered currency shortcut")
+        self.native.click_hwnd(host_hwnd)
+        self.native.wait(lambda:json.loads(self.fixture_ready.read_text(encoding="utf-8")).get("mouse_presses",0)>0,
+                         "external process received actual mouse input")
+        self.assertTrue(game_foreground())
+        before_event = self.window._latest_hotkey
+        before_commits = logger.get_state()["scan_commit_count"]
+
+        def injected_currency_reader(image,references=(),read=None,strictness=50):
+            """Retain the actual captured pixels while injecting only the uncertain recognition result."""
+            image.save(self.artifacts / "10-real-currency-hotkey-capture.png")
+            self.assertEqual(strictness,100)
+            return reading
+
+        def currency_finished_or_failed():
+            """Observe the real hotkey event or completed held review without bypassing GUI callbacks."""
+            latest = service.HOTKEY.status().get("latest") or {}
+            return ((latest.get("id",0)>before_event and bool(latest.get("error"))) or
+                    (self.window.pending_review_kind=="currency" and self.window.isVisible() and
+                     self.window._inventory_reading is None and self.window.inventory_table.rowCount()==1))
+
+        with patch.object(native_desktop.item_ocr,"scan_inventory_grid",side_effect=injected_currency_reader) as reader:
+            self.native.key(ord("I"),(0x11,0x10))
+            try:
+                self.native.wait(currency_finished_or_failed,"real currency shortcut scan and uncertain confirmation",timeout=30)
+            except AssertionError as error:
+                self.fail(f"{error}; hotkey status={service.HOTKEY.status()}; HUD status={self.window.scan_status.text()}")
+            latest = service.HOTKEY.status().get("latest") or {}
+            self.assertFalse(latest.get("error"),f"Real currency hotkey failed: {latest.get('error')}")
+            self.assertEqual(reader.call_count,1)
+        # _inventory_captured retires the consumed manager event; the GUI keeps
+        # its handled ID and frozen capture context for ownership verification.
+        self.assertGreater(self.window._latest_hotkey,before_event)
+        self.assertEqual(self.window._inventory_capture_context["strictness"],100)
+        self.assertEqual(self.window._inventory_capture_context["phase"],"end")
+        self.assertEqual(self.window._inventory_capture_context["map_id"],"M0001")
+        self.assertEqual(logger.get_state()["scan_commit_count"],before_commits)
+        self.native.screenshots.append("10-real-currency-hotkey-capture.png")
+        self.report["currency_confirmation_route"] = {"external_mouse_received":True,"shortcut":"Ctrl+Shift+I",
+            "capture":"real ImageGrab","recognition":"injected fixture at scan_inventory_grid","strictness":100,
+            "event_id":self.window._latest_hotkey}
         # No SetForegroundWindow here: the logger must reveal and activate itself.
         self.native.wait(lambda:self.native.foreground()==int(self.window.winId()),"automatic confirmation OS foreground")
         self.assertEqual(self.native.rect(int(self.window.winId())),bounds)

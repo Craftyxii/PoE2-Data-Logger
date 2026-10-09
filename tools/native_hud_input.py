@@ -204,6 +204,25 @@ class NativeWindowsInput:
                             self.Input(0, self.InputUnion(mi=self.MouseInput(0,0,0,4,0,0)))))
         self._send(entries, "mouse double click" if double else "mouse click")
 
+    def click_hwnd(self, hwnd):
+        """Send real mouse input to a verified external foreground window's client area."""
+        origin = wintypes.POINT(0,0)
+        if not self.user.ClientToScreen(hwnd,ctypes.byref(origin)):
+            raise AssertionError("Cannot locate the external fixture's client origin.")
+        _,_,width,height = self.rect(hwnd,client=True)
+        x,y = origin.x+min(80,width//2),origin.y+min(180,height//2)
+        hit = self.user.GetAncestor(self.user.WindowFromPoint(wintypes.POINT(x,y)),2)
+        foreground = self.foreground()
+        if int(hit or 0) != int(hwnd) or foreground != int(hwnd):
+            raise AssertionError(f"External native click target/foreground mismatch: {int(hit or 0)}/{foreground} != {hwnd}")
+        self.events.append({"action":"external_hit_test","hwnd":int(hwnd),"foreground":foreground,
+                            "hit_hwnd":int(hit),"point":[x,y]})
+        if not self.user.SetCursorPos(x,y):
+            raise AssertionError("Windows rejected external fixture cursor movement.")
+        self._send([self.Input(0,self.InputUnion(mi=self.MouseInput(0,0,0,2,0,0))),
+                    self.Input(0,self.InputUnion(mi=self.MouseInput(0,0,0,4,0,0)))],"external fixture mouse click")
+        self.wait(lambda:self.foreground()==int(hwnd),"external foreground after actual mouse input")
+
     def key(self, vk, modifiers=()):
         """Send a physical virtual-key chord through the Windows input queue."""
         entries = []
@@ -279,15 +298,32 @@ def fixture_window(image_path, ready_file):
         raise RuntimeError("Fixture window must use the real Windows Qt plugin.")
     window = QMainWindow()
     window.setWindowTitle("Path of Exile 2")
-    label = QLabel()
+    clicks = []
+
+    def write_ready():
+        """Publish fixture HWND and observed real mouse presses atomically for the parent."""
+        ready = Path(ready_file)
+        temporary = ready.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"hwnd":int(window.winId()),"pid":__import__("os").getpid(),
+                                         "qt_platform":app.platformName(),"mouse_presses":len(clicks)}),encoding="utf-8")
+        temporary.replace(ready)
+
+    class FixtureLabel(QLabel):
+        """Confirm that the external process actually received the OS mouse press."""
+        def mousePressEvent(self,event):
+            """Record native-delivered mouse input without synthesizing any Qt event."""
+            clicks.append(True)
+            write_ready()
+            super().mousePressEvent(event)
+
+    label = FixtureLabel()
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
     label.setStyleSheet("background-color:rgb(37,72,95)")
     label.setPixmap(QPixmap(str(image_path)).scaled(600, 680, Qt.AspectRatioMode.KeepAspectRatio))
     window.setCentralWidget(label)
     window.showMaximized()
     app.processEvents()
-    Path(ready_file).write_text(json.dumps({"hwnd":int(window.winId()), "pid":__import__("os").getpid(),
-                                          "qt_platform":app.platformName()}), encoding="utf-8")
+    write_ready()
     return app.exec()
 
 
