@@ -187,6 +187,14 @@ class NativeWindowsInput:
 
     def click(self, widget, point=None, double=False):
         """Click a verified HWND target using native cursor movement and mouse input."""
+        from PySide6.QtWidgets import QCheckBox, QStyle, QStyleOptionButton
+        if point is None and isinstance(widget, QCheckBox):
+            # Stretched checkbox widgets include blank space that their style
+            # does not treat as a click. Aim at the visible indicator instead.
+            option = QStyleOptionButton()
+            option.initFrom(widget)
+            point = widget.style().subElementRect(
+                QStyle.SubElement.SE_CheckBoxIndicator, option, widget).center()
         x, y = self.assert_target(widget, point)
         if not self.user.SetCursorPos(x, y):
             raise AssertionError("Windows rejected cursor movement.")
