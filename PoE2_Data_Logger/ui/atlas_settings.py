@@ -305,6 +305,14 @@ class GearRaritySpinBox(QDoubleSpinBox):
             self.lineEdit().setText(text)
             self.lineEdit().setCursorPosition(position)
 
+    def stepBy(self, steps):
+        """Keep stepping through zero from producing a negative fractional rarity."""
+        super().stepBy(steps)
+        if -1 < self.value() < 0:
+            # The range includes -1 only for "Not set". A decimal rarity
+            # below one must reach zero before stepping to that sentinel.
+            self.setValue(0)
+
     def validate(self, text, position):
         """Reject typed negatives while retaining Qt validation for intermediate decimals."""
         if text.lstrip().startswith("-"):

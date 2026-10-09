@@ -220,6 +220,27 @@ class AtlasEditorTests(unittest.TestCase):
                     self.assertEqual(self.page.settings()["gear_item_rarity"], expected)
                     self.assertTrue(self.page.dirty)
 
+    def test_decreasing_fractional_gear_rarity_reaches_zero_and_can_save(self):
+        """Keep arrow-key adjustments saveable at the zero/unknown boundary."""
+        field = self.page.gear_rarity
+        saved = []
+        self.page.saved.connect(saved.append)
+        for rarity in (.25, .75):
+            with self.subTest(rarity=rarity):
+                self.page.set_settings({"gear_item_rarity": rarity}, force=True)
+                QTest.keyClick(field, Qt.Key.Key_Down)
+                self.assertEqual(self.page.settings()["gear_item_rarity"], 0)
+                self.assertTrue(self.page.dirty)
+                self.assertFalse(self.page.set_settings({"gear_item_rarity": rarity}))
+                self.page.save_button.click()
+                self.assertEqual(saved[-1]["gear_item_rarity"], 0)
+                QTest.keyClick(field, Qt.Key.Key_Down)
+                self.assertEqual(field.text(), "Not set")
+                self.page.save_button.click()
+                self.assertIsNone(saved[-1]["gear_item_rarity"])
+                QTest.keyClick(field, Qt.Key.Key_Up)
+                self.assertEqual(self.page.settings()["gear_item_rarity"], 0)
+
     def test_gear_rarity_paste_and_edit_keep_the_typed_number(self):
         """Verify pasted rarity remains editable and saves the edited number."""
         field = self.page.gear_rarity

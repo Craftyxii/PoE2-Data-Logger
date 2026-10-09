@@ -1,3 +1,11 @@
+# PoE2 Data Logger 1.3.2
+
+- Promote the reviewed main-branch code to a stable installer with consistent executable, installer, window and release metadata.
+- Provide recipe-only propagation dropdowns with rune artwork, confidence-grouped currency review and guarded linked seed corrections.
+- Recover held waystone and tablet edits; keep Ritual raw evidence in developer tools.
+- Fix fractional gear-rarity stepping and scaled scan-region resizing, and keep shared HUD controls accessible in smaller windows.
+- Remove proven unused helpers and build triggers, retain old-data compatibility, and complete first-party function notes.
+
 # PoE2 Data Logger 1.3.1.1 Beta
 
 - Keep currency row approval separate from the final Start/End inventory commit; preserve the captured map and phase through review.

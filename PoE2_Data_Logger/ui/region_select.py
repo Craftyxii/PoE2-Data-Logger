@@ -592,8 +592,14 @@ class RegionEditor(QDialog):
             moved.moveTop(max(0, min(moved.top(), self.height() - moved.height())))
             self.selection = moved
         elif self.operation == "resize":
-            end = QPoint(max(self.initial.left() + 199, min(pos.x(), self.width() - 1)),
-                         max(self.initial.top() + 99, min(pos.y(), self.height() - 1)))
+            minimum_width, minimum_height = 200, 100
+            if self.capture_bounds is not None:
+                # The acceptance threshold is in native capture pixels, while
+                # mouse positions and the overlay selection use Qt logical pixels.
+                minimum_width = math.ceil(200 * self.width() / self.capture_bounds.width())
+                minimum_height = math.ceil(100 * self.height() / self.capture_bounds.height())
+            end = QPoint(min(self.width() - 1, max(self.initial.left() + minimum_width - 1, pos.x())),
+                         min(self.height() - 1, max(self.initial.top() + minimum_height - 1, pos.y())))
             self.selection = QRect(self.initial.topLeft(), end).normalized()
         else:
             self.selection = QRect(self.anchor, pos).normalized()

@@ -99,6 +99,64 @@ class AtlasIntegrationTests(unittest.TestCase):
         self.assertEqual(self.page.settings(), before)
         self.assertTrue(self.window.header_wisp.isChecked())
 
+    def test_real_six_choice_node_keeps_effects_and_draft_across_pages(self):
+        """Exercise every dropdown state through the shown HUD and reopen its saved settings."""
+        self.window.show()
+        self.window.nav_buttons[-1].click()
+        self.app.processEvents()
+        node_id = "AtlasExpeditionNotable1"
+        node = catalog()["nodes"][node_id]
+        self.page.activity_filter.setCurrentIndex(self.page.activity_filter.findData("Expedition"))
+        self.app.processEvents()
+        badge = self.page.node_items[node_id].choice_badge
+        QTest.mouseClick(self.page.view.viewport(), Qt.MouseButton.LeftButton,
+                         pos=self.page.view.mapFromScene(badge.scenePos()))
+        self.app.processEvents()
+        self.assertIn(node_id, self.page.settings()["allocated"])
+        combo = self.page.choice_combo
+        self.assertEqual(combo.count(), 7)
+        for number in range(7):
+            with self.subTest(number=number):
+                if not combo.view().isVisible():
+                    QTest.mouseClick(combo, Qt.MouseButton.LeftButton, pos=combo.rect().center())
+                self.app.processEvents()
+                QTest.keyClick(combo.view(), Qt.Key.Key_Home)
+                for _ in range(number):
+                    QTest.keyClick(combo.view(), Qt.Key.Key_Down)
+                QTest.keyClick(combo.view(), Qt.Key.Key_Return)
+                self.app.processEvents()
+                text = self.page.node_effects.toPlainText()
+                for option_number, option in enumerate(node["choices"], 1):
+                    self.assertIn(f"{option_number}. {option['name']}", text)
+                    for effect in option["effects"]:
+                        self.assertIn(effect, text)
+                if number:
+                    self.assertEqual(self.page.settings()["choices"][node_id],
+                                     node["choices"][number - 1]["id"])
+                    self.assertEqual(self.page.node_items[node_id].choice_number, number)
+                else:
+                    self.assertNotIn(node_id, self.page.settings()["choices"])
+                    self.assertIsNone(self.page.node_items[node_id].choice_number)
+        before = self.page.settings()
+        self.window.tabs.setCurrentIndex(0)
+        self.window.refresh()
+        self.window.nav_buttons[-1].click()
+        self.app.processEvents()
+        self.assertEqual(self.page.settings(), before)
+        self.assertTrue(self.page.dirty)
+        QTest.mouseClick(self.page.save_button, Qt.MouseButton.LeftButton)
+        self.assertFalse(self.page.dirty)
+        self.window.close()
+        self.window.pool.shutdown(wait=True, cancel_futures=True)
+        self.window = LoggerWindow()
+        self.window._poll.stop()
+        self.page = self.window.atlas_settings_page
+        self.window.show()
+        self.window.nav_buttons[-1].click()
+        self.app.processEvents()
+        self.assertEqual(self.page.settings(), before)
+        self.assertEqual(self.page.node_items[node_id].choice_number, 6)
+
     def test_saved_change_applies_to_next_map_and_preserves_old_rarity(self):
         """Verify new rarity settings affect the next map while prior currency rows retain their snapshot."""
         self.configure(100)

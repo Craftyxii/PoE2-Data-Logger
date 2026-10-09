@@ -69,6 +69,7 @@ class UIRegressionTests(unittest.TestCase):
         self.assertEqual(self.window.size().toTuple(), (1366, 720))
         page = self.window.tabs.widget(1)
         self.window.tabs.setCurrentIndex(1)
+        self.app.processEvents()
         page.ensureWidgetVisible(self.window.expedition_complete_chain_button, 20, 20)
         self.app.processEvents()
         targets = [self.window.expedition_complete_chain_button]

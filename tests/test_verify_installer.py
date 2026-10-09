@@ -91,7 +91,7 @@ class ReleasePackagingTests(unittest.TestCase):
     root = Path(__file__).resolve().parents[1]
 
     def test_installer_and_executable_numeric_and_display_versions_agree(self):
-        """Verify NSIS and executable metadata agree on numeric and displayed beta versions."""
+        """Verify NSIS, executable flags and window title agree on the selected release channel."""
         installer = (self.root / "packaging/installer.nsi").read_text(encoding="utf-8")
         version = re.search(r'^!define APP_VERSION "([0-9.]+)"$', installer, re.MULTILINE).group(1)
         numeric = re.search(r'^VIProductVersion "([^"]+)"$', installer, re.MULTILINE).group(1)
@@ -105,11 +105,16 @@ class ReleasePackagingTests(unittest.TestCase):
         values = {item.arg: ast.literal_eval(item.value) for item in fixed.keywords}
         self.assertEqual(values["filevers"], numeric)
         self.assertEqual(values["prodvers"], numeric)
+        beta = bool(re.search(r'^!define APP_CHANNEL "beta"$', installer, re.MULTILINE))
+        display = f"{version} Beta" if beta else version
+        self.assertEqual(values["flags"] & 0x2, 0x2 if beta else 0)
         strings = {ast.literal_eval(node.args[0]): ast.literal_eval(node.args[1])
                    for node in calls if isinstance(node.func, ast.Name) and node.func.id == "StringStruct"}
-        self.assertEqual(strings["FileVersion"], f"{version} Beta")
-        self.assertEqual(strings["ProductVersion"], f"{version} Beta")
-        self.assertEqual(strings["ProductName"], f"PoE2 Data Logger {version} Beta")
+        self.assertEqual(strings["FileVersion"], display)
+        self.assertEqual(strings["ProductVersion"], display)
+        self.assertEqual(strings["ProductName"], f"PoE2 Data Logger {display}")
+        from PoE2_Data_Logger.ui.native_desktop import WINDOW_TITLE
+        self.assertEqual(WINDOW_TITLE, strings["ProductName"])
 
     def test_release_workflow_accepts_two_to_four_part_versions(self):
         """Verify the release workflow's version pattern accepts two to four numeric parts only."""
@@ -131,7 +136,7 @@ class ReleasePackagingTests(unittest.TestCase):
         for name in (".onInit", "un.onInit"):
             with self.subTest(function=name):
                 body = installer.split(f"Function {name}\n", 1)[1].split("FunctionEnd", 1)[0]
-                for title in ("PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta", "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta", "PoE2 Data Logger 1.3.1 Beta", "PoE2 Data Logger 1.3.1.1 Beta", "PoE2 Data Logger 1.3.1.2 Beta", "${APP_NAME}"):
+                for title in ("PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta", "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta", "PoE2 Data Logger 1.3.1 Beta", "PoE2 Data Logger 1.3.1.1 Beta", "PoE2 Data Logger 1.3.1.2 Beta", "PoE2 Data Logger 1.3.1.3 Beta", "${APP_NAME}"):
                     self.assertIn(f'FindWindowW(p 0, w "{title}")', body)
                 running = body.split("  running:\n", 1)[1].split("  ready:", 1)[0]
                 self.assertIn("/SD IDOK", running)
@@ -141,12 +146,12 @@ class ReleasePackagingTests(unittest.TestCase):
         """Verify native guard probes include previous clients and the current release without duplicate titles."""
         titles = running_client_titles("1.3.1.2", True)
         self.assertEqual(titles, (
-            "PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta",
+            "PoE2 Data Logger", "PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta",
             "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta",
             "PoE2 Data Logger 1.3.1 Beta", "PoE2 Data Logger 1.3.1.1 Beta",
-            "PoE2 Data Logger 1.3.1.2 Beta",
+            "PoE2 Data Logger 1.3.1.2 Beta", "PoE2 Data Logger 1.3.1.3 Beta",
         ))
-        self.assertEqual(running_client_titles("1.3.1.2", False)[-1], "PoE2 Data Logger")
+        self.assertEqual(running_client_titles("1.3.2", False)[-1], "PoE2 Data Logger 1.3.2")
         prior = running_client_titles("1.3.1", True)
         self.assertEqual(prior.count("PoE2 Data Logger 1.3.1 Beta"), 1)
         current = running_client_titles("1.3.1.3", True)

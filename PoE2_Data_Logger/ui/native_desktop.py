@@ -46,7 +46,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.1.3 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2"
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
                             if getattr(sys, "frozen", False) else
@@ -629,12 +629,22 @@ class LoggerWindow(QMainWindow):
         atlas_nav.setProperty("page_index", 12)
         self.nav_buttons.append(atlas_nav)
         nav.addWidget(atlas_nav)
-        root.addWidget(sidebar)
+        navigation = QScrollArea()
+        navigation.setFrameShape(QFrame.Shape.NoFrame)
+        navigation.setWidgetResizable(True)
+        navigation.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        navigation.setFixedWidth(224)
+        sidebar.setMinimumWidth(0)
+        sidebar.setMaximumWidth(16777215)
+        navigation.setWidget(sidebar)
+        root.addWidget(navigation)
         main = QWidget()
         main_layout = QVBoxLayout(main)
         main_layout.setContentsMargins(24, 10, 16, 4)
         main_layout.setSpacing(10)
-        top = QHBoxLayout()
+        top = QGridLayout()
+        self._header_layout = top
+        self._header_arrangement = None
         heading = QVBoxLayout()
         self.page_title = QLabel("Review")
         self.page_title.setStyleSheet("font-size:24px;font-weight:700;color:#FFFFFF;")
@@ -645,8 +655,9 @@ class LoggerWindow(QMainWindow):
         self.page_subtitle.setWordWrap(True)
         heading.addWidget(self.page_title)
         heading.addWidget(self.page_subtitle)
-        top.addLayout(heading, 1)
+        self._header_heading = heading
         self._build_kill_controls(top, compact=True)
+        top.removeWidget(self.kill_counts_group)
         self.header_map_id = QLabel("—")
         self.header_remnant_id = QLabel("—")
         self.header_expedition = combo([1, 2])
@@ -666,12 +677,13 @@ class LoggerWindow(QMainWindow):
                 field.setStyleSheet("font-size:17px;font-weight:700;color:#FFFFFF;")
             column.addWidget(field)
             identifiers.addLayout(column)
-        top.addLayout(identifiers)
+        self._header_identifiers = identifiers
         actions = QHBoxLayout()
         actions.addWidget(button("Undo new map", lambda: self.run(self.undo_map)))
         actions.addWidget(button("+ New map", lambda: self.run(self.finish_map), "primary"))
-        top.addLayout(actions)
+        self._header_actions = actions
         main_layout.addLayout(top)
+        self._arrange_header()
         cards = QHBoxLayout()
         self.stat_values = [QLabel("—") for _ in range(4)]
         for number in self.stat_values:
@@ -709,6 +721,9 @@ class LoggerWindow(QMainWindow):
         main_layout.addLayout(cards)
         self.tabs = QTabWidget()
         self.tabs.tabBar().hide()
+        # Scroll pages manage their own content bounds. Standalone page
+        # minimums are applied on navigation so the workspace can scroll them.
+        self.tabs.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         main_layout.addWidget(self.tabs, 1)
         self._build_review()
         self._build_expedition()
@@ -739,7 +754,11 @@ class LoggerWindow(QMainWindow):
         self.tabs.currentChanged.connect(self._page_changed)
         self._page_changed(0)
         self._apply_developer_mode()
-        root.addWidget(main, 1)
+        workspace = QScrollArea()
+        workspace.setFrameShape(QFrame.Shape.NoFrame)
+        workspace.setWidgetResizable(True)
+        workspace.setWidget(main)
+        root.addWidget(workspace, 1)
         self.setCentralWidget(central)
         menu = self.menuBar().addMenu("File")
         menu.addAction("Save Export CSV as…", lambda: self.run(lambda: self.save_as("csv")))
@@ -749,8 +768,41 @@ class LoggerWindow(QMainWindow):
         for label, index in (("README", 9), ("Licenses", 10), ("Disclaimer", 11)):
             self.help_menu.addAction(label, lambda checked=False, index=index: self.tabs.setCurrentIndex(index))
 
+    def _arrange_header(self):
+        """Keep map controls readable by placing the header on two rows in smaller windows."""
+        if not hasattr(self, "_header_actions"):
+            return
+        compact = self.width() < 1200
+        if self._header_arrangement == compact:
+            return
+        self._header_arrangement = compact
+        layout = self._header_layout
+        for item in (self._header_heading, self._header_identifiers, self._header_actions):
+            layout.removeItem(item)
+        layout.removeWidget(self.kill_counts_group)
+        for column in range(4):
+            layout.setColumnStretch(column, 0)
+        if compact:
+            layout.addLayout(self._header_heading, 0, 0)
+            layout.addLayout(self._header_actions, 0, 1, Qt.AlignmentFlag.AlignRight)
+            layout.addWidget(self.kill_counts_group, 1, 0)
+            layout.addLayout(self._header_identifiers, 1, 1)
+            layout.setColumnStretch(0, 1)
+            layout.setColumnStretch(1, 1)
+        else:
+            layout.addLayout(self._header_heading, 0, 0)
+            layout.addWidget(self.kill_counts_group, 0, 1)
+            layout.addLayout(self._header_identifiers, 0, 2)
+            layout.addLayout(self._header_actions, 0, 3)
+            layout.setColumnStretch(0, 1)
+
+    def resizeEvent(self, event):
+        """Reflow the shared header when a resize crosses its readable single-row width."""
+        super().resizeEvent(event)
+        self._arrange_header()
+
     def _page_changed(self, index):
-        """Restore ordinary page opacity and update capture behavior as the user switches pages."""
+        """Restore page opacity/capture behavior and keep standalone controls scrollable."""
         if self._end_hotkey_capture() and index != 7:
             service.HOTKEY.start()
         if index != 0:
@@ -781,6 +833,12 @@ class LoggerWindow(QMainWindow):
         self.page_title.setText(titles[index])
         self.page_subtitle.setText(subtitles[index])
         self.page_subtitle.setVisible(bool(subtitles[index]))
+        page = self.tabs.currentWidget()
+        minimum = page.minimumSizeHint()
+        if isinstance(page, QScrollArea):
+            self.tabs.setMinimumSize(0, 0)
+        else:
+            self.tabs.setMinimumSize(max(0, minimum.width()), max(0, minimum.height()))
         for i, item in enumerate(self.nav_buttons):
             target = item.property("page_index")
             item.setProperty("active", "true" if (i if target is None else target) == index else "false")
@@ -6128,6 +6186,11 @@ def instance_lock():
         user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
         user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
         window = (user32.FindWindowW(None, WINDOW_TITLE)
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3.1.3 Beta")
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3.1.2 Beta")
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3.1.1 Beta")
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3.1 Beta")
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.2.2 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.2.1 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.2 Beta")

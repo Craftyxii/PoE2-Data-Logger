@@ -53,11 +53,9 @@ def version_strings(path):
 
 
 def check_version(path, version, beta):
-    """Require installer/runtime version strings to match the selected numeric version and Beta
-    display channel.
-    """
+    """Require installer/runtime names and version strings to match the stable or beta release."""
     display = f"{version} Beta" if beta else version
-    name = f"PoE2 Data Logger {display}" if beta else "PoE2 Data Logger"
+    name = f"PoE2 Data Logger {display}"
     actual = version_strings(path)
     if actual != {"ProductName": name, "ProductVersion": display, "FileVersion": display}:
         raise RuntimeError(f"{path.name} version metadata does not match {display}.")
@@ -94,12 +92,12 @@ def verify_blocked_launch(executable, arguments, protected_files, check_saved):
 
 def running_client_titles(version, beta):
     """List recognized prior releases plus the current title without duplicate window names."""
-    current = f"PoE2 Data Logger {version} Beta" if beta else "PoE2 Data Logger"
+    current = f"PoE2 Data Logger {version}{' Beta' if beta else ''}"
     return tuple(dict.fromkeys((
-        "PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta",
+        "PoE2 Data Logger", "PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta",
         "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta",
         "PoE2 Data Logger 1.3.1 Beta", "PoE2 Data Logger 1.3.1.1 Beta",
-        "PoE2 Data Logger 1.3.1.2 Beta", current,
+        "PoE2 Data Logger 1.3.1.2 Beta", "PoE2 Data Logger 1.3.1.3 Beta", current,
     )))
 
 
