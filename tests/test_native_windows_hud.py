@@ -126,8 +126,11 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.native.wait(lambda: bool(tick), "responsive Qt event loop")
 
     def table_edit(self, table, row, column, text):
-        """Edit a table cell with a physical double click and Windows Unicode keyboard input."""
+        """Settle the review layout before locating a cell for native mouse and keyboard correction."""
+        self.native.expose(table)
         table.scrollToItem(table.item(row, column))
+        self.native.pump()
+        self.native.expose(table.viewport())
         self.native.click(table.viewport(), table.visualItemRect(table.item(row, column)).center(), double=True)
         self.native.key(ord("A"), (0x11,))
         self.native.type_text(text)
@@ -155,8 +158,10 @@ class NativeWindowsHUDTests(unittest.TestCase):
         menu = self.window.help_menu
         for index, action in zip((9,10,11), menu.actions()):
             bar = self.window.menuBar()
+            self.native.expose(bar)
             self.native.click(bar, bar.actionGeometry(menu.menuAction()).center())
             self.native.wait(menu.isVisible, "native Help menu")
+            self.native.expose(menu)
             self.native.click(menu, menu.actionGeometry(action).center())
             self.native.wait(lambda: self.window.tabs.currentIndex() == index, f"Help page {index}")
         self.tab(13)
