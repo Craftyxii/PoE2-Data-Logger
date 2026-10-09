@@ -495,23 +495,29 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.window.first_recipe.text(), first_recipe)
         self.assertEqual(logger.get_state()["ocr_pending"], held)
 
-    def test_confident_scan_after_manual_draft_keeps_both_parts_for_explicit_commit(self):
-        """Verify a confident scan joins an existing manual draft until explicit chain commitment."""
+    def test_confident_scan_saves_directly_with_manual_draft_and_survives_unrelated_reviews(self):
+        """Save confident OCR immediately while retaining manual edits and later review isolation."""
         self.propagate(("Rage", "Time"), "Chaos Orb x2")
         self.auto_propagate(("Death", "Power"), "Divine Orb x2")
-        self.assertEqual(self.exported_chain(), [])
+        saved = [("M0001", "M0001-E01", "1", "Death", "Power")]
+        self.assertEqual(self.exported_chain(), saved)
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
         self.assertEqual(self.expedition_counts(), {"M0001-E01": 2})
         self.assertEqual(self.draft_rows(), [
-            ("1", "Rage", "Chaos Orb x2"), ("1", "Time", "Chaos Orb x2"),
-            ("2", "Death", "Divine Orb x2"), ("2", "Power", "Divine Orb x2")])
+            ("1", "Rage", "Chaos Orb x2"), ("1", "Time", "Chaos Orb x2")])
+        self.assertEqual(self.expedition_chain_rows(), ["#1  Death → Power"])
         self.assertFalse(self.window.review_complete_chain_button.isEnabled())
-        self.window.expedition_commit_chain_button.click()
-        self.assertEqual(self.exported_chain(), [
-            ("M0001", "M0001-E01", "1", "Rage", "Time"),
-            ("M0001", "M0001-E01", "2", "Death", "Power")])
-        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
-        self.assertEqual(self.expedition_counts(), {"M0001-E01": 2})
+        counts, audit = self.expedition_counts(), self.propagation_audit()
+        self.currency()
+        self.assertEqual(self.window.pending_review_kind, "currency")
+        self.assert_discarded(counts, audit, ["#1  Death → Power"])
+        self.assertEqual(self.exported_chain(), saved)
+        self.window.reject_review()
+        self.window.rune_inputs[0].setText("Time")
+        self.opened_remnant(clear=False)
+        self.assertEqual(self.window.pending_review_kind, "remnant")
+        self.assert_discarded(counts, audit, ["#1  Death → Power"])
+        self.assertEqual(self.exported_chain(), saved)
 
     def test_replayed_confident_read_does_not_duplicate_counts_but_new_capture_can_match(self):
         """Verify replaying one reading is idempotent while a fresh identical capture adds a part."""

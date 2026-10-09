@@ -14,11 +14,11 @@ Scans and records are processed and stored locally. **The app does not upload yo
 
 ## Download
 
-Download the [**1.3.2.4 Beta installer**](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.4-beta/PoE2-Data-Logger-Setup-v1.3.2.4-beta.exe) for the changes in the [beta release notes](docs/RELEASE_1.3.2.4.md). The [1.3.2 stable release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2) remains available. Both installers include the libraries and resources needed to run the app.
+Download the [**1.3.2.5 Beta installer**](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.5-beta/PoE2-Data-Logger-Setup-v1.3.2.5-beta.exe) for the changes in the [beta release notes](docs/RELEASE_1.3.2.5.md). The [1.3.2 stable release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2) remains available. Both installers include the libraries and resources needed to run the app.
 
 The separate **Atlas / Character Settings** tab provides a clickable PoE2 atlas with numbered effect dropdowns, immediate hover descriptions, Autofill and gear item rarity. Excel exports include a companion atlas worksheet linked to each map through its saved Atlas Setup ID.
 
-Kills are recorded separately for Normal, Magic, Rare and Unique monsters. The live HUD shows large **Map #** and **Remnant #** indicators. Each accepted propagation scan adds one remnant detonation to its expedition. Clear scans save their chain parts automatically; **Approve** beside a propagation recipe directly saves that part without changing the Expedition ID. Correct saved runes through the Expedition dropdowns, then use **Complete chain** on Review or Expedition to lock the full chain and advance to the next Expedition ID. Propagation review keeps the recipe rows, Approve and Complete controls together.
+Kills are recorded separately for Normal, Magic, Rare and Unique monsters. The live HUD shows centered **Map #** and **Remnant #** indicators at 64 px in wide layouts and 48 px in compact layouts. Each accepted propagation scan adds one remnant detonation to its expedition. Clear scans save their chain parts automatically; **Approve** beside a propagation recipe directly saves that part without changing the Expedition ID and refreshes the editable saved-rune dropdowns on Expedition. Accepted scan parts save while preserving any separate manual draft. Correct saved runes through the Expedition dropdowns, then use **Complete chain** in the header, Review or Expedition to finish the saved chain and advance to the next Expedition ID. Completion waits for an unrelated pending scan to resolve so its captured context stays intact. Propagation review keeps the recipe rows, Approve and Complete controls together. Expedition hides empty manual-draft controls until explicit manual entry is requested, and chain status remains visible when optional guidance is off.
 
 Approved name corrections in Currency and Ritual review save captured artwork as local recognition examples and create dedicated item-count export columns. Unnamed rows are rejected. Remnant review stays tied to its captured expedition while propagation continues. The **OCR Sensitivity** tab has a separate **OCR Strictness** slider for each scan type: **0** accepts more tentative matches, **50** retains the previous behavior, and **100** requires manual confirmation before OCR results save. Quantity, level, family, marked-position and capture-context checks remain enforced. **Scan settings** offers 1, 2, 4 or 6 CPU OCR threads, applied after restarting the app.
 
@@ -59,7 +59,7 @@ py -3.12 -m PoE2_Data_Logger
 
 ## Build on Windows
 
-Install Python 3.12 and NSIS, add `makensis` to PATH, then run **Build.bat** from the repository folder. It installs the build dependencies, packages the app, checks the bundled runtime and OCR models, and creates **PoE2-Data-Logger-Setup-v1.3.2.4-beta.exe**.
+Install Python 3.12 and NSIS, add `makensis` to PATH, then run **Build.bat** from the repository folder. It installs the build dependencies, packages the app, checks the bundled runtime and OCR models, and creates **PoE2-Data-Logger-Setup-v1.3.2.5-beta.exe**.
 
 The source groups in [packaging/sources.py](packaging/sources.py) feed the PyInstaller specification. Add a new app module or resource there when changing the build.
 

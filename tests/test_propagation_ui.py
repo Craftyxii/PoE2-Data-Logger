@@ -242,15 +242,20 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "")
         self.assertEqual(self.window.chain_review_table.item(1, 2).text(), "")
 
-    def test_new_scan_replaces_cleared_trailing_pair_member(self):
-        """Verify new scan replaces cleared trailing pair member."""
+    def test_new_scan_saves_independently_of_cleared_trailing_pair_member(self):
+        """Keep the corrected manual part unchanged when confident OCR saves its own part."""
         self.scan(["Death", "Power"], "Divine Orb x2", draft=True)
         self.window.rune_inputs[1].clear()
         self.scan(["Opulent"], "Greater Regal Orb x3")
-        self.assertEqual(self.draft(), [("1", "Death"), ("2", "Opulent")])
-        self.assertEqual(self.window.chain_review_table.item(1, 2).text(), "Greater Regal Orb x3")
-        self.assertEqual(self.window._chain_steps(), [
-            {"rune1": "Death", "rune2": ""}, {"rune1": "Opulent", "rune2": ""}])
+        self.assertEqual(self.draft(), [("1", "Death")])
+        self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "Divine Orb x2")
+        self.assertEqual(self.window._chain_steps(), [{"rune1": "Death", "rune2": ""}])
+        self.assertEqual(self.saved_parts(), [("Opulent", "")])
+        self.assertEqual(logger.get_state()["detonated"], 2)
+        self.window.commit_chain()
+        self.assertEqual(self.saved_parts(), [("Opulent", ""), ("Death", "")])
+        self.assertEqual(self.draft(), [])
+        self.assertEqual(logger.get_state()["detonated"], 2)
 
     def test_switching_expedition_preserves_separate_drafts(self):
         """Verify switching expedition preserves separate drafts."""
@@ -317,6 +322,66 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E03")
         self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
         self.assertTrue(logger.get_state()["chain_completed"])
+
+    def test_recipe_approval_updates_expedition_saved_fields_and_header_completion(self):
+        """Show approved runes in Expedition and complete the same chain through the global header."""
+        self.window.show()
+        self.window.tabs.setCurrentIndex(0)
+        self.hold_recipes({"selected_recipe": "Swift Alloy", "runes": [], "can_use": False})
+        self.select_row_slots(0, 1, 3)
+        self.assertFalse(self.window.header_complete_chain_button.isEnabled())
+        self.recipe_action(0).click()
+        self.assertEqual(self.saved_parts(), [("Rebirth", "Rebirth")])
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.assertTrue(self.window.header_complete_chain_button.isEnabled())
+        self.window.tabs.setCurrentIndex(1)
+        self.app.processEvents()
+        table = self.window.expedition_chain_table
+        self.assertTrue(table.isVisibleTo(self.window))
+        self.assertEqual(table.rowCount(), 1)
+        self.assertEqual(table.item(0, 0).text(), "1")
+        self.assertEqual(table.cellWidget(0, 1).currentText(), "Rebirth")
+        self.assertEqual(table.cellWidget(0, 2).currentText(), "Rebirth")
+        self.assertTrue(self.window.chain_note.isVisibleTo(self.window))
+        self.assertIn("1 saved parts", self.window.chain_note.text())
+        self.assertTrue(all(field.text() == "" for field in self.window.rune_inputs))
+        self.assertFalse(self.window.expedition_commit_chain_button.isVisibleTo(self.window))
+        self.assertTrue(self.window.header_complete_chain_button.isVisibleTo(self.window))
+        self.window.header_complete_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertEqual(self.saved_parts(), [])
+        self.assertEqual(table.rowCount(), 0)
+        self.assertFalse(self.window.header_complete_chain_button.isEnabled())
+        self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(1))
+        self.assertTrue(logger.get_state()["chain_completed"])
+        self.assertEqual(self.saved_parts(), [("Rebirth", "Rebirth")])
+        self.assertFalse(table.cellWidget(0, 1).isEnabled())
+        self.assertFalse(table.cellWidget(0, 2).isEnabled())
+        self.assertFalse(self.window.header_complete_chain_button.isEnabled())
+
+    def test_pending_currency_blocks_header_completion_until_review_is_rejected(self):
+        """Keep a currency capture's expedition stable while its review remains pending."""
+        self.scan(["Death", "Power"], "Divine Orb x2")
+        self.assertTrue(self.window.header_complete_chain_button.isEnabled())
+        before = logger.get_state()["scan_commit_count"]
+        self.window._inventory_read({"items": [{"slot": 1, "name": "Chaos Orb", "quantity": 4}],
+                                     "unknown": [{"slot": 2, "candidate": "Divine Orb"}],
+                                     "_ocr_strictness": 100}, live=True, expected_map_id="M0001")
+        self.assertEqual(self.window.pending_review_kind, "currency")
+        self.assertFalse(self.window.header_complete_chain_button.isEnabled())
+        self.assertFalse(self.window.review_complete_chain_button.isEnabled())
+        self.assertFalse(self.window.expedition_complete_chain_button.isEnabled())
+        self.window.header_complete_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+        self.assertEqual(self.saved_parts(), [("Death", "Power")])
+        self.window.reject_review()
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertTrue(self.window.header_complete_chain_button.isEnabled())
+        self.assertEqual(logger.get_state()["scan_commit_count"], before)
+        self.window.header_complete_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertEqual(logger.get_state()["scan_commit_count"], before + 1)
 
     def test_normal_propagation_review_exposes_only_recipe_actions_and_completion(self):
         """Keep manual fallback and Expedition draft controls out of the OCR review."""
@@ -1191,14 +1256,20 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
 
     def test_manual_runes_and_scans_keep_existing_order(self):
-        """Verify manual runes and scans keep existing order."""
+        """Persist OCR separately and append valid manual drafts in their original rune order."""
         self.window.rune_inputs[0].setText("Death")
         self.window.rune_inputs[1].setText("Power")
         self.scan(["Opulent"])
-        self.assertEqual(self.draft(), [("1", "Death"), ("2", "Power"), ("3", "Opulent")])
-        self.window.rune_inputs[1].clear()
+        self.assertEqual(self.draft(), [("1", "Death"), ("2", "Power")])
+        self.assertEqual(self.saved_parts(), [("Opulent", "")])
+        self.window.rune_inputs[0].clear()
         with self.assertRaisesRegex(ValueError, "Fill runes in order"):
             self.window.commit_chain()
+        self.assertEqual(self.saved_parts(), [("Opulent", "")])
+        self.window.rune_inputs[0].setText("Death")
+        self.window.commit_chain()
+        self.assertEqual(self.saved_parts(), [("Opulent", ""), ("Death", ""), ("Power", "")])
+        self.assertEqual(self.draft(), [])
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
 
     def test_poll_routes_propagation_without_remnant_assignment(self):

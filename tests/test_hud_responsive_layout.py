@@ -107,6 +107,28 @@ class ResponsiveHUDTests(unittest.TestCase):
             normal = json.loads(db.execute("SELECT kills_json FROM maps WHERE map_id='M0001'").fetchone()[0])[0]
         self.assertEqual(normal, 123)
 
+    def test_large_counters_and_global_chain_completion_fit_both_header_layouts(self):
+        """Keep 48/64-pixel counters and Complete chain reachable at compact and wide sizes."""
+        for width, height, size, caption_size in ((900, 650, 48, 12), (1024, 768, 48, 12),
+                                                 (1920, 1080, 64, 14)):
+            with self.subTest(size=(width, height)):
+                self.window.resize(width, height)
+                self.app.processEvents()
+                self.assertEqual(self.window.size().toTuple(), (width, height))
+                for counter in (self.window.header_map_id, self.window.header_remnant_id):
+                    self.assertIn(f"font-size:{size}px;", counter.styleSheet())
+                    self.assertEqual(counter.alignment(), Qt.AlignmentFlag.AlignCenter)
+                    self.expose(counter)
+                for caption in self.window._header_identifier_captions:
+                    self.assertIn(f"font-size:{caption_size}px;", caption.styleSheet())
+                for page in (0, 1):
+                    self.window.tabs.setCurrentIndex(page)
+                    self.app.processEvents()
+                    button = self.window.header_complete_chain_button
+                    bounds = QRect(button.mapTo(self.window, QPoint()), button.size())
+                    self.assertTrue(self.window.rect().contains(bounds), (width, bounds))
+                    self.expose(self.window.header_complete_chain_button)
+
 
 if __name__ == "__main__":
     unittest.main()

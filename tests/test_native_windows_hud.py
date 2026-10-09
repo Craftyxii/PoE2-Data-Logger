@@ -188,7 +188,7 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.phase("02-persisted-preferences-reset")
 
     def check_propagation_and_counters(self):
-        """Correct a held scaled capture with a real PNG dropdown and save once before advancing."""
+        """Approve real PNG OCR, inspect saved Expedition runes and complete through the live header."""
         self.tab(0)
         with Image.open(io.BytesIO(self.raw)) as opened:
             source = runehelper_ocr.default_frame(opened.convert("RGB"))
@@ -221,10 +221,27 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.assertEqual(self.window.propagation_recipe_table.rowCount(),0)
         self.assertIsNone(self.window.pending_review_kind)
         self.assertTrue(self.window.approve_scan_button.isHidden())
+        self.tab(1)
+        saved_table = self.window.expedition_chain_table
+        self.native.wait(lambda:saved_table.rowCount() == 1 and saved_table.isVisible(),
+                         "approved propagation visible on Expedition")
+        saved_first, saved_second = (saved_table.cellWidget(0,column) for column in (1,2))
+        self.assertEqual((saved_first.currentText(),saved_second.currentText()),("Tidal",""))
+        self.native.assert_target(saved_first)
+        self.native.assert_target(saved_second)
+        self.assertTrue(self.window.chain_note.isVisible())
+        self.assertIn("1 saved parts",self.window.chain_note.text())
         self.phase("03-propagation-direct-approve")
-        self.native.click(self.window.review_complete_chain_button)
+        before_complete = logger.get_state()["scan_commit_count"]
+        self.native.click(self.window.header_complete_chain_button)
+        self.native.wait(lambda:logger.get_state()["current_expedition_id"] == "M0001-E02",
+                         "global header completed chain and advanced expedition once")
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        self.assertEqual(logger.get_state()["scan_commit_count"],before_complete+1)
+        self.assertEqual(self.window.header_expedition.currentData(),2)
         self.assertEqual(logger.get_state()["chain"], [])
+        self.assertEqual(saved_table.rowCount(),0)
+        self.assertFalse(self.window.header_complete_chain_button.isEnabled())
         result = {"mode":"opened", "status":"Injected opened rewards", "can_use":True,
                   "family":"Family 3", "candidates":[3], "sockets":10, "recipe_sockets":10,
                   "socket_source":"opened icons", "first_line_gap":60, "list_complete":False,
@@ -240,8 +257,10 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.assertIsNone(self.window.pending_review_kind)
         self.assertEqual(self.window.header_map_id.text(), "#1")
         self.assertEqual(self.window.header_remnant_id.text(), "#1")
-        self.assertIn("32px", self.window.header_map_id.styleSheet())
-        self.assertGreaterEqual(self.window.header_map_id.height(), 32)
+        for counter in (self.window.header_map_id,self.window.header_remnant_id):
+            self.assertIn("font-size:48px;",counter.styleSheet())
+            self.assertEqual(counter.font().pixelSize(),48)
+            self.assertGreaterEqual(counter.height(),counter.fontMetrics().height())
         self.phase("04-large-map-remnant-counters")
         new_map = next(button for button in self.window.findChildren(QPushButton) if button.text() == "+ New map")
         undo = next(button for button in self.window.findChildren(QPushButton) if button.text() == "Undo new map")

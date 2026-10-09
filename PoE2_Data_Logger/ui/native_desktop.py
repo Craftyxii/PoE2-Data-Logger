@@ -46,7 +46,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.4 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.5 Beta"
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
                             if getattr(sys, "frozen", False) else
@@ -684,6 +684,7 @@ class LoggerWindow(QMainWindow):
         self.header_expedition.setMinimumWidth(145)
         identifiers = QHBoxLayout()
         identifiers.setSpacing(14)
+        self._header_identifier_captions = []
         for label, field in (("MAP #", self.header_map_id),
                              ("REMNANT #", self.header_remnant_id),
                              ("EXPEDITION #", self.header_expedition)):
@@ -692,15 +693,18 @@ class LoggerWindow(QMainWindow):
             caption = QLabel(label)
             caption.setProperty("role", "eyebrow")
             caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._header_identifier_captions.append(caption)
             column.addWidget(caption)
             if isinstance(field, QLabel):
                 field.setMinimumWidth(96)
                 field.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                field.setStyleSheet("font-size:32px;font-weight:700;color:#FFFFFF;")
                 field.setAccessibleName(label)
             column.addWidget(field)
             identifiers.addLayout(column)
         self._header_identifiers = identifiers
+        self.header_complete_chain_button = button(
+            "Complete chain", lambda: self.run(self.complete_chain), "primary")
+        self.header_complete_chain_button.setEnabled(False)
         actions = QHBoxLayout()
         actions.addWidget(button("Undo new map", lambda: self.run(self.undo_map)))
         actions.addWidget(button("+ New map", lambda: self.run(self.finish_map), "primary"))
@@ -793,33 +797,40 @@ class LoggerWindow(QMainWindow):
             self.help_menu.addAction(label, lambda checked=False, index=index: self.tabs.setCurrentIndex(index))
 
     def _arrange_header(self):
-        """Keep map controls readable by placing the header on two rows in smaller windows."""
+        """Center large live counters and keep chain completion reachable at either header width."""
         if not hasattr(self, "_header_actions"):
             return
         compact = self.width() < 1200
         if self._header_arrangement == compact:
             return
         self._header_arrangement = compact
+        for counter in (self.header_map_id, self.header_remnant_id):
+            counter.setStyleSheet(f"font-size:{48 if compact else 64}px;font-weight:700;color:#FFFFFF;")
+        for caption in self._header_identifier_captions:
+            caption.setStyleSheet(f"font-size:{12 if compact else 14}px;font-weight:700;color:#D5B36C;")
         layout = self._header_layout
         for item in (self._header_heading, self._header_identifiers, self._header_actions):
             layout.removeItem(item)
         layout.removeWidget(self.kill_counts_group)
-        for column in range(4):
+        layout.removeWidget(self.header_complete_chain_button)
+        for column in range(5):
             layout.setColumnStretch(column, 0)
         if compact:
-            layout.addLayout(self._header_heading, 0, 0)
-            layout.addLayout(self._header_actions, 0, 1, Qt.AlignmentFlag.AlignRight)
-            layout.addWidget(self.kill_counts_group, 1, 0)
-            layout.addLayout(self._header_identifiers, 1, 1)
+            layout.addLayout(self._header_heading, 0, 0, 1, 2)
+            layout.addWidget(self.header_complete_chain_button, 0, 2, Qt.AlignmentFlag.AlignCenter)
+            layout.addLayout(self._header_actions, 0, 3, Qt.AlignmentFlag.AlignRight)
+            layout.addWidget(self.kill_counts_group, 1, 0, 1, 2)
+            layout.addLayout(self._header_identifiers, 1, 2, 1, 2)
             layout.setColumnStretch(0, 1)
-            layout.setColumnStretch(1, 1)
+            layout.setColumnStretch(2, 1)
         else:
             layout.addLayout(self._header_heading, 0, 0)
             layout.addWidget(self.kill_counts_group, 0, 1, Qt.AlignmentFlag.AlignLeft)
-            layout.addLayout(self._header_identifiers, 0, 2)
-            layout.addLayout(self._header_actions, 0, 3)
-            layout.setColumnStretch(1, 1)
+            layout.addWidget(self.header_complete_chain_button, 0, 2, Qt.AlignmentFlag.AlignCenter)
+            layout.addLayout(self._header_identifiers, 0, 3)
+            layout.addLayout(self._header_actions, 0, 4)
             layout.setColumnStretch(2, 1)
+            layout.setColumnStretch(3, 1)
 
     def resizeEvent(self, event):
         """Reflow the shared header when a resize crosses its readable single-row width."""
@@ -1967,16 +1978,19 @@ class LoggerWindow(QMainWindow):
         chain.addWidget(self.expedition_chain_table)
         self.expedition_save_chain_button = button("Save corrections", lambda: self.run(self.save_chain_corrections))
         chain.addWidget(self.expedition_save_chain_button)
-        self.rune_grid = QGridLayout()
+        self.expedition_draft_widget = QWidget()
+        self.rune_grid = QGridLayout(self.expedition_draft_widget)
+        self.rune_grid.setContentsMargins(0, 0, 0, 0)
         self.rune_inputs = []
-        chain.addLayout(self.rune_grid)
+        chain.addWidget(self.expedition_draft_widget)
         self.add_runes(18)
         buttons = QHBoxLayout()
         self.expedition_commit_chain_button = button("Commit to chain", lambda: self.run(self.commit_chain), "primary")
         buttons.addWidget(self.expedition_commit_chain_button)
         self.expedition_complete_chain_button = button("Complete chain", lambda: self.run(self.complete_chain), "primary")
         buttons.addWidget(self.expedition_complete_chain_button)
-        buttons.addWidget(button("+ More runes", lambda: self.add_runes(6)))
+        self.expedition_more_runes_button = button("+ More runes", lambda: self.add_runes(6))
+        buttons.addWidget(self.expedition_more_runes_button)
         buttons.addStretch()
         chain.addLayout(buttons)
 
@@ -2958,13 +2972,18 @@ class LoggerWindow(QMainWindow):
         for field in self.rune_inputs:
             field.setEnabled(not self.state.get("chain_completed"))
         self.expedition_commit_chain_button.setEnabled(can_append)
+        # Empty draft fields are not the saved chain; manual entry remains available via its shortcut.
+        for control in (self.expedition_draft_widget, self.expedition_commit_chain_button,
+                        self.expedition_more_runes_button):
+            control.setVisible(bool(table.rowCount()))
         self._update_chain_completion_controls()
         self._manual_propagation_changed()
         expedition_id = self.state.get("current_expedition_id") or "the active expedition"
         detonated = self.state.get("detonated") or 0
-        self.chain_note.setText(f"{expedition_id} · {detonated} remnants detonated. "
-                               + ("Chain completed." if self.state.get("chain_completed") else
-                                  f"{len(saved_chain)} saved parts. Complete chain starts the next expedition."))
+        # Current chain status must remain visible when optional guidance is turned off.
+        set_message(self.chain_note, f"{expedition_id} · {detonated} remnants detonated. "
+                    + ("Chain completed." if self.state.get("chain_completed") else
+                       f"{len(saved_chain)} saved parts. Complete chain starts the next expedition."))
         draft_summary = (f" · {part_number} reviewed parts waiting to save" if table.rowCount() else "")
         set_message(self.chain_review_status,
                     f"{expedition_id} · {detonated} remnants detonated · {len(saved_chain)} saved chain parts"
@@ -3038,18 +3057,19 @@ class LoggerWindow(QMainWindow):
         self._update_chain_completion_controls()
 
     def _update_chain_completion_controls(self):
-        """Enable completion only for a saved open chain with no drafts or pending propagation
-        choices.
-        """
+        """Enable completion for saved open chains without drafts, corrections or context-bound scans."""
         if not hasattr(self, "expedition_complete_chain_button"):
             return
         draft = any(value(field) for field in self.rune_inputs)
         dirty = self._saved_chain_edits() != (self.state.get("chain") or [])
         ready = bool(self.state.get("chain") and not self.state.get("chain_completed") and
-                     not draft and not dirty and self.pending_review_kind != "propagation" and
+                     not draft and not dirty and self.pending_review_kind in (None, "remnant", "seed") and
                      not self._manual_propagation_context)
-        for field in (self.review_complete_chain_button, self.expedition_complete_chain_button):
+        for field in (self.review_complete_chain_button, self.expedition_complete_chain_button,
+                      self.header_complete_chain_button):
             field.setEnabled(ready)
+            field.setToolTip("Finish this saved chain and advance to the next expedition." if ready else
+                             "Save a chain part and finish any pending scan, draft or corrections first.")
 
     def save_chain_corrections(self):
         """Persist saved-step corrections against their captured context and refresh commit
@@ -3420,7 +3440,7 @@ class LoggerWindow(QMainWindow):
         propagation-only controls.
         """
         held_propagation = self.pending_review_kind == "propagation"
-        self._append_propagation(result, preserve_remnant_review=True, auto_save=True, direct_save=True)
+        self._append_propagation(result, preserve_remnant_review=True, auto_save=True)
         self._clear_manual_propagation()
         if held_propagation:
             self._propagation_reading = None
@@ -3472,8 +3492,8 @@ class LoggerWindow(QMainWindow):
         else:
             self._prepare_manual_propagation(result)
 
-    def _append_propagation(self, result=None, *, preserve_remnant_review=False, auto_save=False, direct_save=False):
-        """Save an accepted part without completing or advancing the chain."""
+    def _append_propagation(self, result=None, *, preserve_remnant_review=False, auto_save=False):
+        """Persist accepted parts atomically, or stage an explicitly requested draft, without advancing."""
         result = result if preserve_remnant_review else self._propagation_reading
         if ((not preserve_remnant_review and self.pending_review_kind != "propagation") or
                 not result or not result.get("can_use")):
@@ -3483,7 +3503,8 @@ class LoggerWindow(QMainWindow):
         runes = result.get("runes", [])
         if not 1 <= len(runes) <= 2 or any(not isinstance(rune, str) or not rune.strip() for rune in runes):
             raise ValueError("Scan a selected recipe with one or two clear propagation marks.")
-        if auto_save and (direct_save or not any(value(field) for field in self.rune_inputs)):
+        # Accepted scans persist independently of an unrelated manual draft in this expedition.
+        if auto_save:
             request_id = result.setdefault("_chain_accept_request", uuid4().hex)
             saved = logger.accept_propagation_part(self._chain_context, runes=runes,
                 recipe=result.get("selected_recipe") or "", request_id=request_id)
@@ -3604,6 +3625,9 @@ class LoggerWindow(QMainWindow):
             raise ValueError("Commit the reviewed parts to the chain before completing it.")
         if self.pending_review_kind == "propagation" or self._manual_propagation_context:
             raise ValueError("Approve or deny the waiting propagation scan before completing the chain.")
+        # Other scan captures retain the expedition token until their review is resolved.
+        if self.pending_review_kind not in (None, "remnant", "seed"):
+            raise ValueError("Finish the pending scan review before completing the chain.")
         if self._saved_chain_edits() != (self.state.get("chain") or []):
             raise ValueError("Save the rune corrections before completing the chain.")
         preserve_remnant = self.pending_review_kind in ("remnant", "seed")
