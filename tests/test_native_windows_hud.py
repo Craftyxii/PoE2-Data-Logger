@@ -272,6 +272,16 @@ class NativeWindowsHUDTests(unittest.TestCase):
             caption_size = (14 if compact else 17) if index < 2 else (12 if compact else 14)
             self.assertEqual(caption.font().pixelSize(),caption_size)
         self.phase("04-large-map-remnant-counters")
+        # Seed a saved chain, then exercise its completion through actual Windows input.
+        logger.commit_chain("Death")
+        self.window.refresh()
+        before_remnant = self.window.header_remnant_id.text()
+        self.native.click(self.window.header_complete_chain_button)
+        self.native.wait(lambda: logger.get_state()["current_expedition_id"] == "M0001-E03",
+                         "completion retains the current map's remnant number")
+        self.assertEqual(self.window.header_remnant_id.text(), before_remnant)
+        self.assertEqual(logger.get_state()["map_remnant_id"], "R0001")
+        self.phase("04b-completion-retains-remnant-number")
         new_map = next(button for button in self.window.findChildren(QPushButton) if button.text() == "+ New map")
         undo = next(button for button in self.window.findChildren(QPushButton) if button.text() == "Undo new map")
         self.native.click(new_map)

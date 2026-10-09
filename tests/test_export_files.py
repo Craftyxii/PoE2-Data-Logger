@@ -213,7 +213,8 @@ class SQLiteFolderExportTests(unittest.TestCase):
             self.assertTrue(expected[table], table)
         result = logger.save_export_file("sqlite3")
         destination = Path(result["path"])
-        self.assertEqual(destination.parent, self.directory)
+        # Windows may return the long form of a temporary directory's 8.3 alias.
+        self.assertEqual(destination.parent.resolve(), self.directory.resolve())
         self.assertEqual(destination.suffix, ".sqlite3")
         self.assertEqual(result["bytes"], destination.stat().st_size)
         self.assertEqual(set(result), {"path", "bytes"})
@@ -266,7 +267,8 @@ class SQLiteFolderExportTests(unittest.TestCase):
 
         def reserve_then_write(files, *, replace=True):
             """Simulate one competing reservation before using the actual grouped writer."""
-            if competing in files:
+            # Compare filesystem identities after resolving Windows 8.3 aliases.
+            if any(Path(path).resolve() == competing.resolve() for path in files):
                 competing.write_bytes(b"Other export")
             return write_files(files, replace=replace)
 

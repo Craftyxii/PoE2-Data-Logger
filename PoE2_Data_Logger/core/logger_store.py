@@ -3025,6 +3025,22 @@ def export_map_summary_csv(*, _db=None):
     return output.getvalue().encode("utf-8-sig")
 
 
+def _map_remnant_id(db, map_id, pending):
+    """Return this map's latest saved or reserved remnant, independent of expedition selection."""
+    if not map_id:
+        return ""
+    if pending and pending.get("map_id") == map_id:
+        return pending.get("remnant_id", "")
+    # IDs increase across expeditions; compare their numeric suffix beyond R9999.
+    row = db.execute("SELECT remnant_id FROM ("
+                     "SELECT remnant_id FROM new_export WHERE map_id=? "
+                     "UNION ALL SELECT remnant_id FROM legacy_export WHERE map_id=?) "
+                     "WHERE remnant_id IS NOT NULL AND remnant_id!='' "
+                     "ORDER BY CAST(SUBSTR(remnant_id, 2) AS INTEGER) DESC LIMIT 1",
+                     (map_id, map_id)).fetchone()
+    return row[0] if row else ""
+
+
 def get_state():
     """Assemble editable settings, selected IDs and counts, catalogs, current chain and recent remnants for the UI."""
     with _connect() as db:
@@ -3082,6 +3098,8 @@ def get_state():
             "atlas_settings_target_map_id": _map_id(_atlas_settings_target(db)),
             "current_map_id": mid, "current_expedition_id": eid,
             "current_remnant_id": rid,
+            # Keep the HUD's map-level number separate from the selected expedition's remnant.
+            "map_remnant_id": _map_remnant_id(db, mid, pending),
             "next_remnant_id": f"R{_meta(db, 'next_remnant_number'):04d}",
             "scan_commit_count": _meta(db, "scan_commit_count", 0),
             "ocr_pending": pending,

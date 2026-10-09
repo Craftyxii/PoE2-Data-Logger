@@ -46,7 +46,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.5 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.6 Beta"
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
                             if getattr(sys, "frozen", False) else
@@ -2588,8 +2588,10 @@ class LoggerWindow(QMainWindow):
         mid = state["current_map_id"]
         self.header_map_id.setText(header_counter(mid))
         self.header_map_id.setToolTip(mid or "No active map")
-        self.header_remnant_id.setText(header_counter(state["current_remnant_id"]))
-        self.header_remnant_id.setToolTip(state["current_remnant_id"] or "No remnant recorded")
+        # Completing a chain selects an empty expedition without resetting this map's remnant number.
+        remnant = state.get("map_remnant_id") or state["current_remnant_id"]
+        self.header_remnant_id.setText(header_counter(remnant))
+        self.header_remnant_id.setToolTip(remnant or "No remnant recorded")
         self._arrange_header()
         current = state["settings"]["expedition"]
         for control in (self.header_expedition, self.expedition):
@@ -6478,6 +6480,8 @@ def instance_lock():
         user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
         user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
         window = (user32.FindWindowW(None, WINDOW_TITLE)
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.5 Beta")
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.4 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.1.3 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.1.2 Beta")

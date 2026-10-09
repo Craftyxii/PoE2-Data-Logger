@@ -438,6 +438,23 @@ class WorkflowTests(unittest.TestCase):
         newest = logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
         self.assertEqual(logger.get_state()["current_remnant_id"], newest["remnant_id"])
 
+    def test_map_remnant_counter_orders_imported_and_new_ids_numerically(self):
+        """Retain the latest map remnant across legacy storage and IDs longer than four digits."""
+        with logger._connect() as db:
+            logger._set_meta(db, "next_remnant_number", 9999)
+        older = logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
+        newest = logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
+        self.assertEqual((older["remnant_id"], newest["remnant_id"]), ("R9999", "R10000"))
+        with logger._connect() as db:
+            db.execute("INSERT INTO legacy_export SELECT * FROM new_export WHERE remnant_id=?",
+                       (newest["remnant_id"],))
+            db.execute("DELETE FROM new_export WHERE remnant_id=?", (newest["remnant_id"],))
+        logger.save_settings({"expedition": 2})
+        before = (logger.get_state()["next_remnant_id"], logger.get_state()["scan_commit_count"])
+        self.assertEqual(logger.get_state()["map_remnant_id"], newest["remnant_id"])
+        self.assertEqual(logger.get_state()["current_remnant_id"], "")
+        self.assertEqual((logger.get_state()["next_remnant_id"], logger.get_state()["scan_commit_count"]), before)
+
     def test_reference_pack_rejects_invalid_reward_values(self):
         """Verify reference pack rejects invalid reward values."""
         self.add_scan()

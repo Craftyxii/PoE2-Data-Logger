@@ -1,5 +1,6 @@
 """End-user export destinations must never replace the active logging database."""
 
+from contextlib import closing
 import os
 from pathlib import Path
 import sqlite3
@@ -92,7 +93,9 @@ class ActiveLoggingDatabaseExportTests(unittest.TestCase):
         done(result)
         self.assertEqual(logger.currency_for_map("M0001")["start"], {"Chaos Orb": 9})
         self.assertEqual(logger.get_state()["scan_commit_count"], 2)
-        with sqlite3.connect(destination) as backup:
+        # SQLite transaction contexts do not close handles; Windows needs the
+        # explicit close before the temporary backup can be removed.
+        with closing(sqlite3.connect(destination)) as backup:
             self.assertEqual(backup.execute("PRAGMA integrity_check").fetchone()[0], "ok")
             self.assertEqual(backup.execute("SELECT count(*) FROM commits").fetchone()[0], 1)
 

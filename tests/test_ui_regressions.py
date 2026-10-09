@@ -209,7 +209,8 @@ class UIRegressionTests(unittest.TestCase):
         result = work()
         done(result)
         path = Path(result["path"])
-        self.assertEqual(path.parent, directory)
+        # The export canonicalizes paths, including Windows temporary 8.3 aliases.
+        self.assertEqual(path.parent.resolve(), directory.resolve())
         self.assertEqual(path.suffix, ".sqlite3")
         self.assertTrue(path.read_bytes().startswith(b"SQLite format 3\x00"))
         with closing(sqlite3.connect(path)) as backup:

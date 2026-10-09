@@ -569,6 +569,44 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.expedition_counts()["M0001-E01"], 1)
         self.assertEqual(self.exported_chain(), [("M0001", "M0001-E01", "1", "Death", "Power")])
 
+    def test_completion_keeps_map_remnant_number_through_reselection_and_restart(self):
+        """Complete through the HUD without hiding saved remnants or changing their identity."""
+        saved = logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
+        self.window.refresh()
+        self.auto_propagate()
+        before = self.window.header_remnant_id.text()
+        self.assertEqual(before, "#1")
+        self.window.header_complete_chain_button.click()
+        state = logger.get_state()
+        self.assertEqual(state["current_expedition_id"], "M0001-E02")
+        self.assertEqual(state["current_remnant_id"], "")
+        self.assertEqual(state["map_remnant_id"], saved["remnant_id"])
+        self.assertEqual(self.window.header_remnant_id.text(), before)
+        for expedition in (1, 2):
+            select(self.window.header_expedition, expedition)
+            self.assertEqual(self.window.header_remnant_id.text(), before)
+        logger._READY = False
+        logger.initialize()
+        self.window.refresh()
+        self.assertEqual(self.window.header_remnant_id.text(), before)
+        pending = logger.assign_ocr_id("opened")
+        self.window.refresh()
+        self.assertEqual(self.window.header_remnant_id.text(), "#2")
+        logger.discard_ocr_id()
+        self.window.refresh()
+        self.assertEqual(self.window.header_remnant_id.text(), before)
+        second = logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
+        self.assertEqual(second["remnant_id"], pending["remnant_id"])
+        self.window.refresh()
+        self.assertEqual(self.window.header_remnant_id.text(), "#2")
+        logger.finish_map(0, 0, 0, 0)
+        logger.start_map()
+        self.window.refresh()
+        self.assertEqual(self.window.header_remnant_id.text(), "—")
+        logger.undo_empty_map()
+        self.window.refresh()
+        self.assertEqual(self.window.header_remnant_id.text(), "#2")
+
     def test_completion_refuses_unsaved_draft_and_held_propagation_choice(self):
         """Verify chain completion refuses unsaved parts and unresolved propagation choices."""
         self.auto_propagate()

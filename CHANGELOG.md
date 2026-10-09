@@ -1,3 +1,17 @@
+# PoE2 Data Logger 1.3.2.6 Beta
+
+- Compact shared layouts and Currency/Ritual previews; wrap long guidance and keep recipe rune dropdowns readable.
+- Retain the map's remnant number across chain completion and preserve propagation corrections when independent remnant scans finish.
+- Keep conflicting stack counts for manual review, and protect pending Currency/Ritual context from expedition changes.
+- Add reference reset and complete raw SQLite export; preserve older backups/reference exports and block writes over the active database.
+- Reduce redundant currency-card redraws and update previous-beta running-client guards.
+
+# PoE2 Data Logger 1.3.2.5 Beta
+
+- Enlarge live map/remnant counters and make Complete chain available in the shared header.
+- Refresh saved Expedition runes immediately after recipe approval, retain independent manual drafts, and keep chain status visible.
+- Size pages from the active tab to keep scan-region controls reachable in shorter windows.
+
 # PoE2 Data Logger 1.3.2.4 Beta
 
 - Add separate OCR Strictness sliders for each scan type in the OCR Sensitivity tab: 0 accepts more tentative matches, 50 retains previous behavior, and 100 requires manual confirmation. Keep semantic and capture-context safety checks.
