@@ -18,11 +18,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
 class UserReviewNavigationTests(unittest.TestCase):
+    """Check review corrections and perk drafts keep their context while navigation and refresh preserve saved paths."""
     @classmethod
     def setUpClass(cls):
+        """Create or reuse the QApplication required by the Qt test fixtures."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Open an isolated logger window with polling stopped and a reusable propagation screenshot."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-review-navigation-")
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -35,6 +38,7 @@ class UserReviewNavigationTests(unittest.TestCase):
         self.raw = raw.getvalue()
 
     def tearDown(self):
+        """Close the logger window, stop workers and restore the original data directory."""
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -43,12 +47,14 @@ class UserReviewNavigationTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def saved_part(self):
+        """Deliver a confident Tidal propagation scan to save a chain part in the current context."""
         self.window._propagation_read({
             "mode": "propagation", "can_use": True, "runes": ["Tidal"],
             "selected_recipe": "Regal Orb x3", "positions": [3],
             **logger.scan_context()}, self.raw)
 
     def test_return_from_unaccepted_propagation_does_not_leave_a_hidden_chain_blocker(self):
+        """Verify return from unaccepted propagation does not leave a hidden chain blocker."""
         self.saved_part()
         self.window.manual_remnant_button.click()
         self.window.first_recipe.setText("Reward being corrected")
@@ -74,6 +80,7 @@ class UserReviewNavigationTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
 
     def test_saved_chain_corrections_survive_viewing_another_expedition(self):
+        """Verify saved chain corrections survive viewing another expedition."""
         self.saved_part()
         self.window.tabs.setCurrentIndex(1)
         self.window.expedition_chain_table.cellWidget(0, 1).setCurrentText("Death")
@@ -91,6 +98,7 @@ class UserReviewNavigationTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
 
     def test_saved_corrections_for_two_expeditions_do_not_cross_ids(self):
+        """Verify saved corrections for two expeditions do not cross IDs."""
         self.saved_part()
         self.window.expedition_chain_table.cellWidget(0, 1).setCurrentText("Death")
         self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
@@ -108,6 +116,7 @@ class UserReviewNavigationTests(unittest.TestCase):
                          [("M0001-E01", "Death"), ("M0001-E02", "Opulent")])
 
     def test_new_map_discards_unsaved_corrections_and_perk_drafts(self):
+        """Verify new map discards unsaved corrections and perk drafts."""
         self.saved_part()
         self.window.expedition_chain_table.cellWidget(0, 1).setCurrentText("Death")
         self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
@@ -147,6 +156,7 @@ class UserReviewNavigationTests(unittest.TestCase):
         self.assertTrue(Path(self.window.export_folder.text()).samefile(folder))
 
     def test_perk_selection_survives_viewing_another_master(self):
+        """Verify perk selection survives viewing another master."""
         self.window.tabs.setCurrentIndex(3)
         self.window.perk_master.setCurrentText("Jado")
         self.window.perk_boxes[0].setCurrentText("Trove Seekers")
@@ -189,6 +199,7 @@ class UserReviewNavigationTests(unittest.TestCase):
             self.assertEqual(logger._meta(db, "ritual_region", None), legacy)
 
     def test_saving_a_changed_setup_explains_that_logged_map_data_remains_frozen(self):
+        """Verify saving a changed setup explains that logged map data remains frozen."""
         logger.save_settings({"waystone": 85})
         self.window.refresh()
         self.saved_part()
@@ -231,6 +242,7 @@ class UserReviewNavigationTests(unittest.TestCase):
             self.assertEqual(logger._meta(db, "scan_region_resolution", "auto"), "auto")
 
     def test_auto_saved_waystone_does_not_claim_to_change_an_already_logged_setup(self):
+        """Verify auto saved waystone does not claim to change an already logged setup."""
         from PoE2_Data_Logger.ocr.item_text import parse_item_text
         logger.save_settings({"waystone": 85, "ocr_auto_commit": True})
         self.window.refresh()

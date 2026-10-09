@@ -12,7 +12,9 @@ from PoE2_Data_Logger.core.atlas_catalog import catalog
 
 
 class MapSetupRegressionTests(unittest.TestCase):
+    """Check frozen map setups and pending waystone preparation across scans, restarts, undo and reset."""
     def setUp(self):
+        """Initialize a clean isolated logger database with the first map open."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-map-setup-")
         self.previous_data_dir = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -22,30 +24,37 @@ class MapSetupRegressionTests(unittest.TestCase):
         logger.start_map()
 
     def tearDown(self):
+        """Restore the original data directory and initialization state, then remove temporary logger data."""
         store.DATA_DIR = self.previous_data_dir
         logger._READY = False
         self.tmp.cleanup()
 
     def snapshot(self, map_id="M0001"):
+        """Read and decode the stored setup snapshot for a map."""
         with logger._connect() as db:
             return json.loads(db.execute("SELECT snapshot_json FROM maps WHERE map_id=?", (map_id,)).fetchone()[0])
 
     def atlas(self, rarity):
+        """Build empty Atlas allocation settings with the requested gear rarity and current catalog version."""
         return {"catalog_version": catalog()["version"], "allocated": [], "choices": {},
                 "gear_item_rarity": rarity}
 
     def inventory(self, phase="start", quantity=3):
+        """Save a test Chaos Orb stack for the requested inventory phase."""
         return logger.save_currency_snapshot(phase, [{"name": "Chaos Orb", "quantity": quantity}])
 
     def waystone(self, quantity=87):
+        """Save and commit a complete tier-16 Storm Peak setup with a configurable drop-chance value."""
         logger.save_settings({"tier": 16, "waystone": quantity, "map_mods": 5,
                               "waystone_name": "Storm Peak", "waystone_mods": ["Example map modifier"]})
         logger.record_commit("Map settings")
 
     def rows(self, exporter):
+        """Run a CSV exporter and decode its rows as header-keyed dictionaries."""
         return list(csv.DictReader(io.StringIO(exporter().decode("utf-8-sig"))))
 
     def test_first_waystone_after_start_inventory_completes_map_and_keeps_original_atlas(self):
+        """Verify first waystone after start inventory completes map and keeps original atlas."""
         logger.save_atlas_settings(self.atlas(100))
         original = self.snapshot()
         self.inventory()
@@ -73,6 +82,7 @@ class MapSetupRegressionTests(unittest.TestCase):
         self.assertEqual(totals["Atlas Setup ID"], original["atlas_setup_id"])
 
     def test_subsequent_edits_and_next_map_cannot_rewrite_saved_setup(self):
+        """Verify subsequent edits and next map cannot rewrite saved setup."""
         self.inventory()
         self.waystone()
         original = self.snapshot()
@@ -90,6 +100,7 @@ class MapSetupRegressionTests(unittest.TestCase):
         self.assertEqual(self.snapshot("M0002")["waystone"], 10)
 
     def test_first_setup_exception_requires_only_start_inventory(self):
+        """Verify end inventory, remnants, chains, Ritual or counts prevent later first-waystone completion."""
         for activity in ("end", "remnant", "chain", "ritual", "counts"):
             with self.subTest(activity=activity):
                 logger.clear_export_and_reset_ids()
@@ -110,6 +121,7 @@ class MapSetupRegressionTests(unittest.TestCase):
                 self.assertEqual(self.snapshot(), original)
 
     def test_existing_map_without_marker_stays_frozen(self):
+        """Verify existing map without marker stays frozen."""
         self.inventory()
         with logger._connect() as db:
             previous = self.snapshot()
@@ -119,6 +131,7 @@ class MapSetupRegressionTests(unittest.TestCase):
         self.assertEqual(self.snapshot(), previous)
 
     def test_repeated_inventory_phase_replaces_metadata_and_retains_commit_history(self):
+        """Verify repeated inventory phase replaces metadata and retains commit history."""
         for phase in ("start", "end"):
             with self.subTest(phase=phase):
                 logger.clear_export_and_reset_ids()
@@ -139,6 +152,7 @@ class MapSetupRegressionTests(unittest.TestCase):
                 self.assertEqual(row[f"{phase.title()} Count"], "6")
 
     def test_same_ritual_page_replacement_matches_latest_commit_and_preserves_frozen_atlas(self):
+        """Verify same ritual page replacement matches latest commit and preserves frozen atlas."""
         logger.save_atlas_settings(self.atlas(100))
         original_atlas = self.snapshot()["atlas_setup_id"]
         self.waystone()
@@ -169,6 +183,7 @@ class MapSetupRegressionTests(unittest.TestCase):
         self.assertEqual(row["Scan Commit #"], str(saved["scan_commit_number"]))
 
     def test_first_ever_prepared_waystone_is_marked_ready_and_cannot_be_overwritten_after_start(self):
+        """Verify first ever prepared waystone is marked ready and cannot be overwritten after start."""
         logger.clear_export_and_reset_ids()
         self.waystone()
         logger.start_map()
@@ -180,6 +195,7 @@ class MapSetupRegressionTests(unittest.TestCase):
         self.assertEqual(self.snapshot(), prepared)
 
     def test_pending_next_waystone_survives_start_and_keeps_map_specific_atlas(self):
+        """Verify pending next waystone survives start and keeps map specific atlas."""
         logger.save_atlas_settings(self.atlas(100))
         self.waystone()
         self.inventory()
@@ -201,6 +217,7 @@ class MapSetupRegressionTests(unittest.TestCase):
             self.assertIsNone(logger._meta(db, "prepared_waystone_setup"))
 
     def test_pending_next_waystone_survives_implicit_remnant_map_start(self):
+        """Verify pending next waystone survives implicit remnant map start."""
         self.waystone()
         logger.finish_map(0, 0, 0, 0)
         closed = self.snapshot()
@@ -215,6 +232,7 @@ class MapSetupRegressionTests(unittest.TestCase):
             self.assertIsNone(logger._meta(db, "prepared_waystone_setup"))
 
     def test_pending_preparation_survives_app_restart_before_next_map_start(self):
+        """Verify pending preparation survives app restart before next map start."""
         self.waystone()
         logger.finish_map(0, 0, 0, 0)
         self.waystone(99)
@@ -226,6 +244,7 @@ class MapSetupRegressionTests(unittest.TestCase):
         self.assertTrue(upcoming["waystone_setup_saved"])
 
     def test_tag_only_pending_commit_does_not_claim_prepared_waystone(self):
+        """Verify tag only pending commit does not claim prepared waystone."""
         self.waystone()
         logger.finish_map(0, 0, 0, 0)
         logger.save_settings({"biome": "Swamp"})
@@ -239,6 +258,7 @@ class MapSetupRegressionTests(unittest.TestCase):
         self.assertEqual(self.snapshot("M0002")["waystone"], 99)
 
     def test_partial_preparation_merges_defaults_and_does_not_claim_readiness(self):
+        """Verify partial preparation merges defaults and does not claim readiness."""
         self.waystone()
         logger.finish_map(0, 0, 0, 0)
         logger.save_settings({"tier": 16})
@@ -254,6 +274,7 @@ class MapSetupRegressionTests(unittest.TestCase):
         self.assertEqual(self.snapshot("M0002")["waystone"], 99)
 
     def test_separate_partial_preparations_combine_before_start(self):
+        """Verify separate partial preparations combine before start."""
         logger.finish_map(0, 0, 0, 0)
         logger.save_settings({"tier": 16})
         logger.save_settings({"waystone": 99})
@@ -264,6 +285,7 @@ class MapSetupRegressionTests(unittest.TestCase):
         self.assertTrue(upcoming["waystone_setup_saved"])
 
     def test_canceling_pending_marker_or_undo_invalidates_preparation_and_restores_old_values(self):
+        """Verify canceling pending marker or undo invalidates preparation and restores old values."""
         for cancel in (lambda: logger.mark_next_map(False), logger.undo_empty_map):
             with self.subTest(cancel=cancel):
                 logger.clear_export_and_reset_ids()
@@ -282,6 +304,7 @@ class MapSetupRegressionTests(unittest.TestCase):
                 self.assertEqual(self.snapshot("M0002")["waystone"], 0)
 
     def test_undo_prepared_empty_map_restores_previous_map_values_and_discards_preparation(self):
+        """Verify undo prepared empty map restores previous map values and discards preparation."""
         self.waystone()
         logger.finish_map(0, 0, 0, 0)
         closed = self.snapshot()
@@ -296,6 +319,7 @@ class MapSetupRegressionTests(unittest.TestCase):
         self.assertEqual(self.snapshot("M0002")["waystone"], 0)
 
     def test_reset_invalidates_preparation_and_new_session_map_cannot_consume_it(self):
+        """Verify reset invalidates preparation and new session map cannot consume it."""
         logger.finish_map(0, 0, 0, 0)
         logger.save_settings({"tier": 16, "waystone": 99, "map_mods": 6})
         old_generation = logger.session_generation()
@@ -311,6 +335,7 @@ class MapSetupRegressionTests(unittest.TestCase):
         self.assertEqual(self.snapshot("M0002")["waystone"], 0)
 
     def test_pending_records_use_clean_waystone_defaults_and_closed_end_keeps_old_setup(self):
+        """Verify pending records use clean waystone defaults and closed end keeps old setup."""
         logger.save_atlas_settings(self.atlas(100))
         affixes = [{"affix": "Chance to Contain Essences", "value": 12}] + [
             {"affix": "", "value": None} for _ in range(15)]
@@ -337,6 +362,7 @@ class MapSetupRegressionTests(unittest.TestCase):
         self.assertEqual(end["gear_item_rarity"], 100)
 
     def test_pending_start_and_configuration_use_preparation_without_consuming_it(self):
+        """Verify pending start and configuration use preparation without consuming it."""
         self.waystone(85)
         logger.finish_map(0, 0, 0, 0)
         self.waystone(99)

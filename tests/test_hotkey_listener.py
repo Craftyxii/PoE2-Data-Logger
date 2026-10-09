@@ -14,7 +14,9 @@ from PoE2_Data_Logger.platform import hotkey
 
 
 class HotkeyListenerTests(unittest.TestCase):
+    """Check hotkey listener responsiveness and capture reservation cleanup under delays."""
     def setUp(self):
+        """Initialize temporary logger storage and enable HUD overlay handling."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-hotkey-listener-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -24,17 +26,20 @@ class HotkeyListenerTests(unittest.TestCase):
             logger._set_meta(db, "hud_overlay", True)
 
     def tearDown(self):
+        """Restore the original data directory and remove the isolated logger database."""
         store.DATA_DIR = self.previous_data
         logger._READY = False
         self.tmp.cleanup()
 
     def test_overlay_key_and_listener_shutdown_remain_responsive_during_capture(self):
+        """Verify overlay key and listener shutdown remain responsive during capture."""
         grabbing = threading.Event()
         release_grab = threading.Event()
         overlay_handled = threading.Event()
         capture_finished = threading.Event()
 
         def grab(**kwargs):
+            """Block the screenshot grab until released, then return a synthetic image."""
             grabbing.set()
             if not release_grab.wait(2):
                 raise RuntimeError("Test did not release the screenshot grabber.")
@@ -46,6 +51,7 @@ class HotkeyListenerTests(unittest.TestCase):
                                       readers={"propagation": reader}, focused=lambda: True)
 
         def notified():
+            """Signal observed overlay handling and capture completion from manager status."""
             state = manager.status()
             if state["overlay_sequence"]:
                 overlay_handled.set()
@@ -60,6 +66,7 @@ class HotkeyListenerTests(unittest.TestCase):
         kernel32.GetCurrentThreadId.return_value = 17
 
         def get_message(pointer, *_):
+            """Feed queued Win32 messages to the listener and stop on WM_QUIT."""
             message, ident = messages.get(timeout=2)
             pointer._obj.message = message
             pointer._obj.wParam = ident
@@ -102,6 +109,7 @@ class HotkeyListenerTests(unittest.TestCase):
         manager._capture_lock.release()
 
     def test_background_capture_reserves_slot_and_cancelled_request_never_prepares(self):
+        """Verify background capture reserves slot and cancelled request never prepares."""
         manager = hotkey.HotkeyManager(supported=False, focused=lambda: True,
                                       grabber=Mock(), readers={"opened": Mock()})
         manager.before_capture = Mock()
@@ -120,12 +128,14 @@ class HotkeyListenerTests(unittest.TestCase):
         manager._capture_lock.release()
 
     def test_background_capture_rechecks_focus_before_grabbing_and_releases_slot(self):
+        """Verify background capture rechecks focus before grabbing and releases slot."""
         prepared, release_prepare, finished = (threading.Event() for _ in range(3))
         manager = hotkey.HotkeyManager(supported=False, grabber=Mock(),
                                       readers={"opened": Mock()},
                                       focused=Mock(side_effect=[True, False]))
 
         def prepare():
+            """Pause capture preparation so focus can change before the screenshot grab."""
             prepared.set()
             if not release_prepare.wait(2):
                 raise RuntimeError("Test did not release capture preparation.")
@@ -134,6 +144,7 @@ class HotkeyListenerTests(unittest.TestCase):
         original_capture = manager._capture
 
         def capture(*args):
+            """Run capture and signal worker completion even when it fails."""
             try:
                 original_capture(*args)
             finally:
@@ -153,6 +164,7 @@ class HotkeyListenerTests(unittest.TestCase):
         manager._capture_lock.release()
 
     def test_background_worker_start_failure_reports_error_and_releases_slot(self):
+        """Verify background worker start failure reports error and releases slot."""
         manager = hotkey.HotkeyManager(supported=False, focused=lambda: True)
         with patch.object(hotkey.threading.Thread, "start", side_effect=RuntimeError("No worker")):
             manager.capture("remnant", background=True)

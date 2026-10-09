@@ -10,7 +10,9 @@ from PoE2_Data_Logger.core import logger_store as logger, store
 
 
 class MapExportExpeditionTests(unittest.TestCase):
+    """Check map-export expedition columns retain positions, sparse IDs, and count semantics."""
     def setUp(self):
+        """Initialize temporary logger storage, reset IDs, and start the first map."""
         self.temporary = tempfile.TemporaryDirectory(prefix="poe2-map-export-")
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.temporary.name)
@@ -20,17 +22,20 @@ class MapExportExpeditionTests(unittest.TestCase):
         logger.start_map()
 
     def tearDown(self):
+        """Restore the original data directory and remove the isolated logger database."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.temporary.cleanup()
 
     def exported(self):
+        """Validate map CSV structure and return headers plus rows keyed by map ID."""
         raw = list(csv.reader(io.StringIO(logger.export_maps_csv().decode("utf-8-sig"))))
         self.assertEqual(len(raw[0]), len(set(raw[0])))
         self.assertTrue(all(len(row) == len(raw[0]) for row in raw))
         return raw[0], {row[0]: dict(zip(raw[0], row)) for row in raw[1:]}
 
     def test_later_expedition_columns_preserve_existing_positions_and_map_identity(self):
+        """Verify later expedition columns preserve existing positions and map identity."""
         previous_headers, _ = self.exported()
         self.assertEqual(previous_headers[13:15], ["Expedition 1 Detonated", "Expedition 2 Detonated"])
         logger.save_detonated(5)
@@ -57,6 +62,7 @@ class MapExportExpeditionTests(unittest.TestCase):
         self.assertEqual(rows["M0002"]["Expedition 4 Detonated"], "")
 
     def test_sparse_expedition_ids_only_add_the_stored_column(self):
+        """Verify sparse expedition IDs only add the stored column."""
         previous_headers, _ = self.exported()
         logger.save_settings({"expedition": 100000})
         saved = logger.save_detonated(7)

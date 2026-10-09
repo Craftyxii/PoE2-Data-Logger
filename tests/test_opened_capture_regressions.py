@@ -15,7 +15,9 @@ CAPTURE = Path(__file__).resolve().parents[1] / "PoE2_Data_Logger/region_example
 
 
 class OpenedCaptureRegressions(unittest.TestCase):
+    """Check real opened-panel recipes and socket geometry across capture scales."""
     def setUp(self):
+        """Initialize temporary logger references for real opened-capture tests."""
         self.data = tempfile.TemporaryDirectory(prefix="poe2-real-opened-capture-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.data.name)
@@ -23,11 +25,13 @@ class OpenedCaptureRegressions(unittest.TestCase):
         logger.initialize()
 
     def tearDown(self):
+        """Restore the data directory and remove temporary logger data."""
         store.DATA_DIR = self.previous_data
         logger._READY = False
         self.data.cleanup()
 
     def test_real_full_window_keeps_recipe_quantities_and_three_sockets_at_each_scale(self):
+        """Verify the real capture preserves reward quantities and three sockets at each scale."""
         expected_recipes = ["Lesser Jeweller's Orb", "Regal Orb x3", "Exalted Orb x2"]
         with Image.open(CAPTURE) as source:
             source = source.convert("RGB")
@@ -48,6 +52,7 @@ class OpenedCaptureRegressions(unittest.TestCase):
                     self.assertTrue(result["can_use"], result)
 
     def test_visible_fourth_socket_is_held_instead_of_forced_to_recipe_count(self):
+        """Verify visible geometry conflicting with recipe sockets requires review."""
         with Image.open(CAPTURE) as source:
             panel = runehelper_ocr.default_frame(source.convert("RGB"))
         # Reuse a real complete socket frame in the adjacent fourth position.
@@ -62,6 +67,7 @@ class OpenedCaptureRegressions(unittest.TestCase):
         self.assertIn("Opened icons show 4 sockets", result["status"])
 
     def test_database_expected_count_cannot_override_real_three_socket_geometry(self):
+        """Verify database expectations cannot override the real three-socket layout."""
         with Image.open(CAPTURE) as source:
             image = source.convert("RGB")
         rows = runehelper_ocr.recognize(image)
@@ -73,6 +79,7 @@ class OpenedCaptureRegressions(unittest.TestCase):
                 self.assertEqual(opened_scan._icon_count(image, first_reward_y, expected), 3)
 
     def panel_with_icons(self, sockets):
+        """Extend the real opened panel with additional copied socket frames."""
         with Image.open(CAPTURE) as source:
             panel = runehelper_ocr.default_frame(source.convert("RGB"))
         icon = panel.crop((52, 70, 91, 107))
@@ -81,6 +88,7 @@ class OpenedCaptureRegressions(unittest.TestCase):
         return panel
 
     def test_cropped_five_socket_geometry_survives_display_scale_without_db_override(self):
+        """Verify cropped five-socket geometry survives scaling and conflicting expectations."""
         panel = self.panel_with_icons(5)
         for scale in (.5, .75, 1, 1.25):
             image = panel.resize((round(panel.width * scale), round(panel.height * scale)),
@@ -90,6 +98,7 @@ class OpenedCaptureRegressions(unittest.TestCase):
                     self.assertEqual(opened_scan._icon_count(image, 109 * scale, expected), 5)
 
     def test_five_socket_rare_unique_sequence_is_usable_at_smaller_capture_scale(self):
+        """Verify the complete Family 37 sequence remains usable in a reduced capture."""
         panel = self.panel_with_icons(5)
         scale = .75
         image = panel.resize((round(panel.width * scale), round(panel.height * scale)),
@@ -109,6 +118,7 @@ class OpenedCaptureRegressions(unittest.TestCase):
         self.assertTrue(auto_commit.candidate(result)["ready"], result)
 
     def test_complete_single_chase_reward_uses_panel_end_but_cropped_list_stays_ambiguous(self):
+        """Verify panel completeness resolves a single Chase reward while a crop stays ambiguous."""
         panel = self.panel_with_icons(6)
         # Keep the real heading and first icon row, and reuse the fixture's
         # empty parchment to represent a complete one-reward panel.

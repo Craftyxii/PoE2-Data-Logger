@@ -21,11 +21,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, select
 
 
 class UIRegressionTests(unittest.TestCase):
+    """Check desktop review callbacks, header synchronization, reference ownership, and failures."""
     @classmethod
     def setUpClass(cls):
+        """Create or reuse the QApplication needed by these widget tests."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Create an isolated logger window and retain submitted OCR jobs without running them."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-ui-regression-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -39,6 +42,7 @@ class UIRegressionTests(unittest.TestCase):
         self.grid_patch.start()
 
     def tearDown(self):
+        """Stop the grid patch, close the window/workers, restore storage, and remove test data."""
         self.grid_patch.stop()
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
@@ -48,6 +52,7 @@ class UIRegressionTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def image_bytes(self, color=(120, 130, 140)):
+        """Encode a solid 600-by-400 RGB screenshot as PNG bytes."""
         raw = io.BytesIO()
         Image.new("RGB", (600, 400), color).save(raw, format="PNG")
         return raw.getvalue()
@@ -88,6 +93,7 @@ class UIRegressionTests(unittest.TestCase):
         self.assertEqual(self.window.height(), 720)
 
     def opened_result(self):
+        """Build a confident partial opened-reward result bound to the current map."""
         return {"mode": "opened", "status": "Review opened rewards.", "can_use": True,
                 "family": "Family 3", "candidates": [3], "sockets": 10, "recipe_sockets": 10,
                 "socket_source": "opened icons", "first_line_gap": 60, "list_complete": False,
@@ -97,6 +103,7 @@ class UIRegressionTests(unittest.TestCase):
                 "_target_map_id": logger.get_state()["current_map_id"], **logger.scan_context()}
 
     def capture_file(self, mode="opened"):
+        """Select a temporary PNG in the requested scan mode and return its callback."""
         self.window.mode = mode
         select(self.window.mode_select, mode)
         path = Path(self.tmp.name) / "remnant.png"
@@ -106,21 +113,26 @@ class UIRegressionTests(unittest.TestCase):
         return self.jobs[-1][1]
 
     def capture_inventory(self, color=(120, 130, 140), live=False):
+        """Queue a synthetic inventory capture and return its deferred result callback."""
         self.window._inventory_captured(Image.new("RGB", (480, 200), color), live=live)
         return self.jobs[-1][1]
 
     def inventory_result(self, quantity=7):
+        """Build a confident single-stack Chaos Orb inventory result."""
         return {"items": [{"slot": 1, "name": "Chaos Orb", "quantity": quantity}], "unknown": []}
 
     def capture_ritual(self):
+        """Queue a synthetic manual Ritual capture and return its result callback."""
         self.window._ritual_captured(Image.new("RGB", (200, 100)), live=False)
         return self.jobs[-1][1]
 
     def task_error(self, callback, text="Recognition unavailable"):
+        """Deliver a recognition exception through the window task-completion handler."""
         self.window._pending_tasks["failed"] = (callback, logger.session_generation())
         self.window._task_done("failed", None, RuntimeError(text))
 
     def seed_result(self, color=(120, 130, 140)):
+        """Show a confident family-3 seed reading with current context and a synthetic screenshot."""
         with logger._connect() as db:
             stage = dict(db.execute("SELECT * FROM seed_states WHERE family=3 LIMIT 1").fetchone())
         result = {"mode": "seed", "remnants": [{"sockets": stage["sockets"],
@@ -129,11 +141,13 @@ class UIRegressionTests(unittest.TestCase):
         self.window.show_result("seed", result, self.image_bytes(color))
 
     def reference_job(self):
+        """Queue saving the displayed seed reference and return its worker/callback pair."""
         self.seed_result()
         self.window.save_seed_scan()
         return self.jobs[-1]
 
     def two_seed_reference_job(self):
+        """Queue the first of two identically labeled seeds with visibly distinct bar crops."""
         self.seed_result()
         reading = dict(self.window._seed_readings[0])
         result = {**self.window.results["seed"], "remnants": [
@@ -153,10 +167,12 @@ class UIRegressionTests(unittest.TestCase):
         return self.jobs[-1]
 
     def persist_reference(self, work):
+        """Run a reference-save worker with reviewed-vector extraction disabled."""
         with patch.object(store, "_reviewed_vector", return_value=None):
             return work()
 
     def test_header_map_flags_sync_without_changing_area(self):
+        """Verify header map flags sync without changing area."""
         area = self.window.stat_values[2].text()
         self.window.header_deli.setChecked(True)
         self.window.header_wisp.setChecked(True)
@@ -174,6 +190,7 @@ class UIRegressionTests(unittest.TestCase):
         self.assertEqual(self.window.stat_values[2].text(), area)
 
     def test_header_expedition_controls_existing_chain_selection(self):
+        """Verify header expedition controls existing chain selection."""
         self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
         self.assertEqual(self.window.expedition.currentData(), 2)
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
@@ -196,6 +213,7 @@ class UIRegressionTests(unittest.TestCase):
         self.assertEqual([row["rune1"] for row in logger.get_state()["chain"]], ["Rage", "Time"])
 
     def test_header_remnant_id_follows_review_save_and_map_transition(self):
+        """Verify header remnant ID follows review save and map transition."""
         self.assertEqual(self.window.header_map_id.text(), "M0001")
         self.assertEqual(self.window.header_remnant_id.text(), "—")
         self.window.show_result("opened", self.opened_result())
@@ -212,6 +230,7 @@ class UIRegressionTests(unittest.TestCase):
         self.assertIn("M0002-E01", self.window.header_expedition.currentText())
 
     def test_expedition_change_preserves_pending_remnant_original_binding(self):
+        """Verify expedition change preserves pending remnant original binding."""
         self.window.show_result("opened", self.opened_result())
         pending = logger.get_state()["ocr_pending"]
         select(self.window.header_expedition, 2)
@@ -224,6 +243,7 @@ class UIRegressionTests(unittest.TestCase):
         self.assertEqual(self.window.pending_review_kind, "remnant")
 
     def test_unclear_or_unsupported_waystone_tier_cannot_reuse_previous_tier(self):
+        """Verify unclear or unsupported Waystone tier cannot reuse previous tier."""
         for tier in (None, 14, 17):
             with self.subTest(tier=tier):
                 select(self.window.tier, 16)
@@ -247,6 +267,7 @@ class UIRegressionTests(unittest.TestCase):
                 self.assertEqual(logger.get_state()["scan_commit_count"], before + 1)
 
     def test_discard_cancels_delayed_remnant_and_autosave(self):
+        """Verify discard cancels delayed remnant and autosave."""
         self.window.set_auto_commit(True)
         self.window.show_result("opened", self.opened_result())
         callback = self.capture_file()
@@ -259,6 +280,7 @@ class UIRegressionTests(unittest.TestCase):
         self.assertFalse(self.window.approve_scan_button.isEnabled())
 
     def test_undo_clears_waystone_draft_and_preserves_saved_history(self):
+        """Verify undo clears Waystone draft and preserves saved history."""
         self.window.waystone.setText("50")
         self.window.save_map_settings()
         logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 7}])
@@ -282,6 +304,7 @@ class UIRegressionTests(unittest.TestCase):
             self.assertEqual([tuple(row) for row in db.execute("SELECT * FROM commits ORDER BY number")], history)
 
     def test_failed_undo_preserves_pending_draft(self):
+        """Verify failed undo preserves pending draft."""
         logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 7}])
         self.window._review_pending("waystone", "Review waystone")
         self.window.waystone.setText("87")
@@ -291,6 +314,7 @@ class UIRegressionTests(unittest.TestCase):
         self.assertEqual(self.window.waystone.text(), "87")
 
     def test_reference_save_finishes_without_linking_to_later_map(self):
+        """Verify reference save finishes without linking to later map."""
         work, callback = self.reference_job()
         self.window.finish_map()
         self.window.show_result("opened", self.opened_result())
@@ -303,6 +327,7 @@ class UIRegressionTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) FROM scan_links").fetchone()[0], 0)
 
     def test_reference_save_stays_associated_after_propagation_advances(self):
+        """Verify reference save stays associated after propagation advances."""
         work, callback = self.reference_job()
         context = logger.scan_context()
         logger.commit_chain_draft([{"rune1": "Rage"}], context)
@@ -315,12 +340,14 @@ class UIRegressionTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
 
     def test_reference_save_does_not_attach_to_replacement_capture(self):
+        """Verify reference save does not attach to replacement capture."""
         work, callback = self.reference_job()
         self.seed_result((140, 130, 120))
         callback(self.persist_reference(work))
         self.assertIsNone(self.window.saved_scan)
 
     def test_reference_callback_distinguishes_identical_seed_labels(self):
+        """Verify reference callback distinguishes identical seed labels."""
         work, callback = self.two_seed_reference_job()
         original = self.window._seed_readings[0]
         self.window.seed_table.setCurrentCell(1, 2)
@@ -332,6 +359,7 @@ class UIRegressionTests(unittest.TestCase):
             self.assertEqual(screenshot.getpixel((75, 70)), (180, 50, 40))
 
     def test_selecting_another_identical_seed_releases_saved_reference(self):
+        """Verify selecting another identical seed releases saved reference."""
         work, callback = self.two_seed_reference_job()
         saved = self.persist_reference(work)
         callback(saved)
@@ -344,12 +372,14 @@ class UIRegressionTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) FROM scan_links").fetchone()[0], 0)
 
     def test_current_seed_reference_remains_associated(self):
+        """Verify current seed reference remains associated."""
         work, callback = self.reference_job()
         saved = self.persist_reference(work)
         callback(saved)
         self.assertEqual(self.window.saved_scan["id"], saved["id"])
 
     def test_reference_completion_can_link_original_seed_and_opened_view(self):
+        """Verify reference completion can link original seed and opened view."""
         work, callback = self.reference_job()
         self.window.show_result("opened", self.opened_result())
         saved = self.persist_reference(work)
@@ -360,6 +390,7 @@ class UIRegressionTests(unittest.TestCase):
             self.assertEqual([tuple(row) for row in db.execute("SELECT remnant_id,scan_id FROM scan_links")], [("R0001", saved["id"])])
 
     def test_clear_tablets_drops_inflight_autosave_result(self):
+        """Verify clear tablets drops inflight autosave result."""
         self.window.set_auto_tablets(True)
         revision = service.HOTKEY._capture_revision
         event = {"mode": "item", "error": "", "result": {"kind": "tablet",
@@ -377,6 +408,7 @@ class UIRegressionTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
     def test_scan_failures_release_reading_state_and_allow_rejection(self):
+        """Verify scan failures release reading state and allow rejection."""
         for kind, capture, field, save in (
                 ("currency", self.capture_inventory, "_inventory_reading", self.window.save_inventory),
                 ("ritual", self.capture_ritual, "_ritual_reading", self.window.save_ritual),
@@ -395,6 +427,7 @@ class UIRegressionTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
     def test_executor_failure_reaches_failed_review(self):
+        """Verify executor failure reaches failed review."""
         self.window._submit = LoggerWindow._submit.__get__(self.window, LoggerWindow)
         with patch.object(native_desktop.item_ocr, "scan_inventory_grid", side_effect=RuntimeError("Recognition unavailable")):
             self.window._inventory_captured(Image.new("RGB", (480, 200)), live=False)
@@ -409,6 +442,7 @@ class UIRegressionTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
     def test_callback_context_failure_reports_finished_scan(self):
+        """Verify callback context failure reports finished scan."""
         callback = self.capture_file()
         result = self.opened_result()
         logger.save_settings({"expedition": 2})
@@ -420,6 +454,7 @@ class UIRegressionTests(unittest.TestCase):
         self.assertIsNone(logger.get_state()["ocr_pending"])
 
     def test_failed_inventory_retry_preserves_clear_autosave(self):
+        """Verify failed inventory retry preserves clear autosave."""
         self.window.set_auto_all(True)
         self.task_error(self.capture_inventory(live=True))
         callback = self.capture_inventory((140, 130, 120), live=True)
@@ -429,6 +464,7 @@ class UIRegressionTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 1)
 
     def test_stale_failure_cannot_clear_or_replace_newer_review(self):
+        """Verify stale failure cannot clear or replace newer review."""
         older = self.capture_inventory()
         latest = self.capture_inventory((140, 130, 120))
         self.task_error(older, "Old recognition failed")

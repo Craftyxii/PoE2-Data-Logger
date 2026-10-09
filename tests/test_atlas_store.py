@@ -20,6 +20,7 @@ RITUAL_COLUMN = "Atlas Node: Ritual | Ritual Rewards [ritual]"
 
 
 def fixture_catalog():
+    """Build root, rarity, biome-choice and Ritual nodes for Atlas snapshot and export checks."""
     return {"version": "test-atlas-1", "nodes": {
         "root": {"name": "Atlas", "kind": "root", "activity": "Atlas", "allocatable": False},
         "rarity": {"name": "Item Rarity", "kind": "small", "activity": "Atlas", "allocatable": True,
@@ -36,7 +37,9 @@ def fixture_catalog():
 
 
 class AtlasStoreTests(unittest.TestCase):
+    """Check Atlas validation, stable setup identities, frozen map snapshots and coordinated CSV exports."""
     def setUp(self):
+        """Initialize an isolated map database with a controlled Atlas catalog and catalog identity."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-atlas-store-")
         self.previous_data_dir = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -51,6 +54,7 @@ class AtlasStoreTests(unittest.TestCase):
         logger.start_map()
 
     def tearDown(self):
+        """Restore the data directory and Atlas patches, reset initialization and remove temporary data."""
         store.DATA_DIR = self.previous_data_dir
         logger._READY = False
         self.identity_patch.stop()
@@ -58,27 +62,33 @@ class AtlasStoreTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def identity(self):
+        """Return the current fixture catalog canonical JSON and its SHA-256 identity."""
         encoded = json.dumps(self.catalog, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
         return hashlib.sha256(encoded.encode()).hexdigest(), encoded
 
     def settings(self, allocated=(), choices=None, rarity=None):
+        """Build Atlas settings with allocated nodes, saved choices and optional gear rarity."""
         return {"catalog_version": self.catalog["version"], "allocated": list(allocated),
                 "choices": choices or {}, "gear_item_rarity": rarity}
 
     def setup_id(self):
+        """Return the Atlas setup identity for the currently saved logger settings."""
         return logger._atlas_snapshot(logger.get_state()["settings"])["atlas_setup_id"]
 
     def rows(self, data):
+        """Decode CSV rows after checking unique headers and consistent row widths."""
         rows = list(csv.reader(io.StringIO(data.decode("utf-8-sig"))))
         self.assertEqual(len(rows[0]), len(set(rows[0])))
         self.assertTrue(all(len(row) == len(rows[0]) for row in rows))
         return [dict(zip(rows[0], row)) for row in rows[1:]]
 
     def map_snapshot(self, map_id="M0001"):
+        """Read and decode the stored setup snapshot for a map."""
         with logger._connect() as db:
             return json.loads(db.execute("SELECT snapshot_json FROM maps WHERE map_id=?", (map_id,)).fetchone()[0])
 
     def test_defaults_preserve_unknown_rarity_and_zero_is_distinct(self):
+        """Verify defaults preserve unknown rarity and zero is distinct."""
         config = logger.get_state()["settings"]["atlas_settings"]
         self.assertIsNone(config["gear_item_rarity"])
         self.assertEqual(config["allocated"], [])
@@ -89,6 +99,7 @@ class AtlasStoreTests(unittest.TestCase):
         self.assertEqual({row["Gear Item Rarity %"] for row in self.rows(logger.export_atlas_csv())}, {"0"})
 
     def test_settings_validation_and_unresolved_choices(self):
+        """Reject invalid Atlas settings while allowing an allocated choice with no selected effect."""
         for data in (self.settings(["root"]), self.settings(["missing"]), self.settings(["rarity", "rarity"]),
                      self.settings(choices={"choice": "invalid"}), self.settings(choices={"rarity": "swamp"}),
                      self.settings(rarity=True), self.settings(rarity=float("nan")),
@@ -102,6 +113,7 @@ class AtlasStoreTests(unittest.TestCase):
         self.assertEqual(row[CHOICE_COLUMN], "0")
 
     def test_same_setup_has_stable_id_independent_of_input_order(self):
+        """Verify same setup has stable ID independent of input order."""
         logger.save_atlas_settings(self.settings(["ritual", "rarity"], {"choice": "swamp"}, 12.5))
         original = self.setup_id()
         logger.save_atlas_settings(self.settings(["rarity", "ritual"], {"choice": "swamp"}, 12.5))
@@ -111,6 +123,7 @@ class AtlasStoreTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) FROM atlas_setups").fetchone()[0], 2)
 
     def test_all_scan_types_keep_current_atlas_after_next_setup_is_saved(self):
+        """Verify all scan types keep current atlas after next setup is saved."""
         logger.save_atlas_settings(self.settings(["rarity", "choice"], {"choice": "swamp"}, 100))
         original = self.map_snapshot()
         logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 3}])
@@ -146,6 +159,7 @@ class AtlasStoreTests(unittest.TestCase):
             self.assertEqual(row["End Atlas Setup ID"], original["atlas_setup_id"])
 
     def test_start_inventory_before_map_creation_freezes_atlas(self):
+        """Verify start inventory before map creation freezes atlas."""
         logger.clear_export_and_reset_ids()
         logger.save_atlas_settings(self.settings(["rarity"], rarity=100))
         original = self.setup_id()
@@ -159,6 +173,7 @@ class AtlasStoreTests(unittest.TestCase):
         self.assertEqual(latest["Atlas Setup ID"], original)
 
     def test_catalog_changes_keep_frozen_effects_and_old_live_profile(self):
+        """Verify catalog changes keep frozen effects and old live profile."""
         logger.save_atlas_settings(self.settings(["rarity"], rarity=25))
         original = self.setup_id()
         logger.commit_chain("Rage")
@@ -189,6 +204,7 @@ class AtlasStoreTests(unittest.TestCase):
             self.assertIn("15% rarity", new_catalog["nodes"]["rarity"]["effects"][0])
 
     def test_atlas_rows_deduplicate_setups_link_maps_and_preserve_off_choices(self):
+        """Verify atlas rows deduplicate setups link maps and preserve off choices."""
         logger.save_atlas_settings(self.settings(["rarity"], {"choice": "swamp"}, 0))
         setup_id = self.setup_id()
         logger.commit_chain("Rage")
@@ -205,6 +221,7 @@ class AtlasStoreTests(unittest.TestCase):
         self.assertEqual(rows[0][RITUAL_COLUMN], "No")
 
     def test_old_snapshots_remain_unknown_and_are_not_rewritten_on_upgrade(self):
+        """Verify old snapshots remain unknown and are not rewritten on upgrade."""
         logger.commit_chain("Rage")
         with logger._connect() as db:
             for table in ("maps", "commits"):
@@ -230,6 +247,7 @@ class AtlasStoreTests(unittest.TestCase):
                 self.assertEqual(row["Gear Item Rarity %"], "")
 
     def test_reset_preserves_current_settings_but_excludes_unused_historic_setups(self):
+        """Verify reset preserves current settings but excludes unused historic setups."""
         logger.save_atlas_settings(self.settings(["rarity"], rarity=100))
         logger.commit_chain("Rage")
         logger.save_atlas_settings(self.settings(["ritual"], rarity=0))
@@ -241,6 +259,7 @@ class AtlasStoreTests(unittest.TestCase):
         self.assertEqual({row["Map IDs"] for row in rows}, {""})
 
     def test_checked_nodes_are_omitted_until_another_setup_unchecks_them(self):
+        """Verify checked nodes are omitted until another setup unchecks them."""
         logger.save_atlas_settings(self.settings(["rarity", "choice", "ritual"], {"choice": "forest"}, 12.5))
         original = self.setup_id()
         row, = self.rows(logger.export_atlas_csv())
@@ -258,6 +277,7 @@ class AtlasStoreTests(unittest.TestCase):
         self.assertEqual(rows[revised]["Map IDs"], "M0002")
 
     def test_choice_selection_and_allocation_remain_independent(self):
+        """Verify choice selection and allocation remain independent."""
         expected = {}
         for allocated, choices, rarity, allocation, selection in (
                 ([], {}, 1, "No", "0"),
@@ -272,6 +292,7 @@ class AtlasStoreTests(unittest.TestCase):
                           for row in rows}, expected)
 
     def test_choice_numbers_use_frozen_order_even_when_version_text_is_unchanged(self):
+        """Verify choice numbers use frozen order even when version text is unchanged."""
         logger.save_atlas_settings(self.settings(["choice"], {"choice": "forest"}, 25))
         original = self.setup_id()
         logger.commit_chain("Rage")
@@ -286,6 +307,7 @@ class AtlasStoreTests(unittest.TestCase):
         self.assertNotEqual(rows[original]["Atlas Catalog ID"], rows[revised]["Atlas Catalog ID"])
 
     def test_missing_nodes_stay_blank_across_catalog_changes_and_duplicate_names_are_distinct(self):
+        """Verify missing nodes stay blank across catalog changes and duplicate names are distinct."""
         logger.save_atlas_settings(self.settings(rarity=25))
         original = self.setup_id()
         logger.commit_chain("Rage")
@@ -303,6 +325,7 @@ class AtlasStoreTests(unittest.TestCase):
         self.assertEqual(rows[original][RARITY_COLUMN], "No")
 
     def test_twenty_setups_produce_twenty_rows_instead_of_per_node_repetition(self):
+        """Verify twenty setups produce twenty rows instead of per node repetition."""
         for rarity in range(20):
             logger.save_atlas_settings(self.settings(["rarity", "choice", "ritual"],
                                                      {"choice": "forest"}, rarity))
@@ -312,6 +335,7 @@ class AtlasStoreTests(unittest.TestCase):
         self.assertTrue(all(set(row) == {*logger.ATLAS_SHEET_HEADERS, CHOICE_COLUMN} for row in rows))
 
     def test_csv_folder_exports_all_sheets_from_same_transaction(self):
+        """Verify CSV folder exports all sheets from same transaction."""
         logger.save_atlas_settings(self.settings(["rarity"], rarity=0))
         logger.commit_chain("Rage")
         logger.save_export_folder(self.tmp.name)
@@ -331,6 +355,7 @@ class AtlasStoreTests(unittest.TestCase):
         self.assertEqual(history_ids, atlas_ids)
 
     def test_repeated_folder_exports_preserve_previous_data_even_in_same_second(self):
+        """Verify repeated folder exports preserve previous data even in same second."""
         logger.save_currency_snapshot("end", [{"name": "Chaos Orb", "quantity": 7}])
         logger.save_export_folder(self.tmp.name)
         with patch.object(logger, "export_filename", return_value="PoE2_Export_20261007_123456.csv"):

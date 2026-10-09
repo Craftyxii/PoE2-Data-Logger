@@ -15,6 +15,7 @@ from PoE2_Data_Logger.core import logger_store as logger, store, workbook_export
 
 
 def atlas_fixture():
+    """Build three Atlas nodes with ordinary stats, ordered choices, and a Ritual effect."""
     return {"version": "metric-audit-1", "nodes": {
         "0007": {"name": "Map Rarity", "activity": "Main Atlas", "allocatable": True,
                  "stats": {"item_rarity": 5, "zero_stat": 0}, "effects": ["5% map rarity"]},
@@ -30,7 +31,9 @@ def atlas_fixture():
 
 
 class MetricExportAuditTests(unittest.TestCase):
+    """Trace entered map, Atlas, currency, Ritual, and kill metrics through CSV/XLSX cells."""
     def setUp(self):
+        """Patch a synthetic Atlas catalog and initialize an isolated first-map database."""
         self.temporary = tempfile.TemporaryDirectory(prefix="poe2-metric-export-")
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.temporary.name)
@@ -45,6 +48,7 @@ class MetricExportAuditTests(unittest.TestCase):
         logger.start_map()
 
     def tearDown(self):
+        """Stop catalog patches, restore logger storage, and remove the temporary database."""
         self.identity_patch.stop()
         self.catalog_patch.stop()
         store.DATA_DIR = self.previous
@@ -52,16 +56,19 @@ class MetricExportAuditTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def identity(self):
+        """Serialize the current fixture catalog and return its SHA-256 identity."""
         encoded = json.dumps(self.catalog, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
         return hashlib.sha256(encoded.encode()).hexdigest(), encoded
 
     def csv_rows(self, data):
+        """Validate unique CSV headers and row widths, then return named data rows."""
         rows = list(csv.reader(io.StringIO(data.decode("utf-8-sig"))))
         self.assertEqual(len(rows[0]), len(set(rows[0])), "Column names must be unique")
         self.assertTrue(all(len(row) == len(rows[0]) for row in rows), "Every cell must keep its column")
         return [dict(zip(rows[0], row)) for row in rows[1:]]
 
     def workbook_rows(self, number=3):
+        """Read XLSX sheet values and cell types while checking unique headers and no formulas."""
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
             self.assertIsNone(archive.testzip())
             root = ET.fromstring(archive.read(f"xl/worksheets/sheet{number}.xml"))
@@ -84,11 +91,13 @@ class MetricExportAuditTests(unittest.TestCase):
         return result, types
 
     def save_atlas(self, *, allocated=("0007", "0008"), rarity=0):
+        """Save fixture Atlas allocations, its first choice, and the supplied gear rarity."""
         logger.save_atlas_settings({"catalog_version": self.catalog["version"],
                                    "allocated": list(allocated), "choices": {"0008": "001"},
                                    "gear_item_rarity": rarity})
 
     def configure_map(self):
+        """Save distinct map/tablet/master metrics and return their config and commit number."""
         pairs = []
         for tablet in range(1, 5):
             for slot, unit in enumerate(("%", "count", "seconds", "flag"), 1):
@@ -117,6 +126,7 @@ class MetricExportAuditTests(unittest.TestCase):
         return config, logger.record_commit("Map settings")
 
     def test_all_map_tablet_and_master_fields_reach_their_own_cells(self):
+        """Verify all map tablet and master fields reach their own cells."""
         self.save_atlas()
         config, number = self.configure_map()
         expected = {"Map ID": "M0001", "Expedition ID": "M0001-E01", "Expedition #": "1",
@@ -156,6 +166,7 @@ class MetricExportAuditTests(unittest.TestCase):
             self.assertIsNone(types[excel_index][header])
 
     def test_currency_removed_stacks_and_ritual_metrics_preserve_zero_and_blank(self):
+        """Verify currency removed stacks and Ritual metrics preserve zero and blank."""
         self.save_atlas()
         logger.add_item_name("Audit Equipment")
         logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 3},
@@ -201,6 +212,7 @@ class MetricExportAuditTests(unittest.TestCase):
                 self.assertEqual(found[header], row[header])
 
     def test_compact_atlas_setups_keep_allocations_choices_and_frozen_catalog_stats(self):
+        """Verify compact Atlas setups keep allocations choices and frozen catalog stats."""
         self.save_atlas(allocated=("0007",))
         logger.commit_chain("Rage")
         original = logger._atlas_snapshot(logger.get_state()["settings"])["atlas_setup_id"]
@@ -257,6 +269,7 @@ class MetricExportAuditTests(unittest.TestCase):
             self.assertIsNone(types[index][choice])
 
     def test_primary_map_fields_and_item_totals_are_logged_once_with_recipe_rows(self):
+        """Verify primary map fields and item totals are logged once with recipe rows."""
         self.save_atlas()
         config, _ = self.configure_map()
         logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
@@ -279,6 +292,7 @@ class MetricExportAuditTests(unittest.TestCase):
             self.assertIsNone(types[0][header])
 
     def test_propagation_two_runes_count_one_scan_and_chain_keeps_order(self):
+        """Verify propagation two runes count one scan and chain keeps order."""
         self.save_atlas()
         captured = []
         for runes, recipe in ((["Death", "Time"], "Audit Recipe A"),
@@ -320,6 +334,7 @@ class MetricExportAuditTests(unittest.TestCase):
                 self.assertIsNone(types[index]["Remnants Detonated (Expedition)"])
 
     def test_four_kill_counts_keep_map_identity_and_unknown_is_not_zero(self):
+        """Verify four kill counts keep map identity and unknown is not zero."""
         self.save_atlas()
         first = logger.save_counts(10, 2, 3, unique=4)
         zero = logger.save_counts(0, 0, 0, unique=0)
@@ -351,6 +366,7 @@ class MetricExportAuditTests(unittest.TestCase):
                 self.assertIsNone(types[index]["Unique Kills (Map)"])
 
     def test_remnant_family_and_seed_metrics_have_distinct_columns(self):
+        """Verify remnant family and seed metrics have distinct columns."""
         self.save_atlas()
         with logger._connect() as db:
             stage = dict(db.execute("SELECT * FROM seed_states WHERE family=3 ORDER BY sockets DESC LIMIT 1").fetchone())

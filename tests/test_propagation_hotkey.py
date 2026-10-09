@@ -14,7 +14,9 @@ from PoE2_Data_Logger.ui import region_select
 
 
 class PropagationHotkeyTests(unittest.TestCase):
+    """Check dedicated propagation routing, frozen screenshots, selective cancellation and capture context."""
     def setUp(self):
+        """Initialize an isolated logger database for propagation capture checks."""
         self.temporary = tempfile.TemporaryDirectory(prefix="poe2-propagation-hotkey-")
         self.previous_data_dir = store.DATA_DIR
         store.DATA_DIR = Path(self.temporary.name)
@@ -22,11 +24,13 @@ class PropagationHotkeyTests(unittest.TestCase):
         logger.initialize()
 
     def tearDown(self):
+        """Restore the data directory and initialization state, then remove the temporary database."""
         store.DATA_DIR = self.previous_data_dir
         logger._READY = False
         self.temporary.cleanup()
 
     def manager(self, reader=None, supported=False, **kwargs):
+        """Build a hotkey manager with controlled opened/propagation readers and a deterministic screenshot."""
         readers = {"opened": Mock(return_value={"mode": "opened"}),
                    "propagation": reader or Mock(return_value={"selected_recipe": "Medved's Saga",
                        "runes": ["Rage", "Time"], "positions": [1, 5], "can_use": True})}
@@ -35,6 +39,7 @@ class PropagationHotkeyTests(unittest.TestCase):
             **kwargs)
 
     def test_dedicated_capture_reads_only_frozen_screenshot_without_remnant_writes(self):
+        """Verify dedicated capture reads only frozen screenshot without remnant writes."""
         logger.start_map()
         logger.save_settings({"expedition": 2})
         region = {"x": 0, "y": 110, "w": 580, "h": 730}
@@ -77,7 +82,9 @@ class PropagationHotkeyTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT count(*) FROM new_export").fetchone()[0], 0)
 
     def test_image_remains_frozen_if_reader_changes_input(self):
+        """Verify image remains frozen if reader changes input."""
         def read(image):
+            """Mutate the reader input pixel and return a valid propagation result."""
             image.putpixel((0, 0), (90, 80, 70))
             return {"runes": ["Rage"], "positions": [1], "can_use": True}
         manager = self.manager(reader=read)
@@ -87,6 +94,7 @@ class PropagationHotkeyTests(unittest.TestCase):
         self.assertEqual(saved_image.getpixel((0, 0)), (20, 40, 60))
 
     def test_general_and_remnant_capture_cannot_select_propagation_mode(self):
+        """Verify general and remnant capture cannot select propagation mode."""
         for kind in ("default", "remnant"):
             with self.subTest(kind=kind):
                 manager = self.manager()
@@ -99,12 +107,14 @@ class PropagationHotkeyTests(unittest.TestCase):
                 manager.readers["propagation"].assert_not_called()
 
     def test_propagation_is_not_a_general_mode_option(self):
+        """Verify propagation is not a general mode option."""
         manager = self.manager()
         with self.assertRaisesRegex(ValueError, "remnant mode"):
             manager.set_mode("propagation")
         self.assertEqual(manager.mode, "opened")
 
     def test_combined_remnant_reader_cannot_deliver_propagation(self):
+        """Verify combined remnant reader cannot deliver propagation."""
         manager = self.manager()
         manager.readers["both"] = Mock(return_value={"mode": "propagation", "runes": ["Rage"]})
         manager.set_mode("both")
@@ -116,6 +126,7 @@ class PropagationHotkeyTests(unittest.TestCase):
         manager.readers["propagation"].assert_not_called()
 
     def test_legacy_invalid_general_mode_does_not_activate_propagation(self):
+        """Verify legacy invalid general mode does not activate propagation."""
         with logger._connect() as db:
             logger._set_meta(db, "ocr_shortcut", {"mode": "propagation", "combo": "F1"})
         manager = self.manager()
@@ -126,6 +137,7 @@ class PropagationHotkeyTests(unittest.TestCase):
         manager.readers["propagation"].assert_not_called()
 
     def test_configured_propagation_shortcut_clears_and_stays_disabled_after_restart(self):
+        """Verify configured propagation shortcut clears and stays disabled after restart."""
         manager = self.manager(supported=True, focused=lambda: True)
         with patch.object(manager, "_register") as register, patch.object(manager, "_unregister"):
             manager.configure_for("propagation", "ctrl+f8")
@@ -140,6 +152,7 @@ class PropagationHotkeyTests(unittest.TestCase):
             self.assertEqual(logger._meta(db, "ocr_shortcut")["combos"]["propagation"], "")
 
     def test_focus_guard_prevents_propagation_capture(self):
+        """Verify focus guard prevents propagation capture."""
         manager = self.manager(supported=True, focused=lambda: False)
         manager.capture("propagation")
         manager.grabber.assert_not_called()
@@ -147,6 +160,7 @@ class PropagationHotkeyTests(unittest.TestCase):
         self.assertIsNone(manager.status()["latest"])
 
     def test_windows_default_propagation_region_includes_left_cursor_margin(self):
+        """Verify windows default propagation region includes left cursor margin."""
         self.assertEqual(region_select.REGIONS["propagation_region"][2][0], 0)
         manager = self.manager(supported=True, focused=lambda: True)
         with patch.object(hotkey.sys, "platform", "win32"), patch(
@@ -160,6 +174,7 @@ class PropagationHotkeyTests(unittest.TestCase):
         manager.readers["propagation"].assert_called_once()
 
     def test_windows_custom_propagation_region_retains_context_before_left_panel_frame(self):
+        """Verify windows custom propagation region retains context before left panel frame."""
         with logger._connect() as db:
             logger._set_meta(db, "scan_region_boxes", {"propagation_region": [.04, .1, .3, .7]})
         manager = self.manager(supported=True, focused=lambda: True)
@@ -173,8 +188,10 @@ class PropagationHotkeyTests(unittest.TestCase):
             self.assertEqual(logger._meta(db, "scan_region_boxes")["propagation_region"], [.04, .1, .3, .7])
 
     def test_cancelled_propagation_capture_cannot_reappear(self):
+        """Verify cancelled propagation capture cannot reappear."""
         manager = None
         def read(image):
+            """Cancel the active capture before returning an otherwise valid propagation result."""
             manager.cancel_capture()
             return {"runes": ["Rage"], "positions": [1], "can_use": True}
         manager = self.manager(reader=read)
@@ -184,8 +201,10 @@ class PropagationHotkeyTests(unittest.TestCase):
         manager._capture_lock.release()
 
     def test_remnant_rejection_does_not_cancel_inflight_propagation(self):
+        """Verify remnant rejection does not cancel inflight propagation."""
         manager = None
         def read(image):
+            """Attempt remnant-only cancellation during propagation and assert its capture revision remains unchanged."""
             self.assertEqual(manager._active_capture_mode, "propagation")
             revision = manager._capture_revision
             manager.cancel_capture(modes=("seed", "opened", "both"))
@@ -200,8 +219,10 @@ class PropagationHotkeyTests(unittest.TestCase):
         self.assertIsNone(manager._active_capture_mode)
 
     def test_propagation_cancellation_does_not_cancel_inflight_opened_remnant(self):
+        """Verify propagation cancellation does not cancel inflight opened remnant."""
         manager = self.manager()
         def read(image):
+            """Attempt propagation-only cancellation during opened-remnant reading and preserve its capture revision."""
             self.assertEqual(manager._active_capture_mode, "opened")
             revision = manager._capture_revision
             manager.cancel_capture(modes=("propagation",))
@@ -216,8 +237,10 @@ class PropagationHotkeyTests(unittest.TestCase):
         self.assertIsNone(manager._active_capture_mode)
 
     def test_selective_cancellation_discards_matching_worker_and_releases_capture(self):
+        """Verify selective cancellation discards matching worker and releases capture."""
         manager = None
         def read(image):
+            """Cancel propagation selectively before returning a valid reading that must be discarded."""
             manager.cancel_capture(modes=("propagation",))
             return {"runes": ["Rage"], "positions": [1], "can_use": True}
         manager = self.manager(reader=read)
@@ -229,11 +252,13 @@ class PropagationHotkeyTests(unittest.TestCase):
         manager._capture_lock.release()
 
     def test_selective_cancellation_clears_matching_latest_without_affecting_other_worker(self):
+        """Verify selective cancellation clears matching latest without affecting other worker."""
         manager = self.manager()
         manager.capture("propagation")
         previous = manager.status()["latest"]
         self.assertIsNotNone(manager.image(previous["id"]))
         def read(image):
+            """Clear the prior propagation event while preserving the active opened-remnant worker."""
             revision = manager._capture_revision
             manager.cancel_capture(modes=("propagation",))
             self.assertEqual(manager._capture_revision, revision)
@@ -245,6 +270,7 @@ class PropagationHotkeyTests(unittest.TestCase):
         self.assertEqual(manager.status()["latest"]["mode"], "opened")
 
     def test_selective_cancellation_preserves_unrelated_finished_event(self):
+        """Verify selective cancellation preserves unrelated finished event."""
         manager = self.manager()
         manager.capture("propagation")
         event = manager.status()["latest"]
@@ -260,6 +286,7 @@ class PropagationHotkeyTests(unittest.TestCase):
         self.assertEqual(manager._capture_revision, revision + 1)
 
     def test_lost_focus_after_capture_preparation_clears_active_mode_and_lock(self):
+        """Verify lost focus after capture preparation clears active mode and lock."""
         manager = self.manager(focused=Mock(side_effect=[True, False]))
         manager.capture("propagation")
         manager.readers["propagation"].assert_not_called()
@@ -268,8 +295,10 @@ class PropagationHotkeyTests(unittest.TestCase):
         manager._capture_lock.release()
 
     def test_map_finished_during_propagation_scan_keeps_original_context(self):
+        """Verify map finished during propagation scan keeps original context."""
         logger.start_map()
         def read(image):
+            """Finish the captured map during reading and return valid propagation runes."""
             logger.finish_map(0, 0, 0, 0)
             return {"runes": ["Rage"], "positions": [1], "can_use": True}
         manager = self.manager(reader=read)
@@ -281,8 +310,10 @@ class PropagationHotkeyTests(unittest.TestCase):
             logger.validate_scan_context(result)
 
     def test_expedition_changed_during_propagation_scan_keeps_original_context(self):
+        """Verify expedition changed during propagation scan keeps original context."""
         logger.start_map()
         def read(image):
+            """Switch expedition during reading and return valid propagation runes."""
             logger.save_settings({"expedition": 2})
             return {"runes": ["Rage"], "positions": [1], "can_use": True}
         manager = self.manager(reader=read)
@@ -293,8 +324,10 @@ class PropagationHotkeyTests(unittest.TestCase):
             logger.validate_scan_context(result)
 
     def test_new_map_during_propagation_scan_keeps_original_map(self):
+        """Verify new map during propagation scan keeps original map."""
         logger.start_map()
         def read(image):
+            """Finish the captured map and start another during propagation reading."""
             logger.finish_map(0, 0, 0, 0)
             logger.start_map()
             return {"runes": ["Rage"], "positions": [1], "can_use": True}
@@ -306,8 +339,10 @@ class PropagationHotkeyTests(unittest.TestCase):
             logger.validate_scan_context(result)
 
     def test_session_changed_during_propagation_scan_keeps_original_generation(self):
+        """Verify session changed during propagation scan keeps original generation."""
         generation = logger.session_generation()
         def read(image):
+            """Advance the stored session generation during reading and return valid propagation runes."""
             with logger._connect() as db:
                 logger._set_meta(db, "session_generation", generation + 1)
             return {"runes": ["Rage"], "positions": [1], "can_use": True}
@@ -319,6 +354,7 @@ class PropagationHotkeyTests(unittest.TestCase):
             logger.validate_scan_context(result)
 
     def test_reader_failure_releases_capture_lock(self):
+        """Verify reader failure releases capture lock."""
         reader = Mock(side_effect=[RuntimeError("Unreadable cursor"),
             {"runes": ["Rage"], "positions": [1], "can_use": True}])
         manager = self.manager(reader=reader)

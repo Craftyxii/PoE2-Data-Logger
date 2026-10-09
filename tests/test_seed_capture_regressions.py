@@ -22,8 +22,10 @@ CAPTURE = Path(__file__).resolve().parents[1] / "PoE2_Data_Logger/region_example
 
 
 class SeedCaptureRegressions(unittest.TestCase):
+    """Exercise captured seed-bar geometry and approval-linked recognition learning across scales."""
     @classmethod
     def setUpClass(cls):
+        """Scan scaled versions of the real seed capture once using an isolated untrained database."""
         cls.app = QApplication.instance() or QApplication([])
         cls.capture_files = tempfile.TemporaryDirectory(prefix="poe2-real-seed-captures-")
         cls.readings = {}
@@ -49,9 +51,11 @@ class SeedCaptureRegressions(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        """Remove the shared scaled capture files after all regression checks."""
         cls.capture_files.cleanup()
 
     def setUp(self):
+        """Create an isolated learning database and defer desktop window creation until needed."""
         self.data = tempfile.TemporaryDirectory(prefix="poe2-seed-review-learning-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.data.name)
@@ -60,6 +64,7 @@ class SeedCaptureRegressions(unittest.TestCase):
         self.window = None
 
     def tearDown(self):
+        """Close any review window, restore logger storage and remove temporary learning data."""
         if self.window is not None:
             self.window.close()
             self.window.pool.shutdown(wait=True, cancel_futures=True)
@@ -69,6 +74,7 @@ class SeedCaptureRegressions(unittest.TestCase):
         self.data.cleanup()
 
     def review_capture(self):
+        """Open the real capture in seed review and check that all four bars remain available."""
         self.window = LoggerWindow()
         self.window._poll.stop()
         result = {**copy.deepcopy(self.readings[1]), **logger.scan_context(), "mode": "seed"}
@@ -80,6 +86,7 @@ class SeedCaptureRegressions(unittest.TestCase):
     def test_actual_capture_keeps_four_bars_and_known_slots_across_scales(self):
         # The first glyph is not established by this capture's ground truth;
         # its suggestion must stay held rather than inventing a family.
+        """Verify real seed bars retain known slot geometry across scales while the unproven first bar stays held."""
         expected = [(4, "P1", "Adaptive"), (3, "P2", "Arcane"), (4, "P1", "Oath")]
         for scale, result in self.readings.items():
             with self.subTest(scale=scale):
@@ -105,6 +112,7 @@ class SeedCaptureRegressions(unittest.TestCase):
         self.assertFalse(first.get("can_commit"))
 
     def test_manual_approval_saves_linked_reference_used_by_later_recognition(self):
+        """Verify approved seed evidence links to its saved remnant and improves later recognition."""
         model, names, vectors, templates = scan._assets()
         keep = names != "Adaptive"
         without_adaptive = (model, names[keep], vectors[keep], templates)
@@ -147,6 +155,7 @@ class SeedCaptureRegressions(unittest.TestCase):
                          (4, "P1", "Adaptive", "Family 3"))
 
     def test_rejecting_real_seed_rows_never_adds_training_or_commits(self):
+        """Verify rejecting every captured seed row creates no learned glyphs, scan links or commits."""
         window = self.review_capture()
         for row in range(4):
             window.seed_table.setCurrentCell(row, 2)

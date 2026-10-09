@@ -11,7 +11,9 @@ from PoE2_Data_Logger.core import logger_store as logger, store
 
 
 class MapSummaryExportTests(unittest.TestCase):
+    """Check one-row map summaries, approved gains and snapshot-consistent metadata."""
     def setUp(self):
+        """Initialize a clean temporary database for map summary export tests."""
         self.temporary = tempfile.TemporaryDirectory(prefix="poe2-map-summary-")
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.temporary.name)
@@ -20,15 +22,18 @@ class MapSummaryExportTests(unittest.TestCase):
         logger.clear_export_and_reset_ids()
 
     def tearDown(self):
+        """Restore the data directory and delete the temporary export database."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.temporary.cleanup()
 
     def snapshot(self, phase, **quantities):
+        """Save an inventory snapshot from keyword item quantities."""
         return logger.save_currency_snapshot(phase, [
             {"name": name, "quantity": amount} for name, amount in quantities.items()])
 
     def summary(self, **kwargs):
+        """Parse summary CSV and assert unique headers, row widths and map IDs."""
         raw = list(csv.reader(io.StringIO(logger.export_map_summary_csv(**kwargs).decode("utf-8-sig"))))
         self.assertEqual(len(raw[0]), len(set(name.casefold() for name in raw[0])))
         self.assertTrue(all(len(row) == len(raw[0]) for row in raw))
@@ -37,6 +42,7 @@ class MapSummaryExportTests(unittest.TestCase):
         return raw[0], {row["Map ID"]: row for row in rows}
 
     def test_registered_names_have_full_name_columns_before_they_are_seen(self):
+        """Verify registered item columns exist before scans and empty approved scans yield zero."""
         logger.add_currency_item("New Registered Token")
         logger.add_item_name("New Registered Armour")
         logger.add_ritual_name("Omen of Registered Learning")
@@ -58,6 +64,7 @@ class MapSummaryExportTests(unittest.TestCase):
         self.assertTrue(all(rows["M0001"][name] == "0" for name in item_headers))
 
     def test_counts_replace_rescans_and_match_session_totals_once_per_map(self):
+        """Verify latest per-map gains replace rescans and match session totals and map metadata."""
         logger.save_settings({"tier": 16, "waystone": 91, "ocean": True, "deli": True})
         logger.start_map()
         self.snapshot("end", **{"Divine Orb": 1, "Chaos Orb": 23, "Perfect Chaos Orb": 16})
@@ -86,6 +93,7 @@ class MapSummaryExportTests(unittest.TestCase):
             self.assertTrue(all(rows[original["Map ID"]][name] == value for name, value in original.items()))
 
     def test_missing_end_and_approved_empty_end_are_distinct(self):
+        """Verify missing end scans export blanks while approved empty scans export zero."""
         logger.start_map()
         self.snapshot("start", **{"Chaos Orb": 8})
         _, rows = self.summary()
@@ -105,6 +113,7 @@ class MapSummaryExportTests(unittest.TestCase):
         self.assertEqual(self.summary()[1], {})
 
     def test_later_start_recalculates_gains_without_changing_audit_records(self):
+        """Verify a late baseline changes gains without rewriting the earlier end commit."""
         logger.start_map()
         self.snapshot("end", **{"Chaos Orb": 23})
         _, rows = self.summary()
@@ -119,6 +128,7 @@ class MapSummaryExportTests(unittest.TestCase):
                          [("end", "23", "Assumed empty"), ("start", "20", "Scanned")])
 
     def test_ritual_offers_never_become_inventory_gains_and_removed_labels_survive(self):
+        """Verify Ritual offers add no gains and historical item labels remain exportable."""
         logger.start_map()
         logger.add_currency_item("Acquired Token")
         logger.add_item_name("Acquired Armour")
@@ -147,6 +157,7 @@ class MapSummaryExportTests(unittest.TestCase):
         self.assertTrue(all(row["Ritual Rerolls Remaining"] == "5" for row in offers))
 
     def test_future_start_scan_is_exported_before_map_exists_and_is_not_duplicated(self):
+        """Verify a queued baseline exports one future-map row before and after map creation."""
         logger.save_settings({"tier": 16, "waystone": 83, "biome": "Swamp"})
         self.snapshot("start", **{"Chaos Orb": 8})
         _, rows = self.summary()
@@ -167,6 +178,7 @@ class MapSummaryExportTests(unittest.TestCase):
         self.assertEqual(rows["M0002"]["Chaos Orb"], "5")
 
     def test_name_collisions_keep_recipe_metadata_safe_and_case_duplicates_share_count(self):
+        """Verify item labels cannot overwrite metadata and case variants share a count."""
         names = ("Map ID", "Matched Recipe", "Type", "Currency Scan Status", "Map Modifiers", "=SUM(1,2)", "'=SUM(1,2)")
         for name in names:
             logger.add_currency_item(name)
@@ -190,6 +202,7 @@ class MapSummaryExportTests(unittest.TestCase):
         self.assertTrue(all(not name.lstrip().startswith(("=", "+", "-", "@")) for name in formula_headers))
 
     def test_concurrent_approval_does_not_mix_old_counts_with_new_commit_number(self):
+        """Verify interleaved approval cannot combine old quantities with new commit metadata."""
         logger.start_map()
         self.snapshot("end", **{"Chaos Orb": 5})
         old_commit = self.summary()[1]["M0001"]["End Commit #"]
@@ -197,13 +210,17 @@ class MapSummaryExportTests(unittest.TestCase):
         changed = False
 
         class Connection:
+            """Proxy a reader connection to trigger approval between export queries."""
             def __init__(proxy, connection):
+                """Retain the reader connection wrapped by the interleaving proxy."""
                 proxy.connection = connection
 
             def __getattr__(proxy, name):
+                """Delegate ordinary connection operations to the wrapped reader."""
                 return getattr(proxy.connection, name)
 
             def execute(proxy, sql, *arguments):
+                """Approve replacement counts once when the export reads commit metadata."""
                 nonlocal changed
                 if sql.startswith("SELECT number,kind,map_id,reference,recorded_at,details_json,snapshot_json") and not changed:
                     changed = True
@@ -212,6 +229,7 @@ class MapSummaryExportTests(unittest.TestCase):
 
         @contextmanager
         def interleaved_connect():
+            """Yield the proxy around the original logger connection."""
             with original_connect() as db:
                 yield Connection(db)
 

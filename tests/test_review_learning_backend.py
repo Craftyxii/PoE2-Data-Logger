@@ -14,7 +14,9 @@ from PoE2_Data_Logger.ocr import currency_ocr, item_ocr, ritual_grid
 
 
 class ReviewLearningBackendTests(unittest.TestCase):
+    """Check durable review-label learning, canonical names, and valid item footprints."""
     def setUp(self):
+        """Initialize temporary logger storage, reset IDs, and start the first map."""
         self.tmp = tempfile.TemporaryDirectory()
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -24,25 +26,30 @@ class ReviewLearningBackendTests(unittest.TestCase):
         logger.start_map()
 
     def tearDown(self):
+        """Restore the original data directory and remove the isolated logger database."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.tmp.cleanup()
 
     def art(self, size=(50, 50), seed=73):
+        """Create reproducible textured RGB artwork with the requested size and random seed."""
         return Image.fromarray(np.random.default_rng(seed).integers(
             35, 220, (size[1], size[0], 3), dtype=np.uint8))
 
     def example(self, name, category="Currency", size=(50, 50), columns=1, rows=1):
+        """Build a labeled artwork example with its category and grid footprint."""
         return {"name": name, "category": category, "image": self.art(size),
                 "columns": columns, "rows": rows}
 
     def inventory(self, cell, slot=20):
+        """Place a fixture image into a selected slot of an aligned 12-column inventory."""
         grid = Image.new("RGB", (600, 250), (8, 8, 8))
         grid.paste(cell, (((slot - 1) % 12) * 50, ((slot - 1) // 12) * 50))
         grid.info["poe2_inventory_aligned"] = True
         return grid
 
     def scan_inventory(self, image):
+        """Scan the synthetic inventory using saved local icons and no OCR labels."""
         return item_ocr.scan_inventory_grid(image, logger.inventory_icons(), read=lambda _: [])
 
     def scan_ritual(self, cell, slots=(1,), columns=1, rows=1):
@@ -57,6 +64,7 @@ class ReviewLearningBackendTests(unittest.TestCase):
                                              logger.ritual_icons())[0]
 
     def test_inventory_learning_is_durable_and_shared_with_ritual_without_restart(self):
+        """Verify inventory learning is durable and shared with Ritual without restart."""
         example = self.example("Custom Ember")
         logger.save_currency_snapshot("end", [{"name": "Custom Ember", "quantity": 3}],
                                       register_names=True, icon_examples=[example])
@@ -72,6 +80,7 @@ class ReviewLearningBackendTests(unittest.TestCase):
         self.assertEqual(logger.currency_for_map("M0001")["end"], {"Custom Ember": 3})
 
     def test_omen_learning_is_shared_with_inventory_and_remains_omen_in_ritual(self):
+        """Verify omen learning is shared with inventory and remains omen in Ritual."""
         example = self.example("Omen of Local Testing", "Omen")
         logger.save_ritual_page([{"name": example["name"], "category": "Omen", "quantity": 1}],
                                 register_names=True, icon_examples=[example])
@@ -83,6 +92,7 @@ class ReviewLearningBackendTests(unittest.TestCase):
         self.assertEqual((reward["name"], reward["category"]), (example["name"], "Omen"))
 
     def test_full_gear_footprint_does_not_teach_a_one_cell_currency(self):
+        """Verify full gear footprint does not teach a one cell currency."""
         example = self.example("Local Armour", "Item", (100, 150), columns=2, rows=3)
         logger.save_ritual_page([{"name": "Local Armour", "category": "Item", "quantity": 1}],
                                 register_names=True, icon_examples=[example])
@@ -94,6 +104,7 @@ class ReviewLearningBackendTests(unittest.TestCase):
         self.assertNotIn("Local Armour", [item["name"] for item in inventory["items"]])
 
     def test_duplicate_and_relabelled_artwork_has_one_active_label(self):
+        """Verify duplicate and relabelled artwork has one active label."""
         example = self.example("Old Local Name")
         logger.save_currency_snapshot("end", [{"name": "Old Local Name", "quantity": 1}],
                                       register_names=True, icon_examples=[example, example])
@@ -108,6 +119,7 @@ class ReviewLearningBackendTests(unittest.TestCase):
         self.assertEqual(logger.review_icons(), [])
 
     def test_unicode_casefold_deduplicates_names_and_totals(self):
+        """Verify unicode casefold deduplicates names and totals."""
         logger.save_currency_snapshot("end", [{"name": "Straße Token", "quantity": 2},
                                               {"name": "STRASSE TOKEN", "quantity": 3}],
                                       register_names=True)
@@ -115,6 +127,7 @@ class ReviewLearningBackendTests(unittest.TestCase):
         self.assertEqual(sum(name.casefold() == "strasse token" for name in logger.currency_names()), 1)
 
     def test_invalid_examples_roll_back_new_names_and_log(self):
+        """Verify invalid examples roll back new names and log."""
         example = self.example("Uncommitted Icon")
         example["image"] = Image.new("RGB", (50, 50), "black")
         with self.assertRaisesRegex(ValueError, "empty captured"):
@@ -125,6 +138,7 @@ class ReviewLearningBackendTests(unittest.TestCase):
         self.assertEqual(logger.currency_for_map("M0001")["end"], {})
 
     def test_only_accepted_positive_quantity_rows_can_teach_examples(self):
+        """Verify only accepted positive quantity rows can teach examples."""
         example = self.example("Not Accepted")
         with self.assertRaisesRegex(ValueError, "Only accepted"):
             logger.save_currency_snapshot("end", [{"name": "Chaos Orb", "quantity": 1}],
@@ -134,6 +148,7 @@ class ReviewLearningBackendTests(unittest.TestCase):
         self.assertEqual(logger.review_icons(), [])
 
     def test_omen_cannot_promote_registered_item_or_multicell_art(self):
+        """Verify omen cannot promote registered item or multicell art."""
         logger.add_item_name("Local Armour")
         with self.assertRaisesRegex(ValueError, "Item database"):
             logger.save_ritual_page([{"name": "LOCAL ARMOUR", "category": "Omen"}], register_names=True)
@@ -144,6 +159,7 @@ class ReviewLearningBackendTests(unittest.TestCase):
         self.assertNotIn(example["name"], logger.currency_names())
 
     def test_stale_map_rejection_does_not_register_or_learn(self):
+        """Verify stale map rejection does not register or learn."""
         example = self.example("Stale Example")
         with self.assertRaisesRegex(ValueError, "belongs to"):
             logger.save_currency_snapshot("end", [{"name": example["name"], "quantity": 1}],
@@ -151,6 +167,7 @@ class ReviewLearningBackendTests(unittest.TestCase):
         self.assertNotIn(example["name"], logger.currency_names())
 
     def test_make_example_requires_actual_corrected_capture(self):
+        """Verify make example requires actual corrected capture."""
         image = self.inventory(self.art())
         original = {"slot": 20, "name": "Old Name", "quantity": 1}
         self.assertIsNotNone(review_learning.make_example(image, original, "Correct Name", "Currency", "currency"))
@@ -164,6 +181,7 @@ class ReviewLearningBackendTests(unittest.TestCase):
                                                        "Bad Footprint", "Item", "ritual"))
 
     def test_manual_names_log_without_teaching_and_bad_control_names_reject(self):
+        """Verify manual names log without teaching and bad control names reject."""
         logger.save_currency_snapshot("end", [{"name": "Manual Name", "quantity": 1}], register_names=True)
         self.assertIn("Manual Name", logger.currency_names())
         self.assertEqual(logger.review_icons(), [])
@@ -172,6 +190,7 @@ class ReviewLearningBackendTests(unittest.TestCase):
                 review_learning.validate_name(name, "Currency")
 
     def test_review_correction_overrides_an_existing_wrong_catalog_match(self):
+        """Verify review correction overrides an existing wrong catalog match."""
         entries = json.loads((currency_ocr.ROOT / "inventory-icons.json").read_text())["icons"]
         entry = next(entry for entry in entries if "Omen of Amelioration" in entry["members"])
         cell = Image.new("RGBA", (40, 40), (26, 26, 40, 255))
@@ -186,6 +205,7 @@ class ReviewLearningBackendTests(unittest.TestCase):
         self.assertEqual(self.scan_ritual(cell)["name"], example["name"])
 
     def test_real_ritual_gear_can_be_labelled_and_recognized_again(self):
+        """Verify real Ritual gear can be labelled and recognized again."""
         path = Path(__file__).parent / "fixtures" / "ritual_rewards" / "01.png"
         with Image.open(path) as source:
             page = source.convert("RGB")
@@ -202,6 +222,7 @@ class ReviewLearningBackendTests(unittest.TestCase):
         self.assertEqual(found["name"], "Reviewed Real Gear")
 
     def test_real_empty_inventory_art_cannot_be_taught(self):
+        """Verify real empty inventory art cannot be taught."""
         path = Path(item_ocr.__file__).resolve().parent.parent / "region_examples" / "inventory.jpg"
         with Image.open(path) as source:
             aligned = item_ocr.inventory_grid(source.convert("RGB").crop((1153, 657, 1804, 937)))
@@ -211,6 +232,7 @@ class ReviewLearningBackendTests(unittest.TestCase):
             review_learning.encode_example({"image": cell})
 
     def test_learned_stack_art_is_recognized_after_quantity_changes(self):
+        """Verify learned stack art is recognized after quantity changes."""
         base = self.art()
         one, many = base.copy(), base.copy()
         font = ImageFont.truetype(str(Path(item_ocr.__file__).resolve().parent.parent /
@@ -224,6 +246,7 @@ class ReviewLearningBackendTests(unittest.TestCase):
         self.assertEqual([item["name"] for item in found], [example["name"]])
 
     def test_learning_shared_currency_art_preserves_the_existing_tier_resolver(self):
+        """Verify learning shared currency art preserves the existing tier resolver."""
         example = self.example("Reviewed Shared Icon")
         logger.save_currency_snapshot("end", [{"name": example["name"], "quantity": 1}],
                                       register_names=True, icon_examples=[example])

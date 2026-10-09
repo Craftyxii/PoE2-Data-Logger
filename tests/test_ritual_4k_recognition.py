@@ -12,6 +12,7 @@ from PoE2_Data_Logger.ocr.ritual_grid import detect_reward_grid
 
 
 class Ritual4KRecognitionTests(unittest.TestCase):
+    """Exercise captured Ritual rewards and header counters at doubled UI scale."""
     def test_dimmed_scaled_equipment_retains_one_row_per_item(self):
         """Dimmed ornaments must not turn large gear into several omen cells."""
         folder = Path(__file__).parent / "fixtures/ritual_rewards"

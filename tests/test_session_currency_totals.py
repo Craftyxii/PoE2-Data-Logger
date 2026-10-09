@@ -13,7 +13,9 @@ from PoE2_Data_Logger.core import logger_store as logger, store
 
 
 class SessionCurrencyTotalsTests(unittest.TestCase):
+    """Check session gains from latest approved per-map inventory snapshots and canonical labels."""
     def setUp(self):
+        """Initialize temporary logger storage, reset IDs, and start the first map."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-session-currency-")
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -23,22 +25,27 @@ class SessionCurrencyTotalsTests(unittest.TestCase):
         logger.start_map()
 
     def tearDown(self):
+        """Restore the original data directory and remove the isolated logger database."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.tmp.cleanup()
 
     def snapshot(self, phase, **items):
+        """Save named item quantities as a start or end inventory snapshot."""
         return logger.save_currency_snapshot(phase, [{"name": name, "quantity": quantity}
                                                      for name, quantity in items.items()])
 
     def quantities(self):
+        """Return session currency totals as a name-to-quantity mapping."""
         return {item["name"]: item["quantity"] for item in logger.session_currency_totals()["items"]}
 
     def next_map(self):
+        """Finish the current map with zero counts and start the next map."""
         logger.finish_map(0, 0, 0)
         logger.start_map()
 
     def test_counts_positive_gains_per_map_without_netting_against_later_spending(self):
+        """Verify counts positive gains per map without netting against later spending."""
         self.snapshot("start", **{"Chaos Orb": 10, "Exalted Orb": 7})
         self.snapshot("end", **{"Chaos Orb": 15, "Exalted Orb": 5, "Regal Orb": 2})
         self.assertEqual(self.quantities(), {"Chaos Orb": 5, "Regal Orb": 2})
@@ -51,6 +58,7 @@ class SessionCurrencyTotalsTests(unittest.TestCase):
         self.assertEqual((result["maps_pending_baseline"], result["maps_pending_end"]), (0, 0))
 
     def test_repeat_approved_snapshots_replace_totals_instead_of_counting_history(self):
+        """Verify repeat approved snapshots replace totals instead of counting history."""
         self.snapshot("start", **{"Chaos Orb": 10})
         for _ in range(3):
             self.snapshot("end", **{"Chaos Orb": 15})
@@ -64,6 +72,7 @@ class SessionCurrencyTotalsTests(unittest.TestCase):
         self.assertEqual(logger.session_currency_totals()["maps_counted"], 1)
 
     def test_end_only_inventory_counts_empty_start_then_scanned_start_takes_precedence(self):
+        """Verify end only inventory counts empty start then scanned start takes precedence."""
         self.snapshot("end", **{"Chaos Orb": 100})
         self.assertEqual(logger.session_currency_totals(), {
             "items": [{"name": "Chaos Orb", "kind": "Currency", "quantity": 100}],
@@ -79,6 +88,7 @@ class SessionCurrencyTotalsTests(unittest.TestCase):
         self.assertEqual(self.quantities(), {"Chaos Orb": 100})
 
     def test_mixed_end_only_and_paired_maps_keep_latest_gain_without_duplicate_scans(self):
+        """Verify mixed end only and paired maps keep latest gain without duplicate scans."""
         for _ in range(3):
             self.snapshot("end", **{"Chaos Orb": 10, "Divine Orb": 2})
         self.snapshot("end", **{"Chaos Orb": 7, "Divine Orb": 1})
@@ -93,6 +103,7 @@ class SessionCurrencyTotalsTests(unittest.TestCase):
                           result["maps_pending_baseline"], result["maps_pending_end"]), (3, 2, 0, 0))
 
     def test_start_only_and_prepared_next_map_do_not_add_unfinished_counts(self):
+        """Verify start only and prepared next map do not add unfinished counts."""
         self.snapshot("start", **{"Chaos Orb": 20})
         self.assertEqual(logger.session_currency_totals()["maps_pending_end"], 1)
         self.assertEqual(self.quantities(), {})
@@ -104,6 +115,7 @@ class SessionCurrencyTotalsTests(unittest.TestCase):
         self.assertEqual((result["maps_counted"], result["maps_pending_end"]), (1, 1))
 
     def test_ritual_ordinary_and_deferred_offers_are_excluded(self):
+        """Verify Ritual ordinary and deferred offers are excluded."""
         self.snapshot("start")
         self.snapshot("end", **{"Chaos Orb": 2})
         logger.save_ritual_page([
@@ -113,6 +125,7 @@ class SessionCurrencyTotalsTests(unittest.TestCase):
         self.assertEqual(self.quantities(), {"Chaos Orb": 2})
 
     def test_custom_learned_currency_equipment_and_omens_have_individual_counters(self):
+        """Verify custom learned currency equipment and omens have individual counters."""
         logger.add_item_name("Learned Armour")
         logger.add_ritual_name("Omen of Session Testing")
         logger.save_currency_snapshot("start", [], register_names=True)
@@ -131,6 +144,7 @@ class SessionCurrencyTotalsTests(unittest.TestCase):
         json.dumps(logger.session_currency_totals())
 
     def test_unicode_canonical_names_merge_across_maps_and_older_snapshot_spellings(self):
+        """Verify unicode canonical names merge across maps and older snapshot spellings."""
         logger.save_currency_snapshot("start", [{"name": "Straße Token", "quantity": 1}], register_names=True)
         logger.save_currency_snapshot("end", [{"name": "STRASSE TOKEN", "quantity": 4}], register_names=True)
         self.next_map()
@@ -144,6 +158,7 @@ class SessionCurrencyTotalsTests(unittest.TestCase):
             {"name": "Straße Token", "kind": "Currency", "quantity": 8}])
 
     def test_local_reference_deletion_does_not_erase_logged_equipment_gain(self):
+        """Verify local reference deletion does not erase logged equipment gain."""
         logger.add_item_name("Tracked Equipment")
         self.snapshot("start")
         self.snapshot("end", **{"Tracked Equipment": 1})
@@ -153,6 +168,7 @@ class SessionCurrencyTotalsTests(unittest.TestCase):
             {"name": "Tracked Equipment", "kind": "Item", "quantity": 1}])
 
     def test_app_reopen_preserves_session_and_reset_ids_clears_it(self):
+        """Verify app reopen preserves session and reset IDs clears it."""
         self.snapshot("start", **{"Chaos Orb": 1})
         self.snapshot("end", **{"Chaos Orb": 9})
         logger._READY = False
@@ -168,6 +184,7 @@ class SessionCurrencyTotalsTests(unittest.TestCase):
         self.assertEqual(self.quantities(), {"Chaos Orb": 2})
 
     def test_failed_or_unapproved_replacement_cannot_change_existing_session_total(self):
+        """Verify failed or unapproved replacement cannot change existing session total."""
         self.snapshot("start", **{"Chaos Orb": 10})
         self.snapshot("end", **{"Chaos Orb": 13})
         with patch.object(logger, "_record_commit", side_effect=RuntimeError("disk write failed")):

@@ -12,7 +12,9 @@ from PoE2_Data_Logger.core import logger_store as logger, store, workbook_export
 
 
 class UniquePropagationExportTests(unittest.TestCase):
+    """Check unique/total kill exports and one-per-scan propagation metrics across expeditions."""
     def setUp(self):
+        """Initialize temporary logger storage, reset IDs, and start the first map."""
         self.temporary = tempfile.TemporaryDirectory(prefix="poe2-unique-prop-export-")
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.temporary.name)
@@ -22,17 +24,20 @@ class UniquePropagationExportTests(unittest.TestCase):
         logger.start_map()
 
     def tearDown(self):
+        """Restore the original data directory and remove the isolated logger database."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.temporary.cleanup()
 
     def rows(self, producer):
+        """Run a CSV producer, validate headers and row widths, and return named rows."""
         raw = list(csv.reader(io.StringIO(producer().decode("utf-8-sig"))))
         self.assertEqual(len(raw[0]), len(set(raw[0])))
         self.assertTrue(all(len(row) == len(raw[0]) for row in raw))
         return [dict(zip(raw[0], row)) for row in raw[1:]]
 
     def test_unique_and_total_kills_keep_unknown_zero_partial_and_old_commit_values(self):
+        """Verify unique and total kills keep unknown zero partial and old commit values."""
         unknown = logger.save_kills("", "", "", unique="")["scan_commit_number"]
         zero = logger.save_kills(0, 0, 0, unique=0)["scan_commit_number"]
         partial = logger.save_kills(5, None, 0, unique=None)["scan_commit_number"]
@@ -49,6 +54,7 @@ class UniquePropagationExportTests(unittest.TestCase):
         self.assertEqual((rows["M0002"]["Unique Kills"], rows["M0002"]["Total Kills"]), ("", ""))
 
     def test_low_level_remnant_export_projects_unique_once_without_changing_original_columns(self):
+        """Verify low level remnant export projects unique once without changing original columns."""
         logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
         logger.save_kills(1, 2, 3, unique=4)
         raw = list(csv.reader(io.StringIO(logger.export_csv().decode("utf-8-sig"))))
@@ -63,6 +69,7 @@ class UniquePropagationExportTests(unittest.TestCase):
         self.assertEqual(main_headers[-len(logger.HISTORY_APPEND_HEADERS):], list(logger.HISTORY_APPEND_HEADERS))
 
     def test_propagation_scan_rows_preserve_pair_order_ids_and_one_per_scan_delta(self):
+        """Verify propagation scan rows preserve pair order IDs and one per scan delta."""
         first = logger.increment_propagation_detonated(logger.scan_context(),
                     runes=["Rage", "Time"], recipe="3x Greater Exalted Orb")
         second = logger.increment_propagation_detonated(logger.scan_context(),
@@ -94,6 +101,7 @@ class UniquePropagationExportTests(unittest.TestCase):
         self.assertEqual((maps[0]["Expedition 1 Detonated"], maps[0]["Expedition 2 Detonated"]), ("2", "1"))
 
     def test_xlsx_new_metrics_are_numeric_and_unknown_remains_blank(self):
+        """Verify XLSX new metrics are numeric and unknown remains blank."""
         logger.save_kills(0, 0, 0, unique=0)
         logger.increment_propagation_detonated(logger.scan_context(), runes=["Rage", "Time"], recipe="Example")
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:

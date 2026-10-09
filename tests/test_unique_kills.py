@@ -11,7 +11,9 @@ from PoE2_Data_Logger.core import logger_store as logger, store
 
 
 class UniqueKillsTests(unittest.TestCase):
+    """Check nullable unique counts, legacy callers, rollback and per-map persistence."""
     def setUp(self):
+        """Initialize a temporary database with a clean active map."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-unique-kills-")
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -21,16 +23,19 @@ class UniqueKillsTests(unittest.TestCase):
         logger.start_map()
 
     def tearDown(self):
+        """Restore the data directory and remove the temporary kill-count database."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.tmp.cleanup()
 
     def records(self):
+        """Snapshot metadata, maps, expeditions, unique counts and commits for rollback checks."""
         with logger._connect() as db:
             return {table: [tuple(row) for row in db.execute(f"SELECT * FROM {table} ORDER BY rowid")]
                     for table in ("meta", "maps", "expeditions", "map_unique_kills", "commits")}
 
     def test_unknown_and_zero_are_distinct_and_kills_remain_three(self):
+        """Verify explicit zero unique kills remains distinct from unknown and separate from other kills."""
         self.assertIsNone(logger.get_state()["unique_kills"])
         result = logger.save_kills(100, 10, 3, unique=0)
         self.assertEqual(result["unique_kills"], 0)
@@ -41,6 +46,7 @@ class UniqueKillsTests(unittest.TestCase):
         self.assertEqual(details, {"kills": [100, 10, 3], "unique_kills": 0})
 
     def test_old_callers_preserve_unique_and_fourth_positional_remains_detonated(self):
+        """Verify legacy calls preserve unique kills and the fourth positional detonated count."""
         logger.save_kills(1, 2, 3, unique=4)
         self.assertEqual(logger.save_kills(5, 6, 7)["unique_kills"], 4)
         result = logger.save_counts(8, 9, 10, 11)
@@ -52,6 +58,7 @@ class UniqueKillsTests(unittest.TestCase):
         self.assertEqual([item["unique_kills"] for item in details], [4, 4, 4, 4])
 
     def test_explicit_blank_and_none_clear_but_omission_preserves(self):
+        """Verify blank or None clears unique kills while omitted arguments preserve them."""
         logger.save_counts(0, 0, 0, 0, unique=2)
         logger.save_kills(0, 0, 0, unique="")
         self.assertIsNone(logger.get_state()["unique_kills"])
@@ -62,6 +69,7 @@ class UniqueKillsTests(unittest.TestCase):
         self.assertIsNone(logger.get_state()["unique_kills"])
 
     def test_invalid_unique_rolls_back_entire_save_or_finish(self):
+        """Verify invalid unique counts leave all save and finish state unchanged."""
         logger.save_counts(1, 2, 3, 4, unique=5)
         with logger._connect() as db:
             logger._set_meta(db, "ocr_pending", {"remnant_id": "R0001"})
@@ -75,6 +83,7 @@ class UniqueKillsTests(unittest.TestCase):
                 self.assertEqual(self.records(), before)
 
     def test_each_map_keeps_its_unique_total_and_reset_removes_all(self):
+        """Verify each map owns its unique total and export reset removes all totals."""
         logger.finish_map(10, 2, 1, 3, unique=4)
         logger.start_map()
         self.assertIsNone(logger.get_state()["unique_kills"])
@@ -90,6 +99,7 @@ class UniqueKillsTests(unittest.TestCase):
         self.assertIsNone(logger.get_state()["unique_kills"])
 
     def test_unique_only_activity_blocks_first_waystone_exception_and_undo(self):
+        """Verify a saved unique count blocks empty-map undo and late waystone replacement."""
         logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 1}])
         logger.save_kills(None, None, None, unique=0)
         with logger._connect() as db:
@@ -101,6 +111,7 @@ class UniqueKillsTests(unittest.TestCase):
             logger.undo_empty_map()
 
     def test_undo_checks_unique_table_even_without_commit_and_cleans_empty_row(self):
+        """Verify unique-table activity blocks undo while an unknown row is removable."""
         with logger._connect() as db:
             db.execute("INSERT INTO map_unique_kills VALUES('M0001',0)")
         with self.assertRaisesRegex(ValueError, "saved activity"):
@@ -112,6 +123,7 @@ class UniqueKillsTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT count(*) FROM map_unique_kills").fetchone()[0], 0)
 
     def test_schema_upgrade_leaves_existing_map_history_unknown_and_unchanged(self):
+        """Verify schema upgrade preserves old map records and leaves unique kills unknown."""
         logger.save_counts(10, 2, 1, 3)
         with logger._connect() as db:
             original = tuple(db.execute("SELECT * FROM maps WHERE map_id='M0001'").fetchone())
@@ -125,6 +137,7 @@ class UniqueKillsTests(unittest.TestCase):
             self.assertEqual(tuple(db.execute("SELECT * FROM maps WHERE map_id='M0001'").fetchone()), original)
 
     def test_backup_preserves_nullable_unique_and_propagation_counter(self):
+        """Verify backups retain explicit zero unique kills and propagation detonation counts."""
         logger.save_kills(10, 2, 1, unique=0)
         logger.increment_propagation_detonated(logger.scan_context(), runes=["Rage", "Time"])
         backup = Path(self.tmp.name) / "backup.sqlite3"
@@ -139,6 +152,7 @@ class UniqueKillsTests(unittest.TestCase):
             db.close()
 
     def test_commit_failure_rolls_back_new_unique_value(self):
+        """Verify commit failure rolls back the attempted unique-count update."""
         logger.save_kills(1, 2, 3, unique=4)
         before = self.records()
         with patch.object(logger, "_record_commit", side_effect=RuntimeError("failed")):

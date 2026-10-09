@@ -19,6 +19,7 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 @contextmanager
 def export_database():
+    """Yield an in-memory SQLite connection and close it after the export scope."""
     database = sqlite3.connect(":memory:")
     try:
         yield database
@@ -27,7 +28,9 @@ def export_database():
 
 
 class CsvExportConfirmationTests(unittest.TestCase):
+    """Check Save As cancellation and coordinated main, Atlas and scan-history overwrite decisions."""
     def setUp(self):
+        """Create temporary export destinations and a window stub that records task submissions and results."""
         self.temporary = tempfile.TemporaryDirectory(prefix="poe2-csv-save-as-")
         self.destination = Path(self.temporary.name) / "research.csv"
         self.companion = self.destination.with_name("research_Atlas.csv")
@@ -38,13 +41,16 @@ class CsvExportConfirmationTests(unittest.TestCase):
         self.window._submit = self.submit
 
     def tearDown(self):
+        """Remove the temporary export destinations."""
         self.temporary.cleanup()
 
     def submit(self, label, work, done):
+        """Record the export task label, run its work inline and deliver the result callback."""
         self.submissions.append(label)
         done(work())
 
     def test_declining_companion_overwrite_preserves_both_files_and_submits_no_task(self):
+        """Verify declining companion overwrite preserves both files and submits no task."""
         self.destination.write_bytes(b"previous main")
         self.companion.write_bytes(b"previous Atlas")
         with patch.object(QFileDialog, "getSaveFileName", return_value=(str(self.destination), "CSV (*.csv)")), \
@@ -60,6 +66,7 @@ class CsvExportConfirmationTests(unittest.TestCase):
         self.assertEqual(arguments[4], QMessageBox.StandardButton.No)
 
     def test_approving_existing_companion_writes_both_exports(self):
+        """Verify overwrite approval saves main, Atlas and history CSVs from one database connection."""
         self.destination.write_bytes(b"previous main")
         self.companion.write_bytes(b"previous Atlas")
         with patch.object(QFileDialog, "getSaveFileName", return_value=(str(self.destination), "CSV (*.csv)")), \
@@ -79,6 +86,7 @@ class CsvExportConfirmationTests(unittest.TestCase):
         self.assertIs(main_export.call_args.kwargs["_db"], history_export.call_args.kwargs["_db"])
 
     def test_new_pair_is_saved_without_overwrite_question(self):
+        """Verify new main, Atlas and history destinations save without an overwrite prompt."""
         with patch.object(QFileDialog, "getSaveFileName", return_value=(str(self.destination), "CSV (*.csv)")) as chooser, \
                 patch.object(QMessageBox, "question") as question, \
                 patch.object(logger, "_connect", export_database), \
@@ -93,6 +101,7 @@ class CsvExportConfirmationTests(unittest.TestCase):
         self.assertEqual(self.history.read_bytes(), b"new history")
 
     def test_declining_history_overwrite_preserves_all_files(self):
+        """Verify declining history overwrite preserves all files."""
         self.history.write_bytes(b"previous history")
         with patch.object(QFileDialog, "getSaveFileName", return_value=(str(self.destination), "CSV (*.csv)")), \
                 patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No) as question:
@@ -104,6 +113,7 @@ class CsvExportConfirmationTests(unittest.TestCase):
         self.assertIn(str(self.history), question.call_args.args[2])
 
     def test_canceling_file_chooser_does_not_prompt_or_submit(self):
+        """Verify canceling file chooser does not prompt or submit."""
         with patch.object(QFileDialog, "getSaveFileName", return_value=("", "")), \
                 patch.object(QMessageBox, "question") as question:
             LoggerWindow.save_as(self.window, "csv")

@@ -19,11 +19,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, clear_currency_read
 
 
 class InventoryCountClippingTests(unittest.TestCase):
+    """Exercise large count glyphs and ambiguous clusters that must remain under manual review."""
     @classmethod
     def setUpClass(cls):
+        """Reuse or create the QApplication required by the inventory-review check."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Create an isolated database and load bundled captured digit templates."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-count-clipping-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -32,6 +35,7 @@ class InventoryCountClippingTests(unittest.TestCase):
         self.glyphs = json.loads((currency_ocr.ROOT / "digit-templates.json").read_text())["templates"]
 
     def tearDown(self):
+        """Restore the logger data directory and remove the temporary database."""
         store.DATA_DIR = self.previous_data
         logger._READY = False
         self.tmp.cleanup()
@@ -53,18 +57,21 @@ class InventoryCountClippingTests(unittest.TestCase):
         return cell.resize((size, size), Image.Resampling.LANCZOS)
 
     def grid(self, cell):
+        """Place the supplied count cell in the first slot of an aligned inventory grid."""
         grid = Image.new("RGB", (cell.width * 12, cell.height * 5), (26, 26, 40))
         grid.paste(cell, (0, 0))
         grid.info["poe2_inventory_aligned"] = True
         return grid
 
     def test_real_glyph_count_30_stays_complete_at_large_cell_sizes(self):
+        """Verify all digits of the captured count 30 remain readable at enlarged cell sizes."""
         for scale in (1, 2, 2.5):
             with self.subTest(scale=scale):
                 label = item_ocr._inventory_labels(self.grid(self.cell("30", scale)))[1]
                 self.assertEqual(label.get("count"), 30)
 
     def test_real_glyph_count_783_remains_readable_at_large_cell_sizes(self):
+        """Verify all digits of the captured count 783 remain readable at enlarged cell sizes."""
         for scale in (1, 2, 2.5):
             with self.subTest(scale=scale):
                 label = item_ocr._inventory_labels(self.grid(self.cell("783", scale)))[1]
@@ -74,6 +81,7 @@ class InventoryCountClippingTests(unittest.TestCase):
         # Deliberately misalign the trailing captured glyphs to exercise a
         # cluster the geometry cannot verify. Only icon identity is stubbed;
         # count cropping and RapidOCR run on the reconstructed pixels.
+        """Verify incomplete count geometry holds the item for review and blocks automatic saving."""
         cell = self.cell("783", 2.5, taller_tail=True)
         reader = SimpleNamespace(icon=lambda cell, **kwargs: {
             "family": "scroll", "members": ["Scroll of Wisdom"], "score": .99},
@@ -85,6 +93,7 @@ class InventoryCountClippingTests(unittest.TestCase):
         self.assertFalse(clear_currency_read(result))
 
     def test_disagreeing_count_readers_require_review_even_with_confident_ocr(self):
+        """Verify disagreement between native and OCR counts requires review despite a confident icon."""
         for number, native in (("30", 3), ("783", 7)):
             with self.subTest(number=number):
                 reader = SimpleNamespace(icon=lambda cell, **kwargs: {
@@ -98,11 +107,13 @@ class InventoryCountClippingTests(unittest.TestCase):
                 self.assertFalse(clear_currency_read(result))
 
     def test_incomplete_ritual_count_cluster_never_becomes_verified(self):
+        """Verify incomplete ritual count clusters remain present but unverified."""
         labels = item_ocr._ritual_cell_labels({0: self.cell("783", 2.5, taller_tail=True)})
         self.assertTrue(labels[0]["count_present"])
         self.assertFalse(labels[0]["count_verified"])
 
     def test_conflicting_count_stays_pending_in_gui_and_cannot_auto_commit(self):
+        """Verify a conflicting count remains editable in GUI review without saving a snapshot."""
         logger.save_settings({"ocr_auto_commit": True})
         reader = SimpleNamespace(icon=lambda cell, **kwargs: {
             "family": "scroll", "members": ["Scroll of Wisdom"], "score": .99},
@@ -126,6 +137,7 @@ class InventoryCountClippingTests(unittest.TestCase):
             self.app.processEvents()
 
     def test_two_and_three_stroke_tier_badges_survive_large_cell_sizes(self):
+        """Verify scaled two- and three-stroke tier badges remain detected and yield both label crops."""
         for strokes in (2, 3):
             cell = Image.new("RGB", (54, 54), (26, 26, 40))
             for index in range(strokes):

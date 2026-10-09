@@ -20,11 +20,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, select
 
 
 class ScanContextTests(unittest.TestCase):
+    """Check capture ownership and cancellation across phases, maps, expeditions, and sessions."""
     @classmethod
     def setUpClass(cls):
+        """Create or reuse the QApplication needed by these widget tests."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Create an isolated logger window and intercept OCR callbacks and inventory alignment."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-scan-context-")
         self.original_data_dir = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -38,6 +41,7 @@ class ScanContextTests(unittest.TestCase):
         self.grid_patch.start()
 
     def tearDown(self):
+        """Stop the grid patch, close the window/workers, restore storage, and remove test data."""
         self.grid_patch.stop()
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
@@ -47,31 +51,38 @@ class ScanContextTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def inventory_result(self, quantity=7):
+        """Build one confident Chaos Orb inventory reading with the supplied quantity."""
         return {"items": [{"slot": 1, "name": "Chaos Orb", "quantity": quantity}], "unknown": []}
 
     def ritual_result(self, name="Reward"):
+        """Build one confident named Ritual reward and its raw OCR text."""
         return {"items": [{"category": "Item", "name": name, "quantity": 1,
                            "tribute": 10, "source": name, "score": 1}], "raw_text": name}
 
     def capture_inventory(self, phase="start", live=False, color=(10, 20, 30)):
+        """Start a synthetic inventory capture in the requested phase and return its callback."""
         select(self.window.inventory_phase, phase)
         self.window._inventory_captured(Image.new("RGB", (480, 200), color), live=live)
         return self.callbacks[-1]
 
     def choose_inventory_phase(self, phase):
         # Emit the actual combo-box signal; select() deliberately blocks it.
+        """Change the inventory phase through the real combo-box signal."""
         self.window.inventory_phase.setCurrentIndex(self.window.inventory_phase.findData(phase))
 
     def capture_ritual(self, color=(10, 20, 30), live=False):
+        """Start a synthetic Ritual capture and return its callback and pixel fingerprint."""
         image = Image.new("RGB", (200, 100), color)
         self.window._ritual_captured(image, live=live)
         return self.callbacks[-1], hashlib.sha256(image.tobytes()).hexdigest()
 
     def ritual_fingerprints(self):
+        """Read saved Ritual capture hashes in page order."""
         with logger._connect() as db:
             return [row[0] for row in db.execute("SELECT scan_hash FROM ritual_pages ORDER BY page_number")]
 
     def test_inventory_preserves_phase_changed_during_ocr(self):
+        """Verify inventory preserves phase changed during OCR."""
         callback = self.capture_inventory()
         self.assertFalse(self.window.inventory_phase.isEnabled())
         self.choose_inventory_phase("end")
@@ -84,6 +95,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(saved["end"], {})
 
     def test_completed_review_explicit_phase_change_updates_visible_and_saved_phase(self):
+        """Verify completed review explicit phase change updates visible and saved phase."""
         callback = self.capture_inventory("end")
         callback(self.inventory_result())
         self.choose_inventory_phase("start")
@@ -96,6 +108,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(saved["end"], {})
 
     def test_end_selection_and_bottom_approval_feed_counter_and_export_without_start_baseline(self):
+        """Verify end selection and bottom approval feed counter and export without start baseline."""
         callback = self.capture_inventory("start")
         result = self.inventory_result()
         result["items"][0]["count_needs_review"] = True
@@ -119,6 +132,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 1)
 
     def test_pending_next_map_snapshot_cannot_change_phase_to_previous_map(self):
+        """Verify pending next map snapshot cannot change phase to previous map."""
         logger.finish_map(0, 0, 0, 0)
         callback = self.capture_inventory("start")
         callback(self.inventory_result())
@@ -132,6 +146,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.currency_for_map("M0001")["end"], {})
 
     def test_silent_phase_changes_cannot_save_a_mislabelled_snapshot(self):
+        """Verify silent phase changes cannot save a mislabelled snapshot."""
         self.capture_inventory("start")(self.inventory_result())
         # A blocked programmatic change must not bypass the explicit phase policy.
         select(self.window.inventory_phase, "end")
@@ -141,6 +156,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.currency_for_map("M0001")["start"], {})
 
     def test_inventory_auto_commit_preserves_phase(self):
+        """Verify inventory auto commit preserves phase."""
         self.window.state["settings"]["ocr_auto_commit"] = True
         callback = self.capture_inventory(live=True)
         self.choose_inventory_phase("end")
@@ -151,6 +167,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 1)
 
     def test_manual_inventory_save_uses_selected_phase(self):
+        """Verify manual inventory save uses selected phase."""
         self.window.add_inventory_row({"name": "Chaos Orb", "quantity": 4})
         self.choose_inventory_phase("end")
         saved = self.window.save_inventory()
@@ -158,6 +175,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(saved["start"], {})
 
     def test_saved_inventory_releases_capture_phase_for_manual_save(self):
+        """Verify saved inventory releases capture phase for manual save."""
         self.capture_inventory()(self.inventory_result())
         self.window.save_inventory()
         self.choose_inventory_phase("end")
@@ -166,6 +184,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(saved["end"], {"Chaos Orb": 7})
 
     def test_inventory_overlapping_callbacks_keep_latest_capture(self):
+        """Verify inventory overlapping callbacks keep latest capture."""
         older = self.capture_inventory("start")
         newer = self.capture_inventory("end", color=(30, 20, 10))
         older(self.inventory_result(99))
@@ -179,6 +198,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(self.window._inventory_capture.getpixel((0, 0)), (30, 20, 10))
 
     def test_ritual_out_of_order_callbacks_keep_latest_fingerprint(self):
+        """Verify Ritual out of order callbacks keep latest fingerprint."""
         older, _ = self.capture_ritual()
         newer, fingerprint = self.capture_ritual((30, 20, 10))
         newer(self.ritual_result("Latest reward"))
@@ -190,6 +210,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(self.window.preview.pixmap().toImage().pixelColor(0, 0).getRgb()[:3], (30, 20, 10))
 
     def test_ritual_stale_callback_cannot_enable_approval(self):
+        """Verify Ritual stale callback cannot enable approval."""
         older, _ = self.capture_ritual()
         newer, fingerprint = self.capture_ritual((30, 20, 10))
         older(self.ritual_result("Old reward"))
@@ -200,6 +221,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(self.ritual_fingerprints(), [fingerprint])
 
     def test_ritual_sequential_captures_save_distinct_pages(self):
+        """Verify Ritual sequential captures save distinct pages."""
         first, first_hash = self.capture_ritual()
         first(self.ritual_result("Reward A"))
         self.window.save_ritual()
@@ -211,6 +233,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(self.ritual_fingerprints(), [first_hash, second_hash])
 
     def test_ritual_identical_capture_updates_same_page(self):
+        """Verify Ritual identical capture updates same page."""
         first, fingerprint = self.capture_ritual()
         first(self.ritual_result("Reward"))
         self.assertFalse(self.window.save_ritual()["updated"])
@@ -220,6 +243,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(self.ritual_fingerprints(), [fingerprint])
 
     def test_ritual_auto_commit_ignores_overlapping_stale_result(self):
+        """Verify Ritual auto commit ignores overlapping stale result."""
         self.window.state["settings"]["ocr_auto_commit"] = True
         older, _ = self.capture_ritual(live=True)
         newer, fingerprint = self.capture_ritual((30, 20, 10), live=True)
@@ -230,6 +254,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 1)
 
     def test_pending_captures_cannot_be_saved_or_revived_after_rejection(self):
+        """Verify pending captures cannot be saved or revived after rejection."""
         inventory = self.capture_inventory()
         with self.assertRaisesRegex(ValueError, "finish"):
             self.window.save_inventory()
@@ -244,6 +269,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
     def test_inventory_map_guard_uses_capture_phase(self):
+        """Verify inventory map guard uses capture phase."""
         callback = self.capture_inventory()
         logger.finish_map(0, 0, 0, 0)
         self.choose_inventory_phase("end")
@@ -253,6 +279,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.currency_for_map("M0002")["start"], {})
 
     def test_new_map_cancels_pending_capture(self):
+        """Verify new map cancels pending capture."""
         callback, _ = self.capture_ritual()
         self.window.finish_map()
         callback(self.ritual_result())
@@ -260,6 +287,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.ritual_pages_for_map("M0002"), [])
 
     def test_reset_cancels_capture_even_when_map_id_is_reused(self):
+        """Verify reset cancels capture even when map ID is reused."""
         callback = self.capture_inventory()
         with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
             self.window.reset_logger()
@@ -268,6 +296,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.currency_for_map("M0001")["start"], {})
 
     def test_new_review_cancels_capture_of_other_kind(self):
+        """Verify new review cancels capture of other kind."""
         inventory = self.capture_inventory()
         ritual, fingerprint = self.capture_ritual()
         inventory(self.inventory_result())
@@ -277,6 +306,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.currency_for_map("M0001")["start"], {})
 
     def test_icon_reference_rescan_keeps_explicitly_corrected_review_phase(self):
+        """Verify icon reference rescan keeps explicitly corrected review phase."""
         self.capture_inventory()(self.inventory_result())
         self.choose_inventory_phase("end")
         select(self.window.icon_name, "Chaos Orb")
@@ -288,6 +318,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(saved["start"], {})
 
     def test_direct_read_helpers_remain_supported(self):
+        """Verify direct read helpers remain supported."""
         self.window._inventory_read(self.inventory_result(), live=False, expected_map_id="M0001")
         self.window.save_inventory()
         self.window._ritual_read(self.ritual_result(), live=False, expected_map_id="M0001")
@@ -296,6 +327,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(len(logger.ritual_pages_for_map("M0001")), 1)
 
     def test_waystone_review_survives_unrelated_refresh(self):
+        """Verify Waystone review survives unrelated refresh."""
         from PoE2_Data_Logger.ocr.item_text import parse_item_text
         result = parse_item_text("Item Class: Waystones\nRarity: Rare\nStorm Peak\nWaystone (Tier 16)\n--------\nWaystone Drop Chance: +87%\n--------\nItem Level: 82\n--------\n30% increased Rarity of Items found in this Area", self.window.state["affixes"])
         self.window._hover_item_read(result)
@@ -309,6 +341,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["settings"]["waystone"], 90)
 
     def test_starting_map_clears_unapproved_waystone(self):
+        """Verify starting map clears unapproved Waystone."""
         self.window.pending_review_kind = "waystone"
         self.window.waystone.setText("87")
         self.window.finish_map()
@@ -316,6 +349,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertIsNone(self.window.pending_review_kind)
 
     def test_new_map_clears_old_currency_and_ritual_review_rows(self):
+        """Verify new map clears old currency and Ritual review rows."""
         self.capture_inventory()(self.inventory_result())
         self.window.save_inventory()
         callback, _ = self.capture_ritual()
@@ -328,6 +362,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertIsNone(self.window._inventory_capture_context)
 
     def test_clear_auto_scan_does_not_open_overlay_while_reading(self):
+        """Verify clear auto scan does not open overlay while reading."""
         logger.save_settings({"ocr_auto_commit": True})
         self.window.refresh()
         self.window._overlay_enabled = True
@@ -341,6 +376,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 1)
 
     def test_uncertain_scan_still_opens_review_overlay(self):
+        """Verify uncertain scan still opens review overlay."""
         logger.save_settings({"ocr_auto_commit": True})
         self.window.refresh()
         self.window._overlay_enabled = True
@@ -355,6 +391,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
     def test_hotkey_delivery_keeps_original_inventory_phase(self):
+        """Verify hotkey delivery keeps original inventory phase."""
         from PoE2_Data_Logger.core import service
         buffer = __import__("io").BytesIO()
         Image.new("RGB", (480, 200)).save(buffer, format="PNG")
@@ -369,6 +406,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(self.window.save_inventory()["start"], {"Chaos Orb": 7})
 
     def file_capture(self):
+        """Choose a temporary PNG through the file dialog and return its OCR callback."""
         import io
         from PySide6.QtWidgets import QFileDialog
         raw = io.BytesIO()
@@ -380,6 +418,7 @@ class ScanContextTests(unittest.TestCase):
         return self.callbacks[-1]
 
     def opened_result(self):
+        """Build a confident partial opened-reward reading bound to the current scan context."""
         return {"mode": "opened", "status": "Review the opened rewards before logging.",
                 "can_use": True, "family": "Family 3", "candidates": [3], "sockets": 10,
                 "recipe_sockets": 10, "socket_source": "opened icons", "first_line_gap": 60,
@@ -389,6 +428,7 @@ class ScanContextTests(unittest.TestCase):
                 "_target_map_id": "M0001", **logger.scan_context()}
 
     def test_rejected_file_scan_cannot_create_pending_remnant(self):
+        """Verify rejected file scan cannot create pending remnant."""
         callback = self.file_capture()
         self.window.reject_review()
         callback(self.opened_result())
@@ -397,6 +437,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
     def test_only_latest_file_scan_creates_pending_remnant(self):
+        """Verify only latest file scan creates pending remnant."""
         old = self.file_capture()
         latest = self.file_capture()
         old(self.opened_result())
@@ -405,6 +446,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["ocr_pending"]["remnant_id"], "R0001")
 
     def test_review_approval_rejects_expedition_changed_after_scan(self):
+        """Verify review approval rejects expedition changed after scan."""
         self.capture_inventory()(self.inventory_result())
         logger.save_settings({"expedition": 2})
         with self.assertRaisesRegex(ValueError, "expedition changed"):
@@ -412,6 +454,7 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
     def test_both_mode_links_partial_opened_list_and_logs_once(self):
+        """Verify both mode links partial opened list and logs once."""
         with logger._connect() as db:
             sockets = db.execute("SELECT sockets FROM recipes WHERE name='Perfect Chaos Orb x3'").fetchone()[0]
             stage = dict(db.execute("SELECT * FROM seed_states WHERE family=3 AND sockets=? LIMIT 1", (sockets,)).fetchone())

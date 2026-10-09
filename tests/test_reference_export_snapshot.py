@@ -13,7 +13,9 @@ from PoE2_Data_Logger.core import logger_store as logger, reference_pack, store
 
 
 class ReferenceExportSnapshotTests(unittest.TestCase):
+    """Exercise consistent family and recipe export snapshots during concurrent database edits."""
     def test_family_and_recipe_export_use_one_snapshot_during_concurrent_edit(self):
+        """Verify an intervening writer cannot mix new recipe data with old family data in an exported pack."""
         with tempfile.TemporaryDirectory(prefix="poe2-reference-snapshot-") as directory:
             previous = store.DATA_DIR
             try:
@@ -28,10 +30,13 @@ class ReferenceExportSnapshotTests(unittest.TestCase):
                 changed = False
 
                 class ExportConnection:
+                    """Wrap an export connection to inject a committed edit between related table reads."""
                     def __init__(self, database):
+                        """Retain the underlying connection whose read snapshot is being exercised."""
                         self.database = database
 
                     def execute(self, query, *arguments):
+                        """Commit a concurrent family and recipe update once before forwarding the recipe query."""
                         nonlocal changed
                         if query.startswith("SELECT name,sockets,combo") and not changed:
                             changed = True
@@ -45,6 +50,7 @@ class ReferenceExportSnapshotTests(unittest.TestCase):
 
                 @contextmanager
                 def concurrent_export_connection():
+                    """Yield the wrapped export connection while retaining the logger connection's normal lifecycle."""
                     with original_connect() as database:
                         yield ExportConnection(database)
 

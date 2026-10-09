@@ -25,7 +25,9 @@ RETIRED = (*OMENS, "Black Scythe Artifact", "Broken Circle Artifact", "Exotic Co
 
 
 class CurrencyCatalogRetirementTests(unittest.TestCase):
+    """Check retirement of defaults without losing accepted labels, references or history."""
     def setUp(self):
+        """Initialize an isolated logger database for catalog retirement checks."""
         self.tmp = tempfile.TemporaryDirectory()
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -33,11 +35,13 @@ class CurrencyCatalogRetirementTests(unittest.TestCase):
         logger.initialize()
 
     def tearDown(self):
+        """Restore the data directory and remove the temporary database."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.tmp.cleanup()
 
     def seed_previous_catalog(self):
+        """Insert retired currency and Omen defaults to simulate an older catalog."""
         with logger._connect() as db:
             db.executemany("INSERT OR IGNORE INTO currency_items(name) VALUES(?)",
                            ((name,) for name in RETIRED))
@@ -45,10 +49,12 @@ class CurrencyCatalogRetirementTests(unittest.TestCase):
                            ((name,) for name in OMENS))
 
     def restart(self):
+        """Reinitialize the logger to exercise startup catalog retirement."""
         logger._READY = False
         logger.initialize()
 
     def test_new_database_omits_retired_defaults_and_keeps_current_names(self):
+        """Verify fresh catalogs hide retired defaults while retaining current items."""
         self.assertFalse(set(RETIRED) & set(logger.currency_names()))
         self.assertFalse(set(OMENS) & set(logger.ritual_names()))
         with logger._connect() as db:
@@ -61,6 +67,7 @@ class CurrencyCatalogRetirementTests(unittest.TestCase):
         self.assertFalse(set(RETIRED) & set(logger.inventory_names()))
 
     def test_existing_database_hides_defaults_and_preserves_snapshots_and_history(self):
+        """Verify retirement hides defaults without erasing stored counts or exportable names."""
         self.seed_previous_catalog()
         logger.start_map()
         logger.save_currency_snapshot("end", [
@@ -87,6 +94,7 @@ class CurrencyCatalogRetirementTests(unittest.TestCase):
         self.assertTrue(set(RETIRED) <= {row["name"] for row in names})
 
     def test_explicit_local_labels_can_reuse_retired_names_after_restart(self):
+        """Verify explicitly added retired labels remain selectable after restart."""
         self.seed_previous_catalog()
         logger.add_currency_item("sun artifact")
         logger.add_ritual_name("omen of corruption")
@@ -101,6 +109,7 @@ class CurrencyCatalogRetirementTests(unittest.TestCase):
         self.assertNotIn("Exotic Coinage", logger.currency_names())
 
     def test_existing_trained_references_remain_available_with_their_labels(self):
+        """Verify learned icons preserve retired labels through catalog retirement."""
         self.seed_previous_catalog()
         artwork = Image.new("RGB", (40, 40), (26, 26, 40))
         ImageDraw.Draw(artwork).ellipse((10, 10, 35, 35), fill="gold")
@@ -119,6 +128,7 @@ class CurrencyCatalogRetirementTests(unittest.TestCase):
         self.assertNotIn("Sun Artifact", logger.currency_names())
 
     def test_dashboard_hides_retired_defaults_but_displays_accepted_history(self):
+        """Verify dashboard cards show retired names only while accepted counts exist."""
         app = QApplication.instance() or QApplication([])
         self.seed_previous_catalog()
         window = LoggerWindow()

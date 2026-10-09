@@ -11,7 +11,9 @@ from PoE2_Data_Logger.core import logger_store as logger, store, workbook_export
 
 
 class ReviewLearningExportTests(unittest.TestCase):
+    """Check learned item names retain distinct numeric CSV/workbook columns and historical map ownership."""
     def setUp(self):
+        """Initialize a clean isolated logger database with the first map open."""
         self.temporary = tempfile.TemporaryDirectory(prefix="poe2-review-export-")
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.temporary.name)
@@ -21,17 +23,20 @@ class ReviewLearningExportTests(unittest.TestCase):
         logger.start_map()
 
     def tearDown(self):
+        """Restore the data directory and initialization state, then remove the temporary database."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.temporary.cleanup()
 
     def main_csv(self):
+        """Decode history CSV headers and rows, asserting unique columns and consistent widths."""
         raw = list(csv.reader(io.StringIO(logger.export_all_csv().decode("utf-8-sig"))))
         self.assertEqual(len(raw[0]), len(set(raw[0])))
         self.assertTrue(all(len(row) == len(raw[0]) for row in raw))
         return raw[0], [dict(zip(raw[0], row)) for row in raw[1:]]
 
     def main_workbook(self):
+        """Read workbook history headers, row values and cell types while rejecting formulas."""
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
             self.assertIsNone(archive.testzip())
             root = ET.fromstring(archive.read("xl/worksheets/sheet3.xml"))
@@ -52,6 +57,7 @@ class ReviewLearningExportTests(unittest.TestCase):
         return list(headers.values()), results
 
     def assert_workbook_matches(self, headers, rows, numeric):
+        """Assert workbook headers and rows match CSV and populated count cells remain numeric."""
         workbook_headers, workbook = self.main_workbook()
         self.assertEqual(workbook_headers, headers)
         self.assertEqual([values for values, _ in workbook], rows)
@@ -61,6 +67,7 @@ class ReviewLearningExportTests(unittest.TestCase):
                     self.assertIsNone(types[header], f"{header} counts must be numeric")
 
     def test_new_currency_omen_and_equipment_have_their_own_count_columns(self):
+        """Verify new currency omen and equipment have their own count columns."""
         logger.add_currency_item("Review Learned Currency")
         logger.add_item_name("Review Learned Armour")
         logger.add_ritual_name("Omen of Review Learning")
@@ -88,6 +95,7 @@ class ReviewLearningExportTests(unittest.TestCase):
         self.assert_workbook_matches(headers, rows, columns)
 
     def test_historical_item_columns_survive_reference_removal_and_keep_map_ids(self):
+        """Verify historical item columns survive reference removal and keep map IDs."""
         logger.add_currency_item("First Map Currency")
         logger.add_item_name("First Map Equipment")
         logger.save_currency_snapshot("start", [{"name": "First Map Currency", "quantity": 3},
@@ -118,6 +126,7 @@ class ReviewLearningExportTests(unittest.TestCase):
         self.assert_workbook_matches(headers, rows, columns)
 
     def test_reserved_and_formula_names_cannot_collide_or_create_formulas(self):
+        """Verify reserved and formula names cannot collide or create formulas."""
         names = ("Map ID", "Quantity", "=SUM(1,2)", "'=SUM(1,2)", "Currency: Map ID")
         for name in names:
             logger.add_currency_item(name)
@@ -136,6 +145,7 @@ class ReviewLearningExportTests(unittest.TestCase):
         self.assert_workbook_matches(headers, rows, columns)
 
     def test_literal_apostrophe_ritual_names_keep_distinct_counts_after_catalog_deletion(self):
+        """Verify literal apostrophe ritual names keep distinct counts after catalog deletion."""
         logger.save_ritual_page([
             {"category": "Item", "name": "=Review Name", "quantity": 2},
             {"category": "Item", "name": "'=Review Name", "quantity": 3},
@@ -151,6 +161,7 @@ class ReviewLearningExportTests(unittest.TestCase):
         self.assert_workbook_matches(headers, rows, columns)
 
     def test_empty_inventory_commit_keeps_audit_metadata_without_an_item_column(self):
+        """Verify empty inventory commit keeps audit metadata without an item column."""
         logger.save_currency_snapshot("start", [])
         headers, rows = self.main_csv()
         self.assertEqual(len(rows), 1)
@@ -161,6 +172,7 @@ class ReviewLearningExportTests(unittest.TestCase):
         self.assert_workbook_matches(headers, rows, ())
 
     def test_approval_registers_fresh_names_and_unicode_case_variants_share_a_column(self):
+        """Verify approval registers fresh names and unicode case variants share a column."""
         logger.save_currency_snapshot("start", [
             {"name": "Review Straße Currency", "quantity": 2},
             {"name": "REVIEW STRASSE CURRENCY", "quantity": 3}], register_names=True)

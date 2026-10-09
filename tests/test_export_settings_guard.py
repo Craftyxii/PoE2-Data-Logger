@@ -20,11 +20,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
 class ExportSettingsGuardTests(unittest.TestCase):
+    """Check CSV and workbook exports require saving Atlas drafts while database backups remain available."""
     @classmethod
     def setUpClass(cls):
+        """Create or reuse the QApplication required by the Qt test fixtures."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Open an isolated logger with saved rarity, inline export tasks and a temporary export folder."""
         self.temporary = tempfile.TemporaryDirectory(prefix="poe2-export-settings-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.temporary.name)
@@ -44,6 +47,7 @@ class ExportSettingsGuardTests(unittest.TestCase):
         self.window.export_folder.setText(str(self.folder))
 
     def tearDown(self):
+        """Close the logger window, stop workers and restore the original data directory."""
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -52,12 +56,14 @@ class ExportSettingsGuardTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def submit(self, label, work, done):
+        """Record and run an export task inline, retaining its result before invoking the callback."""
         self.submissions.append(label)
         result = work()
         self.results.append(result)
         done(result)
 
     def edit_rarity(self):
+        """Type a new rarity draft and assert it differs from the persisted Atlas setting."""
         self.window.tabs.setCurrentWidget(self.page)
         self.app.processEvents()
         field = self.page.gear_rarity.lineEdit()
@@ -68,6 +74,7 @@ class ExportSettingsGuardTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["settings"]["atlas_settings"]["gear_item_rarity"], 12)
 
     def trigger_export(self, entrypoint, kind):
+        """Activate the requested folder button or Save As menu action for an export format."""
         self.window.tabs.setCurrentIndex(5)
         if entrypoint == "folder":
             self.window.export_folder.setText(str(self.folder))
@@ -82,6 +89,7 @@ class ExportSettingsGuardTests(unittest.TestCase):
             action.trigger()
 
     def assert_exported_rarity(self, kind):
+        """Read the generated CSV or workbook and assert it contains the newly saved gear rarity."""
         destination = Path(self.results[-1]["path"])
         self.assertTrue(destination.is_file())
         if kind == "csv":
@@ -107,6 +115,7 @@ class ExportSettingsGuardTests(unittest.TestCase):
                         self.assertIn("187.25", values)
 
     def check_export_guard(self, entrypoint, kind):
+        """Assert a rarity draft blocks export, then save it and verify the resulting export."""
         self.edit_rarity()
         destination = self.folder / f"chosen.{kind}"
         with patch.object(QFileDialog, "getSaveFileName", return_value=(str(destination), "")) as chooser, \
@@ -131,18 +140,23 @@ class ExportSettingsGuardTests(unittest.TestCase):
         self.assert_exported_rarity(kind)
 
     def test_folder_csv_requires_saving_current_rarity(self):
+        """Verify folder CSV requires saving current rarity."""
         self.check_export_guard("folder", "csv")
 
     def test_folder_xlsx_requires_saving_current_rarity(self):
+        """Verify folder XLSX requires saving current rarity."""
         self.check_export_guard("folder", "xlsx")
 
     def test_save_as_csv_requires_saving_current_rarity(self):
+        """Verify save as CSV requires saving current rarity."""
         self.check_export_guard("save_as", "csv")
 
     def test_save_as_xlsx_requires_saving_current_rarity(self):
+        """Verify save as XLSX requires saving current rarity."""
         self.check_export_guard("save_as", "xlsx")
 
     def test_database_backup_remains_available_with_unsaved_settings(self):
+        """Verify database backup remains available with unsaved settings."""
         self.edit_rarity()
         destination = self.folder / "backup.sqlite3"
         with patch.object(QFileDialog, "getSaveFileName", return_value=(str(destination), "")):

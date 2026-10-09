@@ -18,7 +18,9 @@ from PoE2_Data_Logger.ui.native_desktop import clear_ritual_read
 
 
 class RecognitionTests(unittest.TestCase):
+    """Check recognition confidence, family inference and session-safe automatic commits."""
     def setUp(self):
+        """Initialize a temporary logger database for recognition contract checks."""
         self.tmp = tempfile.TemporaryDirectory()
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -26,15 +28,18 @@ class RecognitionTests(unittest.TestCase):
         logger.initialize()
 
     def tearDown(self):
+        """Restore the data directory and remove temporary recognition data."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.tmp.cleanup()
 
     def row(self, text, x=30, y=40, score=.99, right=None):
+        """Construct an OCR text row with configurable confidence and geometry."""
         return {"text": text, "score": score, "x": x, "y": y,
                 "right": right if right is not None else x + 220, "bottom": y + 20}
 
     def test_clear_ritual_prices_still_allow_automatic_approval(self):
+        """Verify confident inline or separate Ritual prices allow automatic approval."""
         name = "Omen of Whittling"
         result = item_ocr.parse_ritual([self.row(name), self.row("4,000", y=70, right=110)], [name])
         self.assertEqual(result["items"][0]["tribute"], 4000)
@@ -43,12 +48,14 @@ class RecognitionTests(unittest.TestCase):
         self.assertTrue(clear_ritual_read(inline, [name]))
 
     def test_uncertain_price_is_reviewed_without_discarding_reading(self):
+        """Verify low-confidence prices remain visible while blocking automatic approval."""
         name = "Omen of Whittling"
         result = item_ocr.parse_ritual([self.row(name), self.row("4,000", y=70, score=.1, right=110)], [name])
         self.assertEqual(result["items"][0]["tribute"], 4000)
         self.assertFalse(clear_ritual_read(result, [name]))
 
     def test_ritual_available_tribute_header_does_not_block_clear_rewards(self):
+        """Verify confident available-tribute headers are excluded from unmatched reward text."""
         name = "Omen of Whittling"
         for header in ("5,430 Tribute", "2 5,430 Tribute"):
             with self.subTest(header=header):
@@ -60,6 +67,7 @@ class RecognitionTests(unittest.TestCase):
                 self.assertTrue(clear_ritual_read(result, [name]))
 
     def test_ritual_reward_tribute_price_remains_attached_to_its_reward(self):
+        """Verify a tribute-labeled price remains attached to its named reward."""
         name = "Omen of Whittling"
         result = item_ocr.parse_ritual([
             self.row("Favours", y=10), self.row(name, y=80),
@@ -68,6 +76,7 @@ class RecognitionTests(unittest.TestCase):
         self.assertTrue(clear_ritual_read(result, [name]))
 
     def test_ritual_unknown_reward_still_blocks_automatic_approval(self):
+        """Verify unrecognized reward prose blocks automatic Ritual approval."""
         name = "Omen of Whittling"
         result = item_ocr.parse_ritual([
             self.row("Favours", y=10), self.row("5,430 Tribute", y=40),
@@ -76,6 +85,7 @@ class RecognitionTests(unittest.TestCase):
         self.assertFalse(clear_ritual_read(result, [name]))
 
     def test_ritual_ambiguous_or_weak_header_is_not_silently_discarded(self):
+        """Verify weak or context-free tribute headers remain unmatched and require review."""
         name = "Omen of Whittling"
         for rows in ([self.row("Favours", y=10), self.row("5,430 Tribute", y=40, score=.6)],
                      [self.row("Favours", y=10), self.row("5,430 Tribute", y=40, score=.85)],
@@ -88,6 +98,7 @@ class RecognitionTests(unittest.TestCase):
                 self.assertFalse(clear_ritual_read(result, [name]))
 
     def test_prices_stay_in_their_own_column(self):
+        """Verify a price cannot attach to a reward in another column."""
         names = ["Omen of Whittling", "Omen of Sinistral Erasure"]
         result = item_ocr.parse_ritual([self.row(names[0]), self.row(names[1], x=430, y=42),
                                       self.row("4,000", y=70, right=110)], names)
@@ -95,6 +106,7 @@ class RecognitionTests(unittest.TestCase):
                          [(names[0], 4000), (names[1], None)])
 
     def test_deferred_marker_attaches_to_recognized_named_omen(self):
+        """Verify a deferred marker augments the named Omen and preserves save eligibility."""
         name = "Omen of Whittling"
         rng = np.random.default_rng(7)
         icon = Image.fromarray(rng.integers(40, 230, (40, 40, 3), dtype=np.uint8))
@@ -115,6 +127,7 @@ class RecognitionTests(unittest.TestCase):
         self.assertIn(b",0,", logger.export_all_csv())
 
     def partial(self):
+        """Construct a confident partial Family 3 reading using database socket expectations."""
         first, second = "Perfect Chaos Orb x3", "Perfect Exalted Orb x3"
         with logger._connect() as db:
             sockets = db.execute("SELECT sockets FROM recipes WHERE name=?", (first,)).fetchone()[0]
@@ -126,6 +139,7 @@ class RecognitionTests(unittest.TestCase):
                                    for name in (first, second)]}
 
     def test_partial_family_list_can_auto_commit_all_inferred_rewards(self):
+        """Verify a unique partial family reading commits every inferred reward."""
         opened = self.partial()
         with logger._connect() as db:
             family, candidates, complete = opened_scan._families(db, opened["opened_recipes"], False)
@@ -142,17 +156,20 @@ class RecognitionTests(unittest.TestCase):
         self.assertEqual([row["recipe"] for row in logged["recipes"]], expected)
 
     def fresh_auto_capture(self):
+        """Reset the session and create a current automatic opened-capture context."""
         logger.clear_export_and_reset_ids()
         logger.start_map()
         logger.save_settings({"auto_commit": True})
         return {**self.partial(), **logger.scan_context(), **logger.assign_ocr_id("opened")}
 
     def auto_commit_records(self):
+        """Snapshot commit-related tables to detect unintended automatic-save mutations."""
         with logger._connect() as db:
             return {table: [tuple(row) for row in db.execute(f"SELECT * FROM {table} ORDER BY rowid")]
                     for table in ("meta", "maps", "expeditions", "new_export", "commits")}
 
     def test_old_auto_commit_cannot_consume_reused_ids_after_session_reset(self):
+        """Verify session generations reject old captures even when visible IDs are reused."""
         old = self.fresh_auto_capture()
         current = self.fresh_auto_capture()
         self.assertTrue(all(old[key] == current[key] for key in
@@ -166,10 +183,12 @@ class RecognitionTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["ocr_pending"]["remnant_id"], current["remnant_id"])
 
     def test_reset_during_auto_commit_resolution_is_rechecked_inside_commit_transaction(self):
+        """Verify a reset after resolution is caught before any transactional save."""
         old = self.fresh_auto_capture()
         original_candidate = auto_commit.candidate
         after_reset = {}
         def reset_after_resolution(opened, seed=None):
+            """Resolve the candidate, reset the session and record the fresh database state."""
             result = original_candidate(opened, seed)
             self.assertTrue(result["ready"])
             current = self.fresh_auto_capture()
@@ -184,6 +203,7 @@ class RecognitionTests(unittest.TestCase):
         self.assertEqual(self.auto_commit_records(), after_reset["records"])
 
     def test_old_seed_context_cannot_confirm_fresh_opened_capture_with_reused_ids(self):
+        """Verify a seed from a previous session cannot confirm a fresh opened capture."""
         old_seed = self.fresh_auto_capture()
         current = self.fresh_auto_capture()
         before = self.auto_commit_records()
@@ -193,6 +213,7 @@ class RecognitionTests(unittest.TestCase):
         self.assertEqual(self.auto_commit_records(), before)
 
     def test_current_session_auto_commit_preserves_original_chain_after_propagation_advance(self):
+        """Verify delayed automatic save retains its captured expedition after chain advancement."""
         opened = self.fresh_auto_capture()
         logger.increment_propagation_detonated(logger.scan_context(), runes=["Death", "Rebirth"])
         logger.commit_chain_draft([{"rune1": "Death", "rune2": "Rebirth"}], logger.scan_context())
@@ -205,6 +226,7 @@ class RecognitionTests(unittest.TestCase):
         self.assertIsNone(logger.get_state()["ocr_pending"])
 
     def test_partial_family_ambiguity_and_socket_conflict_require_review(self):
+        """Verify ambiguous families and conflicting socket counts block automatic commit."""
         opened = self.partial()
         opened["candidates"] = [3, 5]
         self.assertFalse(auto_commit.candidate(opened)["ready"])
@@ -213,6 +235,7 @@ class RecognitionTests(unittest.TestCase):
         self.assertFalse(auto_commit.candidate(opened)["ready"])
 
     def test_fallback_header_confidence_matches_native_header_policy(self):
+        """Verify fallback header recognition enforces confidence before automatic approval."""
         rows = [self.row("Runeshape Combinations", x=0, y=95, right=500),
                 self.row("3x Perfect Chaos Orb", x=20, y=175, right=350),
                 self.row("3x Perfect Exalted Orb", x=20, y=220, right=350)]
@@ -227,6 +250,7 @@ class RecognitionTests(unittest.TestCase):
         self.assertFalse(bad["can_use"] if "can_use" in bad else False)
 
     def test_opened_explicit_gem_level_cannot_be_fuzzily_changed_or_inferred(self):
+        """Verify fuzzy gem matching preserves explicit levels and does not invent missing levels."""
         with logger._connect() as db:
             names = [row[0] for row in db.execute("SELECT name FROM recipes")]
             for kind in ("Spirit", "Skill"):
@@ -241,6 +265,7 @@ class RecognitionTests(unittest.TestCase):
                 self.assertEqual(opened_scan._match(db, f"Uncut {kind} Gern (Level 19)", 1, names)[0], expected)
 
     def test_opened_wrong_gem_level_cannot_automatically_commit_level_19_family(self):
+        """Verify a wrong explicit gem level cannot resolve or commit a different-level family."""
         image = Image.new("RGB", (600, 500), (190, 190, 190))
         rows = [self.row("Runeshape Combinations", x=0, y=80, right=500),
                 self.row("1x Uncut Spirit Gem (Level 18)", x=160, y=160, right=490)]
@@ -254,6 +279,7 @@ class RecognitionTests(unittest.TestCase):
         self.assertFalse(auto_commit.candidate(result)["ready"])
 
     def native_opened_rows(self):
+        """Build native OCR reward rows preceded by an unrelated caption."""
         return [{"text": "Unrelated caption", "score": .99,
                  "x1": 20, "y1": 115, "x2": 200, "y2": 133},
                 {"text": "3x Perfect Chaos Orb", "score": .99,
@@ -262,6 +288,7 @@ class RecognitionTests(unittest.TestCase):
                  "x1": 200, "y1": 245, "x2": 400, "y2": 265}]
 
     def native_opened(self, header, verify_header=True):
+        """Scan controlled native reward rows with a configurable heading result."""
         image = Image.new("RGB", (600, 500), (190, 190, 190))
         with patch.object(opened_scan.runehelper_ocr, "recognize",
                           return_value=self.native_opened_rows()), patch.object(
@@ -272,6 +299,7 @@ class RecognitionTests(unittest.TestCase):
                                             verify_header=verify_header)
 
     def test_native_missing_heading_preserves_recipes_but_cannot_auto_commit(self):
+        """Verify a missing heading preserves recognized rewards while requiring review."""
         result = self.native_opened(SimpleNamespace(boxes=None))
         self.assertEqual(result["first_recipe"], "Perfect Chaos Orb x3")
         self.assertEqual(result["next_recipe"], "Perfect Exalted Orb x3")
@@ -283,6 +311,7 @@ class RecognitionTests(unittest.TestCase):
         self.assertIn("heading not found", result["status"])
 
     def test_native_low_confidence_or_wrong_heading_requires_review(self):
+        """Verify weak or incorrect native headings block automatic approval."""
         box = [[170, 90], [450, 90], [450, 105], [170, 105]]
         for text, confidence in (("Runeshape Combinations", .1), ("Other heading", .99)):
             with self.subTest(text=text, confidence=confidence):
@@ -293,6 +322,7 @@ class RecognitionTests(unittest.TestCase):
                 self.assertFalse(auto_commit.candidate(result)["ready"])
 
     def test_native_verified_heading_still_allows_automatic_approval(self):
+        """Verify a confident correct native heading permits a ready family reading."""
         result = self.native_opened(SimpleNamespace(
             boxes=[[[170, 90], [450, 90], [450, 105], [170, 105]]],
             txts=["Runeshape Combinations"], scores=[.99]))
@@ -302,6 +332,7 @@ class RecognitionTests(unittest.TestCase):
         self.assertTrue(auto_commit.candidate(result)["ready"])
 
     def test_explicit_heading_bypass_preserves_propagation_recipe_context(self):
+        """Verify explicit heading bypass keeps usable family context for propagation."""
         result = self.native_opened(SimpleNamespace(boxes=None), verify_header=False)
         self.assertFalse(result["header_verified"])
         self.assertEqual(result["first_recipe"], "Perfect Chaos Orb x3")
@@ -309,6 +340,7 @@ class RecognitionTests(unittest.TestCase):
         self.assertTrue(result["can_use"])
 
     def test_rank_cache_preserves_results_and_count_mask(self):
+        """Verify ranked cache reuse preserves results and distinguishes count-mask settings."""
         reader = currency_ocr.CurrencyReader()
         entry = next(row for row in json.loads((currency_ocr.ROOT / "inventory-icons.json").read_text())["icons"]
                      if "Chaos Orb" in row["members"])
@@ -324,6 +356,7 @@ class RecognitionTests(unittest.TestCase):
         self.assertEqual(reader.inventory_ranked(cell, calibrated=True, count_digits=1), first)
 
     def test_reader_reuse_is_confined_to_each_worker_thread(self):
+        """Verify readers are reused within a thread and isolated across workers."""
         first = currency_ocr.get_reader()
         self.assertIs(currency_ocr.get_reader(), first)
         others = []

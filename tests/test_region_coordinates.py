@@ -17,11 +17,14 @@ from PoE2_Data_Logger.ui import region_select
 
 
 class RegionCoordinateTests(unittest.TestCase):
+    """Check normalized and legacy scan regions, native monitor coordinates and Qt DPI conversion."""
     @classmethod
     def setUpClass(cls):
+        """Create or reuse the QApplication required by the Qt test fixtures."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Initialize an isolated logger database for region-coordinate metadata checks."""
         self.tmp = tempfile.TemporaryDirectory()
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -29,17 +32,20 @@ class RegionCoordinateTests(unittest.TestCase):
         logger.initialize()
 
     def tearDown(self):
+        """Restore the data directory and initialization state, then remove the temporary database."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.tmp.cleanup()
 
     def legacy(self, key="inventory_region", region=None):
+        """Persist a legacy pixel region under a scanner metadata key and return it."""
         region = region or {"x": 600, "y": 300, "w": 1000, "h": 600}
         with logger._connect() as db:
             logger._set_meta(db, key, region)
         return region
 
     def test_default_and_saved_normalized_regions_use_physical_4k_bounds(self):
+        """Verify default and saved normalized regions use physical 4K bounds."""
         bounds = (1920, -2160, 5760, 0)
         self.assertEqual(region_select.region_for("inventory_region", bounds),
                          {"x": 4228, "y": -845, "w": 1302, "h": 560})
@@ -49,6 +55,7 @@ class RegionCoordinateTests(unittest.TestCase):
                          {"x": 2880, "y": -1080, "w": 1920, "h": 540})
 
     def test_legacy_only_captures_at_original_hd_origin(self):
+        """Verify legacy only captures at original HD origin."""
         old = self.legacy()
         self.assertEqual(region_select.region_for("inventory_region", (0, 0, 1920, 1080)), old)
         for bounds in ((0, 0, 3840, 2160), (1920, 0, 3840, 1080),
@@ -57,6 +64,7 @@ class RegionCoordinateTests(unittest.TestCase):
                 region_select.region_for("inventory_region", bounds)
 
     def test_reselect_can_open_after_legacy_capture_is_held(self):
+        """Verify reselect can open after legacy capture is held."""
         self.legacy()
         bounds = (0, 0, 3840, 2160)
         self.assertEqual(region_select.region_for("inventory_region", bounds, for_selection=True),
@@ -66,6 +74,7 @@ class RegionCoordinateTests(unittest.TestCase):
                          {"x": 2308, "y": 1315, "w": 1302, "h": 560})
 
     def test_all_unresolved_regions_do_not_report_a_successful_save(self):
+        """Verify all unresolved regions do not report a successful save."""
         for key in region_select.REGIONS:
             self.legacy(key)
         page = region_select.ScanRegionsPage()
@@ -80,6 +89,7 @@ class RegionCoordinateTests(unittest.TestCase):
             self.assertEqual(logger._meta(db, "scan_region_boxes", {}), {})
 
     def test_legacy_page_save_does_not_guess_reference_resolution(self):
+        """Verify legacy page save does not guess reference resolution."""
         old = self.legacy()
         page = region_select.ScanRegionsPage()
         self.addCleanup(page.close)
@@ -93,6 +103,7 @@ class RegionCoordinateTests(unittest.TestCase):
             self.assertEqual(logger._meta(db, "inventory_region", None), old)
 
     def test_one_calibrated_region_saves_while_other_legacy_region_stays_held(self):
+        """Verify one calibrated region saves while other legacy region stays held."""
         self.legacy()
         ritual = self.legacy("ritual_region", {"x": 200, "y": 100, "w": 800, "h": 600})
         page = region_select.ScanRegionsPage()
@@ -112,6 +123,7 @@ class RegionCoordinateTests(unittest.TestCase):
         self.assertIn("Ritual rewards", page.status.text())
 
     def test_explicit_calibration_replaces_legacy_region(self):
+        """Verify explicit calibration replaces legacy region."""
         self.legacy()
         page = region_select.ScanRegionsPage()
         self.addCleanup(page.close)
@@ -121,6 +133,7 @@ class RegionCoordinateTests(unittest.TestCase):
                          {"x": 960, "y": 1080, "w": 1920, "h": 540})
 
     def test_reset_explicitly_accepts_default_for_legacy_region(self):
+        """Verify reset explicitly accepts default for legacy region."""
         self.legacy()
         page = region_select.ScanRegionsPage()
         self.addCleanup(page.close)
@@ -131,9 +144,11 @@ class RegionCoordinateTests(unittest.TestCase):
                          {"x": 2308, "y": 1315, "w": 1302, "h": 560})
 
     def test_native_monitor_query_uses_exclusive_physical_edges_and_device_name(self):
+        """Verify native monitor query uses exclusive physical edges and device name."""
         user32 = Mock()
         user32.MonitorFromRect.return_value = 77
         def monitor_info(handle, pointer):
+            """Populate the native monitor-info pointer with a negative-origin display and device name."""
             info = pointer._obj
             info.rcMonitor.left, info.rcMonitor.top = -3840, -2160
             info.rcMonitor.right, info.rcMonitor.bottom = 0, 0
@@ -148,6 +163,7 @@ class RegionCoordinateTests(unittest.TestCase):
         self.assertEqual((rect.left, rect.top, rect.right, rect.bottom), (-3590, -1860, -2310, -1140))
 
     def editor(self, capture, native, ratio, logical_origin=None, name="\\\\.\\DISPLAY2", native_name=None):
+        """Build a region editor with controlled native and Qt monitor geometry and register cleanup."""
         origin = logical_origin or (native[0], native[1])
         screen = Mock()
         screen.name.return_value = name
@@ -168,6 +184,7 @@ class RegionCoordinateTests(unittest.TestCase):
         return editor, selected
 
     def test_native_monitor_anchor_preserves_all_dpi_scales(self):
+        """Verify native monitor anchor preserves all DPI scales."""
         for ratio in (1, 1.25, 1.5, 2):
             for origin in ((0, 0), (1920, 0), (-3840, -2160)):
                 native = (*origin, 3840, 2160)
@@ -182,11 +199,13 @@ class RegionCoordinateTests(unittest.TestCase):
                         self.assertLessEqual(abs(editor.region()[key] - value), 1)
 
     def test_monitor_lookup_must_match_a_qt_screen(self):
+        """Verify monitor lookup must match a Qt screen."""
         with self.assertRaisesRegex(ValueError, "display"):
             self.editor((1920, 0, 3840, 2160), (1920, 0, 3840, 2160), 2,
                         name="missing", native_name="\\\\.\\DISPLAY2")
 
     def test_capture_cannot_span_monitors_or_missing_pixels(self):
+        """Verify capture cannot span monitors or missing pixels."""
         with self.assertRaisesRegex(ValueError, "one display"):
             self.editor((1800, 0, 3840, 2160), (1920, 0, 3840, 2160), 2)
         with self.assertRaisesRegex(ValueError, "screenshot.*bounds"):

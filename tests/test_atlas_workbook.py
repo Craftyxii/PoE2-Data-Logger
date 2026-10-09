@@ -22,6 +22,7 @@ ATLAS_HEADERS = ["Atlas Setup ID", "Map IDs", "Atlas Data Version", "Gear Item R
 
 
 def csv_bytes(headers, rows):
+    """Encode fixture headers and rows as a UTF-8 BOM CSV payload."""
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     writer.writerow(headers)
@@ -31,6 +32,7 @@ def csv_bytes(headers, rows):
 
 @contextmanager
 def memory_database():
+    """Yield an in-memory SQLite connection and close it after use."""
     database = sqlite3.connect(":memory:")
     try:
         yield database
@@ -39,7 +41,9 @@ def memory_database():
 
 
 class AtlasWorkbookTests(unittest.TestCase):
+    """Check workbook sheet links, typed values and shared export snapshots."""
     def sample_workbook(self):
+        """Build a three-sheet fixture workbook using one transactional connection."""
         main_data = csv_bytes(["Map ID", "Atlas Setup ID", "Gear Item Rarity %", "Chaos Orb"],
                               [["M0001", "ATLAS-1", 0, 7], ["M0002", "ATLAS-2", 175.5, 0],
                                ["M0000", "", "", ""]])
@@ -54,21 +58,25 @@ class AtlasWorkbookTests(unittest.TestCase):
         connections = []
 
         def main_export(*, _db):
+            """Return fixture map rows while recording the active export transaction."""
             self.assertTrue(_db.in_transaction)
             connections.append(_db)
             return main_data
 
         def atlas_export(*, _db):
+            """Return fixture Atlas rows while recording the active export transaction."""
             self.assertTrue(_db.in_transaction)
             connections.append(_db)
             return atlas_data
 
         def history_export(*, _db):
+            """Return fixture scan rows while recording the active export transaction."""
             self.assertTrue(_db.in_transaction)
             connections.append(_db)
             return history_data
 
         def numeric_item_headers(*, _db):
+            """Declare the fixture currency column numeric within the export transaction."""
             self.assertTrue(_db.in_transaction)
             connections.append(_db)
             return ["Chaos Orb"]
@@ -84,6 +92,7 @@ class AtlasWorkbookTests(unittest.TestCase):
         return workbook
 
     def test_companion_sheet_package_and_relationships(self):
+        """Verify workbook packaging, Atlas links and numeric or omitted cells."""
         ns = {"s": workbook_export.NS, "r": workbook_export.DOC_REL,
               "p": workbook_export.PKG_REL, "c": workbook_export.TYPES}
         with ZipFile(io.BytesIO(self.sample_workbook())) as archive:
@@ -142,6 +151,7 @@ class AtlasWorkbookTests(unittest.TestCase):
             self.assertEqual("".join(cells["B2"].itertext()), "M0001, M0003")
 
     def test_setup_hyperlinks_follow_reordered_columns_and_escape_sheet_name(self):
+        """Verify setup links follow header positions and escape apostrophes in sheet names."""
         main_data = csv_bytes(["Map ID", "Detail", "Atlas Setup ID"],
                               [["M1", "first", "setup-two"], ["M2", "second", "setup-one"],
                                ["M3", "legacy", ""], ["M4", "unmatched", "missing"]])
@@ -155,6 +165,7 @@ class AtlasWorkbookTests(unittest.TestCase):
                           for link in root.findall("s:hyperlinks/s:hyperlink", ns)}, links)
 
     def test_actual_export_links_each_map_to_its_matching_saved_setup(self):
+        """Verify real saved setups produce matching CSV rows and workbook links."""
         from PoE2_Data_Logger.core import atlas_catalog
         with tempfile.TemporaryDirectory(prefix="atlas-workbook-integration-") as directory:
             previous = store.DATA_DIR
@@ -232,6 +243,7 @@ class AtlasWorkbookTests(unittest.TestCase):
                 logger._READY = False
 
     def test_latest_currency_counts_extend_recipe_rows_once_and_keep_scan_history(self):
+        """Verify summary rows show latest counts once while history retains every scan."""
         from PoE2_Data_Logger.core import atlas_catalog, catalog_repairs
         with tempfile.TemporaryDirectory(prefix="atlas-workbook-currency-") as directory:
             previous = store.DATA_DIR
@@ -321,6 +333,7 @@ class AtlasWorkbookTests(unittest.TestCase):
                 logger._READY = False
 
     def test_invalid_atlas_row_width_rejected(self):
+        """Verify malformed Atlas CSV rows fail workbook export."""
         with patch.object(logger, "_connect", memory_database), \
                 patch.object(logger, "export_primary_csv", return_value=csv_bytes(["Map ID"], [])), \
                 patch.object(logger, "export_all_csv", return_value=csv_bytes(["Map ID"], [])), \
@@ -331,6 +344,7 @@ class AtlasWorkbookTests(unittest.TestCase):
                 workbook_export.export_xlsx()
 
     def test_all_sheets_use_the_same_read_snapshot_during_a_concurrent_edit(self):
+        """Verify concurrent database edits cannot mix snapshots across workbook sheets."""
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "export.sqlite3"
             writer = sqlite3.connect(path)
@@ -342,6 +356,7 @@ class AtlasWorkbookTests(unittest.TestCase):
 
                 @contextmanager
                 def reader_database():
+                    """Yield a file-backed reader connection for the concurrent export check."""
                     reader = sqlite3.connect(path)
                     try:
                         yield reader
@@ -349,12 +364,14 @@ class AtlasWorkbookTests(unittest.TestCase):
                         reader.close()
 
                 def main_export(*, _db):
+                    """Read rarity before committing a concurrent update through the writer."""
                     rarity = _db.execute("SELECT rarity FROM setup").fetchone()[0]
                     writer.execute("UPDATE setup SET rarity=75")
                     writer.commit()
                     return csv_bytes(["Gear Item Rarity %"], [[rarity]])
 
                 def atlas_export(*, _db):
+                    """Read rarity from the shared snapshot after the concurrent update."""
                     rarity = _db.execute("SELECT rarity FROM setup").fetchone()[0]
                     return csv_bytes(["Gear Item Rarity %"], [[rarity]])
 
@@ -375,6 +392,7 @@ class AtlasWorkbookTests(unittest.TestCase):
 
     @unittest.skipUnless(importlib.util.find_spec("openpyxl"), "optional Excel reader is not installed")
     def test_excel_reader_opens_all_sheets_with_numeric_and_blank_values(self):
+        """Verify openpyxl reads sheet links, numeric values and empty cells correctly."""
         from openpyxl import load_workbook
         workbook = load_workbook(io.BytesIO(self.sample_workbook()), data_only=True)
         try:

@@ -9,7 +9,9 @@ from PoE2_Data_Logger.core import logger_store as logger, store
 
 
 class MapUndoTests(unittest.TestCase):
+    """Exercise empty-map undo and legacy settings repair without rewriting recorded map history."""
     def setUp(self):
+        """Create an isolated database and start the map used by undo checks."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-map-undo-")
         self.previous_data_dir = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -18,21 +20,25 @@ class MapUndoTests(unittest.TestCase):
         logger.start_map()
 
     def tearDown(self):
+        """Restore the logger data directory and remove temporary map storage."""
         store.DATA_DIR = self.previous_data_dir
         logger._READY = False
         self.tmp.cleanup()
 
     def history(self):
+        """Snapshot saved rows associated with the first map across history-bearing tables."""
         with logger._connect() as db:
             return {table: [tuple(row) for row in db.execute(f"SELECT * FROM {table} WHERE map_id='M0001'")]
                     for table in ("maps", "expeditions", "new_export", "currency_snapshots", "commits")}
 
     def reopen(self):
+        """Reinitialize the logger and return its persisted state."""
         logger._READY = False
         logger.initialize()
         return logger.get_state()
 
     def test_untouched_waystone_new_map_undo_and_reopen_keep_valid_defaults(self):
+        """Verify undoing an untouched next map restores valid defaults through database reopen."""
         logger.finish_map(0, 0, 0, 0)
         before = self.history()
         self.assertEqual(logger.start_map()["current_map_id"], "M0002")
@@ -45,6 +51,7 @@ class MapUndoTests(unittest.TestCase):
         self.assertEqual(logger.save_settings({"biome": "Forest"})["settings"]["biome"], "Forest")
 
     def test_undo_restores_saved_waystone_fields_and_preserves_history(self):
+        """Verify undo restores saved waystone and map settings while preserving recorded history."""
         previous = {"tier": 16, "waystone": 87, "map_mods": 7, "waystone_name": "Storm Peak",
                     "waystone_mods": ["Example modifier"], "item_rarity": 0, "monster_rarity": 25,
                     "pack_size": 0, "effectiveness": None}
@@ -66,6 +73,7 @@ class MapUndoTests(unittest.TestCase):
         self.assertEqual(self.history(), before)
 
     def test_undo_repairs_nullable_previous_settings_from_older_beta(self):
+        """Verify undo normalizes nullable legacy settings and supplies missing defaults."""
         logger.save_settings({"tier": 16, "waystone": 87, "map_mods": 4})
         logger.finish_map(0, 0, 0, 0)
         before = self.history()
@@ -87,6 +95,7 @@ class MapUndoTests(unittest.TestCase):
         self.assertEqual(self.reopen()["settings"]["waystone_mods"], [])
 
     def test_initialize_repairs_existing_bad_settings_without_rewriting_saved_history(self):
+        """Verify initialization repairs invalid current settings without rewriting historical records."""
         logger.save_settings({"tier": 16, "waystone": 87, "map_mods": 4, "item_rarity": 37})
         logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 10}])
         before = self.history()

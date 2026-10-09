@@ -16,11 +16,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
 class SavedSnapshotReviewTests(unittest.TestCase):
+    """Exercise readonly saved inventory and Ritual previews and editing for subsequent scans."""
     @classmethod
     def setUpClass(cls):
+        """Reuse or create the QApplication required by snapshot-review widgets."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Create an isolated visible desktop window with polling disabled."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-saved-snapshot-")
         self.original_data_dir = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -32,6 +35,7 @@ class SavedSnapshotReviewTests(unittest.TestCase):
         self.app.processEvents()
 
     def tearDown(self):
+        """Close desktop workers, restore logger storage and remove temporary data."""
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -40,12 +44,14 @@ class SavedSnapshotReviewTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def inventory(self, quantity=14, live=False):
+        """Deliver a recognized Simulacrum Splinter inventory row at the requested quantity."""
         self.window._inventory_read({"items": [
             {"slot": 1, "name": "Simulacrum Splinter", "quantity": quantity}],
             "unknown": []}, live=live)
         self.app.processEvents()
 
     def ritual(self, quantity=1, live=False):
+        """Deliver a confident Chaos Orb Ritual page at the requested quantity."""
         self.window._ritual_read({"items": [
             {"category": "Item", "name": "Chaos Orb", "quantity": quantity,
              "tribute": 100, "source": "Chaos Orb", "score": 1}],
@@ -54,6 +60,7 @@ class SavedSnapshotReviewTests(unittest.TestCase):
         self.app.processEvents()
 
     def assert_inventory_saved_preview(self, quantity):
+        """Check that saved inventory quantities and row count resist keyboard and button edits."""
         table = self.window.inventory_table
         self.assertEqual(table.editTriggers(), QTableWidget.EditTrigger.NoEditTriggers)
         self.assertFalse(self.window.inventory_add_row_button.isEnabled())
@@ -69,6 +76,7 @@ class SavedSnapshotReviewTests(unittest.TestCase):
         self.assertEqual(logger.currency_for_map("M0001")["start"], {"Simulacrum Splinter": quantity})
 
     def assert_ritual_saved_preview(self, quantity):
+        """Check that saved Ritual rows, header fields and deferred flags resist editing."""
         table = self.window.ritual_table
         self.assertEqual(table.editTriggers(), QTableWidget.EditTrigger.NoEditTriggers)
         self.assertFalse(self.window.ritual_add_row_button.isEnabled())
@@ -89,6 +97,7 @@ class SavedSnapshotReviewTests(unittest.TestCase):
         self.assertFalse(pages[0]["items"][0]["deferred"])
 
     def test_manual_inventory_save_locks_preview_and_next_scan_restores_editing(self):
+        """Verify manual inventory save locks its preview and the next scan restores editing."""
         self.inventory()
         self.window.approve_scan_button.click()
         self.assert_inventory_saved_preview(14)
@@ -102,11 +111,13 @@ class SavedSnapshotReviewTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 2)
 
     def test_auto_inventory_save_locks_preview(self):
+        """Verify automatic inventory save locks the resulting preview."""
         self.window.state["settings"]["ocr_auto_commit"] = True
         self.inventory(live=True)
         self.assert_inventory_saved_preview(14)
 
     def test_manual_ritual_save_locks_preview_and_next_scan_restores_editing(self):
+        """Verify manual Ritual save locks its preview and the next scan allows quantity and deferred edits."""
         self.ritual()
         self.window.approve_scan_button.click()
         self.assert_ritual_saved_preview(1)
@@ -126,11 +137,13 @@ class SavedSnapshotReviewTests(unittest.TestCase):
         self.assertTrue(pages[-1]["items"][0]["deferred"])
 
     def test_auto_ritual_save_locks_preview(self):
+        """Verify automatic Ritual save locks the resulting preview."""
         self.window.state["settings"]["ocr_auto_commit"] = True
         self.ritual(live=True)
         self.assert_ritual_saved_preview(1)
 
     def test_loading_and_switching_review_disable_unavailable_edits(self):
+        """Verify loading, switching review kinds and rejection disable unavailable editing controls."""
         self.inventory()
         self.window._review_pending("currency", "Reading inventory…", False)
         self.assertFalse(self.window.inventory_add_row_button.isEnabled())

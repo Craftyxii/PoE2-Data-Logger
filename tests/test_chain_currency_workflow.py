@@ -20,11 +20,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, select
 
 
 class ChainCurrencyWorkflowTests(unittest.TestCase):
+    """Check Review chain approvals and map currency totals through CSV/XLSX exports."""
     @classmethod
     def setUpClass(cls):
+        """Create or reuse the QApplication needed by these widget tests."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Create an isolated logger window and synthetic propagation screenshot."""
         self.temporary = tempfile.TemporaryDirectory(prefix="poe2-chain-currency-")
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.temporary.name)
@@ -37,6 +40,7 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
         self.raw = image.getvalue()
 
     def tearDown(self):
+        """Close the window and worker pool, restore storage, and remove test data."""
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -45,6 +49,7 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def currency(self, phase, amounts, approve=True):
+        """Populate inventory Review for a phase and optionally approve its currency snapshot."""
         select(self.window.inventory_phase, phase)
         self.window._inventory_read({"items": [
             {"slot": index, "name": name, "quantity": quantity}
@@ -53,10 +58,12 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
             self.window.approve_review()
 
     def totals(self):
+        """Return positive quantities currently displayed by the session currency cards."""
         return {name: card.quantity for name, card in self.window.session_currency.cards.items()
                 if card.quantity > 0}
 
     def rows(self, data):
+        """Validate unique CSV headers and row widths, then return named data rows."""
         rows = list(csv.reader(io.StringIO(data.decode("utf-8-sig"))))
         self.assertEqual(len(rows[0]), len(set(rows[0])))
         self.assertTrue(all(len(row) == len(rows[0]) for row in rows))
@@ -81,6 +88,7 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
         approve.click()
 
     def assert_workbook_matches_csv(self):
+        """Assert all three XLSX sheets match their CSV exports and contain no formulas."""
         ns = {"s": workbook_export.NS}
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
             self.assertIsNone(archive.testzip())
@@ -102,6 +110,7 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
                 self.assertEqual(actual, self.rows(csv_data))
 
     def test_review_choice_and_manual_pair_commit_without_crossing_currency_map_ids(self):
+        """Verify review choice and manual pair commit without crossing currency map IDs."""
         self.recipe_prefix("Greater Jeweller's Orb", "Death", "Power")
         self.recipe_prefix("Chaos Orb", "Rage", "Time")
         result = {"mode": "propagation", "can_use": False, "runes": [],
@@ -181,6 +190,7 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
         self.assert_workbook_matches_csv()
 
     def test_live_auto_commit_end_only_and_uncertain_rejection_do_not_double_credit(self):
+        """Verify live auto commit end only and uncertain rejection do not double credit."""
         self.window.set_auto_all(True)
         select(self.window.inventory_phase, "end")
         clear = {"items": [{"slot": 1, "name": "Chaos Orb", "quantity": 6}], "unknown": []}
@@ -198,6 +208,7 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
         self.assert_workbook_matches_csv()
 
     def test_repeated_confident_callback_behind_manual_draft_keeps_one_part_and_count(self):
+        """Verify repeated confident callback behind manual draft keeps one part and count."""
         self.window.rune_inputs[0].setText("Death")
         result = {"can_use": True, "runes": ["Rage", "Time"],
                   "selected_recipe": "Chaos Orb", **logger.scan_context()}
@@ -222,6 +233,7 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
         self.assert_workbook_matches_csv()
 
     def test_reject_restart_and_id_reset_preserve_then_clear_only_approved_data(self):
+        """Verify reject restart and ID reset preserve then clear only approved data."""
         self.currency("end", {"Chaos Orb": 4})
         self.currency("end", {"Chaos Orb": 999}, approve=False)
         self.window.reject_review()
@@ -249,6 +261,7 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
         self.assert_workbook_matches_csv()
 
     def test_uncertain_recipe_accepts_manual_runes_and_keeps_recipe_in_saved_audit(self):
+        """Verify uncertain recipe accepts manual runes and keeps recipe in saved audit."""
         self.recipe_prefix("Greater Jeweller's Orb", "Death", "Rebirth")
         self.recipe_prefix("Chaos Orb", "Rage")
         result = {"mode": "propagation", "can_use": False, "runes": [],

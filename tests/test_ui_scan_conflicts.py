@@ -21,14 +21,17 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, select
 
 
 class UIScanConflictTests(unittest.TestCase):
+    """Check unrelated activity and delayed scan results preserve pending remnant and seed reviews."""
     incoming = ("currency_capture", "currency_read", "ritual_capture", "ritual_read",
                 "waystone", "hover_tablet", "tablet_read")
 
     @classmethod
     def setUpClass(cls):
+        """Create or reuse the QApplication required by the Qt test fixtures."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Open an isolated logger with queued workers, deterministic inventory cropping and unsaved rune inputs."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-ui-scan-conflicts-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -45,6 +48,7 @@ class UIScanConflictTests(unittest.TestCase):
         self.window.rune_inputs[1].setText("Power")
 
     def tearDown(self):
+        """Restore the grid patch, close the window and workers and remove isolated logger data."""
         self.grid_patch.stop()
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
@@ -54,16 +58,19 @@ class UIScanConflictTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def image_bytes(self, color=(120, 130, 140)):
+        """Encode a solid-color screenshot as PNG bytes for preview-preservation checks."""
         output = io.BytesIO()
         Image.new("RGB", (600, 400), color).save(output, format="PNG")
         return output.getvalue()
 
     def opened_result(self, status="The first reward needs review."):
+        """Build an unclear opened-remnant reading bound to the current scan context."""
         return {"mode": "opened", "status": status, "can_use": False, "first_recipe": None,
                 "opened_recipes": [{"raw": "Unreadable reward", "recipe": None}],
                 **logger.scan_context()}
 
     def prepare_pending(self, kind):
+        """Prepare an opened, manual or seed review and assert its review controls and binding."""
         if kind == "opened":
             self.window.show_result("opened", self.opened_result(), self.image_bytes())
             self.assertEqual(logger.get_state()["ocr_pending"]["remnant_id"], "R0001")
@@ -90,11 +97,13 @@ class UIScanConflictTests(unittest.TestCase):
         self.assertFalse(self.window.reject_scan_button.isHidden())
 
     def table_rows(self, table):
+        """Snapshot table cell text and check state, preserving missing cells."""
         return [[(table.item(row, column).text(), table.item(row, column).checkState())
                  if table.item(row, column) else None for column in range(table.columnCount())]
                 for row in range(table.rowCount())]
 
     def review_state(self):
+        """Snapshot review data, drafts, controls, context targets and worker identities for preservation checks."""
         window = self.window
         return {
             "pending": logger.get_state()["ocr_pending"],
@@ -139,17 +148,21 @@ class UIScanConflictTests(unittest.TestCase):
         }
 
     def inventory_result(self):
+        """Build a reviewable seven-Chaos-Orb inventory reading."""
         return {"items": [{"slot": 1, "name": "Chaos Orb", "quantity": 7}], "unknown": []}
 
     def ritual_result(self):
+        """Build a reviewable one-item Ritual reward reading with tribute and raw text."""
         return {"items": [{"category": "Item", "name": "Reward", "quantity": 1,
                            "tribute": 10, "source": "Reward", "score": 1}], "raw_text": "Reward"}
 
     def tablet_result(self):
+        """Build a clipboard tablet reading bound to the current scan context."""
         return {"kind": "tablet", "mods": ["10% increased Pack Size in Map"],
                 "matches": [], "uncertain": [], "source": "clipboard", **logger.scan_context()}
 
     def invoke(self, kind):
+        """Deliver the requested inventory, Ritual, waystone or tablet capture/read path."""
         if kind == "currency_capture":
             return self.window._inventory_captured(Image.new("RGB", (480, 200), "blue"), live=False)
         if kind == "currency_read":
@@ -170,6 +183,7 @@ class UIScanConflictTests(unittest.TestCase):
         return self.window._tablet_read(1, self.tablet_result())
 
     def assert_incoming_scans_preserve_pending(self, pending_kind):
+        """Assert every unrelated scan path is rejected without changing the prepared pending review."""
         self.prepare_pending(pending_kind)
         before = self.review_state()
         for incoming in self.incoming:
@@ -179,15 +193,19 @@ class UIScanConflictTests(unittest.TestCase):
                 self.assertEqual(self.review_state(), before)
 
     def test_nonremnant_scans_preserve_opened_remnant_token_and_recipe_draft(self):
+        """Verify nonremnant scans preserve opened remnant token and recipe draft."""
         self.assert_incoming_scans_preserve_pending("opened")
 
     def test_other_activity_scans_preserve_manual_remnant_binding(self):
+        """Verify other activity scans preserve manual remnant binding."""
         self.assert_incoming_scans_preserve_pending("manual")
 
     def test_nonremnant_scans_preserve_visible_seed_review(self):
+        """Verify nonremnant scans preserve visible seed review."""
         self.assert_incoming_scans_preserve_pending("seed")
 
     def test_nonremnant_scans_preserve_orphan_database_remnant_token(self):
+        """Verify nonremnant scans preserve orphan database remnant token."""
         logger.assign_ocr_id("opened")
         self.assertIsNone(self.window.pending_review_kind)
         before = self.review_state()
@@ -198,6 +216,7 @@ class UIScanConflictTests(unittest.TestCase):
                 self.assertEqual(self.review_state(), before)
 
     def test_rejecting_remnant_allows_each_normal_scan_path(self):
+        """Verify rejecting remnant allows each normal scan path."""
         for incoming in self.incoming:
             with self.subTest(incoming=incoming):
                 self.prepare_pending("opened")
@@ -213,6 +232,7 @@ class UIScanConflictTests(unittest.TestCase):
                 self.window.reject_review()
 
     def test_delayed_inventory_and_ritual_results_cannot_replace_new_remnant_review(self):
+        """Verify delayed inventory and ritual results cannot replace new remnant review."""
         for incoming, result in (("currency_capture", self.inventory_result),
                                  ("ritual_capture", self.ritual_result)):
             with self.subTest(incoming=incoming):
@@ -226,6 +246,7 @@ class UIScanConflictTests(unittest.TestCase):
                 self.window.reject_review()
 
     def capture_file(self):
+        """Queue an opened-remnant file scan and return its completion callback."""
         self.window.mode = "opened"
         select(self.window.mode_select, "opened")
         path = Path(self.tmp.name) / "remnant.png"
@@ -235,6 +256,7 @@ class UIScanConflictTests(unittest.TestCase):
         return self.jobs[-1][1]
 
     def test_delayed_file_result_cannot_replace_newer_held_remnant(self):
+        """Verify delayed file result cannot replace newer held remnant."""
         old = self.capture_file()
         latest = self.capture_file()
         latest(self.opened_result("New remnant needs review."))
@@ -249,6 +271,7 @@ class UIScanConflictTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["ocr_pending"]["remnant_id"], "R0001")
 
     def saved_history_item(self):
+        """Create a saved-seed history item and matching preview image."""
         item = QListWidgetItem("Saved seed reference #17")
         item.setData(Qt.ItemDataRole.UserRole, 17)
         path = Path(self.tmp.name) / "saved-seed.png"
@@ -256,6 +279,7 @@ class UIScanConflictTests(unittest.TestCase):
         return item, path
 
     def test_saved_seed_history_preserves_pending_remnant_mode_image_and_recipe(self):
+        """Verify saved seed history preserves pending remnant mode image and recipe."""
         self.prepare_pending("opened")
         item, path = self.saved_history_item()
         before = self.review_state()
@@ -268,6 +292,7 @@ class UIScanConflictTests(unittest.TestCase):
         self.assertEqual(self.review_state(), before)
 
     def test_saved_seed_history_preserves_orphan_database_remnant_token(self):
+        """Verify saved seed history preserves orphan database remnant token."""
         logger.assign_ocr_id("opened")
         self.window._show_image(self.image_bytes())
         self.assertIsNone(self.window.pending_review_kind)
@@ -282,6 +307,7 @@ class UIScanConflictTests(unittest.TestCase):
         self.assertEqual(self.review_state(), before)
 
     def test_saved_seed_history_loads_normally_without_pending_review(self):
+        """Verify saved seed history loads normally without pending review."""
         service.HOTKEY.set_mode("opened")
         self.window.mode = "opened"
         select(self.window.mode_select, "opened")
@@ -305,6 +331,7 @@ class UIScanConflictTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
     def test_normal_tab_navigation_preserves_pending_remnant_review(self):
+        """Verify normal tab navigation preserves pending remnant review."""
         self.prepare_pending("opened")
         before = self.review_state()
         before.pop("overlay_token")

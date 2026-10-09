@@ -20,11 +20,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, select
 
 
 class ChainReviewVisibilityTests(unittest.TestCase):
+    """Check activity-specific review controls and saved versus discarded propagation parts."""
     @classmethod
     def setUpClass(cls):
+        """Create the shared Qt application for chain-review visibility checks."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Open an isolated logger window and prepare synthetic propagation capture bytes."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-chain-review-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -39,6 +42,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.raw = raw.getvalue()
 
     def tearDown(self):
+        """Close the window and workers, then restore and remove temporary logger data."""
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -68,6 +72,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         return result
 
     def auto_propagate(self, runes=("Death", "Power"), recipe="Divine Orb x2"):
+        """Deliver a confident propagation reading that can automatically save its chain part."""
         result = {"mode": "propagation", "runes": list(runes),
                   "positions": list(range(1, len(runes) + 1)), "selected_recipe": recipe,
                   "can_use": True, "status": "Propagation read", **logger.scan_context()}
@@ -75,32 +80,38 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         return result
 
     def draft_rows(self):
+        """Read the chain draft's displayed step, rune and recipe cells."""
         table = self.window.chain_review_table
         return [tuple(table.item(row, column).text() for column in range(3))
                 for row in range(table.rowCount())]
 
     def expedition_chain_rows(self):
+        """Return the expedition's visible saved-chain labels."""
         return [self.window.chain_list.item(row).text()
                 for row in range(self.window.chain_list.count())]
 
     def expedition_counts(self):
+        """Read accepted detonation counts keyed by expedition ID."""
         with logger._connect() as db:
             return {row[0]: row[1] for row in db.execute(
                 "SELECT expedition_id,detonated FROM expeditions ORDER BY expedition_id")}
 
     def propagation_audit(self):
+        """Read ordered propagation commits for preservation checks."""
         with logger._connect() as db:
             return [tuple(row) for row in db.execute(
                 "SELECT number,map_id,expedition_id,details_json FROM commits "
                 "WHERE kind='Propagation' ORDER BY number")]
 
     def exported_chain(self):
+        """Parse exported chain steps with their map, expedition and rune identities."""
         rows = csv.DictReader(io.StringIO(logger.export_csv().decode("utf-8-sig")))
         return [(row["Map ID"], row["Expedition ID"], row["Chain Step #"],
                  row["Propagation Rune 1"], row["Propagation Rune 2"])
                 for row in rows if row["Chain Step #"]]
 
     def assert_discarded(self, counts, audit, saved=()):
+        """Verify draft controls are cleared while accepted counts, audit and saved parts persist."""
         self.assertTrue(self.window.chain_review_group.isHidden())
         self.assertEqual(self.draft_rows(), [])
         self.assertTrue(all(field.text() == "" and not field.property("chainPart")
@@ -124,6 +135,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.expedition_chain_rows(), list(saved))
 
     def opened_remnant(self, clear=True):
+        """Show either a resolvable Family 26 reading or an unresolved remnant review."""
         if clear:
             with logger._connect() as db:
                 names = json.loads(db.execute(
@@ -146,23 +158,27 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         return result
 
     def tablet(self, automatic=False):
+        """Deliver a controlled tablet reading with configurable automatic-save behavior."""
         self.window.set_auto_tablets(automatic)
         return self.window._tablet_read(1, {"kind": "tablet", "source": "clipboard",
             "mods": ["30% increased Pack Size"], "matches": [], "uncertain": [],
             **logger.scan_context()})
 
     def currency(self, automatic=False):
+        """Deliver an end-inventory reading with configurable live automatic approval."""
         select(self.window.inventory_phase, "end")
         self.window._inventory_read({"items": [{"slot": 1, "name": "Chaos Orb", "quantity": 4}],
                                      "unknown": []}, live=automatic)
 
     def ritual(self, automatic=False):
+        """Deliver a priced Ritual reward with configurable live automatic approval."""
         self.window._ritual_read({"items": [{"category": "Item", "name": "Chaos Orb", "quantity": 1,
              "tribute": 100, "source": "Chaos Orb", "score": 1}],
              "raw_text": "Chaos Orb", "unmatched": [],
              "tribute_available": 5430, "rerolls_remaining": 2}, live=automatic)
 
     def waystone(self):
+        """Parse copied waystone text and deliver it through the hover-item review path."""
         result = parse_item_text(
             "Item Class: Waystones\nRarity: Rare\nStorm Peak\nWaystone (Tier 16)\n"
             "--------\nWaystone Drop Chance: +87%\n--------\nItem Level: 82\n"
@@ -171,6 +187,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.window._hover_item_read(result, self.raw)
 
     def test_unresolved_remnant_discards_draft_and_next_propagation_remains_independent(self):
+        """Verify unresolved remnant review discards an old draft but accepts independent new propagation."""
         self.propagate()
         counts, audit = self.expedition_counts(), self.propagation_audit()
         self.opened_remnant(clear=False)
@@ -190,6 +207,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.expedition_counts()["M0001-E01"], 2)
 
     def test_remnant_review_never_displays_propagation_actions(self):
+        """Verify remnant review and its saved preview keep propagation actions hidden."""
         self.auto_propagate()
         counts, audit = self.expedition_counts(), self.propagation_audit()
         self.opened_remnant()
@@ -211,6 +229,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.propagation_audit(), audit)
 
     def test_independent_propagation_controls_return_to_unchanged_remnant_review(self):
+        """Verify committing independent propagation leaves the held remnant review unchanged."""
         self.opened_remnant()
         held = logger.get_state()["ocr_pending"]
         first = self.window.first_recipe.text()
@@ -238,6 +257,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.expedition_counts()["M0001-E01"], 1)
 
     def test_return_to_existing_remnant_keeps_accepted_unsaved_propagation_part(self):
+        """Verify returning to a held remnant retains accepted propagation for later chain commitment."""
         self.opened_remnant()
         held = logger.get_state()["ocr_pending"]
         self.propagate(("Rage", "Time"), "Chaos Orb x2")
@@ -256,6 +276,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.exported_chain(), [("M0001", "M0001-E01", "1", "Rage", "Time")])
 
     def test_automatically_saved_remnant_keeps_saved_preview_and_accepted_counts(self):
+        """Verify automatic remnant save retains its preview and accepted propagation counts."""
         self.propagate()
         counts, audit = self.expedition_counts(), self.propagation_audit()
         self.window.set_auto_commit(True)
@@ -273,6 +294,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.window.recipe_table.property("savedRemnant"), "R0001")
 
     def test_manual_remnant_entry_clears_manual_choices_and_unsaved_rune_fields(self):
+        """Verify manual remnant entry clears old propagation choices before independent new entry."""
         self.propagate()
         self.propagate((), clear=False, choices=[{
             "selected_recipe": "Chaos Orb x2", "runes": ["Rage", "Time"], "can_use": True}])
@@ -296,6 +318,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["ocr_pending"], held)
 
     def test_pending_tablet_waystone_currency_and_ritual_discard_active_draft(self):
+        """Verify unrelated activity reviews discard chain drafts without erasing accepted counts."""
         for kind, handler in (("tablet", self.tablet), ("waystone", self.waystone),
                               ("currency", self.currency), ("ritual", self.ritual)):
             with self.subTest(kind=kind):
@@ -308,6 +331,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
                 self.window.reject_review()
 
     def test_automatic_tablet_save_discards_draft_without_losing_tablet_data(self):
+        """Verify automatic tablet save clears chain drafts and retains tablet configuration."""
         tablet_count = logger.get_state()["settings"]["tablets_used"]
         self.propagate()
         counts, audit = self.expedition_counts(), self.propagation_audit()
@@ -319,6 +343,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(settings["tablets_used"], tablet_count)
 
     def test_automatic_inventory_and_ritual_saves_discard_draft_without_losing_snapshots(self):
+        """Verify automatic inventory and Ritual saves clear drafts while retaining their records."""
         self.window.set_auto_all(True)
         for kind, handler in (("currency", self.currency), ("ritual", self.ritual)):
             with self.subTest(kind=kind):
@@ -336,6 +361,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.exported_chain(), [])
 
     def test_manual_parts_append_to_same_expedition_and_survive_unrelated_reviews(self):
+        """Verify committed manual parts remain in one expedition across unrelated review activity."""
         self.propagate()
         self.propagate(("Opulent",), "Greater Regal Orb x3")
         self.window.refresh()
@@ -375,6 +401,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertTrue(self.window.chain_review_group.isHidden())
 
     def test_discarded_draft_does_not_reappear_after_expedition_context_round_trip(self):
+        """Verify switching expeditions cannot resurrect a discarded chain draft."""
         self.propagate()
         counts, audit = self.expedition_counts(), self.propagation_audit()
         self.currency()
@@ -387,6 +414,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.draft_rows(), [])
 
     def test_expedition_list_shows_only_saved_parts_and_preserves_them_after_draft_discard(self):
+        """Verify the expedition list reflects only committed parts and survives later draft discard."""
         self.propagate()
         self.assertEqual(self.expedition_chain_rows(), [])
         self.assertTrue(self.window.chain_list.isHidden())
@@ -418,6 +446,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.window._chain_drafts, {})
 
     def test_confident_scans_save_pairs_in_order_without_advancing_until_complete(self):
+        """Verify confident paired scans append ordered parts and advance only on chain completion."""
         self.auto_propagate()
         self.assertEqual(self.exported_chain(), [("M0001", "M0001-E01", "1", "Death", "Power")])
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
@@ -445,6 +474,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
 
     def test_automatic_chain_save_and_completion_do_not_consume_pending_remnant(self):
+        """Verify automatic chain save and completion preserve the pending remnant context."""
         self.opened_remnant(clear=False)
         held = logger.get_state()["ocr_pending"]
         first_recipe = self.window.first_recipe.text()
@@ -460,6 +490,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["ocr_pending"], held)
 
     def test_confident_scan_after_manual_draft_keeps_both_parts_for_explicit_commit(self):
+        """Verify a confident scan joins an existing manual draft until explicit chain commitment."""
         self.propagate(("Rage", "Time"), "Chaos Orb x2")
         self.auto_propagate(("Death", "Power"), "Divine Orb x2")
         self.assertEqual(self.exported_chain(), [])
@@ -477,6 +508,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.expedition_counts(), {"M0001-E01": 2})
 
     def test_replayed_confident_read_does_not_duplicate_counts_but_new_capture_can_match(self):
+        """Verify replaying one reading is idempotent while a fresh identical capture adds a part."""
         result = self.auto_propagate()
         before = logger.get_state()["scan_commit_count"]
         self.window._propagation_read(result, self.raw)
@@ -490,6 +522,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
             ("M0001", "M0001-E01", "2", "Death", "Power")])
 
     def test_new_automatic_part_preserves_unsaved_dropdown_corrections(self):
+        """Verify automatic appends preserve unsaved rune corrections until explicit save."""
         self.auto_propagate()
         self.window.expedition_chain_table.cellWidget(0, 1).setCurrentText("Time")
         self.auto_propagate(("Opulent",), "Greater Regal Orb x3")
@@ -507,6 +540,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
 
     def test_denying_all_held_recipes_allows_completing_the_saved_chain(self):
+        """Verify denying all held recipe choices re-enables completion of saved chain parts."""
         self.auto_propagate()
         self.propagate((), clear=False, choices=[
             {"selected_recipe": "Chaos Orb", "runes": ["Rage"], "can_use": True},
@@ -524,6 +558,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.exported_chain(), [("M0001", "M0001-E01", "1", "Death", "Power")])
 
     def test_completion_refuses_unsaved_draft_and_held_propagation_choice(self):
+        """Verify chain completion refuses unsaved parts and unresolved propagation choices."""
         self.auto_propagate()
         self.propagate(("Rage", "Time"), "Chaos Orb x2")
         before = logger.get_state()["scan_commit_count"]
@@ -545,6 +580,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.expedition_counts()["M0001-E01"], 2)
 
     def test_building_chain_dropdown_corrections_preserve_structure_then_completion_locks_it(self):
+        """Verify rune corrections preserve chain identity and completion locks historical parts."""
         self.auto_propagate()
         self.auto_propagate(("Opulent",), "Greater Regal Orb x3")
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
@@ -597,6 +633,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.expedition_chain_rows(), [])
 
     def test_new_map_and_session_reset_do_not_reuse_previous_draft(self):
+        """Verify new maps and session resets clear drafts while retaining appropriate audit history."""
         self.propagate()
         audit = self.propagation_audit()
         self.window.finish_map()
@@ -616,6 +653,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.draft_rows(), [])
 
     def test_new_map_retains_saved_chain_history_and_discards_only_the_unsaved_part(self):
+        """Verify new-map transition preserves committed parts and discards only the outstanding draft."""
         self.auto_propagate()
         self.propagate(("Rage", "Time"), "Chaos Orb x2")
         audit = self.propagation_audit()

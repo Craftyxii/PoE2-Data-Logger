@@ -14,25 +14,30 @@ from PoE2_Data_Logger.ocr import currency_ocr, inventory_labels, item_ocr
 
 
 class InventoryNoiseTests(unittest.TestCase):
+    """Check inventory occupancy, equipment footprints and ambiguous count or tier evidence stay reviewable."""
     @classmethod
     def setUpClass(cls):
+        """Load the currency reader, inventory screenshot and bundled icon catalog once for image regressions."""
         cls.reader = currency_ocr.CurrencyReader()
         cls.source = Image.open(Path(item_ocr.__file__).resolve().parent.parent /
                                 "region_examples" / "inventory.jpg").convert("RGB")
         cls.entries = json.loads((currency_ocr.ROOT / "inventory-icons.json").read_text())["icons"]
 
     def grid(self):
+        """Create an aligned empty twelve-column inventory image for synthetic item placement."""
         image = Image.new("RGB", (480, 200), (26, 26, 40))
         image.info["poe2_inventory_aligned"] = True
         return image
 
     def art(self, entry):
+        """Composite a catalog RGBA icon over an inventory-cell background."""
         image = Image.new("RGBA", (40, 40), (26, 26, 40, 255))
         image.alpha_composite(Image.fromarray(np.asarray(entry["rgba"], dtype=np.uint8).reshape(
             40, 40, 4), "RGBA"))
         return image.convert("RGB")
 
     def test_real_selected_empty_inventory_has_no_review_rows(self):
+        """Verify real selected empty inventory has no review rows."""
         image = self.source.crop((1153, 657, 1804, 937))
         for size in (image.size, (521, 224), (781, 336)):
             with self.subTest(size=size), patch.object(currency_ocr, "get_reader", return_value=self.reader):
@@ -41,6 +46,7 @@ class InventoryNoiseTests(unittest.TestCase):
                 self.assertEqual(result["unknown"], [])
 
     def test_real_populated_inventory_keeps_all_three_stacks_reviewable(self):
+        """Verify real populated inventory keeps all three stacks reviewable."""
         source = Image.open(Path(item_ocr.__file__).resolve().parent.parent /
                             "region_examples" / "ritual.jpg").convert("RGB")
         image = source.crop((1153, 657, 1804, 937))
@@ -58,18 +64,21 @@ class InventoryNoiseTests(unittest.TestCase):
                     self.assertEqual(liquid["quantity"], 1)
 
     def test_selected_empty_glow_never_reaches_the_matcher(self):
+        """Verify selected empty glow never reaches the matcher."""
         image = item_ocr.inventory_grid(self.source.crop((1153, 657, 1804, 937)))
         cell = item_ocr.inventory_cell(image, 59)
         with patch.object(self.reader, "inventory_ranked", side_effect=AssertionError("empty icon ranked")):
             self.assertEqual(self.reader.icon(cell)["all"], [])
 
     def test_catalog_icons_keep_content_inside_the_occupancy_core(self):
+        """Verify catalog icons keep content inside the occupancy core."""
         for entry in self.entries:
             with self.subTest(family=entry["family"]):
                 core = np.asarray(self.art(entry))[7:-7, 7:-7]
                 self.assertGreaterEqual(float(np.percentile(core, 95)), 32)
 
     def test_dim_catalog_currency_still_reaches_the_matcher(self):
+        """Verify dim catalog currency still reaches the matcher."""
         for name in ("Petition Splinter", "Runic Alloy", "Orb of Extraction", "Preserved Vertebrae"):
             entry = next(entry for entry in self.entries if name in entry["members"])
             image = Image.fromarray((np.asarray(self.art(entry)).astype(np.float32) * .65).astype(np.uint8))
@@ -80,6 +89,7 @@ class InventoryNoiseTests(unittest.TestCase):
                     ranked.assert_called_once()
 
     def test_continuous_body_armour_does_not_create_currency_rows(self):
+        """Verify continuous body armour does not create currency rows."""
         image = self.grid()
         image.paste(self.source.crop((1425, 284, 1524, 431)).resize((80, 120)), (200, 40))
         self.assertEqual(item_ocr._inventory_equipment_slots(image), {18, 19, 30, 31, 42, 43})
@@ -89,6 +99,7 @@ class InventoryNoiseTests(unittest.TestCase):
         self.assertEqual(result["unknown"], [])
 
     def test_belt_spanning_slots_38_and_39_does_not_create_review_rows(self):
+        """Verify belt spanning slots 38 and 39 does not create review rows."""
         image = self.grid()
         image.paste(self.source.crop((1424, 450, 1525, 501)).resize((80, 40)), (40, 120))
         self.assertEqual(item_ocr._inventory_equipment_slots(image), {38, 39})
@@ -98,6 +109,7 @@ class InventoryNoiseTests(unittest.TestCase):
         self.assertEqual(result["unknown"], [])
 
     def test_unknown_single_slot_item_stays_reviewable_beside_large_gear(self):
+        """Verify unknown single slot item stays reviewable beside large gear."""
         image = self.grid()
         image.paste(self.source.crop((1425, 284, 1524, 431)).resize((80, 120)), (200, 40))
         image.paste(self.source.crop((1352, 322, 1402, 378)).resize((40, 40)), (40, 120))
@@ -106,6 +118,7 @@ class InventoryNoiseTests(unittest.TestCase):
         self.assertEqual([entry["slot"] for entry in result["unknown"]], [38])
 
     def test_separate_catalog_tiles_do_not_become_equipment(self):
+        """Verify separate catalog tiles do not become equipment."""
         image = self.grid()
         for index, name in enumerate(("Chaos Orb", "Exalted Orb", "Orb of Annulment", "Runic Alloy")):
             entry = next(entry for entry in self.entries if name in entry["members"])
@@ -113,6 +126,7 @@ class InventoryNoiseTests(unittest.TestCase):
         self.assertEqual(item_ocr._inventory_equipment_slots(image), set())
 
     def test_isolated_white_pixel_does_not_create_a_stack_count(self):
+        """Verify isolated white pixel does not create a stack count."""
         image = Image.new("RGB", (54, 54), (26, 26, 40))
         image.putpixel((4, 4), (255, 255, 255))
         patches, present = inventory_labels.count_crops(image)
@@ -124,6 +138,7 @@ class InventoryNoiseTests(unittest.TestCase):
         self.assertTrue(patches)
 
     def test_unreadable_tier_art_does_not_block_an_untiered_item(self):
+        """Verify unreadable tier art does not block an untiered item."""
         image = self.grid()
         image.paste(Image.fromarray(np.random.default_rng(71).integers(
             40, 230, (40, 40, 3), dtype=np.uint8)), (0, 0))
@@ -139,6 +154,7 @@ class InventoryNoiseTests(unittest.TestCase):
         self.assertEqual(result["unknown"], [])
 
     def test_unreadable_tier_on_a_shared_icon_still_requires_review(self):
+        """Verify unreadable tier on a shared icon still requires review."""
         image = self.grid()
         image.paste(Image.fromarray(np.random.default_rng(72).integers(
             40, 230, (40, 40, 3), dtype=np.uint8)), (0, 0))

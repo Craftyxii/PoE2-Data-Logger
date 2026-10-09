@@ -15,8 +15,10 @@ from PoE2_Data_Logger.ui import region_select
 
 
 class RegionRenderingTests(unittest.TestCase):
+    """Check screenshot ownership, pixel fidelity and transparent region-editor rendering."""
     @classmethod
     def setUpClass(cls):
+        """Create the shared Qt application for region-editor rendering tests."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
@@ -26,6 +28,7 @@ class RegionRenderingTests(unittest.TestCase):
         self.addCleanup(mapping.stop)
 
     def test_screenshot_colors_and_rows_survive_source_release(self):
+        """Verify the editor retains correct pixels after the source screenshot is released."""
         screenshot = Image.new("RGB", (321, 201), (17, 28, 49))
         colors = {(0, 0): (255, 0, 0), (320, 0): (0, 255, 0),
                   (0, 200): (0, 0, 255), (320, 200): (201, 53, 97),
@@ -46,6 +49,7 @@ class RegionRenderingTests(unittest.TestCase):
         editor.close()
 
     def test_4k_screenshot_needs_no_image_encoding(self):
+        """Verify a 4K screenshot renders directly without image encoding."""
         screenshot = Image.new("RGB", (3840, 2160), (83, 137, 219))
         with patch.object(Image.Image, "save", side_effect=AssertionError("Image encoding on GUI thread")):
             editor = region_select.RegionEditor(screenshot=screenshot,
@@ -68,6 +72,7 @@ class RegionRenderingTests(unittest.TestCase):
         editor.close()
 
     def test_alpha_and_palette_transparency_are_preserved(self):
+        """Verify RGBA and palette screenshots preserve transparent pixels."""
         rgba = Image.new("RGBA", (321, 201), (83, 137, 219, 255))
         rgba.putpixel((320, 200), (0, 0, 0, 128))
         palette = Image.new("P", (321, 201), 1)
@@ -85,6 +90,7 @@ class RegionRenderingTests(unittest.TestCase):
                 editor.close()
 
     def test_no_screenshot_preserves_translucent_editor(self):
+        """Verify an editor without a screenshot retains its translucent overlay mode."""
         editor = region_select.RegionEditor(screen_bounds=(0, 0, 1920, 1080))
         self.assertTrue(editor.picture.isNull())
         self.assertTrue(editor.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground))

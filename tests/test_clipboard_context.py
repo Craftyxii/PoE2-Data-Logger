@@ -7,7 +7,9 @@ from PoE2_Data_Logger.platform import hover_copy
 
 
 class ClipboardContextTests(unittest.TestCase):
+    """Exercise hover-copy focus checks that guard Windows clipboard access."""
     def test_focus_change_before_copy_sends_no_keys(self):
+        """Verify losing game focus before copying sends no keys and reads no clipboard sequence."""
         user = Mock()
         with patch.object(hover_copy.sys, "platform", "win32"), patch(
                 "ctypes.WinDLL", create=True, return_value=user), patch(
@@ -17,6 +19,7 @@ class ClipboardContextTests(unittest.TestCase):
         user.GetClipboardSequenceNumber.assert_not_called()
 
     def test_focus_change_after_copy_does_not_read_other_window_clipboard(self):
+        """Verify losing game focus after copying prevents reading another window's clipboard text."""
         user = Mock()
         user.GetAsyncKeyState.return_value = 0
         user.GetClipboardSequenceNumber.side_effect = [1, 2]

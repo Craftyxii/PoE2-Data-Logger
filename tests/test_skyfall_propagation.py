@@ -27,11 +27,14 @@ RECIPES = ("Skyfall", "Triskelion Cascade", "Refutation", "Runic Reprieve", "Ley
 
 
 class SkyfallPropagationTests(unittest.TestCase):
+    """Check composed Skyfall crown geometry and idempotent Celestial propagation saves."""
     @classmethod
     def setUpClass(cls):
+        """Create the shared Qt application for propagation window checks."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Initialize temporary logger data and load real panel pixels for composition."""
         self.tmp = tempfile.TemporaryDirectory()
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -41,6 +44,7 @@ class SkyfallPropagationTests(unittest.TestCase):
             self.source = runehelper_ocr.default_frame(source.convert("RGB"))
 
     def tearDown(self):
+        """Restore the data directory and remove temporary propagation data."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.tmp.cleanup()
@@ -82,12 +86,14 @@ class SkyfallPropagationTests(unittest.TestCase):
             return image, propagation_scan.scan_propagation(image)
 
     def test_clear_six_socket_skyfall_second_mark_is_celestial(self):
+        """Verify the composed six-socket Skyfall slot-two crown resolves to Celestial."""
         _, result = self.composite()
         self.assertTrue(result["can_use"], result)
         self.assertEqual(result["selected_recipe"], "Skyfall (Level 20)")
         self.assertEqual((result["positions"], result["runes"]), ([2], ["Celestial"]))
 
     def test_scaled_and_left_cropped_skyfall_never_uses_tempest_for_second_mark(self):
+        """Verify changed capture geometry yields Celestial or review without a Tempest guess."""
         variants = ((.72, 0, 1.2), (.74, 0, 1.2), (.75, 0, 1.2),
                     (1, 20, 1), (1, 35, 1), (1, 46, 1))
         for scale, left, brightness in variants:
@@ -102,6 +108,7 @@ class SkyfallPropagationTests(unittest.TestCase):
                 self.assertNotIn("Tempest", result["runes"])
 
     def test_clear_skyfall_saves_celestial_once_without_advancing_expedition(self):
+        """Verify repeated Skyfall scans append Celestial once and retain the current expedition."""
         image, result = self.composite()
         raw = io.BytesIO()
         image.save(raw, format="PNG")

@@ -57,11 +57,14 @@ WAYSTONE_FIELDS = sorted(["waystone", "tier", "map_mods", "item_rarity", "monste
 
 @unittest.skipUnless(os.getenv("POE2_RUN_HUNDRED_MAP_SESSION") == "1", "opt-in 100-map GUI gate")
 class HundredMapSession(unittest.TestCase):
+    """Exercise an opt-in 100-map Qt workflow against an independent expected ledger."""
     @classmethod
     def setUpClass(cls):
+        """Create the shared Qt application for the end-user session gate."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Open an isolated logger and initialize the expected ledger and captured artwork."""
         directory = os.getenv("POE2_SESSION_ARTIFACTS")
         self.output = Path(directory) if directory else Path(tempfile.mkdtemp(prefix="poe2-100-map-"))
         self.output.mkdir(parents=True, exist_ok=True)
@@ -100,6 +103,7 @@ class HundredMapSession(unittest.TestCase):
         self.artwork.save(self.raw, format="PNG")
 
     def tearDown(self):
+        """Write session evidence and metrics, close workers and restore the data directory."""
         metrics = {"completed_maps": self.completed, "checks": dict(self.checks),
                    "coverage": dict(self.coverage), "expected_commits": len(self.commit_log),
                    "failures": self.failures, "duration_seconds": round(time.monotonic() - self.started, 2),
@@ -117,12 +121,14 @@ class HundredMapSession(unittest.TestCase):
         logger._READY = False
 
     def check(self, actual, expected, context):
+        """Count a contextual comparison and record mismatches without stopping the session."""
         self.checks[context.split(":", 1)[0]] += 1
         if actual != expected:
             self.failures.append({"map": self.current, "context": context,
                                   "actual": actual, "expected": expected})
 
     def wait_tasks(self):
+        """Pump Qt until background work finishes or write thread diagnostics on timeout."""
         deadline = time.monotonic() + 90
         while self.w._pending_tasks and time.monotonic() < deadline:
             self.app.processEvents()
@@ -145,6 +151,7 @@ class HundredMapSession(unittest.TestCase):
         self.app.processEvents()
 
     def choose(self, control, wanted):
+        """Select a control option by data or text and reject unavailable values."""
         index = control.findData(wanted)
         if index < 0:
             index = control.findText(str(wanted))
@@ -153,6 +160,7 @@ class HundredMapSession(unittest.TestCase):
         control.setCurrentIndex(index)
 
     def button(self, text, page=None):
+        """Click an enabled matching UI button on the requested tab."""
         if page is not None:
             self.w.tabs.setCurrentIndex(page)
         matches = [b for b in self.w.findChildren(QPushButton) if b.text() == text and b.isEnabled()]
@@ -165,6 +173,7 @@ class HundredMapSession(unittest.TestCase):
 
     def record(self, kind, details=None, snapshot=None, reference=None, map_id=None, expedition=None,
                batch_remaining=0):
+        """Compare the next database commit with ledger expectations and record its coverage."""
         number = len(self.commit_log) + 1
         with logger._connect() as db:
             row = db.execute("SELECT * FROM commits WHERE number=?", (number,)).fetchone()
@@ -196,6 +205,7 @@ class HundredMapSession(unittest.TestCase):
         self.coverage[kind] += 1
 
     def atlas_edit(self, n):
+        """Click an Atlas choice node, type gear rarity and save the expected setup."""
         page = self.w.atlas_settings_page
         self.w.tabs.setCurrentIndex(12)
         page.clear_button.click()
@@ -231,6 +241,7 @@ class HundredMapSession(unittest.TestCase):
         # Atlas edits precede activity so they apply to the intended current map.
         # Save through the character UI on every map; repeating a setup also
         # checks that identical setups remain shared in the compact workbook.
+        """Set map, master, tablet and waystone options through UI controls and scan ingress."""
         self.atlas_edit(n)
         self.w.tabs.setCurrentIndex(3)
         master = ["Jado", "Doryani", "Hilda", "None"][(n - 1) % 4]
@@ -359,6 +370,7 @@ class HundredMapSession(unittest.TestCase):
         return config
 
     def inventory(self, phase, amounts, *, custom=None, rejected=None, unnamed=False, automatic=False, live=False):
+        """Capture controlled inventory results, review rows and verify the committed snapshot."""
         self.choose(self.w.inventory_phase, phase)
         before = len(self.commit_log)
         if automatic:
@@ -415,6 +427,7 @@ class HundredMapSession(unittest.TestCase):
         self.verify_totals()
 
     def reject_inventory(self):
+        """Reject a synthetic inventory scan and verify it leaves counts and totals unchanged."""
         self.choose(self.w.inventory_phase, "end")
         self.w._inventory_read({"items": [{"slot": 1, "name": "Chaos Orb", "quantity": 99999}], "unknown": []}, live=False)
         before = len(self.commit_log)
@@ -424,6 +437,7 @@ class HundredMapSession(unittest.TestCase):
         self.verify_totals()
 
     def verify_totals(self):
+        """Compare persisted snapshots, backend gains and visible session totals with the ledger."""
         total = Counter()
         counted = assumed = pending = 0
         for mid, entry in self.expected.items():
@@ -448,6 +462,7 @@ class HundredMapSession(unittest.TestCase):
             self.check(totals[key], val, "counter:" + key)
 
     def ritual(self, n):
+        """Exercise uncertain reviewed and clear automatic Ritual pages with editable reward fields."""
         rows = [{"category": "Omen", "name": "Omen of Whittling", "quantity": 1 + n % 3,
                  "tribute": 300 + n, "source": f"Ritual map {n}", "deferred": n % 2 == 0},
                 {"category": "Item", "name": f"Session reward {n % 7}", "quantity": 2 + n % 4,
@@ -495,6 +510,7 @@ class HundredMapSession(unittest.TestCase):
         self.verify_totals()
 
     def remnant(self, n, seed=False):
+        """Deliver opened or seed results and verify confidence holds and resolved recipe commits."""
         context = logger.scan_context()
         if seed:
             reading = {"sockets": 5, "seed_slot": "P3", "seed_rune": "Power", "family": "Family 1",
@@ -536,6 +552,7 @@ class HundredMapSession(unittest.TestCase):
         self.check(self.w.pending_review_kind, None, "review:remnant-pending-cleared")
 
     def propagation(self, n):
+        """Exercise automatic and reviewed chain parts, corrections and completion with ledger checks."""
         mid = f"M{n:04}"
         eid = mid + "-E01"
         steps = [{"step": 1, "rune1": "Death", "rune2": "Power"},
@@ -649,6 +666,7 @@ class HundredMapSession(unittest.TestCase):
 
     @staticmethod
     def map_records(db, mid):
+        """Collect map-owned history and chain receipt rows for immutable-history fingerprints."""
         records = []
         for table in ("maps", "map_unique_kills", "currency_snapshots", "ritual_pages", "commits", "new_export", "expeditions"):
             records += [dict(row) for row in db.execute(f"SELECT * FROM {table} WHERE map_id=? ORDER BY rowid", (mid,))]
@@ -658,12 +676,14 @@ class HundredMapSession(unittest.TestCase):
         return records
 
     def freeze_old(self):
+        """Compare every completed map's current history fingerprint with its saved fingerprint."""
         with logger._connect() as db:
             for mid, fingerprint in self.frozen.items():
                 record = self.map_records(db, mid)
                 self.check(hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest(), fingerprint, "freeze:old-map-and-history")
 
     def finish(self, n):
+        """Finish the map through the UI and freeze its verified counts, setup and history."""
         expected = self.expected[f"M{n:04}"]
         for field, val in zip((self.w.normal, self.w.magic, self.w.rare, self.w.unique), expected["kills"]):
             field.setText(str(val))
@@ -690,6 +710,7 @@ class HundredMapSession(unittest.TestCase):
         self.expedition = 1
 
     def export(self, n, folder=False):
+        """Save CSV and XLSX through UI actions and compare reopened values with the ledger."""
         destination = self.output / f"share-{n:03}"
         destination.mkdir(exist_ok=True)
         if folder:
@@ -787,6 +808,7 @@ class HundredMapSession(unittest.TestCase):
         self.coverage["real CSV and openpyxl workbook reopen"] += 1
 
     def restart(self):
+        """Reopen the logger and verify retained map context, learned references and session totals."""
         self.w.close()
         self.w.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -806,6 +828,7 @@ class HundredMapSession(unittest.TestCase):
         self.coverage["application restart persistence"] += 1
 
     def test_one_hundred_maps_saved_and_shared(self):
+        """Run 100 varied maps and validate scans, chains, exports, backup and restart persistence."""
         self.w.auto_all_checkbox.setChecked(True)
         self.app.processEvents()
         self.check({key: logger.get_state()["settings"][key] for key in

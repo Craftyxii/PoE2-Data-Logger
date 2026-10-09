@@ -22,11 +22,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
 class OverlayRecoveryTests(unittest.TestCase):
+    """Exercise HUD hiding, shortcut recovery, capture handoffs and context-aware error restoration."""
     @classmethod
     def setUpClass(cls):
+        """Reuse or create the QApplication required by overlay widgets."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Create an isolated visible overlay with controlled hotkeys, Windows APIs and capture bounds."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-overlay-recovery-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -36,6 +39,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.manager.focused = None
 
         def listen(shortcuts, ready, outcome, stop):
+            """Signal listener readiness and wait for its stop event without native hotkey processing."""
             outcome["thread_id"] = 17
             ready.set()
             stop.wait(30)
@@ -65,6 +69,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.app.processEvents()
 
     def tearDown(self):
+        """Close desktop workers and mocks, restore logger storage and remove temporary data."""
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -75,12 +80,14 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def escape(self):
+        """Send Escape to the activated logger window and process the resulting UI events."""
         self.window.activateWindow()
         self.app.processEvents()
         QTest.keyClick(self.window, Qt.Key.Key_Escape)
         self.app.processEvents()
 
     def assert_taskbar_recovery(self):
+        """Check that the minimized window remains recoverable from the taskbar with a responsive event loop."""
         self.assertTrue(self.window.isVisible())
         self.assertTrue(self.window.isMinimized())
         ticks = []
@@ -93,6 +100,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertFalse(self.window.isMinimized())
 
     def test_escape_hides_overlay_with_registered_hud_key_and_key_restores_it(self):
+        """Verify Escape hides a shortcut-recoverable HUD and the HUD shortcut reveals it again."""
         self.escape()
         self.assertFalse(self.window.isVisible())
         self.manager.capture("overlay")
@@ -102,6 +110,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertFalse(self.window.isMinimized())
 
     def test_escape_in_scan_regions_retains_taskbar_recovery(self):
+        """Verify Escape during scan-region editing leaves taskbar recovery available."""
         self.window.tabs.setCurrentIndex(7)
         self.assertTrue(self.window._editing_regions)
         self.assertFalse(self.manager.status()["registered"])
@@ -111,6 +120,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertTrue(self.manager.status()["registered"])
 
     def test_cleared_hud_key_retains_taskbar_recovery(self):
+        """Verify clearing the HUD shortcut leaves taskbar recovery available."""
         self.window.clear_hotkey("overlay")
         self.assertTrue(self.manager.status()["registered"])
         self.assertEqual(self.manager.status()["combos"]["overlay"], "")
@@ -118,11 +128,13 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assert_taskbar_recovery()
 
     def test_dead_listener_retains_taskbar_recovery(self):
+        """Verify a stopped hotkey listener leaves taskbar recovery available."""
         self.manager._unregister()
         self.escape()
         self.assert_taskbar_recovery()
 
     def test_listener_stopping_after_hiding_restores_taskbar_recovery(self):
+        """Verify losing the listener after hiding restores a recoverable minimized window."""
         self.window.hide_overlay()
         self.assertFalse(self.window.isVisible())
         self.manager._unregister()
@@ -130,6 +142,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assert_taskbar_recovery()
 
     def test_hud_key_lost_after_hiding_restores_taskbar_recovery(self):
+        """Verify losing the HUD shortcut after hiding restores taskbar recovery."""
         self.window.hide_overlay()
         self.assertFalse(self.window.isVisible())
         self.manager.configure_for("overlay", "")
@@ -137,6 +150,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assert_taskbar_recovery()
 
     def test_hiding_while_assigning_a_key_resumes_hud_shortcut(self):
+        """Verify hiding while assigning a shortcut resumes the listener and allows HUD recovery."""
         self.window.tabs.setCurrentIndex(6)
         self.window.arm_hotkey("waystone")
         self.assertFalse(self.manager.status()["registered"])
@@ -149,6 +163,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertTrue(self.window.isVisible())
 
     def test_disabling_overlay_restores_a_hidden_main_window(self):
+        """Verify disabling overlay mode restores a hidden main window."""
         self.window.hide_overlay()
         self.assertFalse(self.window.isVisible())
         self.window.set_overlay_enabled(False)
@@ -157,6 +172,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertFalse(self.window.overlay_escape.isEnabled())
 
     def test_transparency_is_scoped_to_the_revealed_hud(self):
+        """Verify opacity changes apply only while the HUD is explicitly revealed."""
         self.window.overlay_opacity_slider.setValue(40)
         self.assertEqual(self.window.windowOpacity(), 1.0)
         self.window.show_overlay()
@@ -175,10 +191,12 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertEqual(self.window.windowOpacity(), 1.0)
 
     def test_background_scan_keeps_hud_controls_and_event_loop_responsive(self):
+        """Verify a background scan leaves HUD controls and the Qt event loop responsive."""
         grabbed = threading.Event()
         release = threading.Event()
 
         def grab(**kwargs):
+            """Block screenshot completion behind an event to exercise responsive background scanning."""
             grabbed.set()
             if not release.wait(3):
                 raise RuntimeError("Capture test timed out")
@@ -213,6 +231,7 @@ class OverlayRecoveryTests(unittest.TestCase):
             self.assertFalse(self.manager._capture_lock.locked())
 
     def test_confirmation_is_opaque_preserves_window_size_and_accepts_edits(self):
+        """Verify confirmation remains opaque, preserves maximized size and accepts recipe edits."""
         self.window.overlay_opacity_slider.setValue(40)
         self.window.showMaximized()
         self.app.processEvents()
@@ -290,16 +309,19 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertFalse(self.window.isVisible())
 
     def test_escape_does_not_hide_when_overlay_is_disabled(self):
+        """Verify Escape leaves the main window visible when overlay mode is disabled."""
         self.window.set_overlay_enabled(False)
         self.escape()
         self.assertTrue(self.window.isVisible())
         self.assertFalse(self.window.isMinimized())
 
     def test_worker_capture_hides_before_grab_and_restores_uncertain_review(self):
+        """Verify worker capture hides the HUD before grabbing and restores uncertain propagation review."""
         visible_at_capture = []
         ticks = []
 
         def grab(**kwargs):
+            """Record HUD visibility at screenshot time and return a test image."""
             visible_at_capture.append(self.window._overlay_visible)
             return Image.new("RGB", (575, 720), "tan")
 
@@ -327,6 +349,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertFalse(self.window.approve_scan_button.isEnabled())
 
     def test_capture_failure_restores_hud_with_visible_error(self):
+        """Verify capture errors restore the previously visible HUD and show the error."""
         self.manager.grabber = Mock(side_effect=RuntimeError("Capture unavailable"))
         self.manager.capture("propagation")
         self.window.poll()
@@ -342,6 +365,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertTrue(self.window.isVisible())
 
     def test_capture_failure_preserves_existing_remnant_review(self):
+        """Verify capture failure preserves an existing remnant review and its reservation."""
         self.window.manual_remnant_button.click()
         self.window.first_recipe.setText("Reward being corrected")
         self.app.processEvents()
@@ -360,6 +384,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.manager.grabber.assert_called_once()
 
     def test_capture_failure_does_not_reopen_previously_hidden_hud(self):
+        """Verify capture failure leaves an already hidden HUD hidden."""
         self.window.hide_overlay()
         self.assertFalse(self.window.isVisible())
         self.manager.grabber = Mock(side_effect=RuntimeError("Capture unavailable"))
@@ -369,6 +394,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertFalse(self.window.isVisible())
 
     def test_capture_failure_preserves_previously_minimized_window(self):
+        """Verify capture failure preserves the window's preexisting minimized state."""
         self.window.showMinimized()
         self.app.processEvents()
         self.manager.grabber = Mock(side_effect=RuntimeError("Capture unavailable"))
@@ -379,6 +405,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertTrue(self.window.isMinimized())
 
     def test_capture_failure_does_not_override_escape_after_capture(self):
+        """Verify capture errors do not undo a later Escape action."""
         self.manager.grabber = Mock(side_effect=RuntimeError("Capture unavailable"))
         self.manager.capture("propagation")
         self.window.hide_overlay()  # Escape uses this same action.
@@ -387,6 +414,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertFalse(self.window.isVisible())
 
     def test_capture_failure_does_not_override_disabled_overlay(self):
+        """Verify capture errors preserve later overlay disabling and tab selection."""
         self.manager.grabber = Mock(side_effect=RuntimeError("Capture unavailable"))
         self.manager.capture("propagation")
         self.window.set_overlay_enabled(False)
@@ -399,6 +427,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertEqual(self.window.tabs.currentIndex(), 4)
 
     def test_stale_capture_error_does_not_reopen_after_map_changes(self):
+        """Verify a capture error from a prior map cannot reopen the HUD."""
         self.manager.grabber = Mock(side_effect=RuntimeError("Capture unavailable"))
         self.manager.capture("propagation")
         logger.finish_map("", "", "")
@@ -408,6 +437,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertFalse(self.window.isVisible())
 
     def test_stale_capture_error_does_not_reopen_after_session_reset(self):
+        """Verify session reset invalidates a capture error's HUD restoration request."""
         self.manager.grabber = Mock(side_effect=RuntimeError("Capture unavailable"))
         self.manager.capture("propagation")
         logger.clear_export_and_reset_ids()
@@ -416,6 +446,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertFalse(self.window.isVisible())
 
     def test_timed_out_capture_does_not_hide_hud_after_worker_finishes(self):
+        """Verify a timed-out worker handoff cannot later hide the HUD or grab a screenshot."""
         self.manager.grabber = Mock(return_value=Image.new("RGB", (575, 720), "tan"))
         worker = threading.Thread(target=lambda: self.manager.capture("propagation"))
         worker.start()

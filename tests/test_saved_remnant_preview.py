@@ -17,11 +17,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
 class SavedRemnantPreviewTests(unittest.TestCase):
+    """Check locked saved remnant previews and their replacement by new reviews."""
     @classmethod
     def setUpClass(cls):
+        """Create the shared Qt application for saved-preview tests."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Open an isolated logger window with automatic polling stopped."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-saved-preview-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -33,6 +36,7 @@ class SavedRemnantPreviewTests(unittest.TestCase):
         self.app.processEvents()
 
     def tearDown(self):
+        """Close the window and workers, then restore and remove temporary data."""
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -41,6 +45,7 @@ class SavedRemnantPreviewTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def reading(self, family=26, offset=1):
+        """Show a synthetic opened reading built from resolved family rewards."""
         with logger._connect() as db:
             names = json.loads(db.execute("SELECT recipes_json FROM families WHERE id=?", (family,)).fetchone()[0])[offset:]
         resolved = logger.resolve(names[0], names[1] if len(names) > 1 else None, family)
@@ -61,10 +66,12 @@ class SavedRemnantPreviewTests(unittest.TestCase):
         return opened, resolved["rows"]
 
     def rows(self):
+        """Read the displayed recipe, socket and combo cells as text rows."""
         return [[self.window.recipe_table.item(row, column).text() for column in range(3)]
                 for row in range(self.window.recipe_table.rowCount())]
 
     def assert_saved_preview(self, expected):
+        """Check saved rows are locked, persisted and no longer carry pending review tokens."""
         self.assertFalse(self.window.recipe_table.isHidden())
         self.assertFalse(self.window.remnant_log_group.isHidden())
         self.assertEqual(self.rows(), [[str(row[key]) for key in ("recipe", "sockets", "combo")]
@@ -94,18 +101,21 @@ class SavedRemnantPreviewTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], before)
 
     def test_manual_save_retains_all_saved_recipes_without_pending_tokens(self):
+        """Verify manual approval retains the complete locked saved recipe preview."""
         self.window.set_auto_commit(False)
         opened, expected = self.reading()
         self.window.approve_remnant_scan()
         self.assert_saved_preview(expected)
 
     def test_automatic_save_retains_all_inferred_recipes(self):
+        """Verify automatic approval retains every inferred recipe in the saved preview."""
         self.window.set_auto_commit(True)
         opened, expected = self.reading()
         self.window.maybe_auto_commit(opened)
         self.assert_saved_preview(expected)
 
     def test_settings_refresh_preserves_saved_preview(self):
+        """Verify refreshing settings leaves the locked saved preview intact."""
         self.window.set_auto_commit(False)
         opened, expected = self.reading()
         self.window.approve_remnant_scan()
@@ -113,6 +123,7 @@ class SavedRemnantPreviewTests(unittest.TestCase):
         self.assert_saved_preview(expected)
 
     def test_next_scan_replaces_saved_preview_with_new_pending_recipe_list(self):
+        """Verify a new opened scan replaces saved rows with an approvable review."""
         self.window.set_auto_commit(False)
         self.reading()
         self.window.approve_remnant_scan()
@@ -125,6 +136,7 @@ class SavedRemnantPreviewTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 1)
 
     def test_manual_entry_starts_with_no_saved_recipe_rows(self):
+        """Verify manual entry clears saved rows and requires a new recipe selection."""
         self.window.set_auto_commit(False)
         self.reading()
         self.window.approve_remnant_scan()

@@ -14,7 +14,9 @@ from PoE2_Data_Logger.core import logger_store as logger, store, workbook_export
 
 
 class CurrencyEndOnlyExportTests(unittest.TestCase):
+    """Check end-only inventory baselines, session totals, audit history and numeric workbook consistency."""
     def setUp(self):
+        """Initialize a fresh isolated logger database with the first map open."""
         self.temporary = tempfile.TemporaryDirectory(prefix="poe2-end-only-currency-")
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.temporary.name)
@@ -24,21 +26,25 @@ class CurrencyEndOnlyExportTests(unittest.TestCase):
         logger.start_map()
 
     def tearDown(self):
+        """Restore the data directory and initialization state, then remove the temporary database."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.temporary.cleanup()
 
     def snapshot(self, phase, **quantities):
+        """Save an inventory phase from a mapping of item names to quantities."""
         return logger.save_currency_snapshot(phase, [
             {"name": name, "quantity": amount} for name, amount in quantities.items()])
 
     def rows(self, data):
+        """Decode CSV rows after checking unique headers and consistent row widths."""
         rows = list(csv.reader(io.StringIO(data.decode("utf-8-sig"))))
         self.assertEqual(len(rows[0]), len(set(rows[0])))
         self.assertTrue(all(len(row) == len(rows[0]) for row in rows))
         return [dict(zip(rows[0], row)) for row in rows[1:]]
 
     def assert_workbook_matches_main(self):
+        """Compare the workbook history sheet with CSV, rejecting formulas and nonnumeric quantity cells."""
         main = self.rows(logger.export_all_csv())
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
             self.assertIsNone(archive.testzip())
@@ -60,6 +66,7 @@ class CurrencyEndOnlyExportTests(unittest.TestCase):
         self.assertEqual(result, main)
 
     def test_end_only_currencies_and_learned_items_have_counts_in_every_export(self):
+        """Verify end only currencies and learned items have counts in every export."""
         logger.add_currency_item("New Session Token")
         logger.add_item_name("Session Equipment")
         saved = logger.save_currency_snapshot("end", [
@@ -100,6 +107,7 @@ class CurrencyEndOnlyExportTests(unittest.TestCase):
         self.assert_workbook_matches_main()
 
     def test_session_found_columns_reconcile_repeats_late_starts_and_mixed_maps(self):
+        """Verify session found columns reconcile repeats late starts and mixed maps."""
         logger.add_currency_item("Counter Token")
         logger.add_item_name("Counter Equipment")
         logger.add_ritual_name("Omen of Counter Tests")
@@ -142,6 +150,7 @@ class CurrencyEndOnlyExportTests(unittest.TestCase):
         self.assert_workbook_matches_main()
 
     def test_repeated_end_scans_replace_latest_counts_but_preserve_each_approval(self):
+        """Verify repeated end scans replace latest counts but preserve each approval."""
         self.snapshot("end", **{"Chaos Orb": 10, "Divine Orb": 2})
         self.snapshot("end", **{"Chaos Orb": 10, "Divine Orb": 2})
         self.snapshot("end", **{"Chaos Orb": 7})
@@ -163,6 +172,7 @@ class CurrencyEndOnlyExportTests(unittest.TestCase):
         self.assert_workbook_matches_main()
 
     def test_later_real_start_replaces_assumption_without_rewriting_old_audit_rows(self):
+        """Verify later real start replaces assumption without rewriting old audit rows."""
         self.snapshot("end", **{"Chaos Orb": 10})
         self.snapshot("start", **{"Chaos Orb": 8})
         self.assertEqual(logger.currency_for_map("M0001")["net"], {"Chaos Orb": 2})
@@ -179,6 +189,7 @@ class CurrencyEndOnlyExportTests(unittest.TestCase):
         self.assert_workbook_matches_main()
 
     def test_empty_snapshots_keep_map_settings_times_and_commit_metadata(self):
+        """Verify empty snapshots keep map settings times and commit metadata."""
         logger.save_settings({"tier": 15, "waystone": 82, "deli": True, "wisp": True})
         self.snapshot("end")
         first = self.rows(logger.export_currency_csv())
@@ -202,6 +213,7 @@ class CurrencyEndOnlyExportTests(unittest.TestCase):
         self.assert_workbook_matches_main()
 
     def test_end_only_reopen_reset_and_failed_replacement_preserve_session_integrity(self):
+        """Verify end only reopen reset and failed replacement preserve session integrity."""
         self.snapshot("end", **{"Chaos Orb": 6})
         with patch.object(logger, "_record_commit", side_effect=RuntimeError("disk write failed")):
             with self.assertRaisesRegex(RuntimeError, "disk write failed"):
@@ -219,6 +231,7 @@ class CurrencyEndOnlyExportTests(unittest.TestCase):
         self.assertEqual(self.rows(logger.export_record_history_csv()), [])
 
     def test_export_uses_same_snapshot_for_quantities_and_commit_numbers_during_approval(self):
+        """Verify export uses same snapshot for quantities and commit numbers during approval."""
         self.snapshot("end", **{"Chaos Orb": 5})
         with logger._connect() as db:
             first_commit = db.execute("SELECT MAX(number) FROM commits WHERE kind='Currency'").fetchone()[0]
@@ -226,13 +239,17 @@ class CurrencyEndOnlyExportTests(unittest.TestCase):
         changed = False
 
         class Connection:
+            """Proxy an export connection to inject a concurrent approval during commit lookup."""
             def __init__(proxy, connection):
+                """Retain the SQLite connection wrapped by the export-interleaving proxy."""
                 proxy.connection = connection
 
             def __getattr__(proxy, name):
+                """Forward unsupported proxy attributes to the underlying SQLite connection."""
                 return getattr(proxy.connection, name)
 
             def execute(proxy, sql, *arguments):
+                """Approve replacement inventory once during commit lookup, then execute the original SQL."""
                 nonlocal changed
                 if sql.startswith("SELECT number,map_id,reference FROM commits") and not changed:
                     changed = True
@@ -241,6 +258,7 @@ class CurrencyEndOnlyExportTests(unittest.TestCase):
 
         @contextmanager
         def interleaved_connect():
+            """Yield a proxied logger connection that injects an approval during export."""
             with original_connect() as db:
                 yield Connection(db)
 

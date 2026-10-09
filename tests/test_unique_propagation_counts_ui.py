@@ -17,11 +17,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, select
 
 
 class UniquePropagationCountsUITests(unittest.TestCase):
+    """Exercise editable unique kill totals and independently persisted propagation detonation counts."""
     @classmethod
     def setUpClass(cls):
+        """Reuse or create the QApplication required by desktop count widgets."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Create an isolated desktop window and PNG evidence for controlled propagation results."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-unique-propagation-ui-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -34,6 +37,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.raw = raw.getvalue()
 
     def tearDown(self):
+        """Close desktop workers, restore logger storage and remove temporary data."""
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -42,6 +46,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.tmp.cleanup()
 
     def scan(self, runes, clear=True, context=None):
+        """Deliver a propagation result with supplied runes, clarity and optional capture context."""
         result = {"mode": "propagation", "runes": runes,
                   "positions": list(range(1, len(runes) + 1)),
                   "selected_recipe": "Medved's Saga", "can_use": clear,
@@ -49,24 +54,29 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.window._propagation_read(result, self.raw)
 
     def counts(self, normal="", magic="", rare="", unique=""):
+        """Populate all four editable kill-count fields."""
         for widget, value in ((self.window.normal, normal), (self.window.magic, magic),
                               (self.window.rare, rare), (self.window.unique, unique)):
             widget.setText(str(value))
 
     def map_rows(self):
+        """Decode map-summary export rows into a map-ID lookup."""
         rows = list(csv.DictReader(io.StringIO(logger.export_maps_csv().decode("utf-8-sig"))))
         return {row["Map ID"]: row for row in rows}
 
     def total_rows(self):
+        """Decode only map-total rows from the combined export."""
         return [row for row in csv.DictReader(io.StringIO(logger.export_all_csv().decode("utf-8-sig")))
                 if row["Type"] == "Map totals"]
 
     def assert_current_detonated(self, count):
+        """Check that persisted detonation count matches both chain status labels."""
         self.assertEqual(logger.get_state()["detonated"], count)
         for label in (self.window.chain_note, self.window.chain_review_status):
             self.assertIn(f"{count or 0} remnants detonated", label.text())
 
     def test_unique_normal_magic_and_rare_save_refresh_and_export(self):
+        """Verify all four kill categories save, refresh and export with their entered values."""
         for rune in ("Death", "Power", "Opulent"):
             self.scan([rune])
         self.counts(normal=101, magic=23, rare=4, unique=2)
@@ -86,11 +96,13 @@ class UniquePropagationCountsUITests(unittest.TestCase):
                              ["101", "23", "4", "2"])
 
     def test_kills_form_has_four_editable_kill_fields_and_no_detonated_input(self):
+        """Verify kill editing exposes four kill fields without an editable detonation field."""
         fields = self.window.normal.parentWidget().findChildren(QLineEdit)
         self.assertEqual(set(fields), {self.window.normal, self.window.magic, self.window.rare, self.window.unique})
         self.assertFalse(isinstance(getattr(self.window, "detonated", None), QLineEdit))
 
     def test_finish_map_exports_unique_and_magic_zero_without_converting_blank_rare(self):
+        """Verify map finish preserves explicit zero kills and blank rare kills in exports, then clears new-map fields."""
         self.scan(["Death"])
         self.counts(normal=10, magic=0, rare="", unique=0)
         self.window.finish_map()
@@ -106,6 +118,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
                              ["10", "0", "", "0"])
 
     def test_each_accepted_scan_counts_one_remnant_and_completion_resets_next_expedition(self):
+        """Verify each accepted scan counts once and chain completion starts a fresh expedition count."""
         self.scan(["Death", "Power"])
         self.assert_current_detonated(1)
         self.scan(["Opulent"])
@@ -131,6 +144,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.assertEqual((row["Expedition 1 Detonated"], row["Expedition 2 Detonated"]), ("2", "1"))
 
     def test_auto_increment_preserves_unsaved_kills_and_save_reads_fresh_persisted_total(self):
+        """Verify automatic detonation increments preserve kill drafts and count saving reads the latest persisted total."""
         self.counts(normal=101, magic=23, rare=4, unique=9)
         self.scan(["Death", "Power"])
         self.assert_current_detonated(1)
@@ -147,6 +161,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.assertEqual(self.map_rows()["M0001"]["Expedition 1 Detonated"], "3")
 
     def test_finish_map_reads_fresh_auto_count_without_clearing_it(self):
+        """Verify finishing a map exports newly persisted detonation counts before starting the next map."""
         self.scan(["Death"])
         self.counts(normal=10, magic=2, rare=3, unique=1)
         logger.increment_propagation_detonated(logger.scan_context(), runes=["Rage", "Time"],
@@ -156,6 +171,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.assert_current_detonated(None)
 
     def test_unique_draft_survives_master_save_and_chain_commit_then_clean_field_refreshes(self):
+        """Verify unique kill drafts survive unrelated saves and clean fields later refresh from storage."""
         self.counts(normal=1, magic=2, rare=3, unique=2)
         self.window.save_counts()
         self.window.unique.setText("9")
@@ -174,6 +190,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["unique_kills"], 11)
 
     def test_legacy_count_api_payloads_preserve_unique_when_omitted(self):
+        """Verify legacy count and finish API payloads preserve unique kills when that field is omitted."""
         self.counts(normal=1, magic=2, rare=3, unique=7)
         self.window.save_counts()
         service.dispatch("/api/kills", {"normal": 9, "magic": 8, "rare": 7, "detonated": 6})
@@ -184,6 +201,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.assertEqual(self.total_rows()[-1]["Unique Kills (Map)"], "7")
 
     def test_finish_api_preserves_auto_count_when_detonated_is_omitted(self):
+        """Verify finish API preserves automatic detonation totals when the field is omitted."""
         self.scan(["Rage", "Time"])
         service.dispatch("/api/finish-map", {"normal": 10, "magic": 2, "rare": 3, "unique": 4})
         row = self.map_rows()["M0001"]
@@ -193,6 +211,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["detonated"], 1)
 
     def test_finish_api_explicit_none_still_clears_legacy_detonated_total(self):
+        """Verify explicit null detonation in the legacy finish API clears the persisted total."""
         self.scan(["Death"])
         service.dispatch("/api/finish-map", {"normal": 10, "magic": 2, "rare": 3,
                                               "unique": 4, "detonated": None})
@@ -200,6 +219,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.assertIsNone(logger.get_state()["detonated"])
 
     def test_unclear_and_rejected_scans_do_not_contribute_remnants(self):
+        """Verify unclear or rejected propagation scans never increase detonation counts."""
         for runes in ([], ["Death"]):
             with self.subTest(runes=runes):
                 self.scan(runes, clear=False)
@@ -215,6 +235,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.assert_current_detonated(1)
 
     def test_malformed_scans_neither_count_nor_append_runes(self):
+        """Verify malformed propagation runes neither increment counts nor append chain parts."""
         for runes in ([None], [""], ["x" * 81], ["Death", 1]):
             with self.subTest(runes=runes):
                 with self.assertRaises(ValueError):
@@ -224,6 +245,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
                 self.window.reject_review()
 
     def test_full_chain_draft_does_not_count_an_unaccepted_scan(self):
+        """Verify a full chain draft rejects extra scan runes without counting the rejected scan."""
         self.window.add_runes(96 - len(self.window.rune_inputs))
         for field in self.window.rune_inputs:
             field.setText("Death")
@@ -234,6 +256,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.assertEqual([field.text() for field in self.window.rune_inputs], before)
 
     def test_pending_remnant_allows_propagation_count_and_keeps_binding(self):
+        """Verify independent propagation acceptance preserves a pending remnant's reservation and count."""
         self.scan(["Death"])
         self.window.show_result("opened", {"mode": "opened", "status": "Review needed.",
                                            "can_use": False, "first_recipe": None,
@@ -252,6 +275,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.assert_current_detonated(2)
 
     def test_stale_scan_after_chain_completion_and_new_map_does_not_count(self):
+        """Verify captures from completed expeditions or prior maps cannot increase current counts."""
         context = logger.scan_context()
         self.scan(["Death"])
         self.window.complete_chain()
@@ -268,6 +292,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.assertEqual((row["Expedition 1 Detonated"], row["Expedition 2 Detonated"]), ("1", "1"))
 
     def test_manual_chain_parts_do_not_create_fake_scanned_remnants(self):
+        """Verify manually entered chain parts never invent scanned-remnant counts."""
         self.window.rune_inputs[0].setText("Death")
         self.window.rune_inputs[1].setText("Power")
         self.window.commit_chain()

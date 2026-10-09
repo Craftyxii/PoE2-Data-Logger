@@ -20,7 +20,9 @@ from PoE2_Data_Logger.ocr import currency_ocr, item_ocr, scan
 
 
 class ReferenceSecurityTests(unittest.TestCase):
+    """Check reference-pack atomic validation, image normalization, and safe rune vectors."""
     def setUp(self):
+        """Initialize temporary logger storage for reference import and image validation."""
         self.tmp = tempfile.TemporaryDirectory()
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -28,16 +30,19 @@ class ReferenceSecurityTests(unittest.TestCase):
         logger.initialize()
 
     def tearDown(self):
+        """Restore the original data directory and remove the isolated logger database."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.tmp.cleanup()
 
     def data(self):
+        """Build an empty reference manifest containing every supported data collection."""
         return {key: [] for key in (
             "families", "recipes", "aliases", "seed_states", "affixes", "master_perks",
             "currency_names", "omen_names", "item_names", "glyphs", "icons", "scans")}
 
     def pack(self, data, assets=None):
+        """Write a version-2 reference ZIP containing supplied manifest data and asset bytes."""
         path = Path(self.tmp.name) / "references.zip"
         with ZipFile(path, "w", compression=ZIP_DEFLATED) as archive:
             archive.writestr("manifest.json", json.dumps({
@@ -47,13 +52,16 @@ class ReferenceSecurityTests(unittest.TestCase):
         return path
 
     def png(self, size, color=(30, 80, 120)):
+        """Encode a solid RGB image of the requested size as PNG bytes."""
         output = io.BytesIO()
         with Image.new("RGB", size, color) as image:
             image.save(output, format="PNG")
         return output.getvalue()
 
     def broken_png(self, size=(96, 96)):
+        """Build a structurally valid PNG whose compressed pixel stream is empty."""
         def chunk(name, raw):
+            """Encode one PNG chunk with its byte length and correct CRC."""
             return (struct.pack(">I", len(raw)) + name + raw +
                     struct.pack(">I", zlib.crc32(name + raw) & 0xffffffff))
         return (b"\x89PNG\r\n\x1a\n" +
@@ -61,10 +69,12 @@ class ReferenceSecurityTests(unittest.TestCase):
                 chunk(b"IDAT", zlib.compress(b"")) + chunk(b"IEND", b""))
 
     def icon(self, name, kind, file, raw):
+        """Build a named icon manifest entry with kind, asset path, and SHA-256 hash."""
         return {"name": name, "kind": kind, "file": file,
                 "sha256": hashlib.sha256(raw).hexdigest()}
 
     def test_damaged_pixel_data_is_rejected_before_import_mutations(self):
+        """Verify damaged pixel data is rejected before import mutations."""
         raw = self.broken_png()
         with Image.open(io.BytesIO(raw)) as image:
             image.verify()
@@ -80,10 +90,12 @@ class ReferenceSecurityTests(unittest.TestCase):
         self.assertFalse((store.DATA_DIR / "images").exists())
 
     def test_screenshot_upload_rejects_damaged_pixel_data(self):
+        """Verify screenshot upload rejects damaged pixel data."""
         with self.assertRaisesRegex(ValueError, "damaged"):
             service._image(base64.b64encode(self.broken_png((200, 100))).decode())
 
     def test_oversized_icons_are_normalized_and_reimport_deduplicates_stored_bytes(self):
+        """Verify oversized icons are normalized and reimport deduplicates stored bytes."""
         data = self.data()
         raw = self.png((4000, 3000))
         data["item_names"] = [{"name": "Example inventory item"}]
@@ -107,6 +119,7 @@ class ReferenceSecurityTests(unittest.TestCase):
         self.assertTrue(all(value == 0 for value in reference_pack.import_pack(path).values()))
 
     def test_valid_local_icons_round_trip_without_duplicate_records(self):
+        """Verify valid local icons round trip without duplicate records."""
         logger.add_item_name("Example inventory item")
         with Image.new("RGB", (96, 96), (30, 80, 120)) as image:
             logger.save_currency_icon("Chaos Orb", image)
@@ -118,6 +131,7 @@ class ReferenceSecurityTests(unittest.TestCase):
         self.assertTrue(all(value == 0 for value in reference_pack.import_pack(path).values()))
 
     def test_valid_icon_encoding_is_preserved_during_round_trip(self):
+        """Verify valid icon encoding is preserved during round trip."""
         output = io.BytesIO()
         with Image.new("RGB", (96, 96), (30, 80, 120)) as image:
             image.save(output, format="PNG", compress_level=0)
@@ -131,6 +145,7 @@ class ReferenceSecurityTests(unittest.TestCase):
         self.assertEqual(logger.currency_icons()[0]["image"], raw)
 
     def test_duplicate_icon_path_cannot_reuse_omen_size_for_currency(self):
+        """Verify duplicate icon path cannot reuse omen size for currency."""
         raw = self.png((512, 512))
         data = self.data()
         data["icons"] = [self.icon("Chaos Orb", "currency", "icons/0000.png", raw),
@@ -139,6 +154,7 @@ class ReferenceSecurityTests(unittest.TestCase):
             reference_pack.import_pack(self.pack(data, {"icons/0000.png": raw}))
 
     def test_screenshot_metadata_cannot_trigger_icon_normalization(self):
+        """Verify screenshot metadata cannot trigger icon normalization."""
         raw = self.png((40, 40))
         sha = hashlib.sha256(raw).hexdigest()
         file = f"screens/{sha}.png"
@@ -150,6 +166,7 @@ class ReferenceSecurityTests(unittest.TestCase):
         self.assertEqual((store.DATA_DIR / "images" / f"{sha}.png").read_bytes(), raw)
 
     def test_inventory_scan_skips_old_damage_and_retains_small_reference_images(self):
+        """Verify inventory scan skips old damage and retains small reference images."""
         with logger._connect() as db:
             db.executemany("INSERT INTO currency_icons(name,image_png,recorded_at) VALUES(?,?,?)", [
                 ("Chaos Orb", self.broken_png(), logger._now()),
@@ -157,10 +174,13 @@ class ReferenceSecurityTests(unittest.TestCase):
         retained = []
 
         class Reader:
+            """Stub inventory classification while recording normalized local-reference dimensions."""
             def icon(self, cell, count_digits=None):
+                """Return no bundled icon candidates for each inventory cell."""
                 return {"family": None, "all": []}
 
             def examples(self, cell, examples):
+                """Record the sizes of supplied reference images and return no matches."""
                 retained.extend(example["image"].size for example in examples)
                 return []
 
@@ -173,6 +193,7 @@ class ReferenceSecurityTests(unittest.TestCase):
         self.assertTrue(all(max(size) <= 96 for size in retained))
 
     def test_case_only_recipe_and_all_mapping_references_use_existing_spelling(self):
+        """Verify case only recipe and all mapping references use existing spelling."""
         logger.save_recipe({"name": "Case Reward", "sockets": 3, "combo": "Sun + Moon + Ward"})
         data = self.data()
         with logger._connect() as db:
@@ -198,6 +219,7 @@ class ReferenceSecurityTests(unittest.TestCase):
                                         .fetchone()[0]), ["Case Reward"])
 
     def test_conflicting_case_only_recipe_rows_rollback(self):
+        """Verify conflicting case only recipe rows rollback."""
         data = self.data()
         data["recipes"] = [{"name": "New Case Reward", "sockets": 3, "combo": "Sun + Moon + Ward"},
                            {"name": "new case reward", "sockets": 3, "combo": "Sun + Moon + Stone"}]
@@ -208,6 +230,7 @@ class ReferenceSecurityTests(unittest.TestCase):
                                          ("New Case Reward",)).fetchone())
 
     def test_explicit_case_only_recipe_replacement_keeps_existing_spelling(self):
+        """Verify explicit case only recipe replacement keeps existing spelling."""
         logger.save_recipe({"name": "Case Reward", "sockets": 3, "combo": "Sun + Moon + Ward"})
         data = self.data()
         data["recipes"] = [{"name": "CASE REWARD", "sockets": 4,
@@ -219,6 +242,7 @@ class ReferenceSecurityTests(unittest.TestCase):
         self.assertEqual([tuple(value) for value in row], [("Case Reward", 4)])
 
     def test_case_only_duplicates_in_family_are_rejected(self):
+        """Verify case only duplicates in family are rejected."""
         data = self.data()
         data["families"] = [{"id": 9999, "top_socket": 10, "valid": 1,
                              "recipes_json": '["Perfect Chaos Orb x3", "perfect chaos orb x3"]'}]
@@ -226,6 +250,7 @@ class ReferenceSecurityTests(unittest.TestCase):
             reference_pack.import_pack(self.pack(data))
 
     def test_scaled_imported_glyph_is_rejected_before_committing_records(self):
+        """Verify oversized glyph vector norms reject import before any reference rows are saved."""
         data = self.data()
         data["affixes"] = [{"name": "Uncommitted glyph affix"}]
         values = np.ones(1296, dtype=np.float32) * 1e20
@@ -239,6 +264,7 @@ class ReferenceSecurityTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) FROM reviewed_glyphs").fetchone()[0], 0)
 
     def test_zero_and_normalized_reviewed_glyphs_round_trip(self):
+        """Verify zero and normalized reviewed glyphs round trip."""
         data = self.data()
         rng = np.random.default_rng(7)
         values = rng.normal(size=1296).astype(np.float32)
@@ -255,6 +281,7 @@ class ReferenceSecurityTests(unittest.TestCase):
         self.assertEqual(len(store.reviewed_glyphs()), 2)
 
     def test_old_scaled_glyph_cannot_inflate_confidence_or_change_correct_rune(self):
+        """Verify old scaled glyph cannot inflate confidence or change correct rune."""
         rng = np.random.default_rng(5)
         image = Image.fromarray(rng.integers(0, 256, (300, 600, 3), dtype=np.uint8))
         bx, by, sockets = 400, 100, 3
@@ -281,7 +308,9 @@ class ReferenceSecurityTests(unittest.TestCase):
                    "rewards": [], "status": "local"} for rune, family in (("Sun", 1), ("Moon", 2))]
 
         class Model:
+            """Stub socket probabilities so the regression isolates rune-vector similarity."""
             def predict_proba(self, features):
+                """Return equal probabilities for three socket classes for every feature row."""
                 return np.ones((len(features), 3))
 
         with patch.object(scan, "features", return_value=np.zeros(4)), patch.object(

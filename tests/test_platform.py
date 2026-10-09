@@ -18,11 +18,14 @@ from PoE2_Data_Logger.ui import region_select
 
 
 class PlatformTests(unittest.TestCase):
+    """Check mocked Windows hotkeys, fresh clipboard reads, and native-pixel capture regions."""
     @classmethod
     def setUpClass(cls):
+        """Create or reuse the QApplication needed by these widget tests."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Initialize temporary logger storage for platform capture and hotkey tests."""
         self.tmp = tempfile.TemporaryDirectory()
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -30,13 +33,16 @@ class PlatformTests(unittest.TestCase):
         logger.initialize()
 
     def tearDown(self):
+        """Restore the original data directory and remove the isolated logger database."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.tmp.cleanup()
 
     def test_shortcut_replacement_does_not_wait_while_holding_listener_lock(self):
+        """Verify shortcut replacement does not wait while holding listener lock."""
         manager = hotkey.HotkeyManager(supported=True)
         def listen(shortcuts, ready, outcome, stop):
+            """Signal listener readiness, then acquire the manager lock after shutdown is requested."""
             outcome["thread_id"] = 17
             ready.set()
             stop.wait(5)
@@ -55,6 +61,7 @@ class PlatformTests(unittest.TestCase):
         self.assertFalse(manager.status()["registered"])
 
     def test_listener_startup_exception_releases_waiter(self):
+        """Verify listener startup exception releases waiter."""
         manager = hotkey.HotkeyManager(supported=True)
         with patch("ctypes.WinDLL", create=True, side_effect=OSError("unavailable")):
             with self.assertRaisesRegex(ValueError, "unavailable"):
@@ -62,6 +69,7 @@ class PlatformTests(unittest.TestCase):
         self.assertFalse(manager.status()["registered"])
 
     def test_clipboard_contention_is_retried(self):
+        """Verify clipboard contention is retried."""
         user = Mock()
         user.GetClipboardSequenceNumber.side_effect = itertools.chain([1], itertools.repeat(2))
         user.GetAsyncKeyState.return_value = 0
@@ -76,6 +84,7 @@ class PlatformTests(unittest.TestCase):
         user.SendInput.assert_not_called()
 
     def test_existing_clipboard_text_is_not_reused_without_fresh_copy(self):
+        """Verify existing clipboard text is not reused without fresh copy."""
         user = Mock()
         user.GetClipboardSequenceNumber.return_value = 91
         user.GetAsyncKeyState.return_value = 0
@@ -87,6 +96,7 @@ class PlatformTests(unittest.TestCase):
         self.assertEqual(read.call_count, 0)
 
     def test_oversized_combined_capture_is_rejected_before_grabbing(self):
+        """Verify oversized combined capture is rejected before grabbing."""
         grab = Mock()
         with patch.object(hover_copy, "_tooltip_bounds", return_value=(0, 0, 1920, 1080)):
             with self.assertRaisesRegex(ValueError, "Combined capture"):
@@ -94,6 +104,7 @@ class PlatformTests(unittest.TestCase):
         grab.assert_not_called()
 
     def test_capture_preserves_panel_and_tooltip_crops(self):
+        """Verify capture preserves panel and tooltip crops."""
         with patch.object(hover_copy, "_tooltip_bounds", return_value=(0, 0, 800, 600)):
             panel, tooltip = hover_copy.capture_remnant_context(
                 {"x": 100, "y": 150, "w": 250, "h": 300},
@@ -102,6 +113,7 @@ class PlatformTests(unittest.TestCase):
         self.assertEqual(tooltip.size, (800, 600))
 
     def test_currency_hotkey_freezes_phase(self):
+        """Verify currency hotkey freezes phase."""
         logger.start_map()
         with logger._connect() as db:
             logger._set_meta(db, "inventory_region", {"x": 0, "y": 0, "w": 480, "h": 200})
@@ -116,6 +128,7 @@ class PlatformTests(unittest.TestCase):
         logger.validate_scan_context(result)
 
     def test_cancelled_hotkey_result_is_discarded_and_capture_lock_released(self):
+        """Verify cancelled hotkey result is discarded and capture lock released."""
         manager = hotkey.HotkeyManager(supported=False)
         self.assertTrue(manager._capture_lock.acquire(False))
         revision = manager._capture_revision
@@ -126,11 +139,13 @@ class PlatformTests(unittest.TestCase):
         manager._capture_lock.release()
 
     def test_copied_waystone_is_read_before_ocr_and_keeps_captured_image(self):
+        """Verify copied Waystone is read before OCR and keeps captured image."""
         calls = []
         text = "Item Class: Waystones\nRarity: Rare\nStorm Peak\nWaystone (Tier 16)\n--------\nWaystone Drop Chance: +87%\n--------\n30% increased Rarity of Items found in this Area"
         with logger._connect() as db:
             logger._set_meta(db, "live_region", {"x": 0, "y": 0, "w": 200, "h": 100})
         def copy():
+            """Record the hover-copy call and return controlled Waystone clipboard text."""
             calls.append("copy")
             return text
         manager = hotkey.HotkeyManager(supported=True, hover_reader=copy, focused=lambda: True,
@@ -178,6 +193,7 @@ class PlatformTests(unittest.TestCase):
         editor.close()
 
     def test_stale_region_is_rejected_before_capture(self):
+        """Verify stale region is rejected before capture."""
         with logger._connect() as db:
             logger._set_meta(db, "live_region", {"x": 3000, "y": 0, "w": 400, "h": 200})
         with self.assertRaisesRegex(ValueError, "outside the game"):

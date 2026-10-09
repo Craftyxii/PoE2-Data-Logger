@@ -19,7 +19,9 @@ from PoE2_Data_Logger.core import logger_store as logger, reference_pack, store,
 
 
 class WorkflowTests(unittest.TestCase):
+    """Check storage workflows, immutable map snapshots, reference round trips, and export compatibility."""
     def setUp(self):
+        """Initialize a temporary logger database and start its first map."""
         self.tmp = tempfile.TemporaryDirectory()
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -28,11 +30,13 @@ class WorkflowTests(unittest.TestCase):
         logger.start_map()
 
     def tearDown(self):
+        """Restore the original data directory and remove the isolated logger database."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.tmp.cleanup()
 
     def test_repeated_currency_scans_replace_totals_and_keep_history(self):
+        """Verify repeated currency scans replace totals and keep history."""
         logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 10}])
         logger.save_currency_snapshot("end", [{"name": "Chaos Orb", "quantity": 15}])
         saved = logger.save_currency_snapshot("end", [{"name": "Chaos Orb", "quantity": 12},
@@ -49,6 +53,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(logger.currency_for_map("M0001")["end"], {"Chaos Orb": 14})
 
     def test_configuration_changes_preserve_committed_settings(self):
+        """Verify configuration changes preserve committed settings."""
         logger.save_settings({"tier": 16, "waystone": 87})
         logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 3}])
         logger.save_ritual_page([{"category": "Item", "name": "Example reward", "quantity": 1}])
@@ -61,6 +66,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(json.loads(before[0][1])["waystone"], 87)
 
     def test_deferred_rewards_have_zero_new_find_quantity(self):
+        """Verify deferred rewards have zero new find quantity."""
         logger.save_ritual_page([{"category": "Omen", "name": "Omen of Whittling", "quantity": 3,
                                  "deferred": True, "tribute": 4000}], tribute_available=1234, rerolls_remaining=2)
         rows = list(csv.DictReader(io.StringIO(logger.export_all_csv().decode("utf-8-sig"))))
@@ -69,6 +75,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(row["Deferred"], "True")
 
     def test_workbook_numeric_research_fields_and_atlas_sheet(self):
+        """Verify workbook numeric research fields and Atlas sheet."""
         logger.save_ritual_page([{"category": "Omen", "name": "Omen of Whittling", "quantity": 3,
                                  "deferred": True, "tribute": 4000}], tribute_available=1234, rerolls_remaining=2)
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
@@ -92,6 +99,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(workbook_export._numeric_column("Visible Seed Sockets"))
 
     def test_concurrent_commits_have_unique_numbers(self):
+        """Verify concurrent commits have unique numbers."""
         with ThreadPoolExecutor(max_workers=8) as pool:
             numbers = list(pool.map(lambda _: logger.record_commit("Map settings"), range(24)))
         self.assertEqual(sorted(numbers), list(range(1, 25)))
@@ -99,6 +107,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
 
     def test_finished_map_rejects_stale_context_and_chain(self):
+        """Verify finished map rejects stale context and chain."""
         context = logger.scan_context()
         logger.finish_map(12, 3, 1, 2)
         with self.assertRaisesRegex(ValueError, "map ended"):
@@ -109,6 +118,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(logger.commit_chain_runes(["Sun", "Moon"])["map_id"], "M0002")
 
     def test_map_transition_carries_tablets_and_clears_waystone_fields(self):
+        """Verify a new map clears Waystone fields while retaining biome and map flags."""
         logger.save_settings({"tier": 16, "waystone": 87, "map_mods": 4,
                               "waystone_name": "Storm Peak", "waystone_mods": ["Example modifier"],
                               "biome": "Forest", "irradiated": True, "deli": True, "wisp": True})
@@ -123,12 +133,14 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(state["settings"]["wisp"])
 
     def export_rows(self, data):
+        """Validate unique CSV headers and row widths, then return named data rows."""
         rows = list(csv.reader(io.StringIO(data.decode("utf-8-sig"))))
         self.assertTrue(all(len(row) == len(rows[0]) for row in rows[1:]))
         self.assertEqual(len(rows[0]), len(set(rows[0])))
         return [dict(zip(rows[0], row)) for row in rows[1:]]
 
     def save_map_flag_records(self):
+        """Save each configuration/activity record type to test map-flag snapshot propagation."""
         for kind in ("Map settings", "Tablet config", "Atlas Master", "Master perks"):
             logger.record_commit(kind)
         logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
@@ -138,6 +150,7 @@ class WorkflowTests(unittest.TestCase):
         logger.save_ritual_page([{"category": "Item", "name": "Example reward", "quantity": 1}])
 
     def test_map_flags_default_validate_and_do_not_change_area_level(self):
+        """Verify map flags default validate and do not change area level."""
         state = logger.get_state()
         self.assertIs(state["settings"]["deli"], False)
         self.assertIs(state["settings"]["wisp"], False)
@@ -152,6 +165,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(state["area_level"], area)
 
     def test_map_flags_snapshot_export_and_preserve_previous_maps(self):
+        """Verify map flags snapshot export and preserve previous maps."""
         logger.save_settings({"deli": True, "wisp": True})
         self.save_map_flag_records()
         logger.finish_map(12, 3, 1, 2)
@@ -198,6 +212,7 @@ class WorkflowTests(unittest.TestCase):
                                  ("Yes" if row["Map ID"] == "M0001" else "No", "Yes"))
 
     def test_map_flag_upgrade_preserves_legacy_records_and_exports_blank(self):
+        """Verify map flag upgrade preserves legacy records and exports blank."""
         logger.save_settings({"deli": True, "wisp": True})
         self.save_map_flag_records()
         tables = ("maps", "new_export", "legacy_export", "currency_snapshots", "ritual_pages", "commits")
@@ -235,6 +250,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual((history[-1]["Deli"], history[-1]["Wisp"]), ("Yes", "No"))
 
     def test_new_map_flag_columns_preserve_existing_export_positions(self):
+        """Verify new map flag columns preserve existing export positions."""
         logger.add_item_name("Example reward")
         positions = {
             logger.export_currency_csv: {"End Tier": 117},
@@ -254,6 +270,7 @@ class WorkflowTests(unittest.TestCase):
                     self.assertEqual(headers[-2:], ["Start Baseline", "Session Found Quantity"])
 
     def test_reset_preserves_settings_references_and_backup(self):
+        """Verify reset preserves settings references and backup."""
         logger.save_settings({"tier": 16, "waystone": 87})
         logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 3}])
         old_context = logger.scan_context()
@@ -271,6 +288,7 @@ class WorkflowTests(unittest.TestCase):
             logger.validate_scan_context(old_context)
 
     def pack(self, mutate=None):
+        """Write an exported reference pack, optionally rewriting its manifest and archive assets."""
         raw = reference_pack.export_pack()
         if mutate:
             with ZipFile(io.BytesIO(raw)) as source:
@@ -288,6 +306,7 @@ class WorkflowTests(unittest.TestCase):
         return path
 
     def add_scan(self):
+        """Store a hashed PNG and matching legacy scan row for reference-pack tests."""
         image = io.BytesIO()
         Image.new("RGB", (40, 40), (30, 80, 120)).save(image, format="PNG")
         raw = image.getvalue()
@@ -302,6 +321,7 @@ class WorkflowTests(unittest.TestCase):
         return destination, raw
 
     def test_reference_pack_excludes_gameplay_and_settings(self):
+        """Verify reference pack excludes gameplay and settings."""
         logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 3}])
         with ZipFile(self.pack()) as archive:
             data = json.loads(archive.read("manifest.json"))["data"]
@@ -309,6 +329,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(all(value == 0 for value in reference_pack.import_pack(self.pack()).values()))
 
     def test_reference_pack_repairs_existing_damaged_image(self):
+        """Verify reference pack repairs existing damaged image."""
         destination, raw = self.add_scan()
         path = self.pack()
         with logger._connect() as db:
@@ -319,6 +340,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(reference_pack.export_pack())
 
     def test_reference_pack_repairs_damage_even_when_record_already_exists(self):
+        """Verify reference pack repairs damage even when record already exists."""
         destination, raw = self.add_scan()
         path = self.pack()
         destination.write_bytes(b"damaged")
@@ -326,6 +348,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(destination.read_bytes(), raw)
 
     def test_implicit_map_start_clears_previous_waystone_settings(self):
+        """Verify implicit map start clears previous Waystone settings."""
         logger.save_settings({"tier": 16, "waystone": 87, "map_mods": 4})
         logger.finish_map(0, 0, 0, 0)
         saved = logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
@@ -336,6 +359,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(snapshot["waystone"], 0)
 
     def test_tablet_sequence_uses_four_slots_and_clear_restarts_it(self):
+        """Verify tablet sequence uses four slots and clear restarts it."""
         with logger._connect() as db:
             affix = db.execute("SELECT name FROM affixes WHERE name LIKE '%Pack Size%' LIMIT 1").fetchone()[0]
         for number in range(1, 5):
@@ -349,6 +373,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(logger.tablet_next_slot(), 1)
 
     def test_two_expeditions_keep_separate_chains_and_counts(self):
+        """Verify two expeditions keep separate chains and counts."""
         first = logger.commit_chain_runes(["Sun", "Moon"])
         logger.save_counts(100, 20, 5, 2)
         logger.start_next_chain()
@@ -361,6 +386,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual([row[0] for row in db.execute("SELECT detonated FROM expeditions WHERE map_id='M0001' ORDER BY expedition_id")], [2, 3])
 
     def test_current_remnant_id_tracks_pending_saved_and_active_map(self):
+        """Verify current remnant ID tracks pending saved and active map."""
         self.assertEqual(logger.get_state()["current_remnant_id"], "")
         pending = logger.assign_ocr_id("opened")
         self.assertEqual(logger.get_state()["current_remnant_id"], pending["remnant_id"])
@@ -380,6 +406,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(state["current_remnant_id"], "")
 
     def test_current_remnant_id_filters_expedition_beyond_recent_list(self):
+        """Verify current remnant ID filters expedition beyond recent list."""
         first = logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
         logger.start_next_chain()
         for _ in range(11):
@@ -402,6 +429,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(after, before)
 
     def test_current_remnant_id_falls_back_to_imported_records(self):
+        """Verify current remnant ID falls back to imported records."""
         saved = logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
         with logger._connect() as db:
             db.execute("INSERT INTO legacy_export SELECT * FROM new_export")
@@ -411,6 +439,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_remnant_id"], newest["remnant_id"])
 
     def test_reference_pack_rejects_invalid_reward_values(self):
+        """Verify reference pack rejects invalid reward values."""
         self.add_scan()
         path = self.pack(lambda manifest, contents: manifest["data"]["scans"][0].update(rewards_json="[42]"))
         with logger._connect() as db:
@@ -420,8 +449,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(store.list_scans(), [])
 
     def test_reference_pack_rejects_mislabeled_screenshot_path(self):
+        """Verify reference pack rejects mislabeled screenshot path."""
         self.add_scan()
         def mutate(manifest, contents):
+            """Rename a screenshot archive asset to a filename with the wrong content hash."""
             row = manifest["data"]["scans"][0]
             original = row["file"]
             row["file"] = "screens/" + "0" * 64 + ".png"
@@ -430,6 +461,7 @@ class WorkflowTests(unittest.TestCase):
             reference_pack.import_pack(self.pack(mutate))
 
     def test_reference_export_checks_import_entry_limit(self):
+        """Verify reference export checks import entry limit."""
         image = io.BytesIO()
         Image.new("RGB", (20, 20)).save(image, format="PNG")
         with logger._connect() as db:

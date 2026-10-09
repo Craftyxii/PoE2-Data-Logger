@@ -11,7 +11,9 @@ from PoE2_Data_Logger.core import logger_store as logger, store
 
 
 class PropagationTotalsTests(unittest.TestCase):
+    """Check propagation count increments, capture receipts, and independent expedition state."""
     def setUp(self):
+        """Initialize temporary logger storage, reset IDs, and start the first map."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-propagation-totals-")
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -21,20 +23,24 @@ class PropagationTotalsTests(unittest.TestCase):
         logger.start_map()
 
     def tearDown(self):
+        """Restore the original data directory and remove the isolated logger database."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.tmp.cleanup()
 
     def accept(self, runes=None, **kwargs):
+        """Accept current-context propagation runes with a fixed recipe and optional count overrides."""
         return logger.increment_propagation_detonated(logger.scan_context(),
             runes=["Rage"] if runes is None else runes, recipe="Test recipe", **kwargs)
 
     def records(self):
+        """Snapshot metadata, maps, expeditions, export rows, and commits to detect mutations."""
         with logger._connect() as db:
             return {table: [tuple(row) for row in db.execute(f"SELECT * FROM {table} ORDER BY rowid")]
                     for table in ("meta", "maps", "expeditions", "new_export", "commits")}
 
     def test_one_and_two_runes_each_increment_once_in_scan_order(self):
+        """Verify one and two runes each increment once in scan order."""
         first = self.accept(["Rage"])
         second = self.accept(["Time", "Power"])
         self.assertEqual((first["detonated"], second["detonated"]), (1, 2))
@@ -48,6 +54,7 @@ class PropagationTotalsTests(unittest.TestCase):
             {"detonated": 2, "runes": ["Time", "Power"], "recipe": "Test recipe"}])
 
     def test_chain_commit_keeps_total_then_next_expedition_starts_unknown(self):
+        """Verify chain commit keeps total then next expedition starts unknown."""
         self.accept(["Death", "Power"])
         self.accept(["Opulent"])
         saved = logger.commit_chain_draft([
@@ -69,6 +76,7 @@ class PropagationTotalsTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["detonated"], 2)
 
     def test_increment_updates_only_existing_first_expedition_row(self):
+        """Verify increment updates only existing first expedition row."""
         logger.commit_chain_steps([{"rune1": "Rage"}, {"rune1": "Time"}])
         self.accept()
         self.accept()
@@ -78,6 +86,7 @@ class PropagationTotalsTests(unittest.TestCase):
         self.assertEqual([row[26] for row in rows], ["Rage", "Time"])
 
     def test_invalid_reads_and_correction_values_do_not_mutate(self):
+        """Verify invalid reads and correction values do not mutate."""
         before = self.records()
         for runes in (None, [], ["Rage", "Time", "Power"], [""], [" "], [1], ["Rage", None], ["a" * 81]):
             with self.subTest(runes=runes), self.assertRaises(ValueError):
@@ -89,6 +98,7 @@ class PropagationTotalsTests(unittest.TestCase):
             self.assertEqual(self.records(), before)
 
     def test_missing_and_stale_context_do_not_mutate(self):
+        """Verify missing and stale context do not mutate."""
         current = logger.scan_context()
         before = self.records()
         for context in (None, {}, "bad", {**current, "_scan_generation": -1},
@@ -100,6 +110,7 @@ class PropagationTotalsTests(unittest.TestCase):
             self.assertEqual(self.records(), before)
 
     def test_pending_remnant_no_map_and_finished_map_reject(self):
+        """Verify pending remnant no map and finished map reject."""
         with logger._connect() as db:
             logger._set_meta(db, "ocr_pending", {"remnant_id": "R0001"})
         before = self.records()
@@ -118,6 +129,7 @@ class PropagationTotalsTests(unittest.TestCase):
         self.assertEqual(self.records(), before)
 
     def test_same_chain_pending_remnant_is_preserved_while_counting_propagation(self):
+        """Verify same chain pending remnant is preserved while counting propagation."""
         pending = logger.assign_ocr_id("opened")
         number = logger.get_state()["next_remnant_id"]
         self.assertEqual(self.accept(["Death", "Rebirth"])["detonated"], 1)
@@ -128,6 +140,7 @@ class PropagationTotalsTests(unittest.TestCase):
         self.assertEqual(state["scan_commit_count"], 1)
 
     def test_pending_remnant_for_another_map_cannot_receive_propagation(self):
+        """Verify pending remnant for another map cannot receive propagation."""
         pending = {"remnant_id": "R0001", "map_id": "M0002", "expedition_id": "M0002-E01"}
         with logger._connect() as db:
             logger._set_meta(db, "ocr_pending", pending)
@@ -137,6 +150,7 @@ class PropagationTotalsTests(unittest.TestCase):
         self.assertEqual(self.records(), before)
 
     def test_pending_remnant_other_expedition_on_same_map_stays_independent(self):
+        """Verify pending remnant other expedition on same map stays independent."""
         pending = logger.assign_ocr_id("opened")
         logger.commit_chain_draft([{"rune1": "Death"}], logger.scan_context())
         logger.complete_chain(logger.scan_context())
@@ -146,6 +160,7 @@ class PropagationTotalsTests(unittest.TestCase):
         self.assertEqual(pending["expedition_id"], "M0001-E01")
 
     def test_legacy_corrections_and_omitted_count_preservation(self):
+        """Verify legacy corrections and omitted count preservation."""
         self.assertEqual(self.accept(current_value="7")["detonated"], 8)
         logger.save_counts(10, 2, 1, 3)
         self.assertEqual(self.accept()["detonated"], 4)
@@ -160,6 +175,7 @@ class PropagationTotalsTests(unittest.TestCase):
         self.assertIsNone(logger.get_state()["detonated"])
 
     def test_write_failure_rolls_back_count_row_and_commit(self):
+        """Verify write failure rolls back count row and commit."""
         logger.commit_chain("Rage")
         before = self.records()
         with patch.object(logger, "_record_commit", side_effect=RuntimeError("failed")):
@@ -168,6 +184,7 @@ class PropagationTotalsTests(unittest.TestCase):
         self.assertEqual(self.records(), before)
 
     def test_concurrent_accepted_reads_cannot_lose_increments(self):
+        """Verify concurrent accepted reads cannot lose increments."""
         context = logger.scan_context()
         with ThreadPoolExecutor(max_workers=4) as pool:
             results = list(pool.map(lambda _: logger.increment_propagation_detonated(
@@ -177,6 +194,7 @@ class PropagationTotalsTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["detonated"], 6)
 
     def test_manual_draft_callback_receipt_counts_once_and_preserves_distinct_scan(self):
+        """Verify manual draft callback receipt counts once and preserves distinct scan."""
         context = logger.scan_context()
         with ThreadPoolExecutor(max_workers=2) as pool:
             saved = list(pool.map(lambda _: logger.increment_propagation_detonated(
@@ -202,6 +220,7 @@ class PropagationTotalsTests(unittest.TestCase):
         self.assertEqual(self.records(), before)
 
     def test_propagation_freezes_setup_and_blocks_undo_and_reset_reuse(self):
+        """Verify propagation freezes setup and blocks undo and reset reuse."""
         atlas = dict(logger.get_state()["settings"]["atlas_settings"])
         atlas["gear_item_rarity"] = 100
         logger.save_atlas_settings(atlas)

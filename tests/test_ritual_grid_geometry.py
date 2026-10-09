@@ -14,6 +14,7 @@ EXPECTED_FOOTPRINTS = [[1], [2], [13], [14], [25, 26], [37, 38, 49, 50],
 
 
 def synthetic_grid(occupied=(), cursor=False):
+    """Draw a complete twelve-by-ten Ritual grid with optional occupied cells and an empty cursor highlight."""
     image = Image.new("RGB", (540, 500), (9, 7, 7))
     draw = ImageDraw.Draw(image)
     for row in range(10):
@@ -38,8 +39,10 @@ def synthetic_grid(occupied=(), cursor=False):
 
 
 class RitualGridGeometryTests(unittest.TestCase):
+    """Check complete Ritual lattices retain reward footprints across scaling and reject clipped pages."""
     @classmethod
     def setUpClass(cls):
+        """Load the full Ritual fixture and its normalized rewards-panel crop once."""
         fixture = Path(__file__).resolve().parent.parent / "PoE2_Data_Logger/region_examples/ritual.jpg"
         with Image.open(fixture) as source:
             cls.full = source.convert("RGB")
@@ -48,6 +51,7 @@ class RitualGridGeometryTests(unittest.TestCase):
                                  round(width * (.098 + .379)), round(height * (.106 + .78))))
 
     def assert_rewards(self, image, **kwargs):
+        """Detect a complete twelve-by-ten grid and assert its nine reward footprints stay inside the image."""
         grid = detect_reward_grid(image, **kwargs)
         self.assertIsNotNone(grid, "The complete visible Ritual grid should be detected")
         self.assertEqual([reward["slots"] for reward in grid["rewards"]], EXPECTED_FOOTPRINTS)
@@ -62,14 +66,17 @@ class RitualGridGeometryTests(unittest.TestCase):
         return grid
 
     def test_actual_page_groups_equipment_and_ignores_empty_cursor_cell(self):
+        """Verify actual page groups equipment and ignores empty cursor cell."""
         self.assert_rewards(self.crop)
 
     def test_full_capture_uses_ritual_grid_and_excludes_player_inventory(self):
+        """Verify full capture uses ritual grid and excludes player inventory."""
         grid = self.assert_rewards(self.full, header_box=(410, 178, 625, 218))
         self.assertLess(grid["bounds"][2], 1000)
         self.assertGreater(grid["bounds"][1], 250)
 
     def test_normal_resolution_changes_preserve_all_nine_rewards(self):
+        """Verify normal resolution changes preserve all nine rewards."""
         for scale in (.5, .75, 1.25, 2):
             with self.subTest(scale=scale):
                 image = self.crop.resize((round(self.crop.width * scale), round(self.crop.height * scale)),
@@ -77,26 +84,31 @@ class RitualGridGeometryTests(unittest.TestCase):
                 self.assert_rewards(image)
 
     def test_grid_only_and_border_crops_preserve_all_rewards(self):
+        """Verify grid only and border crops preserve all rewards."""
         for box in ((30, 190, 670, 725), (0, 170, 726, 760), (35, 193, 666, 720)):
             with self.subTest(box=box):
                 self.assert_rewards(self.crop.crop(box))
 
     def test_clipped_grids_are_not_reported_as_complete_pages(self):
+        """Verify clipped grids are not reported as complete pages."""
         for box in ((0, 0, 626, 840), (0, 0, 726, 600), (50, 0, 726, 840), (0, 245, 726, 840)):
             with self.subTest(box=box):
                 self.assertIsNone(detect_reward_grid(self.crop.crop(box)))
                 self.assertTrue(has_grid_structure(self.crop.crop(box)))
 
     def test_blank_images_do_not_invent_grid_geometry(self):
+        """Verify blank images do not invent grid geometry."""
         self.assertIsNone(detect_reward_grid(Image.new("RGB", (726, 840), "black")))
         self.assertFalse(has_grid_structure(Image.new("RGB", (726, 840), "black")))
 
     def test_full_120_cell_grid_keeps_each_one_cell_reward_separate(self):
+        """Verify full 120 cell grid keeps each one cell reward separate."""
         grid = detect_reward_grid(synthetic_grid(range(1, 121)))
         self.assertIsNotNone(grid)
         self.assertEqual([reward["slots"] for reward in grid["rewards"]], [[slot] for slot in range(1, 121)])
 
     def test_empty_grid_and_cursor_only_grid_have_no_rewards(self):
+        """Verify empty grid and cursor only grid have no rewards."""
         for cursor in (False, True):
             with self.subTest(cursor=cursor):
                 grid = detect_reward_grid(synthetic_grid(cursor=cursor))
@@ -104,6 +116,7 @@ class RitualGridGeometryTests(unittest.TestCase):
                 self.assertEqual(grid["rewards"], [])
 
     def test_actual_reward_pages_keep_every_equipment_footprint_separate(self):
+        """Verify actual reward pages keep every equipment footprint separate."""
         fixtures = Path(__file__).resolve().parent / "fixtures/ritual_rewards"
         for expected in json.loads((fixtures / "expected.json").read_text(encoding="utf-8")):
             with self.subTest(capture=expected["source"]):
@@ -120,6 +133,7 @@ class RitualGridGeometryTests(unittest.TestCase):
                     self.assertTrue(grid["evidence"]["image_boundary"])
 
     def test_scaled_supplied_pages_keep_all_reward_footprints(self):
+        """Verify scaled supplied pages keep all reward footprints."""
         fixtures = Path(__file__).resolve().parent / "fixtures/ritual_rewards"
         cases = json.loads((fixtures / "expected.json").read_text(encoding="utf-8"))
         for expected in cases:
@@ -140,6 +154,7 @@ class RitualGridGeometryTests(unittest.TestCase):
                         self.assertLessEqual(reward["box"][3], image.height)
 
     def test_small_full_captures_and_image_edge_keep_complete_grid(self):
+        """Verify small full captures and image edge keep complete grid."""
         fixtures = Path(__file__).resolve().parent / "fixtures/ritual_rewards"
         cases = json.loads((fixtures / "expected.json").read_text(encoding="utf-8"))
         for name in ("03.png", "11.png"):
@@ -159,6 +174,7 @@ class RitualGridGeometryTests(unittest.TestCase):
                         self.assertTrue(grid["evidence"]["image_boundary"])
 
     def test_resampling_never_completes_clipped_supplied_pages(self):
+        """Verify resampling never completes clipped supplied pages."""
         fixtures = Path(__file__).resolve().parent / "fixtures/ritual_rewards"
         cases = json.loads((fixtures / "expected.json").read_text(encoding="utf-8"))
         for expected in cases:
@@ -175,6 +191,7 @@ class RitualGridGeometryTests(unittest.TestCase):
                         self.assertIsNone(detect_reward_grid(image))
 
     def test_image_edge_does_not_allow_a_missing_bottom_reward_row(self):
+        """Verify image edge does not allow a missing bottom reward row."""
         fixtures = Path(__file__).resolve().parent / "fixtures/ritual_rewards"
         with Image.open(fixtures / "11.png") as image:
             # This capture's complete lower frame coincides with the image

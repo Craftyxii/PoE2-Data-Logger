@@ -16,11 +16,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, select
 
 
 class SessionCurrencyUITests(unittest.TestCase):
+    """Check approved inventory changes update rolling currency cards, summaries, filters and learned icons."""
     @classmethod
     def setUpClass(cls):
+        """Create or reuse the QApplication required by the Qt test fixtures."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Open an isolated logger window with background polling stopped."""
         self.tmp = tempfile.TemporaryDirectory()
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -30,6 +33,7 @@ class SessionCurrencyUITests(unittest.TestCase):
         self.window._poll.stop()
 
     def tearDown(self):
+        """Close the logger window, stop workers and restore the original data directory."""
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -38,19 +42,23 @@ class SessionCurrencyUITests(unittest.TestCase):
         self.tmp.cleanup()
 
     def review(self, phase, amounts):
+        """Select an inventory phase and display a review reading from supplied item quantities."""
         select(self.window.inventory_phase, phase)
         self.window._inventory_read({"items": [
             {"slot": index, "name": name, "quantity": quantity}
             for index, (name, quantity) in enumerate(amounts.items(), 1)], "unknown": []}, live=False)
 
     def approve(self, phase, **amounts):
+        """Display and approve an inventory reading for the requested phase."""
         self.review(phase, amounts)
         self.window.approve_review()
 
     def quantities(self):
+        """Return positive quantities displayed by the session currency cards."""
         return {name: card.quantity for name, card in self.window.session_currency.cards.items() if card.quantity > 0}
 
     def test_reference_tools_live_in_debug_and_are_hidden_by_default(self):
+        """Verify reference tools live in debug and are hidden by default."""
         page = self.window.tabs.widget(4).widget()
         debug = self.window.tabs.widget(5).widget()
         self.assertFalse(page.isAncestorOf(self.window.inventory_reference_group))
@@ -63,6 +71,7 @@ class SessionCurrencyUITests(unittest.TestCase):
         self.assertTrue(self.window.kill_counts_group.isAncestorOf(self.window.normal))
 
     def test_only_approved_end_scans_update_totals_and_repeats_replace_them(self):
+        """Verify only approved end scans update totals and repeats replace them."""
         self.approve("start", **{"Chaos Orb": 10, "Divine Orb": 2})
         self.assertEqual(self.quantities(), {})
         self.review("end", {"Chaos Orb": 18, "Divine Orb": 3})
@@ -79,6 +88,7 @@ class SessionCurrencyUITests(unittest.TestCase):
             self.assertEqual(card.name_label.toolTip(), name)
 
     def test_rejected_scan_does_not_change_counter(self):
+        """Verify rejected scan does not change counter."""
         self.approve("start")
         self.approve("end", **{"Chaos Orb": 8})
         self.review("end", {"Chaos Orb": 99})
@@ -86,6 +96,7 @@ class SessionCurrencyUITests(unittest.TestCase):
         self.assertEqual(self.quantities(), {"Chaos Orb": 8})
 
     def test_new_map_retains_previous_gains_then_adds_its_approved_gain(self):
+        """Verify new map retains previous gains then adds its approved gain."""
         self.approve("start", **{"Chaos Orb": 10})
         self.approve("end", **{"Chaos Orb": 18})
         self.window.finish_map()
@@ -95,6 +106,7 @@ class SessionCurrencyUITests(unittest.TestCase):
         self.assertEqual(self.quantities(), {"Chaos Orb": 13, "Divine Orb": 1})
 
     def test_session_reset_clears_cards_and_retains_reference_tools(self):
+        """Verify session reset clears cards and retains reference tools."""
         self.approve("start")
         self.approve("end", **{"Chaos Orb": 8})
         self.window.session_currency.search.setText("Chaos")
@@ -109,6 +121,7 @@ class SessionCurrencyUITests(unittest.TestCase):
         self.assertIsNotNone(self.window.icon_name)
 
     def test_cancelled_reset_keeps_session_totals(self):
+        """Verify cancelled reset keeps session totals."""
         self.approve("start")
         self.approve("end", **{"Chaos Orb": 8})
         with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Cancel):
@@ -116,6 +129,7 @@ class SessionCurrencyUITests(unittest.TestCase):
         self.assertEqual(self.quantities(), {"Chaos Orb": 8})
 
     def test_end_only_counts_as_empty_start_and_later_start_scan_updates_totals(self):
+        """Verify end only counts as empty start and later start scan updates totals."""
         self.approve("end", **{"Chaos Orb": 100})
         self.assertEqual(self.quantities(), {"Chaos Orb": 100})
         self.assertIn("assumed to start empty", self.window.session_currency.summary.text())
@@ -123,6 +137,7 @@ class SessionCurrencyUITests(unittest.TestCase):
         self.assertEqual(self.quantities(), {"Chaos Orb": 3})
 
     def test_empty_start_updates_summary_even_when_quantities_stay_the_same(self):
+        """Verify empty start updates summary even when quantities stay the same."""
         self.approve("end", **{"Chaos Orb": 12, "Divine Orb": 2})
         self.assertIn("assumed to start empty", self.window.session_currency.summary.text())
         self.approve("start")
@@ -130,6 +145,7 @@ class SessionCurrencyUITests(unittest.TestCase):
         self.assertNotIn("assumed", self.window.session_currency.summary.text())
 
     def test_multiple_end_only_maps_and_corrected_end_scan(self):
+        """Verify end-only gains accumulate across maps and a corrected latest end scan replaces its contribution."""
         self.approve("end", **{"Chaos Orb": 12, "Divine Orb": 2})
         self.window.finish_map()
         self.approve("end", **{"Chaos Orb": 5, "Exalted Orb": 9})
@@ -138,6 +154,7 @@ class SessionCurrencyUITests(unittest.TestCase):
         self.assertEqual(self.quantities(), {"Chaos Orb": 15, "Divine Orb": 2, "Exalted Orb": 8})
 
     def test_custom_learned_icon_and_name_display_with_session_quantity(self):
+        """Verify custom learned icon and name display with session quantity."""
         name = "My newly labelled currency"
         icon = Image.new("RGB", (96, 96), (12, 12, 20))
         ImageDraw.Draw(icon).ellipse((16, 16, 80, 80), fill=(170, 80, 220), outline=(220, 180, 80), width=4)
@@ -152,6 +169,7 @@ class SessionCurrencyUITests(unittest.TestCase):
         self.assertEqual(card.name_label.toolTip(), name)
 
     def test_filter_and_responsive_grid_preserve_all_totals(self):
+        """Verify filter and responsive grid preserve all totals."""
         self.approve("start")
         self.approve("end", **{"Chaos Orb": 1000, "Divine Orb": 2, "Exalted Orb": 5})
         counter = self.window.session_currency
@@ -174,6 +192,7 @@ class SessionCurrencyUITests(unittest.TestCase):
         self.assertGreater(counter.grid.count(), len(counter.cards))
 
     def test_latest_correction_to_zero_keeps_its_card(self):
+        """Verify latest correction to zero keeps its card."""
         self.approve("start")
         self.approve("end", **{"Chaos Orb": 8, "Divine Orb": 1})
         self.approve("end", **{"Divine Orb": 1})

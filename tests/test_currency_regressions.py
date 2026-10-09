@@ -18,11 +18,15 @@ from PoE2_Data_Logger.ocr import currency_ocr, item_ocr
 
 
 class CurrencyRegressionTests(unittest.TestCase):
+    """Compare native reference scoring with QuickJS and check cache limits."""
     def setUp(self):
+        """Create a currency reader for scoring and prepared-reference checks."""
         self.reader = currency_ocr.CurrencyReader()
 
     def oracle(self, cell, references):
+        """Score normalized cells and references through the original QuickJS matcher."""
         def pixels(image):
+            """Flatten a resized RGB image into the QuickJS matcher's pixel format."""
             return np.asarray(image.convert("RGB").resize(
                 (40, 40), Image.Resampling.LANCZOS), dtype=np.uint8).reshape(-1).tolist()
         payload = {"cell": pixels(cell), "refs": [
@@ -30,6 +34,7 @@ class CurrencyRegressionTests(unittest.TestCase):
         return json.loads(self.reader.match_examples(json.dumps(payload, separators=(",", ":"))))
 
     def test_native_custom_scores_match_real_quickjs_with_shifts_and_foreground_weights(self):
+        """Verify native rankings and scores match QuickJS across shifts and backgrounds."""
         rng = np.random.default_rng(17)
         for background in (False, True):
             with self.subTest(background=background):
@@ -48,6 +53,7 @@ class CurrencyRegressionTests(unittest.TestCase):
                     self.assertAlmostEqual(actual["score"], expected["score"], places=6)
 
     def test_same_name_variants_keep_a_close_competing_name_visible(self):
+        """Verify duplicate reference labels do not hide an equally close competing label."""
         cell = Image.fromarray(np.random.default_rng(51).integers(0, 256, (40, 40, 3), dtype=np.uint8))
         references = [{"name": "Chaos Orb", "image": cell} for _ in range(3)]
         references.append({"name": "Exalted Orb", "image": cell})
@@ -57,6 +63,7 @@ class CurrencyRegressionTests(unittest.TestCase):
             self.assertFalse(ranked[0]["score"] - ranked[1]["score"] > 150)
 
     def test_global_ranking_preserves_references_across_atlas_batches(self):
+        """Verify ranking combines winners and competitors across reference atlas batches."""
         rng = np.random.default_rng(22)
         pixels = rng.integers(50, 180, (40, 40, 3), dtype=np.uint8)
         cell = Image.fromarray(pixels)
@@ -71,6 +78,7 @@ class CurrencyRegressionTests(unittest.TestCase):
         self.assertGreaterEqual(len(self.reader._example_atlases), 2)
 
     def test_exact_refinement_preserves_150_margin_and_1200_score_boundaries(self):
+        """Verify native refinement preserves strict confidence-margin and score cutoffs."""
         pixels = np.random.default_rng(10).integers(50, 180, (40, 40, 3), dtype=np.uint8)
         y, x = np.indices((40, 40))
         positions = np.flatnonzero(np.repeat(~((y < 13) & (x < 13)), 3).reshape(-1))
@@ -91,6 +99,7 @@ class CurrencyRegressionTests(unittest.TestCase):
             self.assertEqual(native[0]["score"] > -1200, accepted)
 
     def test_prepared_pixels_and_names_are_snapshots_and_invalidate_rank_cache(self):
+        """Verify prepared banks snapshot inputs and cached results resist caller mutation."""
         source = Image.fromarray(np.random.default_rng(33).integers(0, 256, (40, 40, 3), dtype=np.uint8))
         cell = source.copy()
         bank = self.reader.prepare_examples([{"name": "Original", "image": source}])
@@ -107,6 +116,7 @@ class CurrencyRegressionTests(unittest.TestCase):
         self.assertEqual(self.reader.examples(cell, bank)[0]["name"], "Original")
 
     def test_prepared_bank_and_reader_stay_with_their_worker(self):
+        """Verify prepared banks and readers reject use from another reader or thread."""
         image = Image.new("RGB", (40, 40), (100, 120, 140))
         bank = self.reader.prepare_examples([{"name": "Example", "image": image}])
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -116,6 +126,7 @@ class CurrencyRegressionTests(unittest.TestCase):
                 pool.submit(lambda: self.reader.examples(image, bank)).result()
 
     def test_prepared_atlas_and_rank_caches_remain_bounded(self):
+        """Verify atlas memory and ranked-result caches stay within their configured bounds."""
         pixels = np.random.default_rng(55).integers(0, 256, (40, 40, 3), dtype=np.uint8)
         for index in range(160):
             candidate = pixels.copy()
@@ -130,6 +141,7 @@ class CurrencyRegressionTests(unittest.TestCase):
                             for key, values in self.reader._example_rank_cache.items()))
 
     def test_1999_imported_canonical_icons_scan_without_large_quickjs_payload(self):
+        """Verify a large imported icon pack scans through bounded native reference batches."""
         with tempfile.TemporaryDirectory() as temporary:
             previous = store.DATA_DIR
             store.DATA_DIR = Path(temporary)

@@ -20,11 +20,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
 class AtlasIntegrationTests(unittest.TestCase):
+    """Exercise Atlas settings navigation, persistence, map snapshots and linked desktop exports."""
     @classmethod
     def setUpClass(cls):
+        """Reuse or create the QApplication required by Atlas desktop widgets."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Create an isolated map database and desktop window with polling disabled."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-atlas-integration-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -37,6 +40,7 @@ class AtlasIntegrationTests(unittest.TestCase):
         self.page = self.window.atlas_settings_page
 
     def tearDown(self):
+        """Close desktop workers, restore the data directory and remove temporary storage."""
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -45,6 +49,7 @@ class AtlasIntegrationTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def configure(self, rarity=125.5):
+        """Allocate an Expedition choice and save the requested character rarity through the UI."""
         node_id = "AtlasExpeditionNotable8"
         self.page.toggle_node(node_id)
         choice_id = catalog()["nodes"][node_id]["choices"][0]["id"]
@@ -55,6 +60,7 @@ class AtlasIntegrationTests(unittest.TestCase):
         return node_id, choice_id
 
     def test_separate_navigation_and_save_signal(self):
+        """Verify Atlas navigation titles, active buttons and saved settings reach the logger."""
         self.assertEqual(self.window.tabs.tabText(3), "Atlas Masters")
         self.assertEqual(self.window.tabs.tabText(12), "Atlas / Character Settings")
         self.window.nav_buttons[-1].click()
@@ -72,6 +78,7 @@ class AtlasIntegrationTests(unittest.TestCase):
         self.assertEqual(self.window.page_title.text(), "README")
 
     def test_atlas_source_notice_is_accessible_in_help(self):
+        """Verify help exposes the Atlas source attribution notice."""
         picker = self.window.license_picker
         notice = "atlas/NOTICE.txt"
         index = picker.findData(notice)
@@ -82,6 +89,7 @@ class AtlasIntegrationTests(unittest.TestCase):
         self.assertIn("RePoE", text)
 
     def test_other_scan_refresh_keeps_unsaved_atlas_draft(self):
+        """Verify unrelated settings refreshes preserve unsaved Atlas edits."""
         self.page.toggle_node("AtlasExpeditionNotable8")
         self.page.gear_rarity.setValue(75)
         before = self.page.settings()
@@ -92,6 +100,7 @@ class AtlasIntegrationTests(unittest.TestCase):
         self.assertTrue(self.window.header_wisp.isChecked())
 
     def test_saved_change_applies_to_next_map_and_preserves_old_rarity(self):
+        """Verify new rarity settings affect the next map while prior currency rows retain their snapshot."""
         self.configure(100)
         logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 1}])
         self.page.gear_rarity.setValue(200)
@@ -108,6 +117,7 @@ class AtlasIntegrationTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["settings"]["atlas_settings"]["gear_item_rarity"], 200)
 
     def test_typed_gear_rarity_saves_and_reaches_both_export_sheets(self):
+        """Verify typed rarity persists and links matching values across the main and Atlas exports."""
         self.window.show()
         self.window.tabs.setCurrentIndex(12)
         self.app.processEvents()
@@ -129,6 +139,7 @@ class AtlasIntegrationTests(unittest.TestCase):
         self.assertEqual(self.page.gear_rarity.value(), 187.25)
 
     def test_csv_save_as_writes_linked_companions(self):
+        """Verify CSV Save As writes Atlas and scan-history companions linked to the main record."""
         self.configure(0)
         destination = Path(self.tmp.name) / "my-log.csv"
         self.window._submit = lambda label, work, done: done(work())

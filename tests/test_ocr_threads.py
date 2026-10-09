@@ -18,7 +18,9 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
 class OCRThreadPreferenceTests(unittest.TestCase):
+    """Check supported OCR thread preferences persist separately from the process-wide active setting."""
     def setUp(self):
+        """Initialize isolated logger data and reset the active OCR thread cache."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-ocr-threads-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -28,12 +30,14 @@ class OCRThreadPreferenceTests(unittest.TestCase):
         logger.initialize()
 
     def tearDown(self):
+        """Restore the active-thread patch and data directory, then remove the isolated database."""
         self.active_patch.stop()
         store.DATA_DIR = self.previous_data
         logger._READY = False
         self.tmp.cleanup()
 
     def test_default_and_all_supported_preferences_are_saved_outside_map_settings(self):
+        """Verify default and all supported preferences are saved outside map settings."""
         self.assertEqual(ocr_runtime.saved_threads(), 2)
         self.assertEqual(ocr_runtime.active_threads(), 2)
         for count in (1, 2, 4, 6):
@@ -45,6 +49,7 @@ class OCRThreadPreferenceTests(unittest.TestCase):
         self.assertNotIn(b"ocr_cpu_threads", logger.export_all_csv())
 
     def test_invalid_values_are_rejected_without_changing_saved_or_active_setting(self):
+        """Verify invalid values are rejected without changing saved or active setting."""
         for count in (True, False, None, "4", 4.0, 0, -1, 3, 8, 100):
             with self.subTest(count=count):
                 with self.assertRaisesRegex(ValueError, "must be 1, 2, 4 or 6"):
@@ -53,6 +58,7 @@ class OCRThreadPreferenceTests(unittest.TestCase):
                 self.assertEqual(ocr_runtime.active_threads(), 2)
 
     def test_invalid_stored_preference_safely_uses_default(self):
+        """Verify invalid stored preference safely uses default."""
         for count in (True, "6", 6.0, 8, None, {"threads": 4}):
             with self.subTest(count=count):
                 with logger._connect() as db:
@@ -63,6 +69,7 @@ class OCRThreadPreferenceTests(unittest.TestCase):
         self.assertEqual(ocr_runtime.saved_threads(), 2)
 
     def test_saved_change_before_first_model_keeps_original_process_setting(self):
+        """Verify saved change before first model keeps original process setting."""
         ocr_runtime.save_threads(6)
         self.assertEqual(ocr_runtime.active_threads(), 2)
         self.assertEqual(ocr_runtime.saved_threads(), 6)
@@ -71,6 +78,7 @@ class OCRThreadPreferenceTests(unittest.TestCase):
             self.assertEqual(ocr_runtime.active_threads(), 6)
 
     def test_concurrent_first_read_initializes_one_shared_value(self):
+        """Verify concurrent first read initializes one shared value."""
         with patch.object(ocr_runtime, "saved_threads", return_value=4) as read:
             with ThreadPoolExecutor(max_workers=6) as pool:
                 counts = list(pool.map(lambda _: ocr_runtime.active_threads(), range(30)))
@@ -78,6 +86,7 @@ class OCRThreadPreferenceTests(unittest.TestCase):
             read.assert_called_once_with()
 
     def test_real_sessions_use_startup_count_and_do_not_rebuild_after_save(self):
+        """Verify real sessions use startup count and do not rebuild after save."""
         root = Path(__file__).resolve().parents[1]
         program = """
 import sys
@@ -118,11 +127,14 @@ assert all(session.get_session_options().intra_op_num_threads == 4 for session i
 
 
 class OCRThreadSettingUITests(unittest.TestCase):
+    """Check the thread selector shows saved and active counts, restart requirements and save failures."""
     @classmethod
     def setUpClass(cls):
+        """Create or reuse the QApplication required by the Qt test fixtures."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Open an isolated logger window with a fresh active OCR thread cache and polling stopped."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-ocr-threads-ui-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -133,6 +145,7 @@ class OCRThreadSettingUITests(unittest.TestCase):
         self.window._poll.stop()
 
     def tearDown(self):
+        """Close the window and workers, restore thread/data state and remove temporary logger data."""
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -142,6 +155,7 @@ class OCRThreadSettingUITests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_setting_shows_supported_values_and_pending_restart_without_changing_workers(self):
+        """Verify setting shows supported values and pending restart without changing workers."""
         selector = self.window.ocr_threads_select
         self.assertEqual([selector.itemData(i) for i in range(selector.count())], [1, 2, 4, 6])
         self.assertEqual(selector.currentData(), 2)
@@ -157,6 +171,7 @@ class OCRThreadSettingUITests(unittest.TestCase):
         self.assertNotIn("Saved:", self.window.ocr_threads_status.text())
 
     def test_saved_setting_is_displayed_when_window_reopens_without_reloading_runtime(self):
+        """Verify saved setting is displayed when window reopens without reloading runtime."""
         ocr_runtime.save_threads(6)
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
@@ -168,6 +183,7 @@ class OCRThreadSettingUITests(unittest.TestCase):
         self.assertIn("Saved: 6", self.window.ocr_threads_status.text())
 
     def test_failed_save_restores_selection_and_reports_error(self):
+        """Verify failed save restores selection and reports error."""
         with patch.object(ocr_runtime, "save_threads", side_effect=OSError("Could not save preference")):
             self.window.ocr_threads_select.setCurrentIndex(self.window.ocr_threads_select.findData(4))
         self.assertEqual(self.window.ocr_threads_select.currentData(), 2)

@@ -21,6 +21,7 @@ CHOICE_ID = "AtlasMonsterPackSizeSelector1"
 
 def choice_catalog():
     # Use the actual game's options and stable IDs, with compact test geometry.
+    """Build a compact two-node Atlas fixture retaining the bundled three-choice option order."""
     choice = copy.deepcopy(bundled_catalog()["nodes"][CHOICE_ID])
     choice.update(x=200, y=0)
     ordinary = {"id": "ordinary", "name": "Ordinary passive", "kind": "small",
@@ -35,20 +36,25 @@ class RecordingPainter(QPainter):
     """Observe text sent to the real raster paint path."""
 
     def __init__(self, image):
+        """Initialize raster painting and an ordered list of observed text labels."""
         super().__init__(image)
         self.labels = []
 
     def drawText(self, *args):
+        """Record each text label while forwarding the draw call to the real painter."""
         self.labels.append(str(args[-1]))
         return super().drawText(*args)
 
 
 class AtlasChoiceBadgeTests(unittest.TestCase):
+    """Check choice badge numbering, allocation toggles, hover details and screen-space zoom behavior."""
     @classmethod
     def setUpClass(cls):
+        """Create or reuse the QApplication required by the Qt test fixtures."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Patch the Atlas catalog and show a settings page with compact choice-node geometry."""
         self.data = choice_catalog()
         self.catalog_patch = patch("PoE2_Data_Logger.ui.atlas_settings.catalog", return_value=self.data)
         self.catalog_patch.start()
@@ -58,6 +64,7 @@ class AtlasChoiceBadgeTests(unittest.TestCase):
         self.app.processEvents()
 
     def tearDown(self):
+        """Dismiss tooltips and dropdowns, destroy the settings page and restore the catalog."""
         QToolTip.hideText()
         self.page.choice_combo.hidePopup()
         self.page.close()
@@ -66,6 +73,7 @@ class AtlasChoiceBadgeTests(unittest.TestCase):
         self.catalog_patch.stop()
 
     def painted_labels(self, node_id=CHOICE_ID):
+        """Paint a node badge to an image and return the text labels drawn."""
         image = QImage(200, 200, QImage.Format.Format_ARGB32_Premultiplied)
         image.fill(Qt.GlobalColor.transparent)
         painter = RecordingPainter(image)
@@ -78,11 +86,13 @@ class AtlasChoiceBadgeTests(unittest.TestCase):
             painter.end()
 
     def tooltip_text(self):
+        """Convert the choice node tooltip from HTML to plain text for assertions."""
         document = QTextDocument()
         document.setHtml(self.page.node_items[CHOICE_ID].toolTip())
         return document.toPlainText()
 
     def click_choice_face(self):
+        """Click the screen-space badge center and process the resulting Qt events."""
         item = self.page.node_items[CHOICE_ID]
         # Click the screen-fixed number, not just the icon's center.
         point = self.page.view.mapFromScene(item.choice_badge.scenePos())
@@ -90,11 +100,13 @@ class AtlasChoiceBadgeTests(unittest.TestCase):
         self.app.processEvents()
 
     def set_choice(self, number, allocated=True):
+        """Load a numbered catalog option with the requested allocation state."""
         choice_id = self.data["nodes"][CHOICE_ID]["choices"][number - 1]["id"]
         self.page.set_settings({"allocated": [CHOICE_ID] if allocated else [],
                                 "choices": {CHOICE_ID: choice_id}}, force=True)
 
     def test_game_option_numbers_match_dropdown_selection_paint_and_hover(self):
+        """Verify game option numbers match dropdown selection paint and hover."""
         self.click_choice_face()
         combo = self.page.choice_combo
         self.assertTrue(combo.view().isVisible())
@@ -115,6 +127,7 @@ class AtlasChoiceBadgeTests(unittest.TestCase):
         self.assertNotIn("Selected effect: 1.", tooltip)
 
     def test_saved_options_paint_their_number_including_third_option(self):
+        """Verify saved options paint their number including third option."""
         for number, name in enumerate(("Pack Size", "Effectiveness", "Rarity"), 1):
             with self.subTest(number=number):
                 self.set_choice(number)
@@ -122,6 +135,7 @@ class AtlasChoiceBadgeTests(unittest.TestCase):
                 self.assertIn(f"Selected effect: {number}. {name}", self.tooltip_text())
 
     def test_clicking_badge_turns_node_off_without_losing_saved_choice(self):
+        """Verify clicking badge turns node off without losing saved choice."""
         self.set_choice(3)
         self.click_choice_face()
         self.assertNotIn(CHOICE_ID, self.page.settings()["allocated"])
@@ -134,6 +148,7 @@ class AtlasChoiceBadgeTests(unittest.TestCase):
         self.assertEqual(self.page.settings()["choices"][CHOICE_ID], "AtlasMonsterPackSizeSelector1c")
 
     def test_autofill_and_clear_preserve_choice_without_painting_inactive_badge(self):
+        """Verify autofill and clear preserve choice without painting inactive badge."""
         self.set_choice(2, allocated=False)
         self.assertEqual(self.painted_labels(), [])
         self.page.autofill_button.click()
@@ -146,6 +161,7 @@ class AtlasChoiceBadgeTests(unittest.TestCase):
         self.assertEqual(self.painted_labels(), ["2"])
 
     def test_unset_choice_has_no_option_number_or_invented_default(self):
+        """Verify unset choice has no option number or invented default."""
         self.page.autofill_button.click()
         self.assertEqual(self.painted_labels(), [])
         self.assertIn("awaiting a selection", self.page.summary.text())
@@ -159,6 +175,7 @@ class AtlasChoiceBadgeTests(unittest.TestCase):
         self.assertIn("awaiting a selection", self.page.summary.text())
 
     def test_number_comes_from_catalog_order_instead_of_variant_id_suffix(self):
+        """Verify number comes from catalog order instead of variant ID suffix."""
         node = self.data["nodes"][CHOICE_ID]
         node["choices"][:] = [node["choices"][2], node["choices"][0], node["choices"][1]]
         self.page.set_settings({"allocated": [CHOICE_ID],
@@ -167,6 +184,7 @@ class AtlasChoiceBadgeTests(unittest.TestCase):
         self.assertIn("Selected effect: 2. Pack Size", self.tooltip_text())
 
     def test_sidepanel_keeps_actual_seven_and_eight_option_lists(self):
+        """Verify sidepanel keeps actual seven and eight option lists."""
         for node_id in ("AtlasEssenceNotable13", "AtlasEssenceNotable11"):
             with self.subTest(node_id=node_id):
                 options = copy.deepcopy(bundled_catalog()["nodes"][node_id]["choices"])
@@ -190,6 +208,7 @@ class AtlasChoiceBadgeTests(unittest.TestCase):
                     self.assertIn(f"{number}. {option['name']}", self.page.node_effects.toPlainText())
 
     def test_hovering_between_badge_and_icon_keeps_node_hovered(self):
+        """Verify hovering between badge and icon keeps node hovered."""
         item = self.page.node_items[CHOICE_ID]
         self.page.view.resetTransform()
         self.page.view.centerOn(item)
@@ -208,6 +227,7 @@ class AtlasChoiceBadgeTests(unittest.TestCase):
         # The offscreen Qt platform routes hover to overlapping top-level
         # windows inconsistently. Keep only the page under test visible,
         # as it is when opened inside the logger's single window.
+        """Verify fitted bundled tree badge is readable clickable and tracks zoom."""
         self.page.hide()
         data = bundled_catalog()
         with patch("PoE2_Data_Logger.ui.atlas_settings.catalog", return_value=data):

@@ -12,7 +12,9 @@ from PoE2_Data_Logger.core import logger_store as logger, store, workbook_export
 
 
 class RitualRewardStorageTests(unittest.TestCase):
+    """Check validated Ritual pages, correction identities, and ordered spreadsheet exports."""
     def setUp(self):
+        """Initialize temporary logger storage, reset IDs, and start the first map."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-ritual-storage-")
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -22,22 +24,26 @@ class RitualRewardStorageTests(unittest.TestCase):
         logger.start_map()
 
     def tearDown(self):
+        """Restore the original data directory and remove the isolated logger database."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.tmp.cleanup()
 
     def records(self):
+        """Snapshot logger metadata, maps, Ritual pages, and commits to detect partial writes."""
         with logger._connect() as db:
             return {table: [tuple(row) for row in db.execute(f"SELECT * FROM {table} ORDER BY rowid")]
                     for table in ("meta", "maps", "ritual_pages", "commits")}
 
     def rows(self, exporter):
+        """Run a CSV exporter, validate headers and row widths, and return named rows."""
         rows = list(csv.reader(io.StringIO(exporter().decode("utf-8-sig"))))
         self.assertEqual(len(rows[0]), len(set(rows[0])))
         self.assertTrue(all(len(row) == len(rows[0]) for row in rows))
         return [dict(zip(rows[0], row)) for row in rows[1:]]
 
     def test_unresolved_blank_reward_blocks_whole_page_then_manual_edits_save(self):
+        """Verify unresolved blank reward blocks whole page then manual edits save."""
         rewards = [{"category": "Omen", "name": "Omen of Whittling", "quantity": 1, "tribute": 250},
                    {"category": "Item", "name": "", "quantity": None, "tribute": None,
                     "needs_review": True, "source": "Occupied reward; name not resolved"}]
@@ -54,6 +60,7 @@ class RitualRewardStorageTests(unittest.TestCase):
                                      "source": "Occupied reward; name not resolved"})
 
     def test_currency_equipment_omen_and_deferred_metrics_preserve_order(self):
+        """Verify currency equipment omen and deferred metrics preserve order."""
         rewards = [
             {"category": "Item", "name": "Chaos Orb", "quantity": 5, "tribute": 0},
             {"category": "Item", "name": "Unregistered rare helmet", "quantity": 1, "tribute": None},
@@ -77,6 +84,7 @@ class RitualRewardStorageTests(unittest.TestCase):
                          ["Chaos Orb", "Unregistered rare helmet", "", "Unregistered rare belt"])
 
     def test_invalid_manual_rows_fail_without_creating_partial_pages(self):
+        """Verify invalid manual rows fail without creating partial pages."""
         known = {"category": "Item", "name": "Chaos Orb", "quantity": 1}
         before = self.records()
         for edit in ({"name": " "}, {"category": "Currency"}, {"quantity": ""},
@@ -86,6 +94,7 @@ class RitualRewardStorageTests(unittest.TestCase):
             self.assertEqual(self.records(), before)
 
     def test_full_120_slot_page_saves_all_rewards_and_121_is_rejected_atomically(self):
+        """Verify a 120-reward page saves in order and an overflow page leaves storage unchanged."""
         items = [{"category": "Item", "name": f"Reward {index + 1}", "quantity": 1,
                   "tribute": index, "deferred": index % 2 == 0} for index in range(120)]
         saved = logger.save_ritual_page(items, scan_hash="a" * 64)
@@ -101,6 +110,7 @@ class RitualRewardStorageTests(unittest.TestCase):
         self.assertEqual(self.records(), before)
 
     def test_same_capture_correction_keeps_page_identity_and_original_history(self):
+        """Verify same capture correction keeps page identity and original history."""
         atlas = dict(logger.get_state()["settings"]["atlas_settings"])
         atlas["gear_item_rarity"] = 100
         logger.save_atlas_settings(atlas)
@@ -132,6 +142,7 @@ class RitualRewardStorageTests(unittest.TestCase):
         self.assertEqual(exported[0]["Scan Commit #"], str(second["scan_commit_number"]))
 
     def test_capture_identity_is_map_scoped_and_old_map_cannot_be_overwritten(self):
+        """Verify capture identity is map scoped and old map cannot be overwritten."""
         logger.save_ritual_page([{"name": "First map reward", "quantity": 1}], scan_hash="a" * 64)
         logger.finish_map(0, 0, 0)
         logger.start_map()
@@ -148,6 +159,7 @@ class RitualRewardStorageTests(unittest.TestCase):
                          ["First map reward", "Second map reward"])
 
     def test_manual_names_and_sources_export_as_text_not_spreadsheet_formulas(self):
+        """Verify manual names and sources export as text not spreadsheet formulas."""
         logger.save_ritual_page([{"name": "=SUM(1,2)", "quantity": 1, "source": "@unexpected source"}],
                                raw_text="+captured text")
         row = self.rows(logger.export_ritual_csv)[0]

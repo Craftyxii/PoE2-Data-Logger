@@ -20,11 +20,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
 class CoreRegressionTests(unittest.TestCase):
+    """Check seed reward mappings, immutable snapshots, and concurrent settings/tablet writes."""
     @classmethod
     def setUpClass(cls):
+        """Create or reuse the QApplication needed by these widget tests."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Initialize a temporary logger database and start its first map."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-core-regressions-")
         self.previous_data_dir = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -33,16 +36,19 @@ class CoreRegressionTests(unittest.TestCase):
         logger.start_map()
 
     def tearDown(self):
+        """Restore the original data directory and remove the isolated logger database."""
         store.DATA_DIR = self.previous_data_dir
         logger._READY = False
         self.tmp.cleanup()
 
     def stage(self):
+        """Read the highest-socket seed stage in family 3 from the database."""
         with logger._connect() as db:
             return dict(db.execute("SELECT * FROM seed_states WHERE family=3 "
                                    "ORDER BY sockets DESC LIMIT 1").fetchone())
 
     def seed_result(self, stage, count=1):
+        """Build repeated confident seed readings with current map and pending-remnant context."""
         reading = {"sockets": stage["sockets"], "seed_slot": stage["seed_slot"],
                    "seed_rune": stage["seed_rune"], "family": "Family 3", "candidates": [3],
                    "can_commit": True, "rewards": json.loads(stage["rewards_json"])}
@@ -50,16 +56,19 @@ class CoreRegressionTests(unittest.TestCase):
                 **logger.scan_context(), **logger.assign_ocr_id("seed")}
 
     def selection(self, stage, index=0):
+        """Build the selected family-3 seed tuple for a reading index."""
         return {"index": index, "family": 3, "sockets": stage["sockets"],
                 "seed_slot": stage["seed_slot"], "seed_rune": stage["seed_rune"]}
 
     def commit_recipes(self, number):
+        """Read recipe names saved in the requested commit audit record."""
         with logger._connect() as db:
             details = json.loads(db.execute("SELECT details_json FROM commits WHERE number=?",
                                             (number,)).fetchone()[0])
         return [row["recipe"] for row in details["recipes"]]
 
     def test_local_stage_review_and_commit_include_only_mapped_rewards(self):
+        """Verify local stage review and commit include only mapped rewards."""
         stage = self.stage()
         rewards = ["Chaos Orb", "Sovereign Alloy"]
         logger.save_seed_state({**stage, "rewards": rewards})
@@ -89,6 +98,7 @@ class CoreRegressionTests(unittest.TestCase):
             self.app.processEvents()
 
     def test_builtin_seed_stage_rewards_keep_the_full_family_order(self):
+        """Verify builtin seed stage rewards keep the full family order."""
         with logger._connect() as db:
             for stage in db.execute("SELECT s.* FROM seed_states s JOIN families f ON f.id=s.family WHERE f.valid=1"):
                 rewards = json.loads(stage["rewards_json"])
@@ -107,6 +117,7 @@ class CoreRegressionTests(unittest.TestCase):
                          set(json.loads(stage["rewards_json"])))
 
     def test_partial_seed_approval_updates_context_after_implicit_map_start(self):
+        """Verify partial seed approval updates context after implicit map start."""
         logger.finish_map(12, 3, 1, 2)
         stage = self.stage()
         result = self.seed_result(stage, count=2)
@@ -122,6 +133,7 @@ class CoreRegressionTests(unittest.TestCase):
         self.assertIsNone(second["pending"])
 
     def test_new_map_and_reference_edits_preserve_prior_records_and_settings(self):
+        """Verify new map and reference edits preserve prior records and settings."""
         logger.save_settings({"tier": 16, "waystone": 87})
         logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 10}])
         logger.save_currency_snapshot("end", [{"name": "Chaos Orb", "quantity": 15}])
@@ -146,11 +158,13 @@ class CoreRegressionTests(unittest.TestCase):
         self.assertTrue(all(json.loads(row[-2])["waystone"] == 87 for row in before["commits"]))
 
     def test_concurrent_partial_settings_updates_both_survive(self):
+        """Verify concurrent partial settings updates both survive."""
         first_read = threading.Event()
         second_saved = threading.Event()
         original_validate = logger._validate_settings
 
         def pause_first(db, data):
+            """Pause the waystone validation until the competing settings save can run."""
             settings = original_validate(db, data)
             if data == {"waystone": 87}:
                 first_read.set()
@@ -158,6 +172,7 @@ class CoreRegressionTests(unittest.TestCase):
             return settings
 
         def save_second():
+            """Save the competing biome update and signal its completion."""
             result = logger.save_settings({"biome": "Forest"})
             second_saved.set()
             return result
@@ -172,11 +187,13 @@ class CoreRegressionTests(unittest.TestCase):
         self.assertEqual((settings["waystone"], settings["biome"]), (87, "Forest"))
 
     def test_concurrent_tablet_scans_receive_distinct_slots_and_history(self):
+        """Verify concurrent tablet scans receive distinct slots and history."""
         first_read = threading.Event()
         second_saved = threading.Event()
         original_validate = logger._validate_settings
 
         def pause_first(db, data):
+            """Pause validation of the first tablet to expose competing slot assignment."""
             settings = original_validate(db, data)
             if data["tablet_affixes"][0]["value"] == 10 and not first_read.is_set():
                 first_read.set()
@@ -184,10 +201,12 @@ class CoreRegressionTests(unittest.TestCase):
             return settings
 
         def save_tablet(amount):
+            """Save a synthetic Essence tablet with the requested modifier amount."""
             return logger.save_scanned_tablet([{"affix": "Chance to Contain Essences", "value": amount}],
                                              [f"{amount}% chance to contain Essences"])
 
         def save_second():
+            """Save the second tablet and signal completion to the paused first scan."""
             number = save_tablet(20)
             second_saved.set()
             return number
@@ -207,6 +226,7 @@ class CoreRegressionTests(unittest.TestCase):
         self.assertEqual(json.loads(commits[1][1])["tablet_affixes"][4]["value"], 20)
 
     def test_tablet_commit_failure_rolls_back_settings_and_slot(self):
+        """Verify tablet commit failure rolls back settings and slot."""
         before = logger.get_state()["settings"]
         with patch.object(logger, "_record_commit", side_effect=ValueError("Commit failed")):
             with self.assertRaisesRegex(ValueError, "Commit failed"):

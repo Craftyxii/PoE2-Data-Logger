@@ -12,38 +12,46 @@ from PoE2_Data_Logger.ocr import currency_ocr, item_ocr
 
 
 class InventoryEmptySlotTests(unittest.TestCase):
+    """Check empty-slot rejection and occupied-item matching beside multicell equipment."""
     @classmethod
     def setUpClass(cls):
+        """Load the currency reader, real inventory capture, and bundled icon catalog."""
         cls.reader = currency_ocr.CurrencyReader()
         cls.source = Image.open(Path(item_ocr.__file__).resolve().parent.parent /
                                 "region_examples" / "inventory.jpg").convert("RGB")
         cls.entries = json.loads((currency_ocr.ROOT / "inventory-icons.json").read_text())["icons"]
 
     def grid(self, size=(648, 270)):
+        """Create a dark synthetic inventory marked as already aligned."""
         image = Image.new("RGB", size, (26, 26, 40))
         image.info["poe2_inventory_aligned"] = True
         return image
 
     def art(self, name):
+        """Composite a named bundled inventory icon over the inventory background."""
         entry = next(entry for entry in self.entries if name in entry["members"])
         image = Image.new("RGBA", (40, 40), (26, 26, 40, 255))
         image.alpha_composite(Image.fromarray(np.asarray(entry["rgba"], dtype=np.uint8).reshape(40, 40, 4)))
         return image.convert("RGB")
 
     def reference(self, name, image):
+        """Encode an image as a named PNG reference for local icon matching."""
         raw = io.BytesIO()
         image.save(raw, format="PNG")
         return {"name": name, "image": raw.getvalue()}
 
     def scan(self, image, references=()):
+        """Scan with the shared fixture reader and no OCR text labels."""
         with patch.object(currency_ocr, "get_reader", return_value=self.reader):
             return item_ocr.scan_inventory_grid(image, references, read=lambda _: [])
 
     def selected_empty(self):
+        """Extract empty slot 59 from the aligned real inventory fixture."""
         original = item_ocr.inventory_grid(self.source.crop((1153, 657, 1804, 937)))
         return item_ocr.inventory_cell(original, 59)
 
     def test_selected_empty_cannot_be_resurrected_by_saved_reference(self):
+        """Verify selected empty cannot be resurrected by saved reference."""
         cell = self.selected_empty()
         image = self.grid()
         image.paste(cell, (0, 0))
@@ -56,6 +64,7 @@ class InventoryEmptySlotTests(unittest.TestCase):
         examples.assert_not_called()
 
     def test_explicit_local_reference_can_override_ignored_catalog_art(self):
+        """Verify explicit local reference can override ignored catalog art."""
         cell = self.art("Lesser Ward Rune").resize((54, 54))
         image = self.grid()
         image.paste(cell, (0, 0))
@@ -69,6 +78,7 @@ class InventoryEmptySlotTests(unittest.TestCase):
         examples.assert_called_once()
 
     def test_occupied_unknown_icon_can_still_use_local_omen_reference(self):
+        """Verify occupied unknown icon can still use local omen reference."""
         cell = Image.fromarray(np.random.default_rng(729).integers(45, 190, (54, 54, 3), dtype=np.uint8))
         image = self.grid()
         image.paste(cell, (0, 0))
@@ -82,6 +92,7 @@ class InventoryEmptySlotTests(unittest.TestCase):
         self.assertEqual(result["unknown"], [])
 
     def test_dark_catalog_currency_still_reaches_matcher_and_is_not_marked_empty(self):
+        """Verify dark catalog currency still reaches matcher and is not marked empty."""
         for name in ("Petition Splinter", "Runic Alloy", "Orb of Extraction", "Preserved Vertebrae"):
             cell = Image.fromarray((np.asarray(self.art(name)).astype(np.float32) * .65).astype(np.uint8))
             for size in (40, 54, 72):
@@ -92,6 +103,7 @@ class InventoryEmptySlotTests(unittest.TestCase):
                 self.assertFalse(result.get("empty", False))
 
     def test_unknown_single_cell_beside_body_armour_remains_reviewable(self):
+        """Verify unknown single cell beside body armour remains reviewable."""
         image = self.grid((480, 200))
         image.paste(self.source.crop((1425, 284, 1524, 431)).resize((80, 120)), (200, 40))
         image.paste(self.source.crop((1352, 322, 1402, 378)).resize((40, 40)), (40, 120))
@@ -100,6 +112,7 @@ class InventoryEmptySlotTests(unittest.TestCase):
         self.assertEqual([entry["slot"] for entry in result["unknown"]], [38])
 
     def test_currency_adjacent_to_multicell_gear_is_not_discarded(self):
+        """Verify currency adjacent to multicell gear is not discarded."""
         image = self.grid((480, 200))
         image.paste(self.source.crop((1425, 284, 1524, 431)).resize((80, 120)), (200, 40))
         image.paste(self.art("Chaos Orb"), (160, 40))

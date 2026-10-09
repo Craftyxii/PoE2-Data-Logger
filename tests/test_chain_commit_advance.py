@@ -12,7 +12,9 @@ from PoE2_Data_Logger.core import logger_store as logger, store
 
 
 class ChainCommitAdvanceTests(unittest.TestCase):
+    """Exercise durable chain appends, completion, correction, request replay and atomic rollback."""
     def setUp(self):
+        """Start a fresh isolated map database for each chain transaction check."""
         self.tmp = tempfile.TemporaryDirectory()
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -22,24 +24,29 @@ class ChainCommitAdvanceTests(unittest.TestCase):
         logger.start_map()
 
     def tearDown(self):
+        """Restore the logger data directory and remove the temporary database."""
         store.DATA_DIR = self.previous
         logger._READY = False
         self.tmp.cleanup()
 
     def records(self):
+        """Snapshot chain-related database tables to detect unintended transaction writes."""
         with logger._connect() as db:
             return {table: [tuple(row) for row in db.execute(f"SELECT * FROM {table} ORDER BY rowid")]
                     for table in ("meta", "maps", "expeditions", "new_export", "commits",
                                   "chain_completions", "chain_append_receipts")}
 
     def commits(self):
+        """Read saved commit records in commit-number order."""
         with logger._connect() as db:
             return [dict(row) for row in db.execute("SELECT * FROM commits ORDER BY number")]
 
     def read_csv(self, data):
+        """Decode an exported CSV into dictionaries for field assertions."""
         return list(csv.DictReader(io.StringIO(data.decode("utf-8-sig"))))
 
     def test_repeat_append_preserves_pairs_and_order_until_complete_then_restart(self):
+        """Verify ordered rune pairs survive restart and explicit completion closes and advances the chain."""
         context = logger.scan_context()
         first = logger.commit_chain_draft([{"rune1": "Death", "rune2": "Power"}], context, request_id="scan-a")
         second = logger.commit_chain_draft([{"rune1": "Opulent"}], context, request_id="scan-b")
@@ -68,6 +75,7 @@ class ChainCommitAdvanceTests(unittest.TestCase):
         self.assertTrue(all(row["Chain Status"] == "Completed" for row in self.read_csv(logger.export_csv())))
 
     def test_concurrent_identical_request_saves_once_but_new_scan_may_repeat_same_rune(self):
+        """Verify concurrent request replay saves once while a distinct scan may append the same rune."""
         context = logger.scan_context()
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(lambda _: logger.commit_chain_draft(
@@ -84,6 +92,7 @@ class ChainCommitAdvanceTests(unittest.TestCase):
         self.assertEqual(self.records(), before)
 
     def test_atomic_confident_accept_counts_once_per_part_and_replays_after_completion(self):
+        """Verify confident acceptance counts each part once and replays without writes after completion."""
         context = logger.scan_context()
         first = logger.accept_propagation_part(context, runes=["Death", "Power"], recipe="Unique Belt", request_id="a")
         second = logger.accept_propagation_part(context, runes=["Time"], recipe="Chaos Orb", request_id="b")
@@ -104,10 +113,12 @@ class ChainCommitAdvanceTests(unittest.TestCase):
         self.assertEqual([row[33] for row in self._raw_rows()], [2, ""])
 
     def _raw_rows(self):
+        """Decode saved export row JSON in export-position order."""
         with logger._connect() as db:
             return [json.loads(row[0]) for row in db.execute("SELECT row_json FROM new_export ORDER BY position")]
 
     def test_auto_save_failure_rolls_back_count_audits_parts_and_receipt(self):
+        """Verify failed automatic acceptance rolls back counts, audits, parts and replay receipts."""
         before = self.records()
         with patch.object(logger, "_add_new", side_effect=RuntimeError("write failed")):
             with self.assertRaisesRegex(RuntimeError, "write failed"):
@@ -117,10 +128,12 @@ class ChainCommitAdvanceTests(unittest.TestCase):
         self.assertEqual((result["detonated"], result["steps"], result["scan_commit_number"]), (1, [1], 2))
 
     def test_append_batch_failure_is_atomic(self):
+        """Verify failure during a multi-part append rolls back the whole batch."""
         before = self.records()
         insert = logger._add_new
         count = 0
         def fail_second(db, row):
+            """Inject failure on the second export-row insertion to test batch rollback."""
             nonlocal count
             count += 1
             if count == 2:
@@ -132,6 +145,7 @@ class ChainCommitAdvanceTests(unittest.TestCase):
         self.assertEqual(self.records(), before)
 
     def test_completion_repeated_callbacks_are_idempotent_and_do_not_overwrite_existing_eid(self):
+        """Verify duplicate completion advances once without overwriting an existing expedition."""
         logger.save_settings({"expedition": 2})
         logger.commit_chain("Power")
         logger.save_settings({"expedition": 1})
@@ -148,10 +162,12 @@ class ChainCommitAdvanceTests(unittest.TestCase):
         self.assertFalse(logger.get_state()["chain_completed"])
 
     def test_completion_failure_rolls_back_closure_and_advance(self):
+        """Verify failed selection persistence rolls back chain closure and expedition advancement."""
         logger.commit_chain("Death")
         before = self.records()
         save = logger._set_meta
         def fail_selection(db, key, value):
+            """Fail settings persistence while allowing other metadata writes to test completion rollback."""
             if key == "settings":
                 raise RuntimeError("settings write failed")
             return save(db, key, value)
@@ -161,6 +177,7 @@ class ChainCommitAdvanceTests(unittest.TestCase):
         self.assertEqual(self.records(), before)
 
     def test_empty_invalid_or_stale_operations_do_not_mutate(self):
+        """Verify empty, malformed and stale chain operations leave saved tables unchanged."""
         before = self.records()
         for steps in ([], [{"rune1": ""}], ["Death"], [{"rune1": 7}]):
             with self.subTest(steps=steps), self.assertRaises(ValueError):
@@ -179,6 +196,7 @@ class ChainCommitAdvanceTests(unittest.TestCase):
             self.assertEqual(self.records(), before)
 
     def test_closed_chain_rejects_new_parts_counts_and_corrections_but_remnant_is_independent(self):
+        """Verify completed chains reject edits while an independently reserved remnant can still save."""
         context = logger.scan_context()
         pending = logger.assign_ocr_id("opened")
         logger.accept_propagation_part(context, runes=["Death"], request_id="accepted")
@@ -200,6 +218,7 @@ class ChainCommitAdvanceTests(unittest.TestCase):
             self.assertEqual(self.records(), before)
 
     def test_building_correction_preserves_ids_counts_original_commits_and_final_snapshot(self):
+        """Verify chain correction changes only intended rune fields and records the final corrected snapshot."""
         context = logger.scan_context()
         logger.accept_propagation_part(context, runes=["Death", "Power"], request_id="a")
         original = self.commits()
@@ -228,6 +247,7 @@ class ChainCommitAdvanceTests(unittest.TestCase):
                          [{"step": 1, "rune1": "Time", "rune2": "Power"}])
 
     def test_reset_removes_closure_receipts_and_invalidates_old_captures(self):
+        """Verify session reset clears completion receipts and invalidates old capture contexts."""
         context = logger.scan_context()
         logger.commit_chain_draft([{"rune1": "Death"}], context, request_id="a")
         logger.complete_chain(context)
@@ -242,6 +262,7 @@ class ChainCommitAdvanceTests(unittest.TestCase):
         self.assertFalse(self.records()["chain_append_receipts"])
 
     def test_long_saved_chain_can_be_corrected_without_using_draft_size_limit(self):
+        """Verify a saved chain exceeding the draft batch limit can still be corrected and completed."""
         context = logger.scan_context()
         logger.commit_chain_draft([{"rune1": "Death"} for _ in range(96)], context)
         logger.commit_chain_draft([{"rune1": "Power"} for _ in range(4)], context)
@@ -253,6 +274,7 @@ class ChainCommitAdvanceTests(unittest.TestCase):
         self.assertEqual(logger.complete_chain(context)["step_count"], 100)
 
     def test_legacy_parts_are_not_inferred_completed_and_next_chain_cannot_bypass_closure(self):
+        """Verify legacy parts remain open until advancing explicitly records chain completion."""
         logger.commit_chain("Rage", "Time")
         saved = logger.commit_chain_runes(["Death", "Power"])
         self.assertEqual(saved["steps"], [2, 3])

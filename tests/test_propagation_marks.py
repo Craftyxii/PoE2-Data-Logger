@@ -10,21 +10,26 @@ from PoE2_Data_Logger.ocr.propagation_marks import supported_peak_boxes, three_p
 
 
 class PropagationPeakTests(unittest.TestCase):
+    """Check crown detection requires three supported peaks and survives capture changes."""
     @classmethod
     def setUpClass(cls):
+        """Load the real opened-panel fixture used for crown geometry checks."""
         path = Path(__file__).resolve().parents[1] / "PoE2_Data_Logger/region_examples/opened.jpg"
         with Image.open(path) as source:
             cls.source = runehelper_ocr.default_frame(source.convert("RGB"))
 
     def masks(self, image):
+        """Yield gold masks under several brightness adjustments."""
         for factor in (1, .9, 1.1, .8, 1.2, 1.35, 1.5, .95, 1.05, 1.25):
             yield factor, propagation_scan._gold_mask(ImageEnhance.Brightness(image).enhance(factor))
 
     def markers(self, image, rows, layout, tile_size=38):
+        """Find supported crown boxes and order them vertically."""
         found = supported_peak_boxes(self.masks(image), rows, tile_layout=layout, tile_size=tile_size)
         return sorted(found, key=lambda box: box[1])
 
     def crown(self, offsets, frame=False):
+        """Draw a synthetic crown with configurable peaks and an optional socket frame."""
         image = Image.new("RGB", (575, 200), (176, 161, 130))
         draw = ImageDraw.Draw(image)
         if frame:
@@ -35,6 +40,7 @@ class PropagationPeakTests(unittest.TestCase):
         return image
 
     def test_three_crown_peaks_do_not_require_a_frame(self):
+        """Verify three crown peaks qualify with or without a surrounding frame."""
         for frame in (False, True):
             with self.subTest(frame=frame):
                 boxes = self.markers(self.crown((-9, 0, 9), frame), [{"y1": 109}], (71, 41))
@@ -43,12 +49,14 @@ class PropagationPeakTests(unittest.TestCase):
                 self.assertAlmostEqual(boxes[0][1], 68, delta=2)
 
     def test_ordinary_highlight_and_one_or_two_peaks_never_qualify(self):
+        """Verify frames and incomplete peak groups never qualify as crowns."""
         for offsets in ((), (0,), (-9, 9)):
             for frame in (False, True):
                 with self.subTest(offsets=offsets, frame=frame):
                     self.assertEqual(self.markers(self.crown(offsets, frame), [{"y1": 109}], (71, 41)), [])
 
     def test_rune_artwork_strokes_in_the_same_band_do_not_qualify(self):
+        """Verify long glyph strokes in the crown band are rejected."""
         image = self.crown(())
         draw = ImageDraw.Draw(image)
         for centre in (62, 71, 80):
@@ -56,16 +64,19 @@ class PropagationPeakTests(unittest.TestCase):
         self.assertEqual(self.markers(image, [{"y1": 109}], (71, 41)), [])
 
     def test_missing_recipe_rows_never_searches_unrelated_gold_text(self):
+        """Verify absent reward rows prevent searching unrelated gold pixels."""
         mask = propagation_scan._gold_mask(self.crown((-9, 0, 9)))
         self.assertEqual(three_peak_boxes(mask, [], tile_layout=(71, 41)), [])
 
     def test_real_recipe_crowns_have_no_extra_marks_from_glyphs_or_text(self):
+        """Verify the real fixture produces exactly its three slot-three crowns."""
         boxes = self.markers(self.source, [{"y1": y, "sockets": sockets}
                                             for y, sockets in ((109, 4), (189, 3), (270, 3))], (71, 41))
         self.assertEqual(len(boxes), 3)
         self.assertEqual([round((box[0] - 71) / 41) + 1 for box in boxes], [3, 3, 3])
 
     def test_real_crowns_survive_removed_frames_crops_scales_and_exposure(self):
+        """Verify real peak detection survives removed frames, cropping, scaling and brightness."""
         frameless = self.source.copy()
         draw = ImageDraw.Draw(frameless)
         # These independently observed crown positions belong to the three

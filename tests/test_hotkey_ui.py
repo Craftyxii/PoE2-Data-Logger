@@ -18,11 +18,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
 class HotkeyUITests(unittest.TestCase):
+    """Check shortcut capture, validation, registration failures and restoration across UI navigation."""
     @classmethod
     def setUpClass(cls):
+        """Create or reuse the QApplication required by the Qt test fixtures."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Install an isolated hotkey manager with stubbed native listening and open shortcut settings."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-hotkey-ui-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -31,6 +34,7 @@ class HotkeyUITests(unittest.TestCase):
         self.manager = HotkeyManager(supported=True)
         self.manager.focused = None
         def listen(shortcuts, ready, outcome, stop):
+            """Signal successful native listener startup and wait for its stop event."""
             outcome["thread_id"] = 17
             ready.set()
             stop.wait(30)
@@ -46,6 +50,7 @@ class HotkeyUITests(unittest.TestCase):
         self.window.tabs.setCurrentIndex(6)
 
     def tearDown(self):
+        """Close the window and workers, restore hotkey/native patches and remove isolated logger data."""
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -56,13 +61,16 @@ class HotkeyUITests(unittest.TestCase):
         self.tmp.cleanup()
 
     def press(self, key, modifiers=Qt.KeyboardModifier.NoModifier):
+        """Send a key-press event with optional modifiers to the logger window."""
         self.app.sendEvent(self.window, QKeyEvent(QEvent.Type.KeyPress, key, modifiers))
 
     def saved_keys(self):
+        """Read the persisted OCR shortcut metadata from the test database."""
         with logger._connect() as db:
             return logger._meta(db, "ocr_shortcut", {})
 
     def assert_original_active(self):
+        """Assert the original shortcuts are registered, persisted and no longer being captured."""
         status = self.manager.status()
         self.assertEqual(status["combo"], "F8")
         self.assertEqual(status["combos"]["waystone"], "F9")
@@ -71,26 +79,31 @@ class HotkeyUITests(unittest.TestCase):
         self.assertFalse(self.window._capturing_hotkey)
 
     def test_reserved_key_restores_existing_shortcuts_and_keeps_error_visible(self):
+        """Verify reserved key restores existing shortcuts and keeps error visible."""
         self.window.arm_hotkey()
         self.press(Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
         self.assert_original_active()
         self.assertIn("item copy key", self.window.statusBar().currentMessage())
 
     def test_duplicate_key_restores_existing_shortcuts_and_keeps_error_visible(self):
+        """Verify duplicate key restores existing shortcuts and keeps error visible."""
         self.window.arm_hotkey()
         self.press(Qt.Key.Key_F9)
         self.assert_original_active()
         self.assertIn("different key combination", self.window.statusBar().currentMessage())
 
     def test_unsupported_key_restores_existing_shortcuts(self):
+        """Verify unsupported key restores existing shortcuts."""
         self.window.arm_hotkey()
         self.press(Qt.Key.Key_unknown)
         self.assert_original_active()
         self.assertIn("could not be captured", self.window.statusBar().currentMessage())
 
     def test_registration_failure_preserves_original_shortcuts(self):
+        """Verify registration failure preserves original shortcuts."""
         original_register = self.manager._register
         def register(shortcuts):
+            """Reject an F10 reassignment while allowing all other shortcut registrations."""
             if shortcuts.get("default", (0, 0))[1] == 0x79:
                 raise ValueError("Shortcut is unavailable or already in use.")
             return original_register(shortcuts)
@@ -101,6 +114,7 @@ class HotkeyUITests(unittest.TestCase):
         self.assertIn("unavailable", self.window.statusBar().currentMessage())
 
     def test_successful_assignment_is_active_and_persisted(self):
+        """Verify successful assignment is active and persisted."""
         self.window.arm_hotkey()
         self.press(Qt.Key.Key_F10, Qt.KeyboardModifier.ControlModifier)
         self.assertEqual(self.manager.status()["combo"], "Ctrl+F10")
@@ -109,6 +123,7 @@ class HotkeyUITests(unittest.TestCase):
         self.assertFalse(self.window._capturing_hotkey)
 
     def test_clear_while_armed_cancels_capture_and_preserves_other_shortcuts(self):
+        """Verify clear while armed cancels capture and preserves other shortcuts."""
         self.window.arm_hotkey()
         self.window.clear_hotkey()
         self.press(Qt.Key.Key_F10)
@@ -119,6 +134,7 @@ class HotkeyUITests(unittest.TestCase):
         self.assertEqual(self.saved_keys()["combo"], "")
 
     def test_clear_other_shortcut_cancels_capture_without_changing_general_key(self):
+        """Verify clear other shortcut cancels capture without changing general key."""
         self.window.arm_hotkey()
         self.window.clear_hotkey("waystone")
         self.press(Qt.Key.Key_F10)
@@ -128,6 +144,7 @@ class HotkeyUITests(unittest.TestCase):
         self.assertTrue(self.manager.status()["registered"])
 
     def test_clear_last_shortcut_stays_off_when_settings_are_reloaded(self):
+        """Verify clear last shortcut stays off when settings are reloaded."""
         self.window.clear_hotkey("waystone")
         self.window.arm_hotkey()
         self.window.clear_hotkey()
@@ -140,6 +157,7 @@ class HotkeyUITests(unittest.TestCase):
         self.assertFalse(self.window._capturing_hotkey)
 
     def test_failed_clear_restores_listener_after_cancelling_capture(self):
+        """Verify failed clear restores listener after cancelling capture."""
         self.window.arm_hotkey()
         with patch.object(self.manager, "configure", side_effect=ValueError("Clear failed.")):
             self.window.run(self.window.clear_hotkey)
@@ -147,6 +165,7 @@ class HotkeyUITests(unittest.TestCase):
         self.assertEqual(self.window.statusBar().currentMessage(), "Clear failed.")
 
     def test_cancel_restores_listener_and_overlay_escape(self):
+        """Verify cancel restores listener and overlay escape."""
         self.window._overlay_enabled = True
         self.window.arm_hotkey()
         self.assertFalse(self.window.overlay_escape.isEnabled())
@@ -155,6 +174,7 @@ class HotkeyUITests(unittest.TestCase):
         self.assertTrue(self.window.overlay_escape.isEnabled())
 
     def test_modifiers_alone_keep_capture_active_until_key_is_pressed(self):
+        """Verify modifiers alone keep capture active until key is pressed."""
         self.window.arm_hotkey()
         self.press(Qt.Key.Key_Control, Qt.KeyboardModifier.ControlModifier)
         self.assertEqual(self.window._capturing_hotkey, "default")
@@ -165,6 +185,7 @@ class HotkeyUITests(unittest.TestCase):
         self.assertTrue(self.manager.status()["registered"])
 
     def test_region_navigation_cancels_capture_and_resumes_shortcuts_on_exit(self):
+        """Verify region navigation cancels capture and resumes shortcuts on exit."""
         self.window.arm_hotkey()
         self.window.tabs.setCurrentIndex(7)
         self.assertFalse(self.window._capturing_hotkey)
@@ -178,11 +199,13 @@ class HotkeyUITests(unittest.TestCase):
         self.assert_original_active()
 
     def test_leaving_scan_settings_cancels_capture_and_restores_shortcuts(self):
+        """Verify leaving scan settings cancels capture and restores shortcuts."""
         self.window.arm_hotkey()
         self.window.tabs.setCurrentIndex(4)
         self.assert_original_active()
 
     def test_hiding_overlay_cancels_capture_and_restores_shortcuts(self):
+        """Verify hiding overlay cancels capture and restores shortcuts."""
         self.window._overlay_enabled = True
         self.window.arm_hotkey()
         self.window.hide_overlay()

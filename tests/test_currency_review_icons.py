@@ -19,11 +19,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
 class CurrencyReviewIconsTests(unittest.TestCase):
+    """Exercise inventory-review icons, slot evidence, callback freshness and saved preview locking."""
     @classmethod
     def setUpClass(cls):
+        """Reuse or create the QApplication required by inventory-review widgets."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Create an isolated desktop window and queue scan jobs for controlled callback delivery."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-currency-review-icons-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -35,6 +38,7 @@ class CurrencyReviewIconsTests(unittest.TestCase):
         self.window._submit = lambda label, work, done=None: self.jobs.append((work, done))
 
     def tearDown(self):
+        """Close desktop workers, restore the data directory and remove temporary storage."""
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -43,6 +47,7 @@ class CurrencyReviewIconsTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def grid(self, offset=0):
+        """Paint a normalized inventory grid with a distinct color for every slot."""
         image = Image.new("RGB", (481, 203))
         image.info["poe2_inventory_aligned"] = True
         draw = ImageDraw.Draw(image)
@@ -58,15 +63,18 @@ class CurrencyReviewIconsTests(unittest.TestCase):
         return image
 
     def capture(self, image):
+        """Deliver a capture and return its queued recognition callback."""
         self.window._inventory_captured(image, live=False)
         return self.jobs[-1][1]
 
     def result(self, known=(1,), unknown=()):
+        """Build known and unknown inventory result rows for selected slots."""
         return {"items": [{"slot": slot, "name": "Chaos Orb", "quantity": slot + 1}
                           for slot in known],
                 "unknown": [{"slot": slot, "candidate": "Regal Orb"} for slot in unknown]}
 
     def assert_icon(self, row, slot, image):
+        """Check that a noneditable icon cell represents the requested screenshot slot."""
         table = self.window.inventory_table
         cell = table.item(row, 0)
         self.assertEqual(cell.text(), "")
@@ -81,6 +89,7 @@ class CurrencyReviewIconsTests(unittest.TestCase):
                          expected.getpixel((expected.width // 2, expected.height // 2)))
 
     def test_known_and_unknown_rows_show_canonical_slot_crops_in_existing_icon_column_only(self):
+        """Verify known and unknown rows crop their original slots in the existing icon column."""
         image = self.grid()
         before = image.tobytes(), dict(image.info)
         callback = self.capture(image)
@@ -100,6 +109,7 @@ class CurrencyReviewIconsTests(unittest.TestCase):
         self.assertEqual((image.tobytes(), dict(image.info)), before)
 
     def test_rows_group_certainty_then_named_candidates_then_unknown_with_original_slot_evidence(self):
+        """Verify certainty and candidate sorting retain each row's original slot evidence."""
         image = self.grid()
         result = {"items": [
             {"slot": 60, "name": "Chaos Orb", "quantity": 7, "score": .1},
@@ -142,6 +152,7 @@ class CurrencyReviewIconsTests(unittest.TestCase):
         self.assertEqual(result, before)
 
     def test_manual_and_captureless_rows_keep_slot_text_without_reusing_old_screenshot(self):
+        """Verify manual and captureless rows show slot text without borrowing prior screenshot icons."""
         self.window.add_inventory_row({"slot": 23, "name": "Chaos Orb", "quantity": 2})
         cell = self.window.inventory_table.item(0, 0)
         self.assertEqual(cell.text(), "23")
@@ -159,6 +170,7 @@ class CurrencyReviewIconsTests(unittest.TestCase):
         self.assertTrue(self.window.inventory_table.item(0, 1).icon().isNull())
 
     def test_invalid_or_absent_manual_slots_do_not_crop_unrelated_cells(self):
+        """Verify invalid manual slot identifiers produce no unrelated icon crop."""
         image = self.grid()
         for slot in (0, 61, "bad", ""):
             with self.subTest(slot=slot):
@@ -168,6 +180,7 @@ class CurrencyReviewIconsTests(unittest.TestCase):
                 self.assertTrue(cell.icon().isNull())
 
     def test_full_capture_uses_normalized_inventory_grid_for_icons_and_preserves_input(self):
+        """Verify full captures normalize the grid for icons without modifying either source image."""
         grid = self.grid()
         raw = Image.new("RGB", (700, 400), "black")
         raw.paste(grid, (80, 60))
@@ -183,6 +196,7 @@ class CurrencyReviewIconsTests(unittest.TestCase):
         self.assertEqual(grid.tobytes(), before_grid)
 
     def test_stale_callbacks_cannot_restore_old_row_icons_before_or_after_latest_capture(self):
+        """Verify outdated callbacks cannot replace icons from the latest inventory capture."""
         older_image, newer_image = self.grid(), self.grid(offset=51)
         older = self.capture(older_image)
         newer = self.capture(newer_image)
@@ -198,6 +212,7 @@ class CurrencyReviewIconsTests(unittest.TestCase):
         self.assert_icon(0, 14, newer_image)
 
     def test_new_scan_replaces_previous_row_icons_slots_and_unknown_review_state(self):
+        """Verify a new scan replaces prior icons, slots and unknown-row review status."""
         older_image, newer_image = self.grid(), self.grid(offset=83)
         self.capture(older_image)(self.result(known=(1,), unknown=(14,)))
         next_callback = self.capture(newer_image)
@@ -208,6 +223,7 @@ class CurrencyReviewIconsTests(unittest.TestCase):
         self.assertEqual(self.window.inventory_table.cellWidget(0, 3).property("reviewStatus"), "pending")
 
     def test_saving_locks_review_and_retains_icon_preview_and_original_capture(self):
+        """Verify saving locks review controls while retaining the original screenshot and icon preview."""
         image = self.grid()
         before_image = image.tobytes()
         self.capture(image)(self.result(known=(14,)))

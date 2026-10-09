@@ -14,11 +14,14 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
 class ChainDraftLifecycleTests(unittest.TestCase):
+    """Check transient chain-draft cleanup, expedition isolation and persistence of committed open parts."""
     @classmethod
     def setUpClass(cls):
+        """Create or reuse the QApplication required by the Qt test fixtures."""
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        """Create an isolated logger window and stop background polling for chain-draft checks."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-chain-drafts-")
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
@@ -28,6 +31,7 @@ class ChainDraftLifecycleTests(unittest.TestCase):
         self.window._poll.stop()
 
     def tearDown(self):
+        """Close the logger window, stop its workers and restore the original data directory."""
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -36,6 +40,7 @@ class ChainDraftLifecycleTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_appending_and_completing_chains_do_not_accumulate_empty_drafts(self):
+        """Verify appending and completing chains do not accumulate empty drafts."""
         for number in range(1, 11):
             self.window.rune_inputs[0].setText("Death")
             self.window.commit_chain()
@@ -49,6 +54,7 @@ class ChainDraftLifecycleTests(unittest.TestCase):
         self.assertEqual(self.window.state["current_expedition_id"], "M0001-E11")
 
     def test_committed_open_chain_survives_restart_while_unsaved_fields_do_not(self):
+        """Verify committed open chain survives restart while unsaved fields do not."""
         self.window.rune_inputs[0].setText("Death")
         self.window.expedition_commit_chain_button.click()
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
@@ -73,6 +79,7 @@ class ChainDraftLifecycleTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
 
     def test_clearing_one_draft_preserves_other_expedition_unsaved_runes(self):
+        """Verify clearing one draft preserves other expedition unsaved runes."""
         self.window.rune_inputs[0].setText("Rage")
         self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
         self.window.rune_inputs[0].setText("Time")
