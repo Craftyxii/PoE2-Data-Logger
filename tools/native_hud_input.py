@@ -124,14 +124,19 @@ class NativeWindowsInput:
         return rect.left, rect.top, rect.right, rect.bottom
 
     def expose(self, widget):
-        """Scroll existing page containers so OS input can reach the intended control."""
+        """Settle queued layouts, then scroll nested pages from inside out before native input."""
         from PySide6.QtWidgets import QScrollArea
+        # A queued scan callback creates table rows before Qt has recomputed the
+        # enclosing pages' scroll ranges. Scrolling at that point is a no-op.
+        self.pump()
         parent = widget.parentWidget()
         while parent:
             if isinstance(parent, QScrollArea):
                 parent.ensureWidgetVisible(widget, 12, 12)
+                # Inner scrolling can change the target's position relative to
+                # the outer workspace; settle it before inspecting that ancestor.
+                self.pump()
             parent = parent.parentWidget()
-        self.pump()
 
     def point(self, widget, point=None):
         """Translate Qt client coordinates into physical desktop pixels, including DPI scaling."""
