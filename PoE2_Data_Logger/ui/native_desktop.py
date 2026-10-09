@@ -579,7 +579,7 @@ class LoggerWindow(QMainWindow):
         nav.setContentsMargins(7, 10, 12, 14)
         nav.setSpacing(3)
         brand = QHBoxLayout()
-        logo = self.brand_logo = QToolButton()
+        logo = QToolButton()
         logo.setObjectName("brandLogo")
         logo.setToolTip("Join CraftyXII's Discord (opens your browser)")
         logo.setAccessibleName("Join CraftyXII's Discord")
@@ -1064,7 +1064,6 @@ class LoggerWindow(QMainWindow):
         page, content = self._page()
         self.tabs.addTab(page, "Review")
         latest = self._group("SCAN REVIEW", content)
-        self.review_content = latest
         self.review_kind = QLabel("Nothing waiting for review")
         self.review_kind.setStyleSheet("font-size:16px;font-weight:700;")
         latest.addWidget(self.review_kind)
@@ -2641,12 +2640,6 @@ class LoggerWindow(QMainWindow):
         self.remnant_log_group.hide()
         self._show_image(None)
 
-    def new_chain(self):
-        """Request the next expedition and refresh the UI with its logger-owned identity."""
-        state = service.dispatch("/api/next-chain")
-        self.refresh()
-        self.note(f"{state['current_expedition_id']} is ready for its chain.")
-
     def undo_map(self):
         """Undo an empty map and invalidate captures and reviews only when its context changes."""
         context = logger.scan_context()
@@ -3475,10 +3468,6 @@ class LoggerWindow(QMainWindow):
         self.refresh()
         self._set_commit_badge(saved["scan_commit_number"])
         self.note("Map kill counts saved.", True)
-
-    def edit_region(self):
-        """Open screenshot editing for the live remnant capture region."""
-        self.choose_scan_region("live_region")
 
     def _end_hotkey_capture(self):
         """Release keyboard capture and restore the overlay Escape shortcut when key selection
@@ -4940,11 +4929,6 @@ class LoggerWindow(QMainWindow):
         """Read a saved scan region from database metadata, returning None when it is unset."""
         with logger._connect() as db:
             return logger._meta(db, key, None)
-
-    def choose_scan_region(self, key):
-        """Open the scan-region settings tab and select the requested capture region."""
-        self.tabs.setCurrentIndex(7)
-        self.scan_regions.select_region(key)
 
     def _regions_saved(self):
         """Refresh the auxiliary region labels after calibration settings are saved."""

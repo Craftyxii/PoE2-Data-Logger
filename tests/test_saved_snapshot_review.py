@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLineEdit, QTableWidget
+from PySide6.QtWidgets import QApplication, QPushButton, QTableWidget
 
 from PoE2_Data_Logger.core import logger_store as logger, store
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
@@ -97,7 +97,7 @@ class SavedSnapshotReviewTests(unittest.TestCase):
         self.assertFalse(pages[0]["items"][0]["deferred"])
 
     def test_manual_inventory_save_locks_preview_and_next_scan_restores_editing(self):
-        """Verify manual inventory save locks its preview and the next scan restores editing."""
+        """Check preview locking and row approval before saving a corrected inventory count."""
         self.inventory()
         self.window.approve_scan_button.click()
         self.assert_inventory_saved_preview(14)
@@ -106,6 +106,10 @@ class SavedSnapshotReviewTests(unittest.TestCase):
         self.assertTrue(self.window.inventory_add_row_button.isEnabled())
         self.assertTrue(self.window.inventory_table.cellWidget(0, 3).isEnabled())
         self.window.inventory_table.item(0, 2).setText("17")
+        controls = self.window.inventory_table.cellWidget(0, 3)
+        self.assertEqual(controls.property("reviewStatus"), "pending")
+        QTest.mouseClick(controls.findChild(QPushButton, "approveCurrency"), Qt.MouseButton.LeftButton)
+        self.assertEqual(controls.property("reviewStatus"), "approved")
         self.window.approve_scan_button.click()
         self.assert_inventory_saved_preview(17)
         self.assertEqual(logger.get_state()["scan_commit_count"], 2)

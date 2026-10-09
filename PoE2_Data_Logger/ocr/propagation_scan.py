@@ -222,25 +222,6 @@ def _marked_boxes(mask, frame_mask=None):
     return found, uncertain
 
 
-def _marked_tiles(mask, cursor_y, first_x=71, pitch=41):
-    """Assign framed crowns near a cursor to the fixed 41-pixel socket lattice.
-
-    Off-lattice and incomplete marks set uncertainty rather than becoming positions.
-    """
-    marked, incomplete = _marked_boxes(mask)
-    found, uncertain = [], False
-    for centre_x, tile_top, width, height in marked:
-        if not cursor_y - 31 <= tile_top <= cursor_y + 10:
-            continue
-        position = round((centre_x - first_x) / pitch) + 1
-        if not 1 <= position <= 10 or abs(centre_x - first_x - (position - 1) * pitch) > 6:
-            uncertain = True
-            continue
-        found.append((position, tile_top, width, height))
-    uncertain |= any(cursor_y - 31 <= box[1] <= cursor_y + 10 for box in incomplete)
-    return sorted(found), uncertain
-
-
 def _tile_layout(image, tile_top, tile_height, marked, min_first_x=15, sockets=None, reference=None):
     """Recover the first tile and spacing when a crop excludes the arrow margin."""
     gray = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2GRAY)

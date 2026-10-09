@@ -3,9 +3,6 @@ name: Windows installer
 
 on:
   push:
-    branches:
-      - 'fix/v33.2'
-      - 'fix/v33.34-beta'
     tags:
       - 'v[0-9]*'
   workflow_dispatch:

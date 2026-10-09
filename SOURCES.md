@@ -36,6 +36,7 @@
 | [ritual_grid.py](PoE2_Data_Logger/ocr/ritual_grid.py) | Ritual reward-grid geometry and item footprints |
 | [opened_scan.py](PoE2_Data_Logger/ocr/opened_scan.py) | Opened remnant scanning and OCR model checks |
 | [propagation_scan.py](PoE2_Data_Logger/ocr/propagation_scan.py) | Selected recipe and propagated rune marker recognition |
+| [propagation_marks.py](PoE2_Data_Logger/ocr/propagation_marks.py) | Three-peak propagation mark detection against recipe tile positions |
 | [runehelper_ocr.py](PoE2_Data_Logger/ocr/runehelper_ocr.py) | RuneHelper OCR adapter |
 | [scan.py](PoE2_Data_Logger/ocr/scan.py) | Visible remnant seed scanning |
 | [prototype.py](PoE2_Data_Logger/ocr/prototype.py) | Rune-bar geometry and template matching |

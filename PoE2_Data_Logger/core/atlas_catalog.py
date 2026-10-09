@@ -21,11 +21,3 @@ def catalog() -> dict:
     if data.get("schema_version") != 1 or not isinstance(data.get("nodes"), dict):
         raise ValueError("Unsupported bundled Atlas catalog")
     return data
-
-
-def asset_path(relative: str) -> Path:
-    """Resolve a bundled artwork path while rejecting paths outside the bundle."""
-    path = (ATLAS_DIR / relative).resolve()
-    if not path.is_relative_to(ATLAS_DIR.resolve()):
-        raise ValueError("Atlas asset path must stay inside the Atlas bundle")
-    return path
