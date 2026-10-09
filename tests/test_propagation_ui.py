@@ -12,7 +12,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QComboBox, QFileDialog, QPushButton
 
@@ -602,6 +602,63 @@ class PropagationUITests(unittest.TestCase):
         self.enter_manual("Death", "Rebirth")
         self.assertEqual(self.draft(), [("1", "Death"), ("1", "Rebirth")])
         self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "Missing recipe")
+
+    def test_replacing_recipe_scan_closes_manual_popup_before_its_selection_can_transfer(self):
+        """Retire an open fallback popup with its scan while allowing fresh input for the replacement."""
+        def review(recipe):
+            self.window._propagation_read({
+                "mode": "propagation", "can_use": False, "runes": [],
+                "selected_recipe": recipe, "status": "Check the marked runes",
+                "choices": [{"selected_recipe": recipe, "runes": [], "can_use": False}],
+                **logger.scan_context()}, self.raw.getvalue())
+            self.app.processEvents()
+
+        review("Missing recipe A")
+        self.window.resize(1400, 700)
+        self.window.show()
+        field = self.window.propagation_rune_inputs[0]
+        page = self.window.tabs.widget(0)
+        page.ensureWidgetVisible(field, 12, 24)
+        self.app.processEvents()
+        arrow = QPoint(field.width() - 8, field.height() // 2)
+        QTest.mouseClick(field, Qt.MouseButton.LeftButton, pos=arrow)
+        self.app.processEvents()
+        view = field.view()
+        self.assertTrue(view.isVisible())
+        target = field.model().index(field.findText("Adaptive"), 0)
+        view.scrollTo(target)
+        self.app.processEvents()
+        position = view.visualRect(target).center()
+        release = self.window.mapFromGlobal(view.viewport().mapToGlobal(position))
+        QTest.mouseMove(view.viewport(), position)
+        QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=position)
+
+        review("Missing recipe B")
+        self.assertFalse(view.isVisible())
+        self.assertIsNone(QApplication.activePopupWidget())
+        QTest.mouseRelease(self.window, Qt.MouseButton.LeftButton, pos=release)
+        self.app.processEvents()
+        self.assertEqual(field.currentText(), "")
+        self.assertFalse(self.window.propagation_add_button.isEnabled())
+        self.assertEqual(self.draft(), [])
+        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+
+        page.ensureWidgetVisible(field, 12, 24)
+        self.app.processEvents()
+        QTest.mouseClick(field, Qt.MouseButton.LeftButton, pos=arrow)
+        QTest.keyClick(field, Qt.Key.Key_Home)
+        QTest.keyClick(field, Qt.Key.Key_Down)
+        QTest.keyClick(field, Qt.Key.Key_Return)
+        self.app.processEvents()
+        self.assertEqual(field.currentText(), "Adaptive")
+        action = self.recipe_action(0)
+        page.ensureWidgetVisible(action, 12, 24)
+        self.app.processEvents()
+        QTest.mouseClick(action, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        self.assertEqual(self.draft(), [("1", "Adaptive")])
+        self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "Missing recipe B")
+        self.assertEqual(logger.get_state()["detonated"], 1)
 
     def test_clear_rescan_replaces_unclear_review_and_enables_chain_completion(self):
         self.scan(["Death"])

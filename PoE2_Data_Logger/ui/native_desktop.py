@@ -3040,23 +3040,25 @@ class LoggerWindow(QMainWindow):
     def _propagation_recipe_selected(self, row, _column, previous_row, _previous_column):
         # Manual corrections belong to one recipe. Switching rows must not
         # apply a correction entered for a different reward.
-        """Clear fallback manual input on row changes while retaining each row's own selections."""
+        """Close stale fallback menus on recipe changes while retaining each row's own selections."""
         if row != previous_row:
             for field in self.propagation_rune_inputs:
                 with QSignalBlocker(field):
+                    field.hidePopup()
                     field.setCurrentIndex(0)
                     field.setEditText("")
         self._manual_propagation_changed()
 
     def _clear_manual_propagation(self):
-        """Clear manual propagation context, recipe choices and rune input without discarding
-        chain parts.
+        """Close old manual menus and clear propagation context, recipe choices and rune input
+        without discarding saved chain parts.
         """
         self._manual_propagation_context = None
         if not hasattr(self, "propagation_rune_inputs"):
             return
         for field in self.propagation_rune_inputs:
             with QSignalBlocker(field):
+                field.hidePopup()
                 field.setCurrentIndex(0)
                 field.setEditText("")
         self._propagation_choices = []

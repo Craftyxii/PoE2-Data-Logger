@@ -13,7 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QAbstractItemView
+from PySide6.QtWidgets import QApplication, QAbstractItemView, QPushButton
 from PIL import Image
 
 from PoE2_Data_Logger.core import logger_store as logger, service, store
@@ -236,6 +236,7 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.assertIsNone(logger.get_state()["ocr_pending"])
 
     def test_uncertain_currency_confirmation_accepts_row_edits_and_commit(self):
+        """Keep confirmation interactive while requiring approval of an edited uncertain row."""
         self.window.overlay_opacity_slider.setValue(40)
         self.window.showMaximized()
         self.app.processEvents()
@@ -269,6 +270,14 @@ class OverlayRecoveryTests(unittest.TestCase):
         editor.selectAll()
         QTest.keyClicks(editor, "7")
         QTest.keyClick(editor, Qt.Key.Key_Return)
+        self.app.processEvents()
+        # Editing a count leaves its row pending; final scan approval includes
+        # it only after the user confirms that row's corrected reading.
+        approve_row = table.cellWidget(0, 3).findChild(QPushButton, "approveCurrency")
+        self.assertTrue(approve_row.isEnabled())
+        page.ensureWidgetVisible(approve_row)
+        self.app.processEvents()
+        QTest.mouseClick(approve_row, Qt.MouseButton.LeftButton)
         self.app.processEvents()
         page.ensureWidgetVisible(self.window.approve_scan_button)
         self.app.processEvents()
