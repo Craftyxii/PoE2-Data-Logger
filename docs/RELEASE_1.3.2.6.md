@@ -22,4 +22,6 @@ Propagation always requires manual approval. Confident items in other activities
 
 The release pipeline checks native Windows HUD input, a 100-map workflow with independently reopened exports, the complete regression suite, packaged runtime/OCR checks, and installer update/file retention. Native HUD testing uses a simulated game window; the workflow simulation injects OCR results, and real OCR fixtures are tested separately.
 
+Regression runs explicitly destroy closed test windows after teardown to prevent retained widget trees from accumulating memory and delaying runner shutdown.
+
 Close any running logger before updating. The installer retains the user's Databases folder. The 1.3.2 stable release remains available.
