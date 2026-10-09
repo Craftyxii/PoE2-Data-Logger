@@ -416,19 +416,7 @@ def initialize():
                     db.executemany("INSERT INTO source_cells VALUES(?,?,?,?)",
                                    ((tab, cell, _dump(raw), _dump(cached))
                                     for cell, raw, cached in cells))
-                db.executemany("INSERT INTO families VALUES(?,?,?,?)",
-                               ((f["id"], f["top_socket"], int(f["valid"]), _dump(f["recipes"]))
-                                for f in snapshot["families"]))
-                db.executemany("INSERT INTO recipes VALUES(?,?,?,?,?,?)",
-                               ((r["name"], r["sockets"], r["combo"], r["level_band"],
-                                 r["category"], r["source"]) for r in snapshot["recipes"]))
-                db.executemany("INSERT INTO aliases VALUES(?,?,?)",
-                               ((i, alias, target) for i, (alias, target) in enumerate(snapshot["aliases"], 1)))
-                db.executemany("INSERT INTO affixes VALUES(?)", ((a,) for a in snapshot["affixes"]))
-                db.executemany("INSERT INTO master_perks VALUES(?,?,?,?)",
-                               ((master, perk["name"], perk["tier"], perk["effect"])
-                                for master, data in snapshot["masters"].items()
-                                for perk in data["perks"]))
+                _seed_reference_snapshot(db, snapshot)
                 db.executemany("INSERT INTO legacy_export VALUES(?,?,?,?,?,?)",
                                ((i, row[22], row[32], row[19], row[25] or None, _dump(row))
                                 for i, row in enumerate(snapshot["export_rows"], 2)))
@@ -457,65 +445,7 @@ def initialize():
                         db.execute("UPDATE expeditions SET detonated=? WHERE expedition_id=?",
                                    (snapshot["detonated"], eid))
                 _set_meta(db, "bootstrapped", True)
-            if not _meta(db, "seed_states_initialized"):
-                db.executemany("INSERT OR IGNORE INTO seed_states VALUES(?,?,?,?,?,?)",
-                               ((s["family"], s["sockets"], s["seed_slot"], s["seed_rune"],
-                                 _dump(s["rewards"]), s["status"]) for s in store.STATES))
-                _set_meta(db, "seed_states_initialized", True)
-            from PoE2_Data_Logger.core.catalog_repairs import repair_farrul_hunt_family
-            repair_farrul_hunt_family(db)
-            if not _meta(db, "rain_of_blades_six_socket_fix"):
-                db.execute("UPDATE recipes SET sockets=6,combo=? WHERE name=? AND sockets=5 AND combo=?",
-                           ("Tempest + Sky + Ward + Stone + Arcane + Ward", "Rain of Blades (Level 20)",
-                            "Tempest + Sky + Ward + Stone + Arcane"))
-                old_state = next((s for s in store.STATES if s["family"] == 38 and s["sockets"] == 5), None)
-                if old_state:
-                    state = db.execute("SELECT rewards_json,status FROM seed_states WHERE family=38 AND sockets=5").fetchone()
-                    if state and state["status"] == "calculator" and _load(state["rewards_json"]) == old_state["rewards"]:
-                        db.execute("UPDATE seed_states SET rewards_json=? WHERE family=38 AND sockets=5",
-                                   (_dump([name for name in old_state["rewards"] if name != "Rain of Blades (Level 20)"]),))
-                _set_meta(db, "rain_of_blades_six_socket_fix", True)
-            if not _meta(db, "visible_seed_reference_fix_v1"):
-                for original in store.STATES:
-                    if original["family"] not in (3, 45):
-                        continue
-                    row = db.execute("SELECT * FROM seed_states WHERE family=? AND sockets=?",
-                                     (original["family"], original["sockets"])).fetchone()
-                    if not row or any(row[field] != original[field] for field in
-                                      ("seed_slot", "seed_rune", "status")) or \
-                            _load(row["rewards_json"]) != original["rewards"]:
-                        continue
-                    if original["family"] == 3:
-                        rewards = ["Runic Alloy" if name == "Runic Alloy x2" else name
-                                   for name in original["rewards"]]
-                        db.execute("UPDATE seed_states SET rewards_json=? WHERE family=3 AND sockets=?",
-                                   (_dump(rewards), original["sockets"]))
-                    else:
-                        db.execute("DELETE FROM seed_states WHERE family=45 AND sockets=?",
-                                   (original["sockets"],))
-                _set_meta(db, "visible_seed_reference_fix_v1", True)
-            if not _meta(db, "alias_keys_v2_initialized"):
-                rebuild_alias_keys(db)
-                _set_meta(db, "alias_keys_initialized", True)
-                _set_meta(db, "alias_keys_v2_initialized", True)
-            if not _meta(db, "currency_items_initialized"):
-                names = {re.sub(r"\s+x\d+$", "", name).strip()
-                         for name, in db.execute("SELECT name FROM recipes WHERE category='Currency'")}
-                db.executemany("INSERT OR IGNORE INTO currency_items(name) VALUES(?)",
-                               ((name,) for name in sorted(names) if name and not _retired_currency_default(name)))
-                _set_meta(db, "currency_items_initialized", True)
-            from PoE2_Data_Logger.ocr.currency_ocr import catalog_names, catalog_version
-            catalog_key = catalog_version()
-            if _meta(db, "currency_inventory_catalog_version") != catalog_key:
-                db.executemany("INSERT OR IGNORE INTO currency_items(name) VALUES(?)",
-                               ((name,) for name in catalog_names() if not _retired_currency_default(name)))
-                _set_meta(db, "currency_overlay_catalog_initialized", True)
-                _set_meta(db, "currency_inventory_catalog_version", catalog_key)
-            db.execute("INSERT OR IGNORE INTO affixes(name) VALUES(?)", ("Chance to Contain Essences",))
-            if _meta(db, "affix_catalog_version") != 1:
-                db.executemany("INSERT OR IGNORE INTO affixes(name) VALUES(?)",
-                               ((item["name"],) for item in affix_catalog()))
-                _set_meta(db, "affix_catalog_version", 1)
+            _initialize_references(db)
             if not _meta(db, "tablet_flat_values_migrated"):
                 config = _meta(db, "settings")
                 pairs = [dict(pair) for pair in config["tablet_affixes"]]
@@ -547,11 +477,6 @@ def initialize():
                     config["tablets_used"] = 4
                     _set_meta(db, "settings", config)
                 _set_meta(db, "tablet_capacity_default_v17", True)
-            if not _meta(db, "ritual_names_initialized"):
-                from PoE2_Data_Logger.core.ritual_catalog import OMEN_NAMES
-                db.executemany("INSERT OR IGNORE INTO ritual_names(name) VALUES(?)",
-                               ((name,) for name in OMEN_NAMES if not _retired_currency_default(name)))
-                _set_meta(db, "ritual_names_initialized", True)
             config = _meta(db, "settings")
             waystone = _waystone_settings(config)
             if (any(key not in config for key in ("deli", "wisp")) or
@@ -565,6 +490,99 @@ def initialize():
                 _set_meta(db, "settings", config)
             _register_atlas_snapshot(db, _atlas_snapshot(config))
         _READY = True
+
+
+def _seed_reference_snapshot(db, snapshot):
+    """Populate only editable references from the shipped bootstrap snapshot.
+
+    Separate reference seeding from the historical spreadsheet rows and profile
+    settings so restoring defaults never imports the shipped sample session.
+    """
+    db.executemany("INSERT INTO families VALUES(?,?,?,?)",
+                   ((f["id"], f["top_socket"], int(f["valid"]), _dump(f["recipes"]))
+                    for f in snapshot["families"]))
+    db.executemany("INSERT INTO recipes VALUES(?,?,?,?,?,?)",
+                   ((r["name"], r["sockets"], r["combo"], r["level_band"],
+                     r["category"], r["source"]) for r in snapshot["recipes"]))
+    db.executemany("INSERT INTO aliases VALUES(?,?,?)",
+                   ((i, alias, target) for i, (alias, target) in enumerate(snapshot["aliases"], 1)))
+    db.executemany("INSERT INTO affixes VALUES(?)", ((a,) for a in snapshot["affixes"]))
+    db.executemany("INSERT INTO master_perks VALUES(?,?,?,?)",
+                   ((master, perk["name"], perk["tier"], perk["effect"])
+                    for master, data in snapshot["masters"].items()
+                    for perk in data["perks"]))
+
+
+def _initialize_references(db):
+    """Seed and repair reference tables without changing recorded runs or settings.
+
+    The same migrations build a fresh shipped baseline for reference reset.
+    Their markers retain normal startup's protection for locally edited rows.
+    """
+    if not _meta(db, "seed_states_initialized"):
+        db.executemany("INSERT OR IGNORE INTO seed_states VALUES(?,?,?,?,?,?)",
+                       ((s["family"], s["sockets"], s["seed_slot"], s["seed_rune"],
+                         _dump(s["rewards"]), s["status"]) for s in store.STATES))
+        _set_meta(db, "seed_states_initialized", True)
+    from PoE2_Data_Logger.core.catalog_repairs import repair_farrul_hunt_family
+    repair_farrul_hunt_family(db)
+    if not _meta(db, "rain_of_blades_six_socket_fix"):
+        db.execute("UPDATE recipes SET sockets=6,combo=? WHERE name=? AND sockets=5 AND combo=?",
+                   ("Tempest + Sky + Ward + Stone + Arcane + Ward", "Rain of Blades (Level 20)",
+                    "Tempest + Sky + Ward + Stone + Arcane"))
+        old_state = next((s for s in store.STATES if s["family"] == 38 and s["sockets"] == 5), None)
+        if old_state:
+            state = db.execute("SELECT rewards_json,status FROM seed_states WHERE family=38 AND sockets=5").fetchone()
+            if state and state["status"] == "calculator" and _load(state["rewards_json"]) == old_state["rewards"]:
+                db.execute("UPDATE seed_states SET rewards_json=? WHERE family=38 AND sockets=5",
+                           (_dump([name for name in old_state["rewards"] if name != "Rain of Blades (Level 20)"]),))
+        _set_meta(db, "rain_of_blades_six_socket_fix", True)
+    if not _meta(db, "visible_seed_reference_fix_v1"):
+        for original in store.STATES:
+            if original["family"] not in (3, 45):
+                continue
+            row = db.execute("SELECT * FROM seed_states WHERE family=? AND sockets=?",
+                             (original["family"], original["sockets"])).fetchone()
+            if not row or any(row[field] != original[field] for field in
+                              ("seed_slot", "seed_rune", "status")) or \
+                    _load(row["rewards_json"]) != original["rewards"]:
+                continue
+            if original["family"] == 3:
+                rewards = ["Runic Alloy" if name == "Runic Alloy x2" else name
+                           for name in original["rewards"]]
+                db.execute("UPDATE seed_states SET rewards_json=? WHERE family=3 AND sockets=?",
+                           (_dump(rewards), original["sockets"]))
+            else:
+                db.execute("DELETE FROM seed_states WHERE family=45 AND sockets=?",
+                           (original["sockets"],))
+        _set_meta(db, "visible_seed_reference_fix_v1", True)
+    if not _meta(db, "alias_keys_v2_initialized"):
+        rebuild_alias_keys(db)
+        _set_meta(db, "alias_keys_initialized", True)
+        _set_meta(db, "alias_keys_v2_initialized", True)
+    if not _meta(db, "currency_items_initialized"):
+        names = {re.sub(r"\s+x\d+$", "", name).strip()
+                 for name, in db.execute("SELECT name FROM recipes WHERE category='Currency'")}
+        db.executemany("INSERT OR IGNORE INTO currency_items(name) VALUES(?)",
+                       ((name,) for name in sorted(names) if name and not _retired_currency_default(name)))
+        _set_meta(db, "currency_items_initialized", True)
+    from PoE2_Data_Logger.ocr.currency_ocr import catalog_names, catalog_version
+    catalog_key = catalog_version()
+    if _meta(db, "currency_inventory_catalog_version") != catalog_key:
+        db.executemany("INSERT OR IGNORE INTO currency_items(name) VALUES(?)",
+                       ((name,) for name in catalog_names() if not _retired_currency_default(name)))
+        _set_meta(db, "currency_overlay_catalog_initialized", True)
+        _set_meta(db, "currency_inventory_catalog_version", catalog_key)
+    db.execute("INSERT OR IGNORE INTO affixes(name) VALUES(?)", ("Chance to Contain Essences",))
+    if _meta(db, "affix_catalog_version") != 1:
+        db.executemany("INSERT OR IGNORE INTO affixes(name) VALUES(?)",
+                       ((item["name"],) for item in affix_catalog()))
+        _set_meta(db, "affix_catalog_version", 1)
+    if not _meta(db, "ritual_names_initialized"):
+        from PoE2_Data_Logger.core.ritual_catalog import OMEN_NAMES
+        db.executemany("INSERT OR IGNORE INTO ritual_names(name) VALUES(?)",
+                       ((name,) for name in OMEN_NAMES if not _retired_currency_default(name)))
+        _set_meta(db, "ritual_names_initialized", True)
 
 
 def _connect():
@@ -3621,12 +3639,13 @@ def export_filename(kind="xlsx"):
 
 
 def save_export_file(kind="xlsx"):
-    """Write a workbook or related primary, Atlas and history CSV files to the configured directory.
+    """Write a workbook, full SQLite backup or related CSV files to the configured directory.
 
-    Read CSV sources in one transaction and choose an unused shared filename suffix, retrying reservation collisions.
+    Read CSV sources in one transaction or take a consistent SQLite backup, then
+    choose an unused shared filename suffix, retrying reservation collisions.
     """
-    if kind not in ("xlsx", "csv"):
-        raise ValueError("Choose XLSX or Export CSV.")
+    if kind not in ("xlsx", "csv", "sqlite3"):
+        raise ValueError("Choose XLSX, Export CSV or SQLite.")
     with _connect() as db:
         folder = _meta(db, "export_folder", "")
     if not folder:
@@ -3637,6 +3656,8 @@ def save_export_file(kind="xlsx"):
     if kind == "xlsx":
         from PoE2_Data_Logger.core.workbook_export import export_xlsx
         contents = {".xlsx": export_xlsx()}
+    elif kind == "sqlite3":
+        contents = {".sqlite3": backup_bytes()}
     else:
         with _connect() as db:
             db.execute("BEGIN")
@@ -3673,9 +3694,24 @@ def save_export_file(kind="xlsx"):
     return result
 
 
+def validate_export_destination(destination):
+    """Reject export paths that replace the live SQLite database or its journal files."""
+    destination = Path(destination)
+    database = store.DATA_DIR / "scans.sqlite3"
+    for live in (database, database.with_name(database.name + "-wal"),
+                 database.with_name(database.name + "-shm"),
+                 database.with_name(database.name + "-journal")):
+        # resolve catches directory symlinks; samefile also catches hard links
+        # whose path differs but whose contents are the active database.
+        if destination.resolve() == live.resolve() or (
+                destination.exists() and live.exists() and destination.samefile(live)):
+            raise ValueError("Choose a different export filename. The active log database must not be overwritten.")
+
+
 def _write_export_bytes(destination, data):
     """Write bytes through a temporary file beside the destination, replace it and remove leftovers."""
     destination = Path(destination)
+    validate_export_destination(destination)
     fd, name = tempfile.mkstemp(prefix=".PoE2_Data_Export_", suffix=".tmp", dir=destination.parent)
     try:
         with os.fdopen(fd, "wb") as file:

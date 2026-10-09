@@ -9,17 +9,19 @@ import io
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageGrab, ImageStat
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
-from PoE2_Data_Logger.core import logger_store as logger, ocr_sensitivity, service, store
+from PoE2_Data_Logger.core import logger_store as logger, ocr_sensitivity, reference_pack, service, store
 from PoE2_Data_Logger.ocr import propagation_scan, runehelper_ocr
 from PoE2_Data_Logger.ocr.item_text import parse_item_text
 from PoE2_Data_Logger.platform.hotkey import HotkeyManager
@@ -57,6 +59,8 @@ class NativeWindowsHUDTests(unittest.TestCase):
         store.DATA_DIR = Path(self.tmp.name)
         logger._READY = False
         logger.initialize()
+        with logger._connect() as db:
+            self.default_references = reference_pack._default_reference_rows(db)
         logger.save_settings({"tablets_used":1, "ocr_auto_commit":True})
         service.HOTKEY = HotkeyManager(supported=True)
         self.window = None
@@ -151,6 +155,7 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.check_tablet_and_waystone()
         self.check_currency_and_ritual()
         self.check_overlay_capture_and_confirmation()
+        self.check_reference_reset_and_raw_export()
         self.report["status"] = "passed"
 
     def check_navigation_and_preferences(self):
@@ -257,10 +262,15 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.assertIsNone(self.window.pending_review_kind)
         self.assertEqual(self.window.header_map_id.text(), "#1")
         self.assertEqual(self.window.header_remnant_id.text(), "#1")
+        compact = self.window.width() < 1600
+        counter_size = 41 if compact else 54
         for counter in (self.window.header_map_id,self.window.header_remnant_id):
-            self.assertIn("font-size:48px;",counter.styleSheet())
-            self.assertEqual(counter.font().pixelSize(),48)
+            self.assertIn(f"font-size:{counter_size}px;",counter.styleSheet())
+            self.assertEqual(counter.font().pixelSize(),counter_size)
             self.assertGreaterEqual(counter.height(),counter.fontMetrics().height())
+        for index, caption in enumerate(self.window._header_identifier_captions):
+            caption_size = (14 if compact else 17) if index < 2 else (12 if compact else 14)
+            self.assertEqual(caption.font().pixelSize(),caption_size)
         self.phase("04-large-map-remnant-counters")
         new_map = next(button for button in self.window.findChildren(QPushButton) if button.text() == "+ New map")
         undo = next(button for button in self.window.findChildren(QPushButton) if button.text() == "Undo new map")
@@ -500,6 +510,147 @@ class NativeWindowsHUDTests(unittest.TestCase):
             pass  # Deleting the obsolete Qt popup is also a valid retirement.
         self.native.choose(self.window._propagation_row_inputs[0][0],2)
         self.phase("13-replacement-scan-retires-popup")
+
+    def database_rows(self, db):
+        """Read every table, including settings and ID sequences, for exact preservation checks."""
+        tables = [row[0] for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+        return {table: [tuple(row) for row in db.execute(f'SELECT * FROM "{table}" ORDER BY rowid')]
+                for table in tables}
+
+    def answer_reference_reset(self, answer):
+        """Click the real reset button and its nested native confirmation without mocking dialogs."""
+        failures, observed = [], []
+        timer = QTimer(self.window)
+        deadline = time.monotonic() + 10
+
+        def answer_visible_dialog():
+            """Handle the synchronous modal from its own event loop through verified Win32 input."""
+            dialog = QApplication.activeModalWidget()
+            if not isinstance(dialog, QMessageBox):
+                if time.monotonic() < deadline:
+                    return
+                timer.stop()
+                failures.append(AssertionError("Reset confirmation did not appear"))
+                if dialog is not None:
+                    dialog.reject()
+                return
+            timer.stop()
+            try:
+                self.assertEqual(dialog.windowTitle(), "Reset OCR references to defaults")
+                self.assertEqual(dialog.standardButton(dialog.defaultButton()), QMessageBox.StandardButton.Cancel)
+                self.assertIn("Logged maps, items, currency, activities, IDs and personal settings are kept", dialog.text())
+                self.native.screenshot(f"14-reference-reset-{answer.name.lower()}-confirmation")
+                self.native.click(dialog.button(answer))
+                observed.append(answer.name)
+            except Exception as error:
+                failures.append(error)
+                dialog.reject()  # Cleanup only: any native-input or assertion failure still fails the test.
+
+        timer.timeout.connect(answer_visible_dialog)
+        timer.start(10)
+        try:
+            self.native.click(self.window.reference_reset_button)
+        finally:
+            timer.stop()
+            timer.deleteLater()
+        if failures:
+            raise failures[0]
+        self.assertEqual(observed, [answer.name])
+        self.assertIsNone(QApplication.activeModalWidget())
+
+    def check_reference_reset_and_raw_export(self):
+        """Use visible reset/export controls, preserving logged history, settings and older backups."""
+        if self.window._overlay_enabled:
+            self.tab(6)
+            self.native.click(self.window.overlay_checkbox)
+            self.assertFalse(self.window._overlay_enabled)
+        if self.window.pending_review_kind is not None:
+            self.tab(0)
+            self.native.click(self.window.reject_scan_button)
+            self.assertIsNone(self.window.pending_review_kind)
+        self.native.wait(lambda:not self.window._pending_tasks, "idle workers before reference reset")
+
+        # Seed explicitly disclosed local references; only the user actions below use OS input.
+        logger.save_recipe({"name":"Native reset reward", "sockets":3, "combo":"Rage + Rage + Rage"})
+        logger.add_affix("Native reset affix")
+        logger.add_currency_item("Native reset currency")
+        logger.add_item_name("Native reset armour")
+        logger.add_ritual_name("Omen of Native Reset")
+        art = Image.new("RGB", (96,96), (25,40,60))
+        ImageDraw.Draw(art).ellipse((12,12,80,80), fill=(220,120,30))
+        logger.save_currency_icon("Native reset currency", art)
+        logger.save_item_icon("Native reset armour", art)
+        logger.save_omen_icon("Omen of Native Reset", art)
+        with logger._connect() as db:
+            logger._save_review_examples(db, [{"name":"Native reset armour", "category":"Item",
+                                               "image":art, "columns":1, "rows":1}],
+                                         {"native reset armour":("item",1)})
+        seed = Path(__file__).resolve().parents[1] / "PoE2_Data_Logger/region_examples/seed.jpg"
+        scan = store.save_scan(seed.read_bytes(), "native-reset-seed.jpg", 3, "P1", "Native reset rune")
+        self.assertTrue(scan["reference_added"], "The real seed fixture must supply learned glyph evidence")
+        self.window.refresh()
+        self.tab(8)
+        with logger._connect() as db:
+            before = self.database_rows(db)
+        for table in ("maps", "expeditions", "chain_completions", "currency_snapshots",
+                      "ritual_pages", "commits", "scans", "meta"):
+            self.assertTrue(before[table], f"Reset preservation must cover saved {table}")
+        for table in reference_pack._EXAMPLE_TABLES:
+            self.assertTrue(before[table], f"Reset fixture must cover {table}")
+        images = {path.name:path.read_bytes() for path in (store.DATA_DIR / "images").iterdir()}
+        self.answer_reference_reset(QMessageBox.StandardButton.Cancel)
+        with logger._connect() as db:
+            self.assertEqual(self.database_rows(db), before, "Cancel must preserve every database row")
+        self.phase("14-reference-reset-cancel-preserves-data")
+        self.answer_reference_reset(QMessageBox.StandardButton.Yes)
+        with logger._connect() as db:
+            after = self.database_rows(db)
+        self.assertEqual({table:after[table] for table in reference_pack._DEFAULT_TABLES},
+                         self.default_references)
+        self.assertTrue(all(not after[table] for table in reference_pack._EXAMPLE_TABLES))
+        preserved = set(before) - set(reference_pack._DEFAULT_TABLES) - set(reference_pack._EXAMPLE_TABLES)
+        before["meta"] = [row for row in before["meta"] if row[0] != "active_retired_currency_names"]
+        self.assertEqual({table:before[table] for table in preserved},
+                         {table:after[table] for table in preserved}, "Reset must preserve all logged data and settings")
+        self.assertEqual({path.name:path.read_bytes() for path in (store.DATA_DIR / "images").iterdir()}, images)
+        self.assertIn("Default OCR references restored", self.window.reference_status.text())
+        self.report["reference_reset"] = {"fixture":"Seeded custom names/icons and reviewed icon; real seed PNG/JPEG glyph learning",
+            "cancel":"all database rows unchanged", "confirm":"shipped defaults restored; all five example tables empty",
+            "preserved_tables":sorted(preserved), "preserved_screenshots":len(images)}
+        self.phase("15-reference-reset-confirm-preserves-logs")
+
+        self.tab(5)
+        directory = self.artifacts.resolve() / "raw-sql-exports"
+        directory.mkdir(parents=True, exist_ok=True)
+        older = directory / "older-user-backup.sqlite3"
+        older.write_bytes(logger.backup_bytes())
+        originals = {path:path.read_bytes() for path in directory.iterdir() if path.is_file()}
+        self.native.edit(self.window.export_folder, str(directory))
+        created = []
+        for number in (1,2):
+            known = set(directory.iterdir())
+            self.native.click(self.window.raw_database_export_button)
+            self.native.wait(lambda:not self.window._pending_tasks and
+                             bool(set(directory.glob("PoE2_Export_*.sqlite3")) - known),
+                             f"raw SQL folder export {number}", timeout=30)
+            new = set(directory.iterdir()) - known
+            self.assertEqual(len(new),1, "A raw SQL export must create exactly one new file")
+            destination = new.pop()
+            created.append(destination)
+            with logger._connect() as source:
+                expected = self.database_rows(source)
+            with sqlite3.connect(destination) as backup:
+                self.assertEqual(backup.execute("PRAGMA integrity_check").fetchone()[0],"ok")
+                self.assertEqual(self.database_rows(backup), expected, "Raw SQL export must preserve every source table")
+            for path, contents in originals.items():
+                self.assertEqual(path.read_bytes(), contents, f"Export replaced older file {path.name}")
+            originals[destination] = destination.read_bytes()
+        self.assertNotEqual(created[0], created[1])
+        self.report["raw_sql_export"] = {"files":[path.name for path in created],
+            "integrity":"ok", "source_tables":{table:len(rows) for table,rows in expected.items()},
+            "older_files_unchanged":len(originals)-1}
+        self.phase("16-raw-sql-folder-export-keeps-older-files")
 
 
 if __name__ == "__main__":

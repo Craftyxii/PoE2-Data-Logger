@@ -61,7 +61,7 @@ QLabel[role="subheading"], QLabel[role="note"] { color:#BCB7AE; }
 QFrame#statCard { background:#1C1C1E; border:1px solid #40372C; border-radius:9px; }
 QFrame#statCard QLabel { background:transparent; border:0; }
 QGroupBox { background:#1C1C1E; border:1px solid #3D352C; border-radius:9px;
-            margin-top:12px; padding:20px 15px 14px; font-weight:600; }
+            margin-top:6px; padding:10px 12px 10px; font-weight:600; }
 QGroupBox::title { subcontrol-origin:margin; left:16px; padding:1px 5px;
                     color:#F4EFE7; background:#1C1C1E; font-weight:700; }
 QLabel[role="message"] { background:#2A241D; color:#EEE7DB; border:1px solid #69553A; padding:9px; border-radius:5px; }
@@ -576,22 +576,22 @@ class LoggerWindow(QMainWindow):
             self.error("Could not open Discord in your default browser.")
 
     def _page(self):
-        """Create a resizable scroll page with a padded vertical content layout."""
+        """Create a scroll page with compact section gaps while preserving control hit targets."""
         outer = QScrollArea()
         outer.setFrameShape(QFrame.Shape.NoFrame)
         outer.setWidgetResizable(True)
         body = QWidget()
         layout = QVBoxLayout(body)
-        layout.setContentsMargins(12, 18, 12, 22)
-        layout.setSpacing(12)
+        layout.setContentsMargins(12, 9, 12, 16)
+        layout.setSpacing(8)
         outer.setWidget(body)
         return outer, layout
 
     def _group(self, title, parent):
-        """Add a titled group to a parent layout and return its content layout."""
+        """Add a titled section with tight content gaps and normal-sized controls."""
         group = QGroupBox(title)
         content = QVBoxLayout(group)
-        content.setSpacing(10)
+        content.setSpacing(6)
         parent.addWidget(group)
         return content
 
@@ -677,6 +677,8 @@ class LoggerWindow(QMainWindow):
         main_layout = QVBoxLayout(main)
         main_layout.setContentsMargins(24, 10, 16, 4)
         main_layout.setSpacing(10)
+        self._header_horizontal_inset = (navigation.width() + main_layout.contentsMargins().left()
+                                         + main_layout.contentsMargins().right())
         top = QGridLayout()
         self._header_layout = top
         self._header_arrangement = None
@@ -700,6 +702,7 @@ class LoggerWindow(QMainWindow):
         identifiers = QHBoxLayout()
         identifiers.setSpacing(14)
         self._header_identifier_captions = []
+        self._header_identifier_columns = []
         for label, field in (("MAP #", self.header_map_id),
                              ("REMNANT #", self.header_remnant_id),
                              ("EXPEDITION #", self.header_expedition)):
@@ -716,10 +719,18 @@ class LoggerWindow(QMainWindow):
                 field.setAccessibleName(label)
             column.addWidget(field)
             identifiers.addLayout(column)
+            self._header_identifier_columns.append(column)
         self._header_identifiers = identifiers
         self.header_complete_chain_button = button(
             "Complete chain", lambda: self.run(self.complete_chain), "primary")
         self.header_complete_chain_button.setEnabled(False)
+        # Compact headers share caption/number rows so unused height cannot separate them.
+        self._compact_header_status = QWidget()
+        self._compact_header_grid = QGridLayout(self._compact_header_status)
+        self._compact_header_grid.setContentsMargins(0, 0, 0, 0)
+        self._compact_header_grid.setHorizontalSpacing(12)
+        self._compact_header_grid.setVerticalSpacing(3)
+        self._compact_header_status.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         actions = QHBoxLayout()
         actions.addWidget(button("Undo new map", lambda: self.run(self.undo_map)))
         actions.addWidget(button("+ New map", lambda: self.run(self.finish_map), "primary"))
@@ -812,34 +823,75 @@ class LoggerWindow(QMainWindow):
             self.help_menu.addAction(label, lambda checked=False, index=index: self.tabs.setCurrentIndex(index))
 
     def _arrange_header(self):
-        """Center large live counters and keep chain completion reachable at either header width."""
+        """Pack small-window counters beside Complete while retaining the wide header layout."""
         if not hasattr(self, "_header_actions"):
             return
         # Keep long page headings from wrapping excessively beside the wider counters and actions.
         compact = self.width() < 1600
-        if self._header_arrangement == compact:
+        if self._header_arrangement is None or self._header_arrangement[0] != compact:
+            # Balance map/remnant labels with smaller numbers; expedition keeps its existing caption size.
+            for counter in (self.header_map_id, self.header_remnant_id):
+                counter.setStyleSheet(f"font-size:{41 if compact else 54}px;font-weight:700;color:#FFFFFF;")
+            for index, caption in enumerate(self._header_identifier_captions):
+                caption_size = (14 if compact else 17) if index < 2 else (12 if compact else 14)
+                caption.setStyleSheet(f"font-size:{caption_size}px;font-weight:700;color:#D5B36C;")
+        fields = (self.header_map_id, self.header_remnant_id, self.header_expedition)
+        # Keep growing map/remnant numbers legible instead of compressing their text at narrow widths.
+        narrow = self.width() < 1150
+        status_width = self.header_complete_chain_button.sizeHint().width() + 24
+        status_width += sum(max(field.minimumWidth(), field.sizeHint().width(), caption.sizeHint().width())
+                            for field, caption in zip(fields[:2], self._header_identifier_captions[:2]))
+        if not narrow:
+            status_width += max(self.header_expedition.minimumWidth(), self.header_expedition.sizeHint().width(),
+                                self._header_identifier_captions[2].sizeHint().width()) + 12
+        stacked = (compact and status_width + self.kill_counts_group.minimumWidth()
+                   + self._header_layout.spacing() > self.width() - self._header_horizontal_inset)
+        arrangement = (compact, narrow, stacked)
+        if self._header_arrangement == arrangement:
             return
-        self._header_arrangement = compact
-        for counter in (self.header_map_id, self.header_remnant_id):
-            counter.setStyleSheet(f"font-size:{48 if compact else 64}px;font-weight:700;color:#FFFFFF;")
-        for caption in self._header_identifier_captions:
-            caption.setStyleSheet(f"font-size:{12 if compact else 14}px;font-weight:700;color:#D5B36C;")
+        self._header_arrangement = arrangement
         layout = self._header_layout
         for item in (self._header_heading, self._header_identifiers, self._header_actions):
             layout.removeItem(item)
         layout.removeWidget(self.kill_counts_group)
         layout.removeWidget(self.header_complete_chain_button)
+        layout.removeWidget(self._compact_header_status)
+        for column, caption, field in zip(self._header_identifier_columns,
+                                          self._header_identifier_captions, fields):
+            column.removeWidget(caption)
+            column.removeWidget(field)
+            self._compact_header_grid.removeWidget(caption)
+            self._compact_header_grid.removeWidget(field)
+        self._compact_header_grid.removeWidget(self.header_complete_chain_button)
         for column in range(5):
             layout.setColumnStretch(column, 0)
         if compact:
-            layout.addLayout(self._header_heading, 0, 0, 1, 2)
-            layout.addWidget(self.header_complete_chain_button, 0, 2, Qt.AlignmentFlag.AlignCenter)
-            layout.addLayout(self._header_actions, 0, 3, Qt.AlignmentFlag.AlignRight)
-            layout.addWidget(self.kill_counts_group, 1, 0, 1, 2)
-            layout.addLayout(self._header_identifiers, 1, 2, 1, 2)
+            status = self._compact_header_grid
+            status.addWidget(self.header_complete_chain_button, 1, 0, Qt.AlignmentFlag.AlignCenter)
+            for index in range(2):
+                status.addWidget(self._header_identifier_captions[index], 0, index + 1,
+                                 Qt.AlignmentFlag.AlignCenter)
+                status.addWidget(fields[index], 1, index + 1, Qt.AlignmentFlag.AlignCenter)
+            if arrangement[1]:
+                status.addWidget(self._header_identifier_captions[2], 2, 0, Qt.AlignmentFlag.AlignCenter)
+                status.addWidget(self.header_expedition, 2, 1, 1, 2)
+            else:
+                status.addWidget(self._header_identifier_captions[2], 0, 3, Qt.AlignmentFlag.AlignCenter)
+                status.addWidget(self.header_expedition, 1, 3, Qt.AlignmentFlag.AlignCenter)
+            layout.addLayout(self._header_heading, 0, 0)
+            layout.addLayout(self._header_actions, 0, 1, Qt.AlignmentFlag.AlignRight)
+            layout.addWidget(self.kill_counts_group, 1, 0, Qt.AlignmentFlag.AlignLeft)
+            layout.addWidget(self._compact_header_status, 2 if stacked else 1,
+                             0 if stacked else 1, 1, 2 if stacked else 1,
+                             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self._compact_header_status.show()
             layout.setColumnStretch(0, 1)
-            layout.setColumnStretch(2, 1)
         else:
+            for column, caption, field in zip(self._header_identifier_columns,
+                                              self._header_identifier_captions, fields):
+                column.addWidget(caption)
+                column.addWidget(field)
+            self._compact_header_status.hide()
             layout.addLayout(self._header_heading, 0, 0)
             layout.addWidget(self.kill_counts_group, 0, 1, Qt.AlignmentFlag.AlignLeft)
             layout.addWidget(self.header_complete_chain_button, 0, 2, Qt.AlignmentFlag.AlignCenter)
@@ -994,6 +1046,7 @@ class LoggerWindow(QMainWindow):
                                   "currency": "Currency inventory", "ritual": "Ritual rewards",
                                   "propagation": "Propagation scan"}[kind])
         self.review_kind.setProperty("scanKind", kind)
+        self._arrange_review_preview()
         set_message(self.review_summary, summary)
         self.found_table.setRowCount(0)
         for label, detail, check in rows or []:
@@ -1175,6 +1228,8 @@ class LoggerWindow(QMainWindow):
         page, content = self._page()
         self.tabs.addTab(page, "Review")
         latest = self._group("SCAN REVIEW", content)
+        self._review_page_layout = content
+        self._review_latest_layout = latest
         self.review_kind = QLabel("Nothing waiting for review")
         self.review_kind.setStyleSheet("font-size:16px;font-weight:700;")
         latest.addWidget(self.review_kind)
@@ -1326,7 +1381,7 @@ class LoggerWindow(QMainWindow):
         self.propagation_recipe_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.propagation_recipe_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.propagation_recipe_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.propagation_recipe_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.propagation_recipe_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.propagation_recipe_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.propagation_recipe_table.verticalHeader().setDefaultSectionSize(62)
         self.propagation_recipe_table.setMaximumHeight(260)
@@ -1609,7 +1664,7 @@ class LoggerWindow(QMainWindow):
         self._update_ocr_threads_status()
 
     def _build_reference_database(self):
-        """Build labeled reference capture and reference-pack import/export controls."""
+        """Build labeled references and reference-only import, export and reset controls."""
         page, content = self._page()
         self.tabs.addTab(page, "Database Import/Export")
         examples = self._group("LABEL ICON SCREENSHOTS", content)
@@ -1624,6 +1679,9 @@ class LoggerWindow(QMainWindow):
         self.reference_name = combo([])
         self.reference_name.setEditable(True)
         self.reference_name.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        # Long catalog names must not force the capture and sharing controls off a compact page.
+        self.reference_name.setMinimumContentsLength(12)
+        self.reference_name.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         row.addWidget(QLabel("Type"))
         row.addWidget(self.reference_kind)
         row.addWidget(QLabel("Name"))
@@ -1657,6 +1715,10 @@ class LoggerWindow(QMainWindow):
         controls.addWidget(button("Import reference pack…", lambda: self.run(self.import_reference_pack)))
         controls.addStretch()
         sharing.addLayout(controls)
+        # Keep the reset action on its own row so compact windows retain readable reference controls.
+        self.reference_reset_button = button("Reset to defaults", lambda: self.run(self.reset_reference_database))
+        self.reference_reset_button.setAccessibleName("Reset OCR references to defaults")
+        sharing.addWidget(self.reference_reset_button, 0, Qt.AlignmentFlag.AlignLeft)
         self.reference_replace = QCheckBox("Update matching family, recipe and seed records on import")
         sharing.addWidget(self.reference_replace)
         self.reference_status = message("")
@@ -2062,9 +2124,18 @@ class LoggerWindow(QMainWindow):
         out.addWidget(button("Save CSV to folder", lambda: self.run(lambda: self.write_export("csv"))))
         out.addStretch()
         exports.addLayout(out)
+        self.raw_database_export_button = button(
+            "Save raw SQL database to folder", lambda: self.run(lambda: self.write_export("sqlite3")))
+        self.raw_database_export_button.setToolTip(
+            "Export the complete saved SQLite database, including all logs, references and settings. "
+            "External screenshot files are separate.")
+        exports.addWidget(self.raw_database_export_button, 0, Qt.AlignmentFlag.AlignLeft)
         reset = self._group("START A FRESH LOG", content)
-        reset.addWidget(QLabel("Clears imported and new Export rows, maps, chains, kills, currency, Ritual pages and IDs. "
-                               "Your settings, families, recipes and saved OCR references remain."))
+        # Wrapped guidance avoids forcing the entire export page wider than a compact viewport.
+        description = QLabel("Clears imported and new Export rows, maps, chains, kills, currency, Ritual pages and IDs. "
+                             "Your settings, families, recipes and saved OCR references remain.")
+        description.setWordWrap(True)
+        reset.addWidget(description)
         reset_actions = QHBoxLayout()
         reset_actions.addWidget(button("Start fresh session / reset IDs…", lambda: self.run(self.reset_logger), "danger"))
         reset_actions.addStretch()
@@ -2506,14 +2577,13 @@ class LoggerWindow(QMainWindow):
                 "wisp": (self.header_wisp, self.wisp)}
 
     def _sync_header_ids(self, state):
-        """Display logger-owned map/remnant IDs and synchronize expedition choices without
-        saving them.
-        """
+        """Display live IDs, reflow growing counters and sync expedition choices without saving them."""
         mid = state["current_map_id"]
         self.header_map_id.setText(header_counter(mid))
         self.header_map_id.setToolTip(mid or "No active map")
         self.header_remnant_id.setText(header_counter(state["current_remnant_id"]))
         self.header_remnant_id.setToolTip(state["current_remnant_id"] or "No remnant recorded")
+        self._arrange_header()
         current = state["settings"]["expedition"]
         for control in (self.header_expedition, self.expedition):
             with QSignalBlocker(control):
@@ -2833,6 +2903,14 @@ class LoggerWindow(QMainWindow):
         failure.
         """
         control = self.expedition if widget is None else widget
+        # Inventory and Ritual snapshots retain their capture expedition. Do
+        # not let a selector change leave a visible, otherwise valid review
+        # stranded behind the store's stale-context validation.
+        if self.pending_review_kind in ("currency", "ritual"):
+            self.state = logger.get_state()
+            select(self.expedition, self.state["settings"]["expedition"])
+            self._sync_header_ids(self.state)
+            raise ValueError("Save or reject the current inventory or Ritual review before changing expedition.")
         try:
             logger.save_settings({"expedition": value(control)})
         except Exception:
@@ -3202,7 +3280,10 @@ class LoggerWindow(QMainWindow):
                     field.setItemIcon(index, QIcon(str(icon_path)))
             field.setAccessibleName(f"{choice['selected_recipe']} · {caption}")
             field.setToolTip(caption + " · choose only runes with three gold marks.")
-            field.setMinimumWidth(0)
+            # Reserve the longest recipe rune, its icon and the styled arrow
+            # instead of allowing compact windows to collapse to icon-only.
+            field.setMinimumWidth(max(field.fontMetrics().horizontalAdvance(name)
+                                      for name in names) + field.iconSize().width() + 52)
             field.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             column.addWidget(field)
             layout.addLayout(column, 1)
@@ -4044,6 +4125,32 @@ class LoggerWindow(QMainWindow):
                     f"{counts.get('review_icon_examples', 0)} learned review icons.", "success")
         self.note("Reference database imported and ready for the next scan.", True)
 
+    def reset_reference_database(self):
+        """Confirm a reference-only reset, then reload catalogs while retaining logged activities and settings."""
+        if self._pending_tasks:
+            raise ValueError("Wait for the current scan, import or export to finish before resetting references.")
+        answer = QMessageBox.question(
+            self, "Reset OCR references to defaults",
+            "Restore the built-in OCR references and remove user-added names, labeled icons, "
+            "learned examples and custom reference changes?\n\n"
+            "Logged maps, items, currency, activities, IDs and personal settings are kept. "
+            "Save a reference pack first if you want to keep your custom references.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        # The confirmation runs a nested event loop; recheck workers before replacing reference rows.
+        if self._pending_tasks:
+            raise ValueError("Wait for the current scan, import or export to finish before resetting references.")
+        reference_pack.reset_to_defaults()
+        self.refresh()
+        self.refresh_currency_references()
+        self.refresh_reference_names()
+        self.refresh_reference_examples()
+        set_message(self.reference_status, "✓ Default OCR references restored. Recorded logs and settings kept.",
+                    "success")
+        self.note("OCR references reset to defaults.", True)
+
     def set_auto_commit(self, enabled):
         """Persist the remnant auto-save preference without changing other activity settings."""
         self.state = logger.save_settings({"auto_commit": enabled})
@@ -4241,18 +4348,33 @@ class LoggerWindow(QMainWindow):
 
     def _show_image(self, raw):
         """Display a scaled scan preview or hide it when bytes are absent or invalid."""
+        self._arrange_review_preview()
         if not raw:
             self.preview.setPixmap(QPixmap())
             self.preview.hide()
             return
         pixmap = QPixmap()
         if pixmap.loadFromData(raw):
-            self.preview.setPixmap(pixmap.scaled(1100, 260, Qt.AspectRatioMode.KeepAspectRatio,
+            self.preview.setPixmap(pixmap.scaled(1100, self.preview.maximumHeight(), Qt.AspectRatioMode.KeepAspectRatio,
                                                  Qt.TransformationMode.SmoothTransformation))
             self.preview.show()
         else:
             self.preview.setPixmap(QPixmap())
             self.preview.hide()
+
+    def _arrange_review_preview(self):
+        """Give inventory and Ritual approvals more space by compacting their preview and heading."""
+        compact = self.review_kind.property("scanKind") in ("currency", "ritual")
+        self.preview.setMinimumHeight(126 if compact else 180)
+        self.preview.setMaximumHeight(182 if compact else 260)
+        self._review_page_layout.setContentsMargins(12, 9, 12, 16)
+        self._review_latest_layout.setSpacing(5 if compact else 6)
+        self._review_latest_layout.parentWidget().setStyleSheet(
+            "QGroupBox { margin-top:6px; padding-top:10px; }" if compact else "")
+        picture = self.preview.pixmap()
+        if compact and picture is not None and picture.height() > self.preview.maximumHeight():
+            self.preview.setPixmap(picture.scaled(1100, self.preview.maximumHeight(),
+                Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 
     def _show_review_capture(self, picture):
         """Encode a captured PIL image as PNG for the shared review preview."""
@@ -4265,6 +4387,13 @@ class LoggerWindow(QMainWindow):
         corresponding review draft.
         """
         logger.validate_remnant_context(result)
+        # A delayed remnant worker may finish while the user is correcting an
+        # independent propagation recipe. Update the held remnant without
+        # discarding the newer selectors, their values or the displayed scan.
+        independent = (self._held_remnant_review is not None and
+                       self.review_kind.property("scanKind") == "propagation")
+        propagation_summary = self.review_summary.text() if independent else None
+        propagation_image = self.preview.pixmap() if independent and self.preview.isVisible() else None
         if not result.get("remnant_id") and (mode == "opened" or result.get("remnants") or result.get("sockets")):
             result.update(logger.assign_ocr_id(mode, result.get("_target_map_id"),
                                               result.get("_scan_generation"), result.get("_capture_expedition")))
@@ -4332,7 +4461,8 @@ class LoggerWindow(QMainWindow):
                      "Matched" if item.get("recipe") else "Review")
                     for i, item in enumerate(found)]
             summary = f"{len(found)} opened rewards · {status}"
-            self._review_pending("remnant", summary, bool(result.get("first_recipe")), rows)
+            self._review_pending("remnant", summary, bool(result.get("first_recipe")), rows,
+                                 preserve_chain_draft=independent)
             if result.get("first_recipe"):
                 self.use_opened(preserve_review=True)
                 if self.resolved and self.resolved["status"] == "ready":
@@ -4344,10 +4474,17 @@ class LoggerWindow(QMainWindow):
                 [("Sockets", result.get("sockets") or "?", ""),
                  ("Visible slot", result.get("seed_slot") or "?", ""),
                  ("Rune", result.get("seed_rune") or "?", ""),
-                 ("Family", result.get("family") or "Unresolved", "Review")])
+                 ("Family", result.get("family") or "Unresolved", "Review")],
+                preserve_chain_draft=independent)
             self._seed_commit_enabled()
         if self.mode == "both" and mode == "opened":
             self._link_opened_to_seed(result)
+        if independent:
+            self._show_independent_propagation_review(propagation_summary)
+            if propagation_image is not None:
+                self.preview.setPixmap(propagation_image)
+                self.preview.show()
+            self._set_chain_review_active(True)
         self.refresh_hotkey()
 
     def _populate_seed_table(self, selected_row=None):
@@ -4460,6 +4597,10 @@ class LoggerWindow(QMainWindow):
         """Auto-save a wholly clear visible-seed queue only outside the both-view confirmation
         mode.
         """
+        if self._manual_propagation_context and self.review_kind.property("scanKind") == "propagation":
+            # A delayed seed completion must leave a newer correction visible
+            # until its owner accepts or abandons it.
+            return
         pending = [r for r in self._seed_readings if not r.get("saved") and not r.get("rejected")]
         if (self.pending_review_kind == "seed" and self.mode != "both" and pending and
                 self.state["settings"].get("auto_commit") and
@@ -4721,6 +4862,10 @@ class LoggerWindow(QMainWindow):
         """Attempt configured remnant auto-save, requiring a linked approved seed in both-view
         mode.
         """
+        if self._manual_propagation_context and self.review_kind.property("scanKind") == "propagation":
+            # Do not replace an independently edited propagation review with
+            # automatic remnant-save feedback from an older worker.
+            return
         if self.mode == "both":
             from PoE2_Data_Logger.core.auto_commit import candidate
             if (self.state["settings"].get("auto_commit") and self._both_link is not None and
@@ -6027,9 +6172,7 @@ class LoggerWindow(QMainWindow):
                                   f"{rewards} reward entries")
 
     def write_export(self, kind):
-        """Require saved Atlas settings for CSV/XLSX, persist the export folder, and queue file
-        generation with a UI completion callback.
-        """
+        """Queue spreadsheet or full SQLite export; require saved Atlas drafts only for spreadsheets."""
         page = getattr(self, "atlas_settings_page", None)
         if kind in ("csv", "xlsx") and page is not None and page.dirty:
             self.tabs.setCurrentWidget(page)
@@ -6069,6 +6212,7 @@ class LoggerWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, title, str(Path.home() / name), extension)
         if path:
             destination = Path(path)
+            logger.validate_export_destination(destination)
             atlas_path = destination.with_name(destination.stem + "_Atlas.csv")
             history_path = destination.with_name(destination.stem + "_Scan_History.csv")
             existing = [companion for companion in (atlas_path, history_path)
@@ -6097,6 +6241,8 @@ class LoggerWindow(QMainWindow):
                 else:
                     data = produce()
                 if atlas_data is not None:
+                    for target in (destination, atlas_path, history_path):
+                        logger.validate_export_destination(target)
                     write_export_files({destination: data, atlas_path: atlas_data,
                                         history_path: history_data})
                 else:

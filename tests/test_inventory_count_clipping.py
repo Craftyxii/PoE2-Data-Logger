@@ -77,6 +77,27 @@ class InventoryCountClippingTests(unittest.TestCase):
                 label = item_ocr._inventory_labels(self.grid(self.cell("783", scale)))[1]
                 self.assertEqual(label.get("count"), 783)
 
+    def test_splinter_count_292_is_complete_at_inventory_capture_scales(self):
+        """Exercise the reported three-digit count using captured glyphs at normal and 4K scales."""
+        for scale in (1, 1.25, 2, 2.5):
+            with self.subTest(scale=scale):
+                label = item_ocr._inventory_labels(self.grid(self.cell("292", scale)))[1]
+                self.assertEqual(label.get("count"), 292)
+
+    def test_missed_count_presence_cannot_auto_approve_quantity_one(self):
+        """Hold a recognised stack when geometry missed its count but the glyph reader sees 292."""
+        labels = {slot: {"count_present": False, "count": 1, "tier_present": False}
+                  for slot in range(1, 61)}
+        reader = SimpleNamespace(icon=lambda cell, **kwargs: {
+            "family": "splinter", "members": ["Simulacrum Splinter"], "score": .99},
+            count=lambda cell: 292)
+        with patch.object(currency_ocr, "get_reader", return_value=reader), \
+                patch.object(item_ocr, "_inventory_labels", return_value=labels):
+            result = item_ocr.scan_inventory_grid(self.grid(self.cell("292", 2)))
+        self.assertEqual(result["items"][0]["quantity"], 292)
+        self.assertTrue(result["items"][0]["count_needs_review"])
+        self.assertFalse(clear_currency_read(result))
+
     def test_incomplete_cluster_cannot_approve_first_digit_or_auto_save(self):
         # Deliberately misalign the trailing captured glyphs to exercise a
         # cluster the geometry cannot verify. Only icon identity is stubbed;

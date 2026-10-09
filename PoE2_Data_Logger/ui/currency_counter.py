@@ -76,6 +76,9 @@ class CurrencyCard(QFrame):
         """Build an accessible item card and initialize its icon and supplied quantity."""
         super().__init__(parent)
         self.name = item["name"]
+        self._icon_bytes = None
+        self._icon_initialized = False
+        self.quantity = None
         self.setObjectName("sessionCurrencyCard")
         self.setMinimumWidth(220)
         self.setFixedHeight(94)
@@ -109,8 +112,13 @@ class CurrencyCard(QFrame):
 
     def set_icon(self, png):
         """Display supplied PNG bytes at card size or use a diamond placeholder."""
+        if self._icon_initialized and png == self._icon_bytes:
+            return
+        self._icon_initialized = True
+        self._icon_bytes = png
         picture = QPixmap()
         if png and picture.loadFromData(png, "PNG"):
+            self.icon.setStyleSheet("")
             self.icon.setPixmap(picture.scaled(52, 60, Qt.AspectRatioMode.KeepAspectRatio,
                                               Qt.TransformationMode.SmoothTransformation))
         else:
@@ -120,6 +128,10 @@ class CurrencyCard(QFrame):
 
     def set_quantity(self, amount):
         """Update the current total, zero-state colour, tooltip, and accessible amount."""
+        # Most reference/import refreshes leave quantities unchanged. Avoid
+        # restyling every card and invalidating the whole dashboard layout.
+        if self.quantity == amount:
+            return
         self.quantity = amount
         self.total_label.setText(f"{amount:,}")
         colour = "#F5C364" if amount else "#807B73"
@@ -283,20 +295,26 @@ class SessionCurrencyCounter(QWidget):
         self._layout_key = key
         while self.grid.count():
             self.grid.takeAt(0)
-        for card in self.cards.values():
-            card.hide()
-        for label in self.group_labels.values():
-            label.hide()
+        visible = set(self._visible)
+        visible_groups = {group for group, _names in self._visible_groups}
+        for name, card in self.cards.items():
+            if name not in visible and not card.isHidden():
+                card.hide()
+        for group, label in self.group_labels.items():
+            if group not in visible_groups and not label.isHidden():
+                label.hide()
         row = 0
         for group, names in self._visible_groups:
             label = self.group_labels[group]
             self.grid.addWidget(label, row, 0, 1, columns)
-            label.show()
+            if label.isHidden():
+                label.show()
             row += 1
             for index, name in enumerate(names):
                 card = self.cards[name]
                 self.grid.addWidget(card, row + index // columns, index % columns)
-                card.show()
+                if card.isHidden():
+                    card.show()
             row += (len(names) + columns - 1) // columns
         for column in range(max(columns, self._columns)):
             self.grid.setColumnStretch(column, 1 if column < columns else 0)

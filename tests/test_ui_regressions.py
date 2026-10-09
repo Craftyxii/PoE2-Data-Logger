@@ -1,8 +1,10 @@
 """Qt desktop regressions for review ownership, asynchronous callbacks, header synchronization and compact layouts."""
 
 import io
+from contextlib import closing
 import os
 from pathlib import Path
+import sqlite3
 import tempfile
 import time
 import unittest
@@ -11,7 +13,8 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image, ImageDraw
-from PySide6.QtCore import QPoint, QRect
+from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog
 
 from PoE2_Data_Logger.core import logger_store as logger, service, store
@@ -56,6 +59,133 @@ class UIRegressionTests(unittest.TestCase):
         raw = io.BytesIO()
         Image.new("RGB", (600, 400), color).save(raw, format="PNG")
         return raw.getvalue()
+
+    def test_inventory_and_ritual_review_compact_preview_without_affecting_other_scans(self):
+        """Show both item reviews at compact/wide sizes while keeping recipe previews full-size."""
+        self.window.show()
+        raw = self.image_bytes()
+        for width in (900, 1920):
+            self.window.resize(width, 1000)
+            for kind in ("currency", "ritual", "waystone"):
+                self.window._review_pending(kind, "Review scanned entries")
+                self.window._show_image(raw)
+                self.app.processEvents()
+                compact = kind in ("currency", "ritual")
+                self.assertEqual(self.window.preview.maximumHeight(), 182 if compact else 260)
+                self.assertLessEqual(self.window.preview.pixmap().height(), 182 if compact else 260)
+                self.assertEqual(self.window._review_page_layout.contentsMargins().top(), 9)
+                self.assertEqual(self.window._review_latest_layout.spacing(), 5 if compact else 6)
+
+    def test_expedition_selector_keeps_pending_snapshot_approvable(self):
+        """Refuse context changes through both selectors instead of stranding a pending inventory."""
+        self.window.show()
+        self.window._inventory_read({"items": [{"slot": 1, "name": "Chaos Orb", "quantity": 7}],
+                                     "unknown": []}, live=False)
+        for control in (self.window.expedition, self.window.header_expedition):
+            select(control, 2)
+            with self.assertRaisesRegex(ValueError, "before changing expedition"):
+                self.window.set_expedition(control)
+            self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
+            self.assertEqual(self.window.expedition.currentData(), 1)
+            self.assertEqual(self.window.header_expedition.currentData(), 1)
+        self.window.approve_scan_button.click()
+        self.assertEqual(logger.currency_for_map("M0001")["start"], {"Chaos Orb": 7})
+
+    def test_reference_reset_button_removes_custom_examples_but_retains_logs_and_drafts(self):
+        """Use the visible reset button to restore references without resetting saved or typed map data."""
+        name = logger.add_item_name("Custom reset test item")
+        logger.save_item_icon(name, Image.new("RGB", (64, 64), (120, 80, 60)))
+        logger.save_settings({"biome": "Desert"})
+        before = logger.get_state()
+        self.window.refresh()
+        select(self.window.reference_kind, "item")
+        self.window.refresh_reference_names()
+        self.window.refresh_reference_examples()
+        self.assertGreaterEqual(self.window.reference_name.findText(name), 0)
+        self.assertEqual(self.window.reference_list.count(), 1)
+        self.window.reference_kind.setCurrentIndex(self.window.reference_kind.findData("omen"))
+        self.window.normal.setText("123")
+        self.window.resize(900, 768)
+        self.window.show()
+        self.window.tabs.setCurrentIndex(8)
+        self.app.processEvents()
+        self.window.tabs.currentWidget().ensureWidgetVisible(self.window.reference_reset_button)
+        self.app.processEvents()
+        self.assertEqual(self.window.tabs.currentWidget().horizontalScrollBar().maximum(), 0)
+        with patch.object(native_desktop.QMessageBox, "question",
+                          return_value=native_desktop.QMessageBox.StandardButton.Yes):
+            QTest.mouseClick(self.window.reference_reset_button, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        self.assertNotIn(name, logger.item_names())
+        self.assertEqual(self.window.reference_kind.currentData(), "omen")
+        self.window.reference_kind.setCurrentIndex(self.window.reference_kind.findData("item"))
+        self.assertEqual(self.window.reference_name.findText(name), -1)
+        self.assertEqual(self.window.reference_list.count(), 0)
+        self.assertIn("Default OCR references restored", self.window.reference_status.text())
+        self.assertEqual(self.window.normal.text(), "123")
+        after = logger.get_state()
+        for key in ("current_map_id", "current_remnant_id", "current_expedition_id", "scan_commit_count", "settings"):
+            self.assertEqual(after[key], before[key], key)
+
+    def test_reference_reset_cancellation_and_busy_workers_do_not_change_references(self):
+        """Keep references on Cancel and block reset if a worker starts before or during confirmation."""
+        name = logger.add_item_name("Retained reset test item")
+        with patch.object(native_desktop.QMessageBox, "question",
+                          return_value=native_desktop.QMessageBox.StandardButton.Cancel), \
+                patch.object(native_desktop.reference_pack, "reset_to_defaults") as reset:
+            self.window.reference_reset_button.click()
+            reset.assert_not_called()
+        self.assertIn(name, logger.item_names())
+        for phase in ("before", "during"):
+            with self.subTest(phase=phase):
+                def confirm(*args):
+                    """Simulate a queued worker arriving while the confirmation dialog is open."""
+                    self.window._pending_tasks["test"] = (None, logger.session_generation())
+                    return native_desktop.QMessageBox.StandardButton.Yes
+                if phase == "before":
+                    self.window._pending_tasks["test"] = (None, logger.session_generation())
+                try:
+                    with patch.object(native_desktop.QMessageBox, "question", side_effect=confirm), \
+                            patch.object(native_desktop.reference_pack, "reset_to_defaults") as reset:
+                        with self.assertRaisesRegex(ValueError, "Wait for the current scan"):
+                            self.window.reset_reference_database()
+                        reset.assert_not_called()
+                    self.assertIn(name, logger.item_names())
+                finally:
+                    self.window._pending_tasks.clear()
+
+    def test_raw_database_export_button_uses_selected_folder_and_keeps_saved_log(self):
+        """Click the raw export control, execute its queued write and reopen the saved SQLite log."""
+        directory = Path(self.tmp.name) / "shared"
+        directory.mkdir()
+        self.window.export_folder.setText(str(directory))
+        before = logger.get_state()
+        self.window.resize(900, 768)
+        self.window.show()
+        self.window.tabs.setCurrentIndex(5)
+        self.app.processEvents()
+        self.window.tabs.currentWidget().ensureWidgetVisible(self.window.raw_database_export_button)
+        self.app.processEvents()
+        self.assertEqual(self.window.tabs.currentWidget().horizontalScrollBar().maximum(), 0)
+        QTest.mouseClick(self.window.raw_database_export_button, Qt.MouseButton.LeftButton)
+        self.assertEqual(len(self.jobs), 1)
+        work, done = self.jobs.pop()
+        result = work()
+        done(result)
+        path = Path(result["path"])
+        self.assertEqual(path.parent, directory)
+        self.assertEqual(path.suffix, ".sqlite3")
+        self.assertTrue(path.read_bytes().startswith(b"SQLite format 3\x00"))
+        with closing(sqlite3.connect(path)) as backup:
+            self.assertEqual(backup.execute("PRAGMA quick_check").fetchone()[0], "ok")
+            self.assertIsNotNone(backup.execute("SELECT map_id FROM maps WHERE map_id=?",
+                                                (before["current_map_id"],)).fetchone())
+            with logger._connect() as source:
+                tables = [row[0] for row in source.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+                for table in tables:
+                    self.assertEqual(backup.execute(f'SELECT * FROM "{table}"').fetchall(),
+                                     [tuple(row) for row in source.execute(f'SELECT * FROM "{table}"')], table)
+        self.assertIn(str(path), self.window.statusBar().currentMessage())
 
     def test_chain_and_atlas_controls_fit_small_screen_after_completion(self):
         """Keep chain, Atlas and scan-region actions inside a 1366-by-720 desktop window."""

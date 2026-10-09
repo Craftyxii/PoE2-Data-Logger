@@ -374,7 +374,7 @@ def _inventory_labels(image):
         if numbers:
             value = max(dict.fromkeys(numbers), key=numbers.count)
             labels[slot]["count_candidate"] = value
-            if len(numbers) >= 2 and len(set(numbers)) == 1:
+            if len(numbers) >= 2 and len({value for value, _score in readings}) == 1:
                 labels[slot]["count"] = value
         if tiers[slot] and len(set(tiers[slot])) == 1:
             labels[slot]["tier"] = tiers[slot][0]
@@ -560,9 +560,12 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
         if name:
             if labels is not None:
                 generic_count = labels[slot].get("count")
-                verify_count = generic_count is not None and labels[slot]["count_present"]
+                verify_count = generic_count is not None
                 # CurrencyReader.count returns only positive glyph readings
                 # meeting its native confidence threshold (currently .76).
+                # A failed presence detector currently supplies quantity one.
+                # Check that assumption too: a confidently recognised icon
+                # cannot verify a stack whose digits were missed by geometry.
                 native_count = (reader.count(cell) if verify_count or (generic_count is None and
                                 labels[slot].get("count_candidate") is None) else None)
                 quantity = (generic_count if generic_count is not None
@@ -1006,7 +1009,7 @@ def _ritual_cell_labels(cells):
         if values:
             labels[index]["count_candidate"] = max(values, key=lambda value: value[1])[0]
             confident = [value for value, score in values if score >= .98]
-            if len(confident) >= 2 and len(set(confident)) == 1:
+            if len(confident) >= 2 and len({value for value, _score in values}) == 1:
                 labels[index]["count"] = confident[0]
                 labels[index]["count_verified"] = True
         if tiers.get(index) and len(set(tiers[index])) == 1:

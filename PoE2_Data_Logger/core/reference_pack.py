@@ -8,11 +8,14 @@ and relational references before committing supported database changes.
 from __future__ import annotations
 
 import base64
+from contextlib import closing
+import gzip
 import hashlib
 import io
 import json
 import os
 import re
+import sqlite3
 import tempfile
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -28,6 +31,60 @@ MAX_PACK = 256 * 1024 * 1024
 MAX_ENTRIES = 2000
 MAX_IMAGE = 16 * 1024 * 1024
 MAX_REVIEW_IMAGE = 500000
+_DEFAULT_TABLES = ("recipes", "families", "aliases", "alias_keys", "alias_conflicts",
+                   "seed_states", "affixes", "master_perks", "currency_items",
+                   "ritual_names", "item_names")
+_EXAMPLE_TABLES = ("reviewed_glyphs", "currency_icons", "omen_icons", "item_icons",
+                   "review_icon_examples")
+
+
+def _default_reference_rows(db):
+    """Build current shipped references in memory using startup's seeding and repairs.
+
+    Use the installed schema and an empty migration ledger. Never replay profile
+    initialization, which also seeds historical rows and changes saved settings.
+    """
+    with gzip.open(logger.HERE / "bootstrap.json.gz", "rt", encoding="utf-8") as file:
+        snapshot = json.load(file)
+    with closing(sqlite3.connect(":memory:")) as defaults:
+        defaults.row_factory = sqlite3.Row
+        for table in (*_DEFAULT_TABLES, "meta"):
+            schema = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+                                (table,)).fetchone()
+            if schema is None:
+                raise ValueError("The reference database is missing a required table.")
+            defaults.execute(schema[0])
+        logger._seed_reference_snapshot(defaults, snapshot)
+        logger._initialize_references(defaults)
+        return {table: [tuple(row) for row in defaults.execute(f"SELECT * FROM {table} ORDER BY rowid")]
+                for table in _DEFAULT_TABLES}
+
+
+def reset_to_defaults():
+    """Atomically restore shipped OCR references and discard all local learning.
+
+    Restore editable catalogs with current bundled corrections, then clear local
+    glyphs and manual/reviewed icons. Preserve recorded maps, exports, commits,
+    inventories, Ritual pages, scan IDs/screenshots, settings and ID sequences.
+    Recognition reloads local rows for each scan; its cached assets are shipped
+    files and require no invalidation. Repeated resets leave the same baseline.
+    Return the restored row count and the number of discarded image examples.
+    """
+    with logger._connect() as db:
+        defaults = _default_reference_rows(db)
+        db.execute("BEGIN IMMEDIATE")
+        removed = 0
+        for table in _EXAMPLE_TABLES:
+            removed += db.execute(f"DELETE FROM {table}").rowcount
+        for table, rows in defaults.items():
+            db.execute(f"DELETE FROM {table}")
+            if rows:
+                placeholders = ",".join("?" for _ in rows[0])
+                db.executemany(f"INSERT INTO {table} VALUES({placeholders})", rows)
+        # Explicitly revived retired names are learned catalog state, not a
+        # profile preference. Leave every other metadata key untouched.
+        db.execute("DELETE FROM meta WHERE key='active_retired_currency_names'")
+    return {"reference_rows": sum(map(len, defaults.values())), "removed_examples": removed}
 
 
 def _name(raw, limit=200):

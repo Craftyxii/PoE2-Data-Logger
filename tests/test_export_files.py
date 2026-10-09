@@ -1,13 +1,17 @@
 """Filesystem fault-injection checks for staging, replacement and rollback across companion export files."""
 
 import errno
+from contextlib import closing
+import json
 import os
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
 
 from PoE2_Data_Logger.core import export_files
+from PoE2_Data_Logger.core import logger_store as logger, store
 
 
 class RelatedExportFilesTests(unittest.TestCase):
@@ -161,6 +165,119 @@ class RelatedExportFilesTests(unittest.TestCase):
             with self.assertRaises(export_files.ExportWriteError):
                 export_files.write_export_files(self.data, replace=False)
         self.assertEqual(list(self.directory.iterdir()), [])
+
+
+class SQLiteFolderExportTests(unittest.TestCase):
+    """Check complete database exports and preservation of previously reserved filenames."""
+
+    def setUp(self):
+        """Initialize an isolated database and configure a separate export directory."""
+        self.temporary = tempfile.TemporaryDirectory(prefix="poe2-sqlite-export-")
+        self.previous = store.DATA_DIR
+        store.DATA_DIR = Path(self.temporary.name) / "data"
+        logger._READY = False
+        logger.initialize()
+        logger.clear_export_and_reset_ids()
+        self.directory = Path(self.temporary.name) / "exports"
+        self.directory.mkdir()
+        logger.save_export_folder(str(self.directory))
+
+    def tearDown(self):
+        """Restore the application profile and remove the temporary export files."""
+        store.DATA_DIR = self.previous
+        logger._READY = False
+        self.temporary.cleanup()
+
+    def test_sqlite_export_preserves_all_tables_and_spreadsheet_sources(self):
+        """Verify the saved file retains activity logs, references, settings and all workbook sources."""
+        logger.save_settings({"tier": 16, "waystone": 87, "ocean": True})
+        logger.start_map()
+        logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
+        logger.commit_chain("Rage", "Time")
+        logger.complete_chain()
+        logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 3}])
+        logger.save_currency_snapshot("end", [{"name": "Chaos Orb", "quantity": 9}])
+        logger.save_ritual_page([
+            {"category": "Omen", "name": "Omen of Whittling", "quantity": 2, "tribute": 4000}],
+            raw_text="Saved Ritual evidence")
+        logger.finish_map(10, 2, 3, 7, unique=4)
+        sources = (logger.export_primary_csv, logger.export_atlas_csv, logger.export_all_csv)
+        expected_exports = [source() for source in sources]
+        with logger._connect() as db:
+            tables = [row[0] for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+            expected = {table: sorted((tuple(row) for row in db.execute(f'SELECT * FROM "{table}"')),
+                                      key=repr) for table in tables}
+        for table in ("new_export", "maps", "map_unique_kills", "expeditions", "chain_completions",
+                      "currency_snapshots", "ritual_pages", "commits", "meta"):
+            self.assertTrue(expected[table], table)
+        result = logger.save_export_file("sqlite3")
+        destination = Path(result["path"])
+        self.assertEqual(destination.parent, self.directory)
+        self.assertEqual(destination.suffix, ".sqlite3")
+        self.assertEqual(result["bytes"], destination.stat().st_size)
+        self.assertEqual(set(result), {"path", "bytes"})
+        with closing(sqlite3.connect(destination)) as restored:
+            restored.row_factory = sqlite3.Row
+            self.assertEqual(restored.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(tables, [row[0] for row in restored.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")])
+            for table in tables:
+                self.assertEqual(expected[table], sorted(
+                    (tuple(row) for row in restored.execute(f'SELECT * FROM "{table}"')), key=repr), table)
+            self.assertEqual(expected_exports, [source(_db=restored) for source in sources])
+
+    def test_repeated_sqlite_exports_preserve_previous_backup_in_same_second(self):
+        """Save changed inventories with one timestamp without replacing the first backup."""
+        logger.start_map()
+        logger.save_currency_snapshot("end", [{"name": "Chaos Orb", "quantity": 7}])
+        with patch.object(logger, "export_filename", return_value="PoE2_Export_fixed.sqlite3"):
+            first = logger.save_export_file("sqlite3")
+            original = Path(first["path"]).read_bytes()
+            logger.save_currency_snapshot("end", [{"name": "Chaos Orb", "quantity": 11}])
+            second = logger.save_export_file("sqlite3")
+        self.assertEqual(Path(first["path"]).name, "PoE2_Export_fixed.sqlite3")
+        self.assertEqual(Path(second["path"]).name, "PoE2_Export_fixed_2.sqlite3")
+        self.assertEqual(Path(first["path"]).read_bytes(), original)
+        for result, quantity in ((first, 7), (second, 11)):
+            with closing(sqlite3.connect(result["path"])) as db:
+                items = json.loads(db.execute(
+                    "SELECT items_json FROM currency_snapshots WHERE phase='end'").fetchone()[0])
+                self.assertEqual(items["Chaos Orb"], quantity)
+
+    def test_sqlite_export_skips_existing_symlink(self):
+        """Preserve a dangling symlink even when its destination does not exist."""
+        reserved = self.directory / "PoE2_Export_fixed.sqlite3"
+        target = self.directory / "missing.sqlite3"
+        try:
+            reserved.symlink_to(target)
+        except OSError as error:
+            self.skipTest(f"Symlinks are unavailable: {error}")
+        with patch.object(logger, "export_filename", return_value=reserved.name):
+            result = logger.save_export_file("sqlite3")
+        self.assertEqual(Path(result["path"]).name, "PoE2_Export_fixed_2.sqlite3")
+        self.assertTrue(reserved.is_symlink())
+        self.assertFalse(target.exists())
+
+    def test_sqlite_export_retries_name_reserved_by_another_writer(self):
+        """Keep a competing file created between the existence check and exclusive reservation."""
+        write_files = export_files.write_export_files
+        competing = self.directory / "PoE2_Export_fixed.sqlite3"
+
+        def reserve_then_write(files, *, replace=True):
+            """Simulate one competing reservation before using the actual grouped writer."""
+            if competing in files:
+                competing.write_bytes(b"Other export")
+            return write_files(files, replace=replace)
+
+        with patch.object(logger, "export_filename", return_value=competing.name), \
+                patch.object(export_files, "write_export_files", side_effect=reserve_then_write):
+            result = logger.save_export_file("sqlite3")
+        self.assertEqual(competing.read_bytes(), b"Other export")
+        self.assertEqual(Path(result["path"]).name, "PoE2_Export_fixed_2.sqlite3")
+        with closing(sqlite3.connect(result["path"])) as db:
+            self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        self.assertFalse(list(self.directory.glob("*.tmp")))
 
 
 if __name__ == "__main__":
