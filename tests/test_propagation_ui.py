@@ -49,12 +49,12 @@ class PropagationUITests(unittest.TestCase):
         logger._READY = False
         self.tmp.cleanup()
 
-    def scan(self, runes, recipe="Medved's Saga", clear=True, context=None, manual=False):
-        """Deliver a propagation reading, optionally configuring and approving a manual recipe-choice fixture."""
+    def scan(self, runes, recipe="Medved's Saga", clear=True, context=None, draft=False):
+        """Deliver a scan or stage an Expedition draft for its separate editor checks."""
         result = {"mode": "propagation", "runes": runes, "positions": list(range(1, len(runes) + 1)),
                   "selected_recipe": recipe, "can_use": clear, "status": "Propagation read",
                   **(logger.scan_context() if context is None else context)}
-        if manual:
+        if draft:
             with logger._connect() as db:
                 entry = db.execute("SELECT sockets,combo FROM recipes WHERE name=?", (recipe,)).fetchone()
                 original = [rune.strip() for rune in entry["combo"].split("+")]
@@ -64,8 +64,12 @@ class PropagationUITests(unittest.TestCase):
                                                    "runes": runes, "positions": result["positions"],
                                                    "can_use": True}])
         self.window._propagation_read(result, self.raw.getvalue())
-        if manual:
-            self.window.approve_propagation_recipe(0)
+        if draft:
+            result["can_use"] = True
+            self.window._propagation_reading = result
+            self.window._append_propagation(result, preserve_remnant_review=
+                self.window.pending_review_kind in ("remnant", "seed"))
+            self.window._clear_manual_propagation()
 
     def saved_parts(self):
         """Return the persisted rune pairs for the currently selected chain."""
@@ -164,7 +168,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
         self.assertFalse(self.window.chain_review_group.isHidden())
         self.assertFalse(self.window.review_complete_chain_button.isHidden())
-        self.assertFalse(self.window.review_commit_chain_button.isEnabled())
+        self.assertFalse(self.window.expedition_commit_chain_button.isEnabled())
         self.assertEqual(logger.get_state()["scan_commit_count"], before + 4)
         self.assertEqual(logger.get_state()["detonated"], 2)
         self.assertIsNone(logger.get_state()["ocr_pending"])
@@ -196,8 +200,8 @@ class PropagationUITests(unittest.TestCase):
 
     def test_keyboard_correction_preserves_pair_in_review_and_export(self):
         """Verify keyboard correction preserves pair in review and export."""
-        self.scan(["Death", "Power"], "Divine Orb x2", manual=True)
-        self.scan(["Opulent"], "Greater Regal Orb x3", manual=True)
+        self.scan(["Death", "Power"], "Divine Orb x2", draft=True)
+        self.scan(["Opulent"], "Greater Regal Orb x3", draft=True)
         field = self.window.rune_inputs[1]
         QTest.keyClick(field, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
         QTest.keyClick(field, Qt.Key.Key_Backspace)
@@ -208,7 +212,7 @@ class PropagationUITests(unittest.TestCase):
         QTest.keyClicks(field, "Time")
         self.assertEqual(self.draft(), [("1", "Death"), ("1", "Time"), ("2", "Opulent")])
         self.assertEqual(self.window.chain_review_table.item(1, 2).text(), "Divine Orb x2")
-        self.window.review_commit_chain_button.click()
+        self.window.expedition_commit_chain_button.click()
         rows = list(csv.reader(io.StringIO(logger.export_csv().decode("utf-8-sig"))))
         self.assertEqual([(row[26], row[27], row[32]) for row in rows[1:]],
                          [("Death", "Time", "M0001-E01"), ("Opulent", "", "M0001-E01")])
@@ -218,7 +222,7 @@ class PropagationUITests(unittest.TestCase):
 
     def test_empty_paired_correction_survives_expedition_switch(self):
         """Verify empty paired correction survives expedition switch."""
-        self.scan(["Death", "Power"], "Divine Orb x2", manual=True)
+        self.scan(["Death", "Power"], "Divine Orb x2", draft=True)
         self.window.rune_inputs[1].clear()
         self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
         self.assertEqual(self.draft(), [])
@@ -229,7 +233,7 @@ class PropagationUITests(unittest.TestCase):
 
     def test_clearing_all_runes_discards_old_scan_grouping(self):
         """Verify clearing all runes discards old scan grouping."""
-        self.scan(["Death", "Power"], "Divine Orb x2", manual=True)
+        self.scan(["Death", "Power"], "Divine Orb x2", draft=True)
         for field in self.window.rune_inputs:
             field.clear()
         self.window.rune_inputs[0].setText("Death")
@@ -240,7 +244,7 @@ class PropagationUITests(unittest.TestCase):
 
     def test_new_scan_replaces_cleared_trailing_pair_member(self):
         """Verify new scan replaces cleared trailing pair member."""
-        self.scan(["Death", "Power"], "Divine Orb x2", manual=True)
+        self.scan(["Death", "Power"], "Divine Orb x2", draft=True)
         self.window.rune_inputs[1].clear()
         self.scan(["Opulent"], "Greater Regal Orb x3")
         self.assertEqual(self.draft(), [("1", "Death"), ("2", "Opulent")])
@@ -250,10 +254,10 @@ class PropagationUITests(unittest.TestCase):
 
     def test_switching_expedition_preserves_separate_drafts(self):
         """Verify switching expedition preserves separate drafts."""
-        self.scan(["Rage", "Time"], manual=True)
+        self.scan(["Rage", "Time"], draft=True)
         self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
         self.assertEqual(self.draft(), [])
-        self.scan(["Death"], manual=True)
+        self.scan(["Death"], draft=True)
         self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(1))
         self.assertEqual(self.draft(), [("1", "Rage"), ("1", "Time")])
         self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
@@ -285,23 +289,101 @@ class PropagationUITests(unittest.TestCase):
 
     def enter_manual(self, *runes):
         """Fill the manual propagation rune inputs and click Add."""
+        if not self.window._propagation_manual_requested:
+            self.window.start_manual_propagation()
         for index, field in enumerate(self.window.propagation_rune_inputs):
             field.setEditText(runes[index] if index < len(runes) else "")
         self.window.propagation_add_button.click()
+
+    def test_recipe_approval_saves_selected_expedition_once_and_completion_advances(self):
+        """Approve a held recipe directly, persist it through restart and advance only on completion."""
+        self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
+        self.hold_recipes({"selected_recipe": "Swift Alloy", "runes": [], "can_use": False})
+        self.select_row_slots(0, 1, 3)
+        action = self.recipe_action(0)
+        action.click()
+        self.assertEqual(self.draft(), [])
+        self.assertEqual(self.saved_parts(), [("Rebirth", "Rebirth")])
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
+        with self.assertRaises(ValueError):
+            self.window.approve_propagation_recipe(0)
+        logger._READY = False
+        logger.initialize()
+        self.window.refresh()
+        self.assertEqual(self.saved_parts(), [("Rebirth", "Rebirth")])
+        self.assertTrue(self.window.review_complete_chain_button.isEnabled())
+        self.window.review_complete_chain_button.click()
+        self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E03")
+        self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(2))
+        self.assertTrue(logger.get_state()["chain_completed"])
+
+    def test_normal_propagation_review_exposes_only_recipe_actions_and_completion(self):
+        """Keep manual fallback and Expedition draft controls out of the OCR review."""
+        self.held_recipe_list()
+        self.window.show()
+        self.app.processEvents()
+        labels = {button.text() for button in self.window.chain_review_group.findChildren(QPushButton)
+                  if button.isVisibleTo(self.window)}
+        self.assertIn("Complete chain", labels)
+        self.assertNotIn("Commit to chain", labels)
+        self.assertNotIn("Edit chain", labels)
+        self.assertNotIn("Add chain part", labels)
+        self.assertTrue(self.window.propagation_manual_group.isHidden())
+        self.assertTrue(all(field.isHidden() or not field.isVisibleTo(self.window)
+                            for field in self.window.propagation_rune_inputs))
+
+    def test_missing_family_scan_requires_explicit_manual_entry_and_saves_directly(self):
+        """An unresolved scan offers a manual action without opening the separate form automatically."""
+        self.window._propagation_read({"mode": "propagation", "can_use": False, "runes": [],
+            "status": "Recipe not identified", **logger.scan_context()}, self.raw.getvalue())
+        self.assertTrue(self.window.propagation_manual_group.isHidden())
+        self.assertFalse(self.window.manual_propagation_button.isHidden())
+        self.window.manual_propagation_button.click()
+        self.assertFalse(self.window.propagation_manual_group.isHidden())
+        self.enter_manual("Death", "Power")
+        self.assertEqual(self.saved_parts(), [("Death", "Power")])
+        self.assertEqual(self.draft(), [])
+        self.assertEqual(logger.get_state()["detonated"], 1)
+
+    def test_maximum_strictness_holds_clear_propagation_for_recipe_approval(self):
+        """A perfect OCR reading still needs manual approval at maximum captured strictness."""
+        self.window._propagation_read({"mode": "propagation", "selected_recipe": "Swift Alloy",
+            "runes": ["Rebirth"], "positions": [2], "can_use": True,
+            "_ocr_strictness": 100, "status": "Clear marks", **logger.scan_context()}, self.raw.getvalue())
+        self.assertEqual(self.saved_parts(), [])
+        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+        self.assertEqual(self.window.pending_review_kind, "propagation")
+        self.assertEqual(self.row_fields(0)[0].currentText(), "Rebirth")
+        self.recipe_action(0).click()
+        self.assertEqual(self.saved_parts(), [("Rebirth", "")])
+        self.assertEqual(logger.get_state()["detonated"], 1)
+
+    def test_recipe_approval_saves_immediately_with_separate_expedition_draft(self):
+        """An Expedition draft cannot turn recipe approval into another unsaved part."""
+        self.window.rune_inputs[0].setText("Death")
+        self.hold_recipes({"selected_recipe": "Swift Alloy", "runes": [], "can_use": False})
+        self.select_row_slots(0, 2)
+        self.recipe_action(0).click()
+        self.assertEqual(self.saved_parts(), [("Soul", "")])
+        self.assertEqual(self.window.rune_inputs[0].text(), "Death")
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.assertFalse(self.window.review_complete_chain_button.isEnabled())
 
     def test_failed_scan_manual_pair_counts_once_and_commits_in_order(self):
         """Verify failed scan manual pair counts once and commits in order."""
         self.scan([], clear=False)
         self.assertFalse(self.window.chain_review_group.isHidden())
         self.enter_manual("Death", "Rebirth")
-        self.assertEqual(self.draft(), [("1", "Death"), ("1", "Rebirth")])
+        self.assertEqual(self.draft(), [])
+        self.assertEqual(self.saved_parts(), [("Death", "Rebirth")])
         self.assertEqual(logger.get_state()["detonated"], 1)
         self.assertIsNone(self.window.pending_review_kind)
         self.assertFalse(self.window.propagation_add_button.isEnabled())
         self.window.propagation_add_button.click()
         self.assertEqual(logger.get_state()["detonated"], 1)
         self.enter_manual("Power")
-        self.window.review_commit_chain_button.click()
+        self.assertEqual(self.saved_parts(), [("Death", "Rebirth"), ("Power", "")])
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
         self.window.complete_chain()
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E02")
@@ -319,7 +401,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.window.pending_review_kind, "remnant")
         self.assertEqual(self.window.first_recipe.text(), "Reward being corrected")
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
-        self.window.commit_chain()
+        self.assertEqual(self.saved_parts(), [("Rage", "Time")])
         self.assertEqual(logger.get_state()["ocr_pending"], pending)
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
         self.window.complete_chain()
@@ -344,7 +426,7 @@ class PropagationUITests(unittest.TestCase):
 
     def test_review_table_correction_preserves_pair_without_extra_detonation(self):
         """Verify review table correction preserves pair without extra detonation."""
-        self.scan(["Death", "Power"], manual=True)
+        self.scan(["Death", "Power"], draft=True)
         self.window.chain_review_table.item(1, 1).setText("Rebirth")
         self.assertEqual(self.draft(), [("1", "Death"), ("1", "Rebirth")])
         self.assertEqual(logger.get_state()["detonated"], 1)
@@ -354,15 +436,15 @@ class PropagationUITests(unittest.TestCase):
         """Verify manual entry is accessible without a scan and typo cannot be committed."""
         self.window.manual_propagation_button.click()
         self.assertFalse(self.window.chain_review_group.isHidden())
-        self.enter_manual("Death", "Rebirth")
-        self.window.chain_review_table.item(0, 1).setText("Deth")
+        self.window.propagation_rune_inputs[0].setEditText("Deth")
         before = logger.get_state()["scan_commit_count"]
-        with self.assertRaisesRegex(ValueError, "Correct the chain rune names"):
-            self.window.commit_chain()
+        self.assertFalse(self.window.propagation_add_button.isEnabled())
+        with self.assertRaisesRegex(ValueError, "Choose a rune name"):
+            self.window.add_manual_propagation()
         self.assertEqual(logger.get_state()["scan_commit_count"], before)
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
-        self.window.chain_review_table.item(0, 1).setText("death")
-        self.window.commit_chain()
+        self.enter_manual("death", "Rebirth")
+        self.assertEqual(self.draft(), [])
         self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(1))
         self.assertEqual(logger.get_state()["chain"][0]["rune1"], "Death")
 
@@ -411,9 +493,11 @@ class PropagationUITests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.window.approve_propagation_recipe(0)
         self.window.approve_propagation_recipe(1)
-        self.assertEqual(self.draft(), [("1", "Rage"), ("1", "Time")])
+        self.assertEqual(self.draft(), [])
+        self.assertEqual(self.saved_parts(), [("Rage", "Time")])
         self.assertEqual(logger.get_state()["detonated"], 1)
-        self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "Recipe B")
+        with logger._connect() as db:
+            self.assertEqual(db.execute("SELECT reference FROM commits WHERE kind='Propagation'").fetchone()[0], "Recipe B")
         with self.assertRaises(ValueError):
             self.window.approve_propagation_recipe(1)
         self.assertEqual(logger.get_state()["detonated"], 1)
@@ -479,14 +563,13 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(action.text(), "Approve")
         self.assertTrue(action.isEnabled())
         action.click()
-        self.assertEqual(self.draft(), [("1", "Opulent")])
-        self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "Prismatic Alloy")
+        self.assertEqual(self.draft(), [])
+        self.assertEqual(self.saved_parts(), [("Opulent", "")])
         self.assertEqual(logger.get_state()["detonated"], 1)
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
         with self.assertRaises(ValueError):
             self.window.approve_propagation_recipe(1)
         self.assertEqual(logger.get_state()["detonated"], 1)
-        self.window.review_commit_chain_button.click()
         self.assertEqual(self.saved_parts(), [("Opulent", "")])
         self.assertTrue(self.window.review_complete_chain_button.isEnabled())
 
@@ -503,8 +586,8 @@ class PropagationUITests(unittest.TestCase):
         self.assertFalse(self.window.propagation_add_button.isEnabled())
         self.select_row_slots(0, 2)
         self.recipe_action(2).click()
-        self.assertEqual(self.draft(), [("1", "Soul")])
-        self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "Swift Alloy")
+        self.assertEqual(self.draft(), [])
+        self.assertEqual(self.saved_parts(), [("Soul", "")])
         self.assertEqual(logger.get_state()["detonated"], 1)
 
     def test_inline_recipe_entry_requires_first_rune_and_cannot_approve_denied_row(self):
@@ -568,11 +651,10 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual([field.currentText() for field in self.row_fields(0)], ["Momentum", "Time"])
         self.select_row_slots(0, 1, 4)
         self.recipe_action(0).click()
-        self.assertEqual(self.draft(), [("1", "Bloodletting"), ("1", "Life")])
-        self.assertEqual(self.window.chain_review_table.item(0, 2).text(), recipe)
+        self.assertEqual(self.draft(), [])
+        self.assertEqual(self.saved_parts(), [("Bloodletting", "Life")])
         self.assertEqual(logger.get_state()["detonated"], 1)
-        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
-        self.window.review_commit_chain_button.click()
+        self.assertEqual(logger.get_state()["scan_commit_count"], 2)
         self.assertEqual(self.saved_parts(), [("Bloodletting", "Life")])
         rows = list(csv.DictReader(io.StringIO(logger.export_csv().decode("utf-8-sig"))))
         chain_rows = [row for row in rows if row["Chain Step #"]]
@@ -604,8 +686,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual((first.currentData(), second.currentData()), (1, 3))
         self.assertTrue(self.recipe_action(0).isEnabled())
         self.recipe_action(0).click()
-        self.assertEqual(self.draft(), [("1", "Rebirth"), ("1", "Rebirth")])
-        self.window.review_commit_chain_button.click()
+        self.assertEqual(self.draft(), [])
         self.assertEqual(self.saved_parts(), [("Rebirth", "Rebirth")])
         self.assertEqual(logger.get_state()["detonated"], 1)
 
@@ -642,11 +723,14 @@ class PropagationUITests(unittest.TestCase):
         self.assertTrue(all(not field.isVisibleTo(self.window)
                             for field in self.window.propagation_rune_inputs))
         self.window.propagation_recipe_table.setCurrentCell(1, 0)
+        self.assertTrue(all(not field.isVisibleTo(self.window)
+                            for field in self.window.propagation_rune_inputs))
+        self.window.manual_propagation_button.click()
         self.assertTrue(all(field.isVisibleTo(self.window)
                             for field in self.window.propagation_rune_inputs))
         self.enter_manual("Death", "Rebirth")
-        self.assertEqual(self.draft(), [("1", "Death"), ("1", "Rebirth")])
-        self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "Missing recipe")
+        self.assertEqual(self.draft(), [])
+        self.assertEqual(self.saved_parts(), [("Death", "Rebirth")])
 
     def test_replacing_recipe_scan_closes_manual_popup_before_its_selection_can_transfer(self):
         """Retire an open fallback popup with its scan while allowing fresh input for the replacement."""
@@ -660,6 +744,7 @@ class PropagationUITests(unittest.TestCase):
             self.app.processEvents()
 
         review("Missing recipe A")
+        self.window.manual_propagation_button.click()
         self.window.resize(1400, 700)
         self.window.show()
         field = self.window.propagation_rune_inputs[0]
@@ -689,6 +774,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.draft(), [])
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
+        self.window.manual_propagation_button.click()
         page.ensureWidgetVisible(field, 12, 24)
         self.app.processEvents()
         QTest.mouseClick(field, Qt.MouseButton.LeftButton, pos=arrow)
@@ -702,8 +788,8 @@ class PropagationUITests(unittest.TestCase):
         self.app.processEvents()
         QTest.mouseClick(action, Qt.MouseButton.LeftButton)
         self.app.processEvents()
-        self.assertEqual(self.draft(), [("1", "Adaptive")])
-        self.assertEqual(self.window.chain_review_table.item(0, 2).text(), "Missing recipe B")
+        self.assertEqual(self.draft(), [])
+        self.assertEqual(self.saved_parts(), [("Adaptive", "")])
         self.assertEqual(logger.get_state()["detonated"], 1)
 
     def test_clear_rescan_replaces_unclear_review_and_enables_chain_completion(self):
@@ -759,7 +845,6 @@ class PropagationUITests(unittest.TestCase):
                 self.select_row_slots(row, 2)
                 self.assertTrue(self.recipe_action(row).isEnabled())
                 self.recipe_action(row).click()
-                self.window.review_commit_chain_button.click()
         self.assertEqual(self.saved_parts(), [("Tidal", ""), ("Tidal", "")])
         self.assertEqual(logger.get_state()["detonated"], 2)
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")

@@ -12,6 +12,7 @@ from PIL import ImageGrab
 
 from PoE2_Data_Logger.core import logger_store as logger
 from PoE2_Data_Logger.core import store
+from PoE2_Data_Logger.core import ocr_sensitivity
 from PoE2_Data_Logger.ocr.opened_scan import scan_opened, scan_both
 from PoE2_Data_Logger.ocr.scan import scan
 from PoE2_Data_Logger.platform.hover_copy import read_hovered_text
@@ -399,7 +400,7 @@ class HotkeyManager:
                 user32.UnregisterHotKey(None, ident)
 
     def capture(self, kind="default", background=False):
-        """Reserve one scan and keep background capture off the hotkey listener."""
+        """Reserve a scan, freeze per-type strictness and keep capture off the listener."""
         if kind == "overlay":
             with logger._connect() as db:
                 enabled = bool(logger._meta(db, "hud_overlay", False))
@@ -419,23 +420,21 @@ class HotkeyManager:
             self._capture_revision += 1
             revision = self._capture_revision
             self._active_capture_mode = mode
-        if background:
-            # Screenshot grabbing and the GUI hide handoff can both wait. Keep
-            # them off the Windows message loop so the HUD key and WM_QUIT
-            # continue to work while a scan is in progress. Reserve the slot
-            # above before starting the worker so repeated keys cannot queue
-            # overlapping captures.
-            try:
-                threading.Thread(target=self._capture, args=(kind, mode, revision),
+        try:
+            strictness_values = dict(ocr_sensitivity.saved_values())
+            if background:
+                # Reserve the settings as well as the capture slot before
+                # scheduling, so changes cannot alter an already queued scan.
+                threading.Thread(target=self._capture, args=(kind, mode, revision, strictness_values),
                                  daemon=True, name="poe2-hotkey-capture").start()
-            except Exception as exc:
-                self._finish_capture({"mode": mode, "result": None,
-                                      "error": f"Screen scan failed: {exc}"}, None, revision)
-        else:
-            self._capture(kind, mode, revision)
+            else:
+                self._capture(kind, mode, revision, strictness_values)
+        except Exception as exc:
+            self._finish_capture({"mode": mode, "result": None,
+                                  "error": f"Screen scan failed: {exc}"}, None, revision)
 
-    def _capture(self, kind, mode, revision):
-        """Prepare and read the reserved screenshot without blocking HUD keys."""
+    def _capture(self, kind, mode, revision, strictness_values=None):
+        """Prepare the screenshot and forward the request's frozen strictness to its reader."""
         try:
             with self._lock:
                 cancelled = revision != self._capture_revision
@@ -538,7 +537,7 @@ class HotkeyManager:
             copied = None
             if self.hover_reader is not None and self.supported and kind in ("default", "waystone", "tablet"):
                 copied = self.hover_reader()
-            args = (kind, mode, region, image, tooltip, remnant_map, capture_map, generation, expedition, activity_crops, copied, phase, pending_map, revision)
+            args = (kind, mode, region, image, tooltip, remnant_map, capture_map, generation, expedition, activity_crops, copied, phase, pending_map, revision, strictness_values)
             self._read_capture(*args)
         except Exception as exc:
             self._finish_capture({"mode": mode, "result": None,
@@ -561,22 +560,29 @@ class HotkeyManager:
         if image.width * image.height > store.MAX_IMAGE_PIXELS:
             raise ValueError("Screen capture exceeds 12 megapixels. Use a smaller game resolution.")
 
-    def _read_capture(self, kind, mode, region, image, tooltip, remnant_map=None, capture_map=None, generation=None, expedition=None, activity_crops=None, copied=None, phase="start", pending_map=False, revision=None):
+    def _read_capture(self, kind, mode, region, image, tooltip, remnant_map=None, capture_map=None, generation=None, expedition=None, activity_crops=None, copied=None, phase="start", pending_map=False, revision=None, strictness_values=None):
         """Route captured pixels or copied item text to the appropriate reader, preserve
-        capture ownership and publish through the revision guard.
+        capture ownership and publish through the revision guard. Built-in OCR
+        readers receive frozen per-type strictness; injected readers keep their API.
         """
         event = None
         raw = None
         try:
+            values = ocr_sensitivity.saved_values() if strictness_values is None else strictness_values
+            strictness_values = {key: ocr_sensitivity.validate(level) for key, level in values.items()}
+            remnant_strictness = strictness_values.get("remnant", ocr_sensitivity.DEFAULT)
+            remnant_options = {} if remnant_strictness == ocr_sensitivity.DEFAULT else {"strictness": remnant_strictness}
             if kind == "propagation":
+                from PoE2_Data_Logger.ocr.propagation_scan import scan_propagation
                 reader = self.readers.get("propagation")
                 if reader is None:
-                    from PoE2_Data_Logger.ocr.propagation_scan import scan_propagation
                     reader = scan_propagation
                 memory = io.BytesIO()
                 image.convert("RGB").save(memory, format="PNG")
                 raw = memory.getvalue()
-                result = reader(image)
+                level = strictness_values.get("propagation", ocr_sensitivity.DEFAULT)
+                options = {"strictness": level} if reader is scan_propagation and level != ocr_sensitivity.DEFAULT else {}
+                result = reader(image, **options)
                 result["mode"] = "propagation"
                 event = {"mode": "propagation", "result": result, "error": ""}
                 return
@@ -597,7 +603,7 @@ class HotkeyManager:
             if (kind == "default" and mode == "opened" and not copied and
                     self.readers.get("opened") is scan_opened):
                 from PoE2_Data_Logger.core.auto_commit import candidate
-                native = scan_opened(image, allow_fallback=False, verify_header=True)
+                native = scan_opened(image, allow_fallback=False, verify_header=True, **remnant_options)
                 if not candidate(native)["ready"]:
                     native = None
             if native and not copied:
@@ -625,7 +631,15 @@ class HotkeyManager:
                     raw = memory.getvalue()
                     event = {"mode": "ritual", "result": {"captured": True, "map_id": capture_map}, "error": ""}
                     return
-                result = item_text.read_screen_tooltip(tooltip_image, affixes, ocr_rows=rows)
+                item_options = {}
+                if mode in ("waystone", "tablet"):
+                    level = strictness_values.get(mode, ocr_sensitivity.DEFAULT)
+                    if level != ocr_sensitivity.DEFAULT:
+                        item_options["strictness"] = level
+                elif any(strictness_values.get(key, ocr_sensitivity.DEFAULT) != ocr_sensitivity.DEFAULT
+                         for key in ("waystone", "tablet")):
+                    item_options["strictness"] = dict(strictness_values)
+                result = item_text.read_screen_tooltip(tooltip_image, affixes, ocr_rows=rows, **item_options)
                 if result and (kind == "default" or result["kind"] == mode):
                     memory = io.BytesIO()
                     tooltip_image.convert("RGB").save(memory, format="JPEG", quality=92)
@@ -636,7 +650,7 @@ class HotkeyManager:
                         self.readers.get("opened") is scan_opened and
                         any("runeshapecombinations" in "".join(c for c in row["text"].lower()
                             if c.isalnum()) for row in rows)):
-                    result = scan_opened(tooltip_image, ocr_rows=rows)
+                    result = scan_opened(tooltip_image, ocr_rows=rows, **remnant_options)
                     result["_target_map_id"] = remnant_map
                     memory = io.BytesIO()
                     tooltip_image.convert("RGB").save(memory, format="JPEG", quality=92)
@@ -671,13 +685,22 @@ class HotkeyManager:
                 event = {"mode": mode, "result": {"captured": True, "map_id": capture_map}, "error": ""}
                 return
             if mode == "opened" and self.readers.get(mode) is scan_opened:
-                result = scan_opened(image)
+                result = scan_opened(image, **remnant_options)
             else:
                 with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp:
                     temp.write(raw)
                     name = Path(temp.name)
                 try:
-                    result = self.readers[mode](name)
+                    reader = self.readers[mode]
+                    options = {}
+                    seed_strictness = strictness_values.get("seed", ocr_sensitivity.DEFAULT)
+                    if reader is scan and seed_strictness != ocr_sensitivity.DEFAULT:
+                        options["strictness"] = seed_strictness
+                    elif reader is scan_both:
+                        options.update(remnant_options)
+                        if seed_strictness != remnant_strictness:
+                            options["seed_strictness"] = seed_strictness
+                    result = reader(name, **options)
                 finally:
                     name.unlink(missing_ok=True)
             if mode == "both":
@@ -693,6 +716,11 @@ class HotkeyManager:
             raw = None
             event = {"mode": mode, "result": None, "error": f"Screen scan failed: {exc}"}
         finally:
+            if event and event.get("result") is not None and strictness_values is not None:
+                event["result"]["_ocr_strictness_values"] = dict(strictness_values)
+                key = {"opened": "remnant", "seed": "seed", "propagation": "propagation"}.get(event["mode"])
+                if key and strictness_values.get(key, ocr_sensitivity.DEFAULT) != ocr_sensitivity.DEFAULT:
+                    event["result"]["_ocr_strictness"] = strictness_values[key]
             if event and event.get("result") is not None and generation is not None:
                 event["result"].update({"_scan_generation": generation, "_capture_map_id": capture_map,
                                         "_capture_expedition": expedition, "_capture_map_pending": pending_map})

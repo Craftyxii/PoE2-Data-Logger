@@ -170,12 +170,12 @@ class ReleasePackagingTests(unittest.TestCase):
                 self.assertIsNone(re.fullmatch(pattern, f'!define APP_VERSION "{version}"'))
 
     def test_install_and_uninstall_guard_previous_activity_beta_clients(self):
-        """Verify install and uninstall initialization guard prior beta client titles and abort silently with nonzero status."""
+        """Guard prior beta/stable clients during install and uninstall and return nonzero silently."""
         installer = (self.root / "packaging/installer.nsi").read_text(encoding="utf-8")
         for name in (".onInit", "un.onInit"):
             with self.subTest(function=name):
                 body = installer.split(f"Function {name}\n", 1)[1].split("FunctionEnd", 1)[0]
-                for title in ("PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta", "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta", "PoE2 Data Logger 1.3.1 Beta", "PoE2 Data Logger 1.3.1.1 Beta", "PoE2 Data Logger 1.3.1.2 Beta", "PoE2 Data Logger 1.3.1.3 Beta", "${APP_NAME}"):
+                for title in ("PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta", "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta", "PoE2 Data Logger 1.3.1 Beta", "PoE2 Data Logger 1.3.1.1 Beta", "PoE2 Data Logger 1.3.1.2 Beta", "PoE2 Data Logger 1.3.1.3 Beta", "PoE2 Data Logger 1.3.2", "${APP_NAME}"):
                     self.assertIn(f'FindWindowW(p 0, w "{title}")', body)
                 running = body.split("  running:\n", 1)[1].split("  ready:", 1)[0]
                 self.assertIn("/SD IDOK", running)
@@ -188,7 +188,8 @@ class ReleasePackagingTests(unittest.TestCase):
             "PoE2 Data Logger", "PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta",
             "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta",
             "PoE2 Data Logger 1.3.1 Beta", "PoE2 Data Logger 1.3.1.1 Beta",
-            "PoE2 Data Logger 1.3.1.2 Beta", "PoE2 Data Logger 1.3.1.3 Beta",
+            "PoE2 Data Logger 1.3.1.3 Beta", "PoE2 Data Logger 1.3.2",
+            "PoE2 Data Logger 1.3.1.2 Beta",
         ))
         self.assertEqual(running_client_titles("1.3.2", False)[-1], "PoE2 Data Logger 1.3.2")
         prior = running_client_titles("1.3.1", True)
@@ -196,6 +197,15 @@ class ReleasePackagingTests(unittest.TestCase):
         current = running_client_titles("1.3.1.3", True)
         self.assertIn("PoE2 Data Logger 1.3.1.2 Beta", current)
         self.assertEqual(current[-1], "PoE2 Data Logger 1.3.1.3 Beta")
+
+    def test_beta_publication_uses_versioned_notes_without_replacing_stable_latest(self):
+        """Require the new beta's reviewable release notes and preserve the stable latest release."""
+        workflow = (self.root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        beta = next(line for line in workflow.splitlines() if "if ($env:PRERELEASE -eq 'True')" in line)
+        self.assertIn("'--prerelease'", beta)
+        self.assertIn("'--latest=false'", beta)
+        self.assertIn("'--notes-file', 'docs/RELEASE_1.3.2.4.md'", beta)
+        self.assertTrue((self.root / "docs/RELEASE_1.3.2.4.md").is_file())
 
 
 class RunningClientGuardTests(unittest.TestCase):

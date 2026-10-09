@@ -215,17 +215,17 @@ class UIRegressionTests(unittest.TestCase):
 
     def test_header_remnant_id_follows_review_save_and_map_transition(self):
         """Verify header remnant ID follows review save and map transition."""
-        self.assertEqual(self.window.header_map_id.text(), "M0001")
+        self.assertEqual(self.window.header_map_id.text(), "#1")
         self.assertEqual(self.window.header_remnant_id.text(), "—")
         self.window.show_result("opened", self.opened_result())
-        self.assertEqual(self.window.header_remnant_id.text(), "R0001")
+        self.assertEqual(self.window.header_remnant_id.text(), "#1")
         self.window.discard_scan()
         self.assertEqual(self.window.header_remnant_id.text(), "—")
         self.window.show_result("opened", self.opened_result())
         self.window.approve_remnant_scan()
-        self.assertEqual(self.window.header_remnant_id.text(), "R0001")
+        self.assertEqual(self.window.header_remnant_id.text(), "#1")
         self.window.finish_map()
-        self.assertEqual(self.window.header_map_id.text(), "M0002")
+        self.assertEqual(self.window.header_map_id.text(), "#2")
         self.assertEqual(self.window.header_remnant_id.text(), "—")
         self.assertEqual(self.window.header_expedition.currentData(), 1)
         self.assertIn("M0002-E01", self.window.header_expedition.currentText())

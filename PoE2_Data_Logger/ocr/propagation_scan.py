@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image
 
 from PoE2_Data_Logger.core import logger_store as logger
+from PoE2_Data_Logger.core import ocr_sensitivity
 from PoE2_Data_Logger.ocr import opened_scan, runehelper_ocr
 from PoE2_Data_Logger.ocr.propagation_marks import supported_partial_peak_boxes, supported_peak_boxes
 
@@ -25,11 +26,12 @@ def _result(status, **values):
             "candidates": [], "choices": [], **values}
 
 
-def _panel(image):
+def _panel(image, strictness=ocr_sensitivity.DEFAULT):
     """Return a 575-pixel-wide recipe panel, preserving verified cropped-panel OCR rows.
 
     Try existing marks or a heading before finding a left-side panel in a larger
     capture; images below the minimum usable dimensions return no panel.
+    Heading confidence uses the same frozen strictness as its reward rows.
     """
     if image.width < 160 or image.height < 120:
         return None
@@ -40,7 +42,8 @@ def _panel(image):
         # Already-cropped panels can omit the arrow margin. The generic frame
         # finder may otherwise mistake a recipe border for the panel header.
         return candidate
-    detections, title = _read_panel_rows(candidate)
+    detections, title = (_read_panel_rows(candidate) if strictness == ocr_sensitivity.DEFAULT else
+                         _read_panel_rows(candidate, strictness=strictness))
     if (title is not None and title["x2"] - title["x1"] >= candidate.width * .28
             and title["y2"] - title["y1"] >= 15):
         # A verified cropped recipe panel remains usable when only the
@@ -74,12 +77,12 @@ def _rapid_rows(image):
     return rows
 
 
-def _read_panel_rows(image):
-    """Require a Runeshape Combinations heading at .8 confidence and retain rows below it."""
+def _read_panel_rows(image, strictness=ocr_sensitivity.DEFAULT):
+    """Retain rows below the required heading using the capture's confidence floor."""
     rows = _rapid_rows(image)
     title = next((row for row in rows
                   if opened_scan._key(row["text"]) == "runeshapecombinations"
-                  and row["score"] >= .8), None)
+                  and row["score"] >= ocr_sensitivity.clear_threshold(.8, strictness, .15)), None)
     if title is None:
         return [], None
     return [row for row in rows if row["y1"] > title["y2"] + 12], title
@@ -279,10 +282,11 @@ def _tile_layout(image, tile_top, tile_height, marked, min_first_x=15, sockets=N
     return (first_x, pitch) if min_first_x <= first_x <= 85 else None
 
 
-def _reward_rows(db, detections):
+def _reward_rows(db, detections, strictness=ocr_sensitivity.DEFAULT):
     """Canonicalize ordered reward rows while preserving quantity and skill-level constraints.
 
-    Unprefixed prose needs a recipe match of at least .92 to enter the list.
+    Strictness adjusts the default .92 review floor for unprefixed prose while
+    quantity, explicit level and ambiguity guards remain mandatory.
     """
     names = [row[0] for row in db.execute("SELECT name FROM recipes")]
     quantity = re.compile(r"^\s*(\d{1,3}|[Il])\s*[xX×]\s+(.+?)\s*$")
@@ -300,10 +304,12 @@ def _reward_rows(db, detections):
             continue
         levels = re.findall(r"\blevel\s*(\d+)\b", text, re.I)
         choices = [name for name in names if re.findall(r"\blevel\s*(\d+)\b", name, re.I) == levels]
-        recipe, confidence = opened_scan._match(db, text, count, choices)
+        options = {} if strictness == ocr_sensitivity.DEFAULT else {"strictness": strictness}
+        recipe, confidence = opened_scan._match(db, text, count, choices, **options)
         if recipe and re.findall(r"\blevel\s*(\d+)\b", recipe, re.I) != levels:
             recipe = None
-        if not matched and not level and (not recipe or confidence < .92):
+        if not matched and not level and (not recipe or confidence <
+                                         ocr_sensitivity.review_threshold(.92, strictness, .08)):
             continue
         rows.append({**detection, "recipe": recipe, "match_score": confidence})
     return rows
@@ -323,17 +329,21 @@ def _family_candidates(db, rows):
     return sorted(matches)
 
 
-def _row_reading(db, panel, marked, incomplete, row, all_rows, candidates, shared_layout, min_first_x):
+def _row_reading(db, panel, marked, incomplete, row, all_rows, candidates, shared_layout, min_first_x,
+                 strictness=ocr_sensitivity.DEFAULT):
     """Map three-marked tile positions to recipe-order names; hold unverified geometry.
 
     Rune names come from the stored combination order, not glyph classification.
     A verified row origin and spacing are required before a position can be saved.
+    Lower strictness can accept tentative text, while crown and position guards
+    remain mandatory before presenting approvable propagated runes.
     """
     recipe = row["recipe"]
     info = {"selected_recipe": recipe, "reward_text": row["text"], "candidates": candidates,
             "family": f"Family {candidates[0]}" if len(candidates) == 1 else None,
             "visible_recipes": [item["recipe"] for item in all_rows]}
-    if not recipe or row["score"] < .85 or row["match_score"] < .9:
+    if (not recipe or row["score"] < ocr_sensitivity.review_threshold(.85, strictness, .15) or
+            row["match_score"] < ocr_sensitivity.review_threshold(.9, strictness, .08)):
         return _result("Reward was unclear — enter its propagated runes manually.", **info)
     entry = db.execute("SELECT sockets,combo FROM recipes WHERE name=?", (recipe,)).fetchone()
     runes = [rune.strip() for rune in entry["combo"].split("+")] if entry else []
@@ -356,27 +366,33 @@ def _row_reading(db, panel, marked, incomplete, row, all_rows, candidates, share
     if (len(set(positions)) != len(positions) or any(position < 1 or position > len(runes) for position in positions)
             or any(abs(box[0] - first_x - round((box[0] - first_x) / pitch) * pitch) > 6 for box in selected)):
         return _result("Marked rune positions conflict with the recipe's rune order — enter them manually.", **info)
-    return _result("Propagation runes detected — approve this recipe to add them to the chain.",
-                   **info, positions=positions, runes=[runes[position - 1] for position in positions], can_use=True)
+    clear = (row["score"] >= ocr_sensitivity.clear_threshold(.85, strictness, .15) and
+             row["match_score"] >= ocr_sensitivity.clear_threshold(.9, strictness, .08))
+    status = ("Propagation runes detected — approve this recipe to add them to the chain." if clear else
+              "Propagation suggestion needs review — enter its runes manually.")
+    return _result(status, **info, positions=positions,
+                   runes=[runes[position - 1] for position in positions], can_use=clear)
 
 
-def scan_propagation(image: Image.Image | Path):
-    """Read cursor-selected recipes and three-marked runes, holding uncertain positions for review."""
+def scan_propagation(image: Image.Image | Path, strictness=ocr_sensitivity.DEFAULT):
+    """Apply frozen capture strictness to recipe suggestions and preserve crown/position guards."""
+    strictness = ocr_sensitivity.validate(strictness)
+    options = {} if strictness == ocr_sensitivity.DEFAULT else {"strictness": strictness}
     if isinstance(image, Image.Image):
         source = image.convert("RGB")
     else:
         with Image.open(image) as opened:
             source = opened.convert("RGB")
-    panel = _panel(source)
+    panel = _panel(source, **options)
     if panel is None:
         return _result("Runeshape panel is too small — capture the full recipe list and cursor.")
     mask, marked, incomplete = _marked_image(panel)
     cursors = _cursors(mask)
-    detections, title = panel.info.get("propagation_rows") or _read_panel_rows(panel)
+    detections, title = panel.info.get("propagation_rows") or _read_panel_rows(panel, **options)
     if title is None:
         return _result("Runeshape Combinations panel was not found — review the capture.")
     with logger._connect() as db:
-        rows = _reward_rows(db, detections)
+        rows = _reward_rows(db, detections, **options)
         candidates = _family_candidates(db, rows)
         min_first_x = 46 if cursors else 15
         # Plain tile geometry locates the rune positions. The three crown
@@ -437,8 +453,11 @@ def scan_propagation(image: Image.Image | Path):
                        key=len, default=[])
         shared = tuple(float(np.median([layout[index] for layout in agreeing]))
                        for index in range(2)) if len(agreeing) >= 2 else None
-        choices = [_row_reading(db, panel, marked, incomplete, row, rows, candidates, shared, min_first_x)
+        choices = [_row_reading(db, panel, marked, incomplete, row, rows, candidates, shared, min_first_x, **options)
                    for row in rows]
+        if strictness != ocr_sensitivity.DEFAULT:
+            for choice in choices:
+                choice["_ocr_strictness"] = strictness
     if len(cursors) == 1:
         selected = [index for index, row in enumerate(rows) if 3 <= row["y1"] - cursors[0]["y"] <= 62]
         if len(selected) == 1:

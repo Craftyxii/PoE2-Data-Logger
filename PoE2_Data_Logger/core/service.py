@@ -17,6 +17,7 @@ from PIL import Image, UnidentifiedImageError
 
 from PoE2_Data_Logger.core import logger_store as logger
 from PoE2_Data_Logger.core import store
+from PoE2_Data_Logger.core import ocr_sensitivity
 from PoE2_Data_Logger.core.auto_commit import commit as auto_commit_remnant
 from PoE2_Data_Logger.platform.hotkey import HotkeyManager
 from PoE2_Data_Logger.ocr.opened_scan import scan_opened, scan_both
@@ -56,7 +57,8 @@ def dispatch(path, data=None):
     """Route desktop actions, staging OCR uploads and rechecking remnant context.
 
     Read routes expose state, catalogs and saved images; mutation routes delegate
-    validation and writes to the matching logger or hotkey operation.
+    validation and writes to the matching logger or hotkey operation. Remnant
+    OCR freezes its strictness before decoding or invoking any reader.
     """
     data = data or {}
     target = urlsplit(path)
@@ -87,6 +89,11 @@ def dispatch(path, data=None):
     if route == "/api/candidates":
         return store.candidates(int(q["sockets"][0]), q["slot"][0], q["rune"][0])
     if route == "/api/scan":
+        values = data["ocr_strictness"] if "ocr_strictness" in data else ocr_sensitivity.saved_values()
+        if not isinstance(values, dict):
+            raise ValueError("OCR strictness settings are invalid.")
+        strictness_values = {kind: ocr_sensitivity.validate(values.get(kind, ocr_sensitivity.DEFAULT))
+                             for kind, _label in ocr_sensitivity.SCAN_TYPES}
         context = data.get("scan_context") or logger.scan_context()
         logger.validate_remnant_context(context)
         expected_generation = data.get("scan_generation", context["_scan_generation"])
@@ -96,14 +103,22 @@ def dispatch(path, data=None):
         mode = q.get("mode", ["seed"])[0]
         if mode not in ("seed", "opened", "both"):
             raise ValueError("Choose visible seed or opened remnant mode.")
+        strictness = strictness_values.get("seed" if mode == "seed" else "remnant", ocr_sensitivity.DEFAULT)
+        options = {} if strictness == ocr_sensitivity.DEFAULT else {"strictness": strictness}
+        if mode == "both" and strictness_values.get("seed", ocr_sensitivity.DEFAULT) != strictness:
+            options["seed_strictness"] = strictness_values.get("seed", ocr_sensitivity.DEFAULT)
         fd, name = tempfile.mkstemp(suffix=".png" if raw.startswith(b"\x89PNG") else ".jpg")
         try:
             with os.fdopen(fd, "wb") as screenshot:
                 screenshot.write(raw)
-            result = scan_both(Path(name)) if mode == "both" else (
-                scan_opened(Path(name)) if mode == "opened" else scan(Path(name)))
+            result = scan_both(Path(name), **options) if mode == "both" else (
+                scan_opened(Path(name), **options) if mode == "opened" else scan(Path(name), **options))
             if mode == "both":
                 mode = result["mode"]
+            selected_strictness = strictness_values.get("seed" if mode == "seed" else "remnant", ocr_sensitivity.DEFAULT)
+            if selected_strictness != ocr_sensitivity.DEFAULT:
+                result["_ocr_strictness"] = selected_strictness
+            result["_ocr_strictness_values"] = strictness_values
             result["mode"] = mode
             logger.validate_remnant_context(context)
             if mode != "seed" or result.get("remnants") or result.get("sockets"):

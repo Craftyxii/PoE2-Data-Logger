@@ -20,6 +20,7 @@ import numpy as np
 import cv2
 import quickjs
 from PIL import Image
+from PoE2_Data_Logger.core import ocr_sensitivity
 
 ROOT = Path(__file__).resolve().parent.parent / "third_party" / "currency_overlay"
 _READERS = threading.local()
@@ -219,13 +220,17 @@ class CurrencyReader:
             self._inventory_js_ready = True
         return self.context.get("inventoryJSON")(payload)
 
-    def icon(self, image: Image.Image, count_digits=None):
+    def icon(self, image: Image.Image, count_digits=None, strictness=ocr_sensitivity.DEFAULT):
         """Identify an icon, separating empty, ignored and uncertain inventory matches.
 
         A weighted match needs score > -3000 with margin > 300, or score > -3200
         with margin > 1500; fallback recognition must also pass its score/margin gates.
-        These scores describe artwork evidence; callers separately hold counts and tiers.
+        Strictness adjusts identity confidence and candidate admission around those
+        defaults. Count and tier checks retain their separate evidence requirements.
         """
+        strictness = ocr_sensitivity.validate(strictness)
+        clear = lambda base, spread: ocr_sensitivity.clear_threshold(base, strictness, spread)
+        suggestion = ocr_sensitivity.review_threshold(-8000, strictness, 2000)
         pending = None
         pixels = np.asarray(image.convert("RGB"))
         dx, dy = max(1, round(image.width * .18)), max(1, round(image.height * .18))
@@ -238,8 +243,8 @@ class CurrencyReader:
             if ranked:
                 top = ranked[0]
                 margin = top["score"] - ranked[1]["score"] if len(ranked) > 1 else float("inf")
-                clear_match = ((top["score"] > -3000 and margin > 300) or
-                               (top["score"] > -3200 and margin > 1500))
+                clear_match = ((top["score"] > clear(-3000, 800) and margin > clear(300, 200)) or
+                               (top["score"] > clear(-3200, 800) and margin > clear(1500, 500)))
                 if top["name"] in self.inventory_ignored and clear_match:
                     return {"family": None, "members": [], "score": 0,
                             "margin": margin, "all": [], "ignored": True,
@@ -252,12 +257,14 @@ class CurrencyReader:
                 pending = {"family": None, "members": [],
                         "score": max(0, 1 + top["score"] / 8000), "margin": margin,
                         "all": [{"name": " / ".join(self.inventory_members[top["name"]])}],
-                        "uncertain": top["score"] > -8000}
+                        "uncertain": top["score"] > suggestion}
                 if top["name"] in self.inventory_ignored:
                     pending["all"] = [{"name": "Unrecognized item"}]
                     pending["uncertain"] = True
                     return pending
-                if top["score"] <= -8000:
+                if top["score"] <= suggestion:
+                    if strictness != ocr_sensitivity.DEFAULT:
+                        pending["all"] = []
                     pending["uncertain"] = True
                     return pending
         icon = image.copy()
@@ -274,9 +281,9 @@ class CurrencyReader:
             agrees = bool(set(result.get("members", [])) &
                           set(self.inventory_members[top["name"]]))
             if not (agrees and result.get("family") and
-                    result.get("score", 0) >= .65 and result.get("margin", 0) >= .15):
+                    result.get("score", 0) >= clear(.65, .15) and result.get("margin", 0) >= clear(.15, .08)):
                 return pending
-        if result.get("family") and (result["score"] < .50 or result["margin"] < .12):
+        if result.get("family") and (result["score"] < clear(.50, .20) or result["margin"] < clear(.12, .08)):
             result["family"], result["members"] = None, []
         return result
 

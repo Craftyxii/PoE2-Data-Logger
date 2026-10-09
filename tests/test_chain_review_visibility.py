@@ -51,9 +51,9 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def propagate(self, runes=("Death", "Power"), recipe="Divine Orb x2", clear=True, **extra):
-        """Approve synthetic parts against matching recipe slots in this test's isolated catalog."""
-        # A held row that the user approves remains a draft until Commit to
-        # chain. Confident direct scans have their own automatic-save checks.
+        """Stage synthetic Expedition drafts for draft lifecycle checks."""
+        # Exercise Expedition drafts separately from recipe approval, which
+        # now saves directly and has dedicated propagation review checks.
         result = {"mode": "propagation", "runes": list(runes),
                   "positions": list(range(1, len(runes) + 1)), "selected_recipe": recipe,
                   "can_use": False, "status": "Confirm propagated recipe", **logger.scan_context(), **extra}
@@ -68,7 +68,11 @@ class ChainReviewVisibilityTests(unittest.TestCase):
                                (" + ".join(slots[:stored["sockets"]]), recipe))
         self.window._propagation_read(result, self.raw)
         if clear:
-            self.window.approve_propagation_recipe(0)
+            result["can_use"] = True
+            self.window._propagation_reading = result
+            self.window._append_propagation(result, preserve_remnant_review=
+                self.window.pending_review_kind in ("remnant", "seed"))
+            self.window._clear_manual_propagation()
         return result
 
     def auto_propagate(self, runes=("Death", "Power"), recipe="Divine Orb x2"):
@@ -121,7 +125,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertIsNone(self.window._manual_propagation_context)
         self.assertEqual(self.window.propagation_recipe_table.rowCount(), 0)
         self.assertTrue(all(field.currentText() == "" for field in self.window.propagation_rune_inputs))
-        self.assertFalse(self.window.review_commit_chain_button.isEnabled())
+        self.assertFalse(self.window.expedition_commit_chain_button.isEnabled())
         self.assertEqual(self.expedition_counts(), counts)
         self.assertEqual(self.propagation_audit(), audit)
         self.assertEqual(self.expedition_chain_rows(), list(saved))
@@ -217,7 +221,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
             self.assertEqual(self.window.review_kind.property("scanKind"), "remnant")
             self.assertTrue(self.window.manual_propagation_button.isHidden())
             self.assertTrue(self.window.chain_review_group.isHidden())
-            self.assertFalse(self.window.review_commit_chain_button.isVisible())
+            self.assertFalse(self.window.expedition_commit_chain_button.isVisible())
             self.assertFalse(self.window.review_complete_chain_button.isVisible())
             self.assertTrue(self.window.remnant_log_group.isVisible())
         self.window.approve_scan_button.click()
@@ -240,7 +244,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertFalse(self.window.approve_scan_button.isVisible())
         self.assertFalse(self.window.reject_scan_button.isVisible())
         self.assertTrue(self.window.chain_review_group.isVisible())
-        self.window.review_commit_chain_button.click()
+        self.window.expedition_commit_chain_button.click()
         self.assertEqual(len(logger.get_state()["chain"]), 1)
         self.window.manual_remnant_button.click()
         self.assertEqual(self.window.pending_review_kind, "remnant")
@@ -313,7 +317,9 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["ocr_pending"], held)
         self.window.propagation_rune_inputs[0].setCurrentText("Opulent")
         self.window.add_manual_propagation()
-        self.assertEqual(self.window._chain_steps(), [{"rune1": "Opulent", "rune2": ""}])
+        self.assertEqual(self.window._chain_steps(), [])
+        self.assertEqual([(part["rune1"], part["rune2"]) for part in logger.get_state()["chain"]],
+                         [("Opulent", "")])
         self.assertEqual(self.expedition_counts()["M0001-E01"], 2)
         self.assertEqual(logger.get_state()["ocr_pending"], held)
 
@@ -368,7 +374,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertFalse(self.window.chain_review_group.isHidden())
         self.assertEqual(self.draft_rows(), [("1", "Death", "Divine Orb x2"),
             ("1", "Power", "Divine Orb x2"), ("2", "Opulent", "Greater Regal Orb x3")])
-        self.window.review_commit_chain_button.click()
+        self.window.expedition_commit_chain_button.click()
         expected = [("M0001", "M0001-E01", "1", "Death", "Power"),
                     ("M0001", "M0001-E01", "2", "Opulent", "")]
         self.assertEqual(self.exported_chain(), expected)
@@ -459,7 +465,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.expedition_counts(), {"M0001-E01": 2})
         self.assertEqual(len(self.propagation_audit()), 2)
         self.assertEqual(self.expedition_chain_rows(), ["#1  Death → Power", "#2  Rage → Time"])
-        self.assertFalse(self.window.review_commit_chain_button.isEnabled())
+        self.assertFalse(self.window.expedition_commit_chain_button.isEnabled())
         self.assertFalse(self.window.expedition_commit_chain_button.isEnabled())
         self.assertTrue(self.window.review_complete_chain_button.isEnabled())
         self.assertTrue(self.window.expedition_complete_chain_button.isEnabled())
@@ -500,7 +506,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
             ("1", "Rage", "Chaos Orb x2"), ("1", "Time", "Chaos Orb x2"),
             ("2", "Death", "Divine Orb x2"), ("2", "Power", "Divine Orb x2")])
         self.assertFalse(self.window.review_complete_chain_button.isEnabled())
-        self.window.review_commit_chain_button.click()
+        self.window.expedition_commit_chain_button.click()
         self.assertEqual(self.exported_chain(), [
             ("M0001", "M0001-E01", "1", "Rage", "Time"),
             ("M0001", "M0001-E01", "2", "Death", "Power")])
@@ -620,7 +626,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertFalse(self.window.expedition_save_chain_button.isEnabled())
         self.assertFalse(self.window.expedition_chain_table.cellWidget(0, 1).isEnabled())
         self.assertFalse(self.window.expedition_chain_table.cellWidget(0, 2).isEnabled())
-        self.assertFalse(self.window.review_commit_chain_button.isEnabled())
+        self.assertFalse(self.window.expedition_commit_chain_button.isEnabled())
         self.assertFalse(self.window.expedition_commit_chain_button.isEnabled())
         self.assertFalse(self.window.review_complete_chain_button.isEnabled())
         self.assertFalse(self.window.expedition_complete_chain_button.isEnabled())

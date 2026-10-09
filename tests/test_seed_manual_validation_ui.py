@@ -90,7 +90,8 @@ class SeedManualValidationUITests(unittest.TestCase):
         for index in range(self.window.tabs.count()):
             page = self.window.tabs.widget(index)
             if page.isAncestorOf(widget):
-                nav = self.window.nav_buttons[9 if index == 12 else index]
+                nav = next(button for position, button in enumerate(self.window.nav_buttons)
+                                  if (position if button.property("page_index") is None else button.property("page_index")) == index)
                 self.assertTrue(nav.isVisible())
                 QTest.mouseClick(nav, Qt.MouseButton.LeftButton)
                 self.app.processEvents()

@@ -91,14 +91,16 @@ def verify_blocked_launch(executable, arguments, protected_files, check_saved):
 
 
 def running_client_titles(version, beta):
-    """List recognized prior releases plus the current title without duplicate window names."""
+    """Probe prior beta/stable clients once each, ending with the current release title."""
     current = f"PoE2 Data Logger {version}{' Beta' if beta else ''}"
-    return tuple(dict.fromkeys((
+    prior = (
         "PoE2 Data Logger", "PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta",
         "PoE2 Data Logger 1.2.2 Beta", "PoE2 Data Logger 1.3 Beta",
         "PoE2 Data Logger 1.3.1 Beta", "PoE2 Data Logger 1.3.1.1 Beta",
-        "PoE2 Data Logger 1.3.1.2 Beta", "PoE2 Data Logger 1.3.1.3 Beta", current,
-    )))
+        "PoE2 Data Logger 1.3.1.2 Beta", "PoE2 Data Logger 1.3.1.3 Beta",
+        "PoE2 Data Logger 1.3.2",
+    )
+    return tuple(dict.fromkeys(title for title in prior if title != current)) + (current,)
 
 
 def verify_running_guards(installer, directory, check_saved, version, beta):

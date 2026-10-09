@@ -6,6 +6,7 @@ percentage rows; returned fields still require review."""
 from __future__ import annotations
 
 import re
+from PoE2_Data_Logger.core import ocr_sensitivity
 from PoE2_Data_Logger.ocr.affix_capture import looks_like_modifier
 
 
@@ -190,11 +191,12 @@ def parse_screen_tooltip(ocr_rows, affixes=()):
     return parsed
 
 
-def read_screen_tooltip(image, affixes=(), ocr_rows=None):
+def read_screen_tooltip(image, affixes=(), ocr_rows=None, strictness=ocr_sensitivity.DEFAULT):
     """Read or reuse OCR rows, isolate the tooltip and retry unclear tablet percentages.
 
-    A single retry at .94 confidence may replace a row; remaining tablet rows
-    below .9 are added to uncertainty before returning the parsed proposal.
+    The captured scan-type preference sets retry and review confidence floors.
+    A dictionary supports automatic waystone/tablet routing from the same capture.
+    Percentage syntax and affix constraints remain mandatory at every setting.
     """
     from PoE2_Data_Logger.ocr.item_ocr import ocr_lines
     rows = [dict(row) for row in ocr_rows] if ocr_rows is not None else ocr_lines(image)
@@ -208,11 +210,16 @@ def read_screen_tooltip(image, affixes=(), ocr_rows=None):
                 abs((row.get("x", center) + row.get("right", center)) / 2 - center) <= radius]
         rows.sort(key=lambda row: (row.get("y", 0), row.get("x", 0)))
     parsed = parse_screen_tooltip(rows, affixes)
+    level = ocr_sensitivity.validate(strictness.get(parsed["kind"], ocr_sensitivity.DEFAULT)
+                                    if isinstance(strictness, dict) and parsed else
+                                    ocr_sensitivity.DEFAULT if isinstance(strictness, dict) else strictness)
+    retry_floor = ocr_sensitivity.clear_threshold(.94, level, .14)
+    review_floor = ocr_sensitivity.clear_threshold(.9, level, .1)
     if parsed and parsed["kind"] == "tablet":
         changed = False
         for row in rows:
             ambiguous = re.search(r"\b(?=[A-Za-z0-9]{1,3}\s*%)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{1,3}\s*%", row["text"])
-            if not ambiguous and float(row.get("score", 1)) >= .94:
+            if not ambiguous and float(row.get("score", 1)) >= retry_floor:
                 continue
             if not all(key in row for key in ("x", "y", "right", "bottom")):
                 continue
@@ -221,12 +228,12 @@ def read_screen_tooltip(image, affixes=(), ocr_rows=None):
             crop = image.crop(box)
             crop = crop.resize((crop.width * 3, crop.height * 3))
             retry = ocr_lines(crop)
-            if not any(_PERCENT.search(item["text"]) and item["score"] >= .94 for item in retry):
+            if not any(_PERCENT.search(item["text"]) and item["score"] >= retry_floor for item in retry):
                 crop = image.crop((max(0, int(row["x"]) - 8), max(0, int(row["y"])),
                                    min(image.width, int(row["right"]) + 8), min(image.height, int(row["bottom"]))))
                 retry = ocr_lines(crop.resize((crop.width * 3, crop.height * 3)))
-            retry = [item for item in retry if _PERCENT.search(item["text"]) and item["score"] >= .94]
-            if len(retry) == 1 and _PERCENT.search(retry[0]["text"]) and retry[0]["score"] >= .94:
+            retry = [item for item in retry if _PERCENT.search(item["text"]) and item["score"] >= retry_floor]
+            if len(retry) == 1 and _PERCENT.search(retry[0]["text"]) and retry[0]["score"] >= retry_floor:
                 row["text"], row["score"] = retry[0]["text"], retry[0]["score"]
                 changed = True
             normalized = re.sub(r"(?<!\w)(?=[0-9Oo]*\d)[0-9Oo]{1,4}(?=\s*%)",
@@ -236,9 +243,11 @@ def read_screen_tooltip(image, affixes=(), ocr_rows=None):
                 changed = True
         if changed:
             parsed = parse_screen_tooltip(rows, affixes)
-        if parsed and any(float(row.get("score", 1)) < .9 for row in parsed.get("ocr_rows", [])):
+        if parsed and any(float(row.get("score", 1)) < review_floor for row in parsed.get("ocr_rows", [])):
             parsed["uncertain"] = list(dict.fromkeys(parsed.get("uncertain", []) +
-                                        [row["text"] for row in parsed["ocr_rows"] if float(row.get("score", 1)) < .9]))
+                                        [row["text"] for row in parsed["ocr_rows"] if float(row.get("score", 1)) < review_floor]))
     if parsed:
         parsed.setdefault("ocr_rows", rows)
+        if level != ocr_sensitivity.DEFAULT:
+            parsed["_ocr_strictness"] = level
     return parsed

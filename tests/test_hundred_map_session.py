@@ -576,20 +576,19 @@ class HundredMapSession(unittest.TestCase):
             self.w.propagation_recipe_table.setCurrentCell(1, 0)
             if clear_candidate:
                 self.w.propagation_recipe_table.cellWidget(1, 2).findChildren(QPushButton)[0].click()
-                self.coverage["held recipe row approval creates draft"] += 1
+                self.coverage["held recipe row approval saves directly"] += 1
             else:
                 for field, rune in zip(self.w._propagation_row_inputs[1], ("Death", "Power")):
                     self.choose(field, rune)
                 self.w.propagation_recipe_table.cellWidget(1, 2).findChild(
                     QPushButton, "approvePropagationRecipe").click()
-                self.coverage["held recipe dropdown corrections create draft"] += 1
+                self.coverage["held recipe dropdown corrections save directly"] += 1
             self.record("Propagation", {"runes": ["Death", "Power"], "recipe": "Divine Orb x2", "detonated": 1},
-                        context, reference="Divine Orb x2")
-            self.check(logger.get_state()["chain"], [], "propagation:manual-part-awaits-commit")
-            self.check(self.w.chain_review_table.rowCount(), 2, "propagation:manual-paired-draft")
-            self.check(self.w.review_complete_chain_button.isEnabled(), False,
-                       "propagation:cannot-complete-uncommitted-draft")
-            self.w.review_commit_chain_button.click()
+                        context, reference="Divine Orb x2", batch_remaining=1)
+            self.check(logger.get_state()["chain"], steps[:1], "propagation:manual-part-saved-directly")
+            self.check(self.w.chain_review_table.rowCount(), 0, "propagation:no-manual-paired-draft")
+            self.check(self.w.review_complete_chain_button.isEnabled(), True,
+                       "propagation:reviewed-part-ready-for-completion")
             self.record("Chain", {"steps": steps[:1], "detonated": 1}, context, reference="Steps 1–1")
             self.coverage["propagation deny and row approval"] += 1
         self.check(logger.get_state()["current_expedition_id"], eid, "propagation:first-part-stays-in-expedition")

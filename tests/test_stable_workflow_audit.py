@@ -85,7 +85,8 @@ class StableWorkflowAudit(unittest.TestCase):
         for index in range(self.w.tabs.count()):
             page = self.w.tabs.widget(index)
             if page.isAncestorOf(widget):
-                QTest.mouseClick(self.w.nav_buttons[9 if index == 12 else index], Qt.LeftButton)
+                QTest.mouseClick(next(button for position, button in enumerate(self.w.nav_buttons)
+                                  if (position if button.property("page_index") is None else button.property("page_index")) == index), Qt.LeftButton)
                 self.app.processEvents()
                 if isinstance(page, QScrollArea):
                     page.ensureWidgetVisible(widget, 20, 20)

@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 from PoE2_Data_Logger.core import logger_store as logger
 from PoE2_Data_Logger.core import reference_pack
 from PoE2_Data_Logger.core import review_learning
-from PoE2_Data_Logger.core import ocr_runtime
+from PoE2_Data_Logger.core import ocr_runtime, ocr_sensitivity
 from PoE2_Data_Logger.ocr.affix_capture import new_affix_names, affix_unit, modifier_value
 from PoE2_Data_Logger.ocr import item_ocr
 from PoE2_Data_Logger.core import service
@@ -46,7 +46,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.4 Beta"
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
                             if getattr(sys, "frozen", False) else
@@ -166,7 +166,7 @@ def set_message(widget, content, role="message"):
 
 
 def clear_waystone_read(result):
-    """Require complete T15/T16 waystone fields and, for screen OCR, confident text rows."""
+    """Require complete waystone fields and the captured OCR strictness evidence floor."""
     fields = result.get("fields") or {}
     mods = result.get("mods") or []
     if (fields.get("tier") not in (15, 16) or fields.get("waystone") is None or
@@ -174,8 +174,12 @@ def clear_waystone_read(result):
             not 1 <= len(mods) <= 10):
         return False
     if result.get("source") == "screen OCR":
+        strictness = ocr_sensitivity.validate(result.get("_ocr_strictness", ocr_sensitivity.DEFAULT))
+        if strictness == 100:
+            return False
+        floor = ocr_sensitivity.clear_threshold(.9, strictness, .1)
         rows = result.get("ocr_rows") or []
-        return bool(rows) and all(float(row.get("score", 0)) >= .9 for row in rows
+        return bool(rows) and all(float(row.get("score", 0)) >= floor for row in rows
                                   if row.get("text", "").strip())
     return True
 
@@ -185,19 +189,26 @@ def clear_currency_read(result):
     review flags.
     """
     items = result.get("items") or []
-    return bool(items) and not result.get("unknown") and all(
+    return result.get("_ocr_strictness", ocr_sensitivity.DEFAULT) != 100 and bool(items) and not result.get("unknown") and all(
         item.get("name") and type(item.get("quantity")) is int and
-        item["quantity"] >= 1 and not item.get("count_needs_review") for item in items)
+        item["quantity"] >= 1 and not item.get("count_needs_review") and
+        not item.get("name_needs_review") for item in items)
 
 
 def currency_review_rank(item):
     """Group accepted names/counts, held named or candidate matches, then unidentified slots."""
     if str(item.get("name") or "").strip():
-        return 1 if item.get("count_needs_review") else 0
+        return 1 if item.get("count_needs_review") or item.get("name_needs_review") else 0
     candidate = str(item.get("candidate") or "").strip()
     return 1 if candidate.casefold() not in {
         "", "unknown", "unidentified", "unresolved", "unknown item", "unidentified item", "unrecognized item"
     } else 2
+
+
+def header_counter(identifier):
+    """Display a readable map/remnant number while storage retains its full linked ID."""
+    match = re.fullmatch(r"[MR](\d+)", str(identifier or ""))
+    return f"#{int(match.group(1))}" if match else "—"
 
 
 def unresolved_ritual_name(name):
@@ -212,6 +223,11 @@ def clear_ritual_read(result, omen_names):
     """Gate Ritual auto-save on complete totals, nonoverlapping grid coverage and confident
     validated rewards.
     """
+    strictness = ocr_sensitivity.validate(result.get("_ocr_strictness", ocr_sensitivity.DEFAULT))
+    if strictness == 100:
+        return False
+    floor = ocr_sensitivity.clear_threshold(.94, strictness, .14)
+    name_floor = ocr_sensitivity.clear_threshold(.9, strictness, .1)
     items = result.get("items") or []
     if (not items or any(result.get(flag) for flag in
             ("unmatched", "unknown", "coverage_uncertain", "needs_review", "unresolved_count",
@@ -236,8 +252,8 @@ def clear_ritual_read(result, omen_names):
         if (item.get("category") not in ("Omen", "Item") or not isinstance(item.get("name"), str) or
                 unresolved_ritual_name(item.get("name")) or
                 len(str(item["name"])) > 200 or
-                (item["category"] == "Omen" and (item["name"] not in omen_names or not .9 <= name_match <= 1)) or
-                not .94 <= score <= 1 or
+                (item["category"] == "Omen" and (item["name"] not in omen_names or not name_floor <= name_match <= 1)) or
+                not floor <= score <= 1 or
                 type(item.get("quantity")) is not int or not 1 <= item["quantity"] <= 1000000 or
                 type(item.get("tribute")) is not int or not 0 <= item["tribute"] <= 1000000000 or
                 type(item.get("deferred", False)) is not bool or
@@ -625,6 +641,10 @@ class LoggerWindow(QMainWindow):
         database_nav = button("Database Import/Export", lambda: self.tabs.setCurrentIndex(8), "nav")
         self.nav_buttons.append(database_nav)
         nav.addWidget(database_nav)
+        ocr_nav = button("OCR Sensitivity", lambda: self.tabs.setCurrentIndex(13), "nav")
+        ocr_nav.setProperty("page_index", 13)
+        self.nav_buttons.append(ocr_nav)
+        nav.addWidget(ocr_nav)
         atlas_nav = button("Atlas / Character Settings", lambda: self.tabs.setCurrentIndex(12), "nav")
         atlas_nav.setProperty("page_index", 12)
         self.nav_buttons.append(atlas_nav)
@@ -664,17 +684,20 @@ class LoggerWindow(QMainWindow):
         self.header_expedition.setMinimumWidth(145)
         identifiers = QHBoxLayout()
         identifiers.setSpacing(14)
-        for label, field in (("MAP ID", self.header_map_id),
-                             ("REMNANT ID", self.header_remnant_id),
-                             ("EXPEDITION # / ID", self.header_expedition)):
+        for label, field in (("MAP #", self.header_map_id),
+                             ("REMNANT #", self.header_remnant_id),
+                             ("EXPEDITION #", self.header_expedition)):
             column = QVBoxLayout()
             column.setSpacing(3)
             caption = QLabel(label)
             caption.setProperty("role", "eyebrow")
+            caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
             column.addWidget(caption)
             if isinstance(field, QLabel):
-                field.setMinimumWidth(80)
-                field.setStyleSheet("font-size:17px;font-weight:700;color:#FFFFFF;")
+                field.setMinimumWidth(96)
+                field.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                field.setStyleSheet("font-size:32px;font-weight:700;color:#FFFFFF;")
+                field.setAccessibleName(label)
             column.addWidget(field)
             identifiers.addLayout(column)
         self._header_identifiers = identifiers
@@ -744,6 +767,7 @@ class LoggerWindow(QMainWindow):
         self.atlas_settings_page = AtlasSettingsPage(self)
         self.atlas_settings_page.saved.connect(lambda data: self.run(lambda: self.save_atlas_settings(data)))
         self.tabs.addTab(self.atlas_settings_page, "Atlas / Character Settings")
+        self._build_ocr_sensitivity()
         self.header_expedition.currentIndexChanged.connect(
             lambda: self.run(lambda: self.set_expedition(self.header_expedition)))
         for key, widgets in self._map_tag_controls().items():
@@ -791,10 +815,11 @@ class LoggerWindow(QMainWindow):
             layout.setColumnStretch(1, 1)
         else:
             layout.addLayout(self._header_heading, 0, 0)
-            layout.addWidget(self.kill_counts_group, 0, 1)
+            layout.addWidget(self.kill_counts_group, 0, 1, Qt.AlignmentFlag.AlignLeft)
             layout.addLayout(self._header_identifiers, 0, 2)
             layout.addLayout(self._header_actions, 0, 3)
-            layout.setColumnStretch(0, 1)
+            layout.setColumnStretch(1, 1)
+            layout.setColumnStretch(2, 1)
 
     def resizeEvent(self, event):
         """Reflow the shared header when a resize crosses its readable single-row width."""
@@ -819,7 +844,7 @@ class LoggerWindow(QMainWindow):
                 service.HOTKEY.start()
         titles = ("Review", "Expedition", "Map / Tablets", "Atlas Masters", "Currency",
                   "Data export", "Scan settings", "Scan regions", "Database Import/Export", "README", "Licenses", "Disclaimer",
-                  "Atlas / Character Settings")
+                  "Atlas / Character Settings", "OCR Sensitivity")
         subtitles = ("Check the latest scan, then Approve to save it.",
                      "Set the expedition and log its propagation chain.",
                      "Read a waystone or tablet, then review and save the map setup.",
@@ -829,7 +854,8 @@ class LoggerWindow(QMainWindow):
                      "Set the hotkeys and scan behaviour.",
                      "Adjust the labelled capture boxes on a game screenshot.",
                      "Label examples and share your OCR reference database.",
-                     "", "", "", "Set atlas passives, choose their effects and enter gear item rarity.")
+                     "", "", "", "Set atlas passives, choose their effects and enter gear item rarity.",
+                     "Adjust OCR Strictness separately for each scan type.")
         self.page_title.setText(titles[index])
         self.page_subtitle.setText(subtitles[index])
         self.page_subtitle.setVisible(bool(subtitles[index]))
@@ -979,7 +1005,7 @@ class LoggerWindow(QMainWindow):
         """Expose the displayed scan's actions and required correction fields."""
         if hasattr(self, "developer_mode"):
             self._apply_developer_mode()
-        self.approve_scan_button.setVisible(kind is not None)
+        self.approve_scan_button.setVisible(kind is not None and kind != "propagation")
         self.reject_scan_button.setVisible(kind is not None)
         if kind != "currency":
             self.approve_scan_button.setToolTip("")
@@ -1261,10 +1287,11 @@ class LoggerWindow(QMainWindow):
         latest.addLayout(controls)
         self.chain_review_group = QGroupBox("PROPAGATION CHAIN")
         chain_review = QVBoxLayout(self.chain_review_group)
-        self.chain_review_status = message("Scan propagation using its dedicated key, or enter the marked runes below.")
+        self.chain_review_status = message("Scan propagation using its dedicated key, then approve the marked runes in its recipe row.")
         chain_review.addWidget(self.chain_review_status)
         self._propagation_choices = []
         self._propagation_row_inputs = []
+        self._propagation_manual_requested = False
         self.propagation_recipe_table = QTableWidget(0, 3)
         self.propagation_recipe_table.setAccessibleName("Detected propagation recipes")
         self.propagation_recipe_table.setHorizontalHeaderLabels(["Recipe", "Marked runes · left to right", "Review"])
@@ -1302,17 +1329,18 @@ class LoggerWindow(QMainWindow):
             column.addWidget(field)
             manual.addLayout(column, 1)
             self.propagation_rune_inputs.append(field)
-        self.propagation_add_button = button("Add chain part", lambda: self.run(self.add_manual_propagation), "primary")
+        self.propagation_add_button = button("Save chain part", lambda: self.run(self.add_manual_propagation), "primary")
         self.propagation_add_button.setEnabled(False)
         manual.addWidget(self.propagation_add_button)
         manual_group.addLayout(manual)
         self.propagation_recipe_table.currentCellChanged.connect(self._propagation_recipe_selected)
         help_text = QLabel("Enter only the runes with three gold marks, left to right. Select a recipe row to attach it to a manual entry. "
-                          "Add chain part counts one remnant. "
-                          "Double-click a rune below to correct it before committing.")
+                          "Save chain part saves one remnant to the selected expedition. "
+                          "Saved runes can be corrected on Expedition.")
         help_text.setWordWrap(True)
         manual_group.addWidget(help_text)
         chain_review.addWidget(self.propagation_manual_group)
+        self.propagation_manual_group.hide()
         self.chain_review_table = QTableWidget(0, 3)
         self.chain_review_table.setHorizontalHeaderLabels(["Chain part", "Rune", "Recipe"])
         self.chain_review_table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked |
@@ -1326,11 +1354,8 @@ class LoggerWindow(QMainWindow):
         self.chain_review_table.setMaximumHeight(340)
         chain_review.addWidget(self.chain_review_table)
         chain_actions = QHBoxLayout()
-        self.review_commit_chain_button = button("Commit to chain", lambda: self.run(self.commit_chain), "primary")
-        chain_actions.addWidget(self.review_commit_chain_button)
         self.review_complete_chain_button = button("Complete chain", lambda: self.run(self.complete_chain), "primary")
         chain_actions.addWidget(self.review_complete_chain_button)
-        chain_actions.addWidget(button("Edit chain", lambda: self.tabs.setCurrentIndex(1)))
         chain_actions.addStretch()
         chain_review.insertLayout(1, chain_actions)
         self.review_items_content.insertWidget(0, self.chain_review_group)
@@ -1351,7 +1376,7 @@ class LoggerWindow(QMainWindow):
         content.addStretch()
 
     def _build_scan_settings(self):
-        """Build capture options with separate HUD opacity and confirmation guidance."""
+        """Build capture preferences, hotkeys and HUD confirmation controls."""
         page, content = self._page()
         self.tabs.addTab(page, "Scan settings")
         performance = self._group("Scan performance", content)
@@ -1405,8 +1430,8 @@ class LoggerWindow(QMainWindow):
                                   self.run(lambda: self.clear_hotkey(target))), index, 3)
         hotkey.addLayout(keys)
         propagation_help = QLabel("Propagation uses only its own key. Each accepted scan counts one detonated remnant "
-                                  "and adds its runes to the chain draft; "
-                                  "Clear scans save their parts automatically. Commit to chain saves reviewed parts; "
+                                  "and saves its runes to the selected expedition. "
+                                  "Clear scans save automatically; recipe Approve saves reviewed runes directly. "
                                   "Complete chain finishes the chain and advances the expedition number.")
         propagation_help.setWordWrap(True)
         hotkey.addWidget(propagation_help)
@@ -1472,6 +1497,67 @@ class LoggerWindow(QMainWindow):
         self.tablet_scan_number.hide()
         self.tablet_scan_number.currentIndexChanged.connect(self.show_tablet_raw)
         content.addStretch()
+
+    def _build_ocr_sensitivity(self):
+        """Build per-scan strictness sliders independently of capture and map settings."""
+        page, content = self._page()
+        self.tabs.addTab(page, "OCR Sensitivity")
+        sensitivity = self._group("OCR Strictness", content)
+        self._ocr_sensitivity_saved = ocr_sensitivity.saved_values()
+        self.ocr_sensitivity_sliders = {}
+        self.ocr_sensitivity_labels = {}
+        for kind, title in ocr_sensitivity.SCAN_TYPES:
+            row = QHBoxLayout()
+            caption = QLabel(title)
+            caption.setMinimumWidth(225)
+            row.addWidget(caption)
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(0, 100)
+            slider.setPageStep(5)
+            slider.setValue(self._ocr_sensitivity_saved[kind])
+            slider.setAccessibleName(f"{title} OCR Strictness")
+            slider.setToolTip("0: looser matches. 50: current defaults. 100: manual confirmation for OCR.")
+            self.ocr_sensitivity_sliders[kind] = slider
+            number = QLabel(str(slider.value()))
+            number.setMinimumWidth(30)
+            self.ocr_sensitivity_labels[kind] = number
+            slider.valueChanged.connect(lambda level, key=kind: self.run(lambda: self.save_ocr_sensitivity(key, level)))
+            row.addWidget(slider, 1)
+            row.addWidget(number)
+            sensitivity.addLayout(row)
+        sensitivity_help = QLabel("Lower strictness accepts more tentative matches automatically. "
+                                  "50 preserves the current settings for each scan type. "
+                                  "At 100, OCR results require manual confirmation. "
+                                  "Missing counts, conflicting recipes and incomplete scans still need review. "
+                                  "Changes apply to the next scan.")
+        sensitivity_help.setWordWrap(True)
+        sensitivity.addWidget(sensitivity_help)
+        self.ocr_sensitivity_reset = button("Reset OCR Strictness to defaults", self.reset_ocr_sensitivity)
+        sensitivity.addWidget(self.ocr_sensitivity_reset)
+        content.addStretch()
+
+    def _restore_ocr_sensitivity(self, values):
+        """Synchronize saved slider values and labels without emitting additional preference writes."""
+        self._ocr_sensitivity_saved = dict(values)
+        for kind, slider in self.ocr_sensitivity_sliders.items():
+            with QSignalBlocker(slider):
+                slider.setValue(values[kind])
+            self.ocr_sensitivity_labels[kind].setText(str(values[kind]))
+
+    def save_ocr_sensitivity(self, kind, level):
+        """Persist one slider change, restoring the last saved controls if the write fails."""
+        previous = dict(self._ocr_sensitivity_saved)
+        try:
+            saved = ocr_sensitivity.save_values({**previous, kind: level})
+        except Exception:
+            self._restore_ocr_sensitivity(previous)
+            raise
+        self._restore_ocr_sensitivity(saved)
+
+    def reset_ocr_sensitivity(self):
+        """Restore every scan's current-behavior default atomically, leaving pending scans unchanged."""
+        self.run(lambda: self._restore_ocr_sensitivity(
+            ocr_sensitivity.save_values({kind: ocr_sensitivity.DEFAULT for kind in self.ocr_sensitivity_sliders})))
 
     def _update_ocr_threads_status(self):
         """Compare the saved CPU-thread preference with the active OCR runtime and explain
@@ -2394,8 +2480,10 @@ class LoggerWindow(QMainWindow):
         saving them.
         """
         mid = state["current_map_id"]
-        self.header_map_id.setText(mid or "—")
-        self.header_remnant_id.setText(state["current_remnant_id"] or "—")
+        self.header_map_id.setText(header_counter(mid))
+        self.header_map_id.setToolTip(mid or "No active map")
+        self.header_remnant_id.setText(header_counter(state["current_remnant_id"]))
+        self.header_remnant_id.setToolTip(state["current_remnant_id"] or "No remnant recorded")
         current = state["settings"]["expedition"]
         for control in (self.header_expedition, self.expedition):
             with QSignalBlocker(control):
@@ -2869,7 +2957,6 @@ class LoggerWindow(QMainWindow):
         can_append = bool(table.rowCount() and not self.state.get("chain_completed"))
         for field in self.rune_inputs:
             field.setEnabled(not self.state.get("chain_completed"))
-        self.review_commit_chain_button.setEnabled(can_append)
         self.expedition_commit_chain_button.setEnabled(can_append)
         self._update_chain_completion_controls()
         self._manual_propagation_changed()
@@ -2883,7 +2970,7 @@ class LoggerWindow(QMainWindow):
                     f"{expedition_id} · {detonated} remnants detonated · {len(saved_chain)} saved chain parts"
                     + draft_summary + ". "
                     "Each propagation scan counts one remnant. "
-                    "Commit to chain saves reviewed parts. Complete chain finishes the chain and starts the next expedition.")
+                    "Approve saves a recipe's marked runes to this expedition. Complete chain finishes the chain and starts the next expedition.")
 
     def _refresh_saved_chain_editor(self):
         """Restore saved-chain correction drafts by session, map and expedition."""
@@ -3000,7 +3087,8 @@ class LoggerWindow(QMainWindow):
                                if 0 <= selected < len(self._propagation_choices) else None)
             waiting = not self._propagation_choices or (selected_choice is not None and
                                                        not selected_choice.get("denied"))
-            self.propagation_add_button.setEnabled(ready and active and waiting)
+            self.propagation_add_button.setEnabled(ready and active and waiting and
+                                                   self._propagation_manual_requested)
             for row, choice in enumerate(self._propagation_choices):
                 actions = self.propagation_recipe_table.cellWidget(row, 2)
                 if actions:
@@ -3017,12 +3105,12 @@ class LoggerWindow(QMainWindow):
                                                              for field in self.propagation_rune_inputs)
                             can_approve = ready if manual else choice.get("can_use", bool(choice.get("runes")))
                         approve.setText("Approve")
-                        approve.setToolTip("Confirm this recipe's marked runes." if can_approve else
+                        approve.setToolTip("Save this recipe's marked runes to the selected expedition." if can_approve else
                                            "Choose the marked runes in this recipe's dropdowns, left to right."
                                            if self._propagation_row_inputs[row] else
-                                           "Select this recipe and enter its marked runes below.")
+                                           "Use Enter propagation manually to identify this recipe's marked runes.")
                         approve.setEnabled(active and not choice.get("denied") and
-                                           (can_approve or self._propagation_row_inputs[row] is None))
+                                           can_approve)
             if self._propagation_choices:
                 text = ("Marked runes for " + (selected_choice.get("selected_recipe") or
                                               selected_choice.get("reward_text") or "the selected recipe")
@@ -3030,10 +3118,7 @@ class LoggerWindow(QMainWindow):
                         "Select a waiting recipe, then enter its marked runes below.")
                 self.propagation_manual_label.setText(text)
             self.propagation_manual_label.setVisible(bool(self._propagation_choices))
-            fallback = (not any(self._propagation_row_inputs) or
-                        0 <= selected < len(self._propagation_row_inputs) and
-                        self._propagation_row_inputs[selected] is None)
-            self.propagation_manual_group.setVisible(fallback)
+            self.propagation_manual_group.setVisible(self._propagation_manual_requested)
             self._update_manual_propagation_shortcut()
             self._update_chain_completion_controls()
 
@@ -3125,6 +3210,7 @@ class LoggerWindow(QMainWindow):
         without discarding saved chain parts.
         """
         self._manual_propagation_context = None
+        self._propagation_manual_requested = False
         if not hasattr(self, "propagation_rune_inputs"):
             return
         for field in self.propagation_rune_inputs:
@@ -3138,11 +3224,14 @@ class LoggerWindow(QMainWindow):
         self.propagation_recipe_table.hide()
         self._manual_propagation_changed()
 
-    def _prepare_manual_propagation(self, result):
+    def _prepare_manual_propagation(self, result, *, manual=False):
         """Create recipe-only rune dropdowns beside each uncertain scan's approval action."""
         self._clear_manual_propagation()
         self._manual_propagation_context = dict(result)
+        self._propagation_manual_requested = manual
         self._propagation_choices = [dict(choice) for choice in result.get("choices") or []]
+        if not self._propagation_choices and result.get("selected_recipe"):
+            self._propagation_choices = [dict(result)]
         table = self.propagation_recipe_table
         blocker = QSignalBlocker(table)
         for index, choice in enumerate(self._propagation_choices):
@@ -3151,7 +3240,7 @@ class LoggerWindow(QMainWindow):
                                                    choice.get("reward_text") or "Unrecognized recipe"))
             runes = choice.get("runes") or []
             table.setItem(index, 1, QTableWidgetItem(" → ".join(runes) or
-                                                   choice.get("status") or "Enter marked runes below"))
+                                                   choice.get("status") or "Identify the marked runes manually"))
             self._propagation_row_inputs.append(self._build_propagation_recipe_inputs(index, choice))
             actions = QWidget()
             layout = QHBoxLayout(actions)
@@ -3182,12 +3271,18 @@ class LoggerWindow(QMainWindow):
     def start_manual_propagation(self):
         """Open propagation entry without changing a held remnant's identity."""
         self._load_chain_context()
+        if self._manual_propagation_context:
+            self._propagation_manual_requested = True
+            self._manual_propagation_changed()
+            self.tabs.setCurrentIndex(0)
+            self._focus_manual_propagation()
+            return
         if self.pending_review_kind not in ("remnant", "seed"):
-            self._review_pending("propagation", "Enter the marked runes, then add the chain part.", False)
+            self._review_pending("propagation", "Enter the marked runes, then save the chain part.", False)
         else:
             self._show_independent_propagation_review(
-                "Enter the marked runes, then add the chain part.")
-        self._prepare_manual_propagation(logger.scan_context())
+                "Enter the marked runes, then save the chain part.")
+        self._prepare_manual_propagation(logger.scan_context(), manual=True)
         self.tabs.setCurrentIndex(0)
 
     def _show_independent_propagation_review(self, summary, raw=None):
@@ -3280,6 +3375,8 @@ class LoggerWindow(QMainWindow):
         row = self.propagation_recipe_table.currentRow()
         fields = (self._propagation_row_inputs[row]
                   if 0 <= row < len(self._propagation_row_inputs) else None)
+        if self._propagation_manual_requested:
+            fields = None
         field = (fields or self.propagation_rune_inputs)[0]
         field.setFocus(Qt.FocusReason.OtherFocusReason)
         page = self.tabs.widget(0)
@@ -3319,11 +3416,11 @@ class LoggerWindow(QMainWindow):
         self._accept_manual_propagation(result)
 
     def _accept_manual_propagation(self, result):
-        """Add accepted manual runes while retaining any held remnant review, then retire
+        """Save accepted manual runes while retaining any held remnant review, then retire
         propagation-only controls.
         """
         held_propagation = self.pending_review_kind == "propagation"
-        self._append_propagation(result, preserve_remnant_review=True)
+        self._append_propagation(result, preserve_remnant_review=True, auto_save=True, direct_save=True)
         self._clear_manual_propagation()
         if held_propagation:
             self._propagation_reading = None
@@ -3332,11 +3429,14 @@ class LoggerWindow(QMainWindow):
             self._review_controls(None)
             self.found_table.hide()
             self.found_label.hide()
-            set_message(self.review_summary, " → ".join(result["runes"]) + " added to the chain draft.", "success")
+            set_message(self.review_summary, " → ".join(result["runes"]) +
+                        " saved to the expedition. Scan the next part, or Complete chain when finished.", "success")
 
     def _propagation_read(self, result, raw=None):
         """Route propagation results to their own review and accepted chain parts."""
         logger.validate_scan_context(result)
+        can_auto_use = (result.get("can_use") and
+                        ocr_sensitivity.validate(result.get("_ocr_strictness", ocr_sensitivity.DEFAULT)) != 100)
         if result.get("can_use"):
             result.setdefault("_chain_accept_request", uuid4().hex)
             if result["_chain_accept_request"] in self._accepted_propagation_requests:
@@ -3348,7 +3448,7 @@ class LoggerWindow(QMainWindow):
         if preserve_remnant:
             self._show_independent_propagation_review(
                 result.get("status") or "Check the selected recipe and marked runes.", raw)
-            if result.get("can_use") and 1 <= len(runes) <= 2:
+            if can_auto_use and 1 <= len(runes) <= 2:
                 self._append_propagation(result, preserve_remnant_review=True, auto_save=True)
                 self._clear_manual_propagation()
             else:
@@ -3366,13 +3466,13 @@ class LoggerWindow(QMainWindow):
         rows = [(f"Rune {index + 1}", rune, "Left to right") for index, rune in enumerate(runes)]
         self._review_pending("propagation", result.get("status") or "Check the selected recipe and marked runes.",
                              bool(result.get("can_use") and 1 <= len(runes) <= 2), rows)
-        if result.get("can_use") and 1 <= len(runes) <= 2:
+        if can_auto_use and 1 <= len(runes) <= 2:
             self._append_propagation(auto_save=True)
             self._clear_manual_propagation()
         else:
             self._prepare_manual_propagation(result)
 
-    def _append_propagation(self, result=None, *, preserve_remnant_review=False, auto_save=False):
+    def _append_propagation(self, result=None, *, preserve_remnant_review=False, auto_save=False, direct_save=False):
         """Save an accepted part without completing or advancing the chain."""
         result = result if preserve_remnant_review else self._propagation_reading
         if ((not preserve_remnant_review and self.pending_review_kind != "propagation") or
@@ -3383,7 +3483,7 @@ class LoggerWindow(QMainWindow):
         runes = result.get("runes", [])
         if not 1 <= len(runes) <= 2 or any(not isinstance(rune, str) or not rune.strip() for rune in runes):
             raise ValueError("Scan a selected recipe with one or two clear propagation marks.")
-        if auto_save and not any(value(field) for field in self.rune_inputs):
+        if auto_save and (direct_save or not any(value(field) for field in self.rune_inputs)):
             request_id = result.setdefault("_chain_accept_request", uuid4().hex)
             saved = logger.accept_propagation_part(self._chain_context, runes=runes,
                 recipe=result.get("selected_recipe") or "", request_id=request_id)
@@ -4059,6 +4159,7 @@ class LoggerWindow(QMainWindow):
         service._image(encoded)
         mode = self.mode
         context = logger.scan_context()
+        sensitivity = ocr_sensitivity.saved_values()
         service.HOTKEY.cancel_capture(modes=("seed", "opened", "both"))
         capture = object()
         self._remnant_reading = capture
@@ -4079,7 +4180,8 @@ class LoggerWindow(QMainWindow):
                      lambda: service.dispatch(f"/api/scan?mode={mode}",
                                               {"image": encoded, "map_id": map_id,
                                                "scan_generation": context["_scan_generation"],
-                                               "scan_context": context, "defer_ocr_id": True}),
+                                               "scan_context": context, "defer_ocr_id": True,
+                                               "ocr_strictness": sensitivity}),
                      lambda result: self._scan_done(mode, result, raw, capture),
                      "seed" if mode == "seed" else "remnant", capture)
 
@@ -4886,9 +4988,11 @@ class LoggerWindow(QMainWindow):
                     self.tabs.setCurrentIndex(0)
                     if event["mode"] == "currency":
                         self.run(lambda: self._inventory_captured(picture, expected_map_id=event["result"].get("map_id"),
-                                                                 expected_phase=event["result"].get("phase")))
+                                                                 expected_phase=event["result"].get("phase"),
+                                                                 expected_strictness=(event["result"].get("_ocr_strictness_values") or {}).get("currency")))
                     else:
-                        self.run(lambda: self._ritual_captured(picture, expected_map_id=event["result"].get("map_id")))
+                        self.run(lambda: self._ritual_captured(picture, expected_map_id=event["result"].get("map_id"),
+                                                              expected_strictness=(event["result"].get("_ocr_strictness_values") or {}).get("ritual")))
             else:
                 self._remnant_reading = None
                 self.run(lambda: self.show_result(event["mode"], event["result"], service.HOTKEY.image(event["id"])))
@@ -5093,6 +5197,9 @@ class LoggerWindow(QMainWindow):
         logger.validate_scan_context(result)
         self._require_remnant_review_finished()
         auto = self.auto_tablet_checkbox.isChecked()
+        strictness = ocr_sensitivity.validate(result.get("_ocr_strictness", ocr_sensitivity.DEFAULT))
+        auto = auto and (result.get("source") != "screen OCR" or strictness != 100)
+        floor = ocr_sensitivity.clear_threshold(.94, strictness, .14)
         next_slot = logger.tablet_next_slot()
         if next_slot > 4:
             self._pending_tablet_slot = None
@@ -5125,8 +5232,8 @@ class LoggerWindow(QMainWindow):
                     for name in added:
                         widget.addItem(name, name)
                 select(widget, current or "")
-        result = item_ocr.parse_tablet(ocr_rows if ocr_rows is not None else original_mods,
-                                        self.state["affixes"])
+        result = {**result, **item_ocr.parse_tablet(ocr_rows if ocr_rows is not None else original_mods,
+                                                   self.state["affixes"])}
         preview_matches = list(result["matches"])
         review_names = new_affix_names(result["uncertain"], self.state["affixes"])
         for raw in result["uncertain"]:
@@ -5143,7 +5250,7 @@ class LoggerWindow(QMainWindow):
         self._fill_tablet_slot(number, preview_matches, original_mods)
         self.tablet_active()
         self.show_tablet_raw()
-        rows = [(f"Affix {i + 1}" if item["score"] >= .94 else "Uncertain", item["affix"],
+        rows = [(f"Affix {i + 1}" if item["score"] >= floor else "Uncertain", item["affix"],
                  f"{item['value']}%" if item["unit"] == "%" else f"{item['value']} {item['unit']}")
                 for i, item in enumerate(preview_matches)]
         rows += [("Uncertain", item, "Review") for item in result["uncertain"]
@@ -5157,7 +5264,7 @@ class LoggerWindow(QMainWindow):
         self._pending_tablet_slot = number
         self._review_pending("tablet", summary, bool(preview_matches), rows)
         if auto and result["status"] == "ready" and all(
-                item["score"] >= .94 for item in result["matches"]):
+                item["score"] >= floor for item in result["matches"]):
             saved_number = logger.save_scanned_tablet(result["matches"], original_mods)
             self._clear_tablet_form_dirty(saved_number)
             self.state = logger.get_state()
@@ -5223,9 +5330,9 @@ class LoggerWindow(QMainWindow):
             logger._set_meta(db, "inventory_scan_phase", phase)
         self.refresh_currency_summary()
 
-    def _inventory_captured(self, image, live=True, expected_map_id=None, expected_phase=None):
+    def _inventory_captured(self, image, live=True, expected_map_id=None, expected_phase=None, expected_strictness=None):
         """Bind an inventory capture to its map, phase, and session context before queueing
-        icon matching and opening the held review.
+        icon matching and opening the held review. Freeze currency strictness for this work.
         """
         self._require_remnant_review_finished()
         service.HOTKEY.cancel_capture()
@@ -5234,7 +5341,9 @@ class LoggerWindow(QMainWindow):
         if expected_map_id is not None and expected_map_id != map_id:
             raise ValueError(f"The currency scan belongs to {expected_map_id}. Scan {map_id} again.")
         image = item_ocr.inventory_grid(image)
-        capture = {"map_id": map_id, "phase": phase, "image": image, "context": logger.scan_context()}
+        capture = {"map_id": map_id, "phase": phase, "image": image, "context": logger.scan_context(),
+                   "strictness": ocr_sensitivity.validate(expected_strictness) if expected_strictness is not None
+                   else ocr_sensitivity.saved_values()["currency"]}
         self._inventory_capture = image
         self._inventory_capture_context = self._inventory_reading = capture
         self._pending_currency_map = map_id
@@ -5248,7 +5357,8 @@ class LoggerWindow(QMainWindow):
         self._review_pending("currency", f"Reading {phase} inventory…", False)
         references = logger.inventory_icons()
         self._submit_scan("Matching inventory icons…",
-                     lambda: item_ocr.scan_inventory_grid(image, references) if capture is self._inventory_reading else None,
+                     lambda: item_ocr.scan_inventory_grid(image, references, strictness=capture["strictness"])
+                     if capture is self._inventory_reading else None,
                      lambda result: self._inventory_read(result, live, map_id, capture), "currency", capture)
 
     def _show_inventory_preview(self, image):
@@ -5300,7 +5410,8 @@ class LoggerWindow(QMainWindow):
             self._show_inventory_preview(capture["image"])
         self.inventory_table.setRowCount(0)
         unknown = result["unknown"]
-        uncertain = len(unknown) + sum(bool(item.get("count_needs_review")) for item in result["items"])
+        uncertain = len(unknown) + sum(bool(item.get("count_needs_review") or item.get("name_needs_review"))
+                                       for item in result["items"])
         rows = [*result["items"], *({**item, "name": "", "quantity": "", "count_needs_review": True}
                                    for item in unknown)]
         # Sort before creating widgets so row actions and icon-learning evidence
@@ -5387,7 +5498,8 @@ class LoggerWindow(QMainWindow):
             action.setStyleSheet("padding:3px 8px;")
             actions.addWidget(action)
         layout.addLayout(actions)
-        controls.setProperty("requiresApproval", bool(item.get("count_needs_review") or not item.get("name")))
+        controls.setProperty("requiresApproval", bool(item.get("count_needs_review") or item.get("name_needs_review")
+                                                       or not item.get("name")))
         controls.setProperty("confidenceGroup", currency_review_rank(item))
         self.inventory_table.setCellWidget(row, 3, controls)
         self.inventory_table.setRowHeight(row, 62)
@@ -5601,9 +5713,9 @@ class LoggerWindow(QMainWindow):
             f"{map_id} · start {len(data['start'])} item types · end {len(data['end'])} item types"
             + (" · net: " + ", ".join(parts[:8]) if parts else ""))
 
-    def _ritual_captured(self, image, live=True, expected_map_id=None):
+    def _ritual_captured(self, image, live=True, expected_map_id=None, expected_strictness=None):
         """Bind a Ritual capture and image hash to the current map and session context before
-        queueing reward recognition and opening the held review.
+        queueing reward recognition with frozen Ritual strictness and opening the held review.
         """
         self._require_remnant_review_finished()
         service.HOTKEY.cancel_capture()
@@ -5614,7 +5726,9 @@ class LoggerWindow(QMainWindow):
             raise ValueError("Ritual capture exceeds 12 megapixels.")
         capture = {"map_id": map_id, "image": image,
                    "context": logger.scan_context(),
-                   "scan_hash": hashlib.sha256(image.tobytes()).hexdigest()}
+                   "scan_hash": hashlib.sha256(image.tobytes()).hexdigest(),
+                   "strictness": ocr_sensitivity.validate(expected_strictness) if expected_strictness is not None
+                   else ocr_sensitivity.saved_values()["ritual"]}
         self._ritual_reading = capture
         self._ritual_capture_context = capture
         self._pending_ritual_map = map_id
@@ -5627,7 +5741,8 @@ class LoggerWindow(QMainWindow):
         names = logger.ritual_names()
         references = logger.ritual_icons()
         self._submit_scan("Reading Ritual rewards…",
-                     lambda: item_ocr.scan_ritual_page(image, names, references) if capture is self._ritual_reading else None,
+                     lambda: item_ocr.scan_ritual_page(image, names, references, strictness=capture["strictness"])
+                     if capture is self._ritual_reading else None,
                      lambda result: self._ritual_read(result, live, map_id, capture), "ritual", capture)
 
     def _ritual_read(self, result, live=True, expected_map_id=None, capture=None):
@@ -6168,7 +6283,7 @@ class LoggerWindow(QMainWindow):
 
 def instance_lock():
     """Acquire the data-directory instance lock, or focus an existing Windows logger and return
-    None when another instance owns it.
+    None when another instance owns it, including the previous stable client.
     """
     store.DATA_DIR.mkdir(parents=True, exist_ok=True)
     lock = QLockFile(str(store.DATA_DIR / "logger.lock"))
@@ -6186,6 +6301,7 @@ def instance_lock():
         user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
         user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
         window = (user32.FindWindowW(None, WINDOW_TITLE)
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.1.3 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.1.2 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.1.1 Beta")

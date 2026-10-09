@@ -69,7 +69,8 @@ class ItemReviewRecoveryTests(unittest.TestCase):
 
     def tab(self, number):
         """Visit a page through its visible sidebar button and normal page-change callback."""
-        nav = self.window.nav_buttons[9 if number == 12 else number]
+        nav = next(button for position, button in enumerate(self.window.nav_buttons)
+                   if (position if button.property("page_index") is None else button.property("page_index")) == number)
         self.assertTrue(nav.isVisible())
         QTest.mouseClick(nav, Qt.MouseButton.LeftButton)
         self.app.processEvents()

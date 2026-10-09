@@ -18,6 +18,7 @@ from PIL import Image
 
 from PoE2_Data_Logger.core import logger_store as logger
 from PoE2_Data_Logger.core import ocr_runtime
+from PoE2_Data_Logger.core import ocr_sensitivity
 from PoE2_Data_Logger.ocr import runehelper_ocr
 
 OCR_LOCK = threading.Lock()
@@ -36,16 +37,20 @@ def verify_models(model_root):
             raise RuntimeError("A bundled OCR model is missing or damaged. Reinstall the latest logger.")
 
 
-def scan_both(path):
-    """Prefer native opened rewards, then seed bars, then opened OCR with fallback enabled."""
+def scan_both(path, strictness=ocr_sensitivity.DEFAULT, seed_strictness=None):
+    """Choose opened rewards or seed bars using their independently frozen strictness."""
     from PoE2_Data_Logger.ocr.scan import scan
-    opened = scan_opened(path, allow_fallback=False)
+    strictness = ocr_sensitivity.validate(strictness)
+    seed_strictness = ocr_sensitivity.validate(strictness if seed_strictness is None else seed_strictness)
+    options = {} if strictness == ocr_sensitivity.DEFAULT else {"strictness": strictness}
+    seed_options = {} if seed_strictness == ocr_sensitivity.DEFAULT else {"strictness": seed_strictness}
+    opened = scan_opened(path, allow_fallback=False, **options)
     if opened.get("first_recipe") or opened.get("opened_recipes"):
         return {**opened, "mode": "opened", "scan_selection": "both"}
-    seeds = scan(path)
+    seeds = scan(path, **seed_options)
     if seeds.get("remnants"):
         return {**seeds, "mode": "seed", "scan_selection": "both"}
-    opened = scan_opened(path)
+    opened = scan_opened(path, **options)
     if opened.get("first_recipe") or opened.get("opened_recipes"):
         return {**opened, "mode": "opened", "scan_selection": "both"}
     return {**seeds, "mode": "seed", "scan_selection": "both"}
@@ -67,10 +72,11 @@ def _levels(name):
     return tuple(int(level) for level in re.findall(r"\blevel\s*(\d+)\b", name, flags=re.I))
 
 
-def _match(db, text, quantity, names):
-    """Prefer canonical recipe spelling, then require .82 similarity and a .025 lead.
+def _match(db, text, quantity, names, strictness=ocr_sensitivity.DEFAULT):
+    """Prefer canonical spelling, then adjust the default .82 review similarity floor.
 
-    Every candidate must preserve the requested quantity and explicit skill levels.
+    Keep the .025 ambiguity lead and every candidate's requested quantity and
+    explicit skill levels, including when lower strictness broadens suggestions.
     """
     target = f"{text} x{quantity}" if quantity > 1 else text
     levels = _levels(text)
@@ -88,7 +94,7 @@ def _match(db, text, quantity, names):
         return None, 0.0
     top, name = choices[0]
     runner = choices[1][0] if len(choices) > 1 else 0
-    if top < .82 or top - runner < .025:
+    if top < ocr_sensitivity.review_threshold(.82, strictness, .12) or top - runner < .025:
         return None, round(top, 2)
     return name, round(top, 2)
 
@@ -259,19 +265,25 @@ def _engine():
                                for kind, filename in models.items()}})
 
 
-def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, verify_header=True):
+def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, verify_header=True,
+                strictness=ocr_sensitivity.DEFAULT):
     """Read ordered opened rewards, match recipes/families and check visible socket counts.
 
     Use native rows first, optionally verify the heading or run RapidOCR fallback,
     and hold incomplete sequences or socket conflicts in the returned review status.
     can_use expresses matched geometry/header constraints, not approval to log.
+    Lower capture strictness permits tentative known matches; semantic and
+    geometry checks still hold them for review when evidence conflicts.
     """
+    strictness = ocr_sensitivity.validate(strictness)
+    options = {} if strictness == ocr_sensitivity.DEFAULT else {"strictness": strictness}
+    heading_threshold = ocr_sensitivity.clear_threshold(.8, strictness, .15)
     if isinstance(path, Image.Image):
         image = path.convert("RGB")
     else:
         with Image.open(path) as source:
             image = source.convert("RGB")
-    detections = runehelper_ocr.recognize(image) if ocr_rows is None else []
+    detections = runehelper_ocr.recognize(image, **options) if ocr_rows is None else []
     header_verified = False
     reward = re.compile(r"^\s*(\d{1,3}|[Il])\s*[xX×]\s+(.+?)\s*$")
     skill = re.compile(r"^Skill Level\s*(\d{1,2})\s*:\s*(.+?)\s*$", re.I)
@@ -288,7 +300,7 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
                 found = _engine()(canvas)
             if found.boxes is not None:
                 for box, text, confidence in zip(found.boxes, found.txts, found.scores):
-                    if "runeshapecombinations" in _key(text) and float(confidence) >= .8:
+                    if "runeshapecombinations" in _key(text) and float(confidence) >= heading_threshold:
                         xs, ys = [float(p[0]) for p in box], [float(p[1]) + top for p in box]
                         title = {"x1": min(xs), "x2": max(xs), "y1": min(ys), "y2": max(ys)}
                         header_verified = True
@@ -310,7 +322,7 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
                     detections.append({"text": text.strip(), "score": float(confidence),
                                        "x1": min(xs), "y1": min(ys), "x2": max(xs), "y2": max(ys)})
         title = next((line for line in detections
-                      if "runeshapecombinations" in _key(line["text"]) and line["score"] >= .8), None)
+                      if "runeshapecombinations" in _key(line["text"]) and line["score"] >= heading_threshold), None)
         header_verified = title is not None
         right = min(image.width, (title["x1"] + title["x2"]) + 20) if title else image.width
     if title is None:
@@ -319,6 +331,8 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
                 "sockets": None, "family": None, "candidates": []}
     lines = []
     for line in detections:
+        if strictness > ocr_sensitivity.DEFAULT and line["score"] < ocr_sensitivity.clear_threshold(.8, strictness, .2):
+            continue
         if line["y1"] < title["y2"] + 16 or line["x2"] > right + 16:
             continue
         found = reward.match(line["text"])
@@ -332,17 +346,23 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
             count, name = 1, line["text"]
         else:
             continue
+        # Keep default rounding unchanged; newly admitted weak rows must not
+        # round upward through the automatic approval floor.
+        score = round(line["score"], 2)
+        if strictness != ocr_sensitivity.DEFAULT:
+            score = min(score, line["score"])
         lines.append({"raw": line["text"], "quantity": count,
-                      "text": name, "ocr_score": round(line["score"], 2),
+                      "text": name, "ocr_score": score,
                       "y": line["y1"]})
     lines.sort(key=lambda item: item["y"])
     bottom = int(lines[-1]["y"] + 65) if lines else int(title["y2"] + 180)
     with logger._connect() as db:
         names = [row[0] for row in db.execute("SELECT name FROM recipes")]
         for line in lines:
-            line["recipe"], line["match_score"] = _match(db, line["text"], line["quantity"], names)
+            line["recipe"], line["match_score"] = _match(db, line["text"], line["quantity"], names, **options)
         lines = [line for line in lines if reward.match(line["raw"]) or
-                 skill.match(line["raw"]) or (line["recipe"] and line["match_score"] >= .92)]
+                 skill.match(line["raw"]) or (line["recipe"] and line["match_score"] >=
+                                             ocr_sensitivity.review_threshold(.92, strictness, .08))]
         first = lines[0]["recipe"] if lines else None
         second = lines[1]["recipe"] if len(lines) > 1 else None
         list_complete = _list_complete(image, lines, right)
@@ -384,6 +404,7 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
             "family": f"Family {family}" if family else None,
             "candidates": candidates,
             "can_use": complete and not socket_conflict and (header_verified or not verify_header),
+            **({"_ocr_strictness": strictness} if strictness != ocr_sensitivity.DEFAULT else {}),
             "bar_bounds": {"x": 0, "y": max(0, int(title["y1"])-20),
                            "width": int(right),
                            "height": max(120, min(image.height, bottom) - max(0, int(title["y1"])-20))}}

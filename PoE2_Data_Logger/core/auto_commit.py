@@ -10,6 +10,7 @@ import re
 import math
 
 from PoE2_Data_Logger.core import logger_store as logger
+from PoE2_Data_Logger.core import ocr_sensitivity
 
 
 def _family(label):
@@ -30,8 +31,8 @@ def _score(value):
 def candidate(opened, seed=None, resolver=logger.resolve):
     """Require one family, icon-derived sockets and confident ordered opened rewards.
 
-    Reject contradictory seed evidence and require the catalog resolver to match
-    the observed reward prefix before returning commit arguments.
+    Apply the opened scan's frozen strictness, require manual confirmation at
+    maximum strictness, and retain seed/context/catalog consistency guards.
     """
     def review(reason):
         """Return the manual-review reason in the common non-ready result shape."""
@@ -39,6 +40,12 @@ def candidate(opened, seed=None, resolver=logger.resolve):
 
     if not isinstance(opened, dict):
         return review("Scan an opened remnant to save it automatically.")
+    try:
+        strictness = ocr_sensitivity.validate(opened.get("_ocr_strictness", ocr_sensitivity.DEFAULT))
+    except ValueError:
+        return review("The scan strictness is invalid; review this remnant manually.")
+    if strictness == 100:
+        return review("Maximum OCR strictness requires manual confirmation.")
     family = _family(opened.get("family"))
     if (opened.get("status") != "Review the opened rewards before logging." or
             opened.get("can_use") is not True or family is None or
@@ -55,8 +62,9 @@ def candidate(opened, seed=None, resolver=logger.resolve):
     lines = opened.get("opened_recipes")
     if (not isinstance(lines, list) or not lines or
             any(not isinstance(line, dict) or not line.get("recipe") or
-                _score(line.get("ocr_score")) < .8 or
-                _score(line.get("match_score")) < .95 for line in lines)):
+                _score(line.get("ocr_score")) < ocr_sensitivity.clear_threshold(.8, strictness, .2) or
+                _score(line.get("match_score")) < ocr_sensitivity.clear_threshold(.95, strictness, .15)
+                for line in lines)):
         return review("Review the opened reward lines before saving.")
     if isinstance(seed, dict):
         seed_family = _family(seed.get("family"))

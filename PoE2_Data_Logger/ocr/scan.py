@@ -12,6 +12,7 @@ import numpy as np
 from PIL import Image
 
 from PoE2_Data_Logger.core import store
+from PoE2_Data_Logger.core import ocr_sensitivity
 from PoE2_Data_Logger.ocr.cv_eval import decode, features
 from PoE2_Data_Logger.ocr.glyph_eval import vector
 from PoE2_Data_Logger.ocr.prototype import center_for, crop_at, find_books, normalize_book
@@ -35,16 +36,19 @@ def _assets():
     return model, names, vectors, templates
 
 
-def scan(path: Path):
+def scan(path: Path, strictness=ocr_sensitivity.DEFAULT):
     """Locate up to 24 readable pre-open bars and return their seed/family suggestions.
 
     Reviewed glyphs extend the gallery; the visible-bar list requires socket
-    confidence of at least .80, with a diagnostic fallback when no bar qualifies.
+    confidence of at least .80 at default strictness. Lower settings admit
+    tentative known matches; maximum strictness requires manual confirmation.
     """
+    strictness = ocr_sensitivity.validate(strictness)
     with Image.open(path) as image:
         im = image.convert("RGB")
     assets = _assets()
-    unique = find_books(im, assets[3])
+    unique = (find_books(im, assets[3]) if strictness == ocr_sensitivity.DEFAULT else
+              find_books(im, assets[3], threshold=ocr_sensitivity.review_threshold(.65, strictness, .15)))
     if not unique:
         return {"status": "No reliable pre-open rune bar found", "remnants": []}
     states = store.states()
@@ -55,14 +59,22 @@ def scan(path: Path):
         vectors = np.concatenate((vectors, np.stack([glyph for _, glyph in local])))
     readings = []
     for book in sorted(unique, key=lambda item: (item[1], item[0])):
-        reading = _scan_scaled_bar(im, book, model, names, vectors, states)
-        if reading.get("sockets") and reading.get("socket_confidence", 0) >= .80:
+        reading = (_scan_scaled_bar(im, book, model, names, vectors, states)
+                   if strictness == ocr_sensitivity.DEFAULT else
+                   _scan_scaled_bar(im, book, model, names, vectors, states, strictness=strictness))
+        if reading.get("sockets") and reading.get("socket_confidence", 0) >= ocr_sensitivity.review_threshold(.80, strictness, .15):
+            if strictness != ocr_sensitivity.DEFAULT:
+                reading["_ocr_strictness"] = strictness
+            if strictness == 100:
+                reading.update(can_commit=False, status="Review suggestion")
             reading["scan_index"] = len(readings) + 1
             readings.append(reading)
             if len(readings) == 24:
                 break
     if not readings:
-        result = _scan_scaled_bar(im, unique[0], model, names, vectors, states)
+        result = (_scan_scaled_bar(im, unique[0], model, names, vectors, states)
+                  if strictness == ocr_sensitivity.DEFAULT else
+                  _scan_scaled_bar(im, unique[0], model, names, vectors, states, strictness=strictness))
         return {**result, "remnants": []}
     if len(readings) == 1:
         return {**readings[0], "remnants": readings}
@@ -72,11 +84,12 @@ def scan(path: Path):
     }
 
 
-def _scan_scaled_bar(im, book, model, names, vectors, all_states):
+def _scan_scaled_bar(im, book, model, names, vectors, all_states, strictness=ocr_sensitivity.DEFAULT):
     """Refine a book’s scale and map the best reading back to capture coordinates.
 
     Competing socket/seed readings within .02 confidence disable commitment
-    even when the highest-scoring alignment otherwise looks usable.
+    even when the highest-scoring alignment otherwise looks usable. All scale
+    alternatives share the capture's strictness without relaxing that guard.
     """
     alternatives = []
     for delta in (0, -.025, .025, -.05, .05, -.075, .075):
@@ -87,7 +100,9 @@ def _scan_scaled_bar(im, book, model, names, vectors, all_states):
         adjusted = (book[0] + 13 * (book[3] - scale),
                     book[1] + 19 * (book[3] - scale), book[2], scale)
         normalized, anchor = normalize_book(im, adjusted)
-        result = _scan_bar(normalized, anchor, model, names, vectors, all_states)
+        result = (_scan_bar(normalized, anchor, model, names, vectors, all_states)
+                  if strictness == ocr_sensitivity.DEFAULT else
+                  _scan_bar(normalized, anchor, model, names, vectors, all_states, strictness=strictness))
         alternatives.append((result, normalized.info["seed_origin"], scale))
     reading, origin, scale = max(alternatives, key=lambda item: item[0].get("socket_confidence", 0))
     if not reading.get("bar_bounds"):
@@ -110,12 +125,13 @@ def _scan_scaled_bar(im, book, model, names, vectors, all_states):
     return reading
 
 
-def _scan_bar(im, book, model, names, vectors, all_states):
+def _scan_bar(im, book, model, names, vectors, all_states, strictness=ocr_sensitivity.DEFAULT):
     """Decode one seed in three to ten sockets, then compare slot-allowed glyphs and families.
 
-    Socket confidence below .60 stops identification. Position disagreement,
+    At default strictness, socket confidence below .60 stops identification. Position disagreement,
     book/glyph scores below .70 or a glyph margin below .08 require review;
-    commitment also needs one non-inferred database stage.
+    commitment also needs one non-inferred database stage. Strictness changes
+    discovery confidence while retaining family, ambiguity and position guards.
     """
     bx, by, bar_score = book
     patches = []
@@ -139,7 +155,7 @@ def _scan_bar(im, book, model, names, vectors, all_states):
         }
     score, rune_j, n = decoded
     socket_confidence = float(np.exp(score / len(indices)))
-    if socket_confidence < 0.60:
+    if socket_confidence < ocr_sensitivity.review_threshold(.60, strictness, .10):
         return {
             "status": "Cannot confirm a single visible seed",
             "bar_score": round(bar_score, 2),
@@ -197,7 +213,12 @@ def _scan_bar(im, book, model, names, vectors, all_states):
     matches = [s for s in entries if s["seed_rune"] == rune]
     stage = matches[0] if len(matches) == 1 else None
     margin = glyph_score - scores[1][0] if len(scores) > 1 else 1.0
-    review = position_unclear or bar_score < 0.70 or glyph_score < 0.70 or margin < 0.08
+    review = (position_unclear or
+              bar_score < ocr_sensitivity.clear_threshold(.70, strictness, .15) or
+              glyph_score < ocr_sensitivity.clear_threshold(.70, strictness, .15) or
+              margin < max(.08, ocr_sensitivity.clear_threshold(.08, strictness, .04)) or
+              (strictness != ocr_sensitivity.DEFAULT and socket_confidence <
+               ocr_sensitivity.clear_threshold(.80, strictness, .15)))
     if position_unclear:
         stage = None
     return {
@@ -221,8 +242,10 @@ def _scan_bar(im, book, model, names, vectors, all_states):
         "can_commit": bool(
             stage
             and not review
+            and strictness < 100
             and not str(stage.get("status", "")).startswith("inferred")
         ),
+        **({"_ocr_strictness": strictness} if strictness != ocr_sensitivity.DEFAULT else {}),
     }
 
 

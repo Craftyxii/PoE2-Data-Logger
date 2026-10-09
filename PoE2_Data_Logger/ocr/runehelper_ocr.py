@@ -305,11 +305,14 @@ def _text_start(row: np.ndarray):
     return in_gap if coverage < .08 else after_tile
 
 
-def _recognize_rows(image: Image.Image):
-    """Read filtered panel rows at 80+ confidence, retrying full rows for missing reward prefixes.
+def _recognize_rows(image: Image.Image, strictness=50):
+    """Filter rows using capture strictness and retry missing reward prefixes.
 
-    Map row boxes back through panel scaling so callers receive capture coordinates.
+    Default 50 retains the 80-percent floor. Map row boxes back through panel
+    scaling so callers receive capture coordinates for manual review.
     """
+    from PoE2_Data_Logger.core.ocr_sensitivity import review_threshold
+    threshold = review_threshold(80, strictness, 20)
     gray, scale = _gray_panel(image)
     results = []
     for y1, y2 in _rows(gray):
@@ -321,18 +324,21 @@ def _recognize_rows(image: Image.Image):
         prefix = r"^(?:(?:\d{1,3}|[Il])\s*[xX×]\s|Skill Level\s*\d{1,2}\s*:)"
         if not re.match(prefix, text, re.I):
             full_text, full_confidence = _read_row(row)
-            if full_confidence >= 80 and re.match(prefix, full_text, re.I):
+            if full_confidence >= threshold and re.match(prefix, full_text, re.I):
                 text, confidence, start = full_text, full_confidence, 0
-        if confidence >= 80 and text:
+        if confidence >= threshold and text:
             results.append({"text": text, "score": confidence / 100,
                             "x1": round(start / scale), "y1": round(y1 / scale),
                             "x2": image.width, "y2": round(y2 / scale)})
     return results
 
 
-def recognize(image: Image.Image):
-    """Prefer readable reward rows, then retry a detected panel and restore its capture offsets."""
-    rows = _recognize_rows(image)
+def recognize(image: Image.Image, strictness=50):
+    """Use one capture strictness for rows and panel retries, restoring capture offsets."""
+    from PoE2_Data_Logger.core.ocr_sensitivity import DEFAULT, validate
+    strictness = validate(strictness)
+    rows = (_recognize_rows(image) if strictness == DEFAULT else
+            _recognize_rows(image, strictness=strictness))
     prefix = re.compile(r"^(?:(?:\d{1,3}|[Il])\s*[xX×]\s|Skill Level\s*\d{1,2}\s*:)", re.I)
     if any(prefix.match(row["text"]) for row in rows):
         return rows
@@ -344,7 +350,8 @@ def recognize(image: Image.Image):
     left, top, right, bottom = _find_panel(gray)
     if (left, top, right, bottom) == (0, 0, image.width, image.height):
         return rows
-    prepared = _recognize_rows(window.crop((left, top, right, bottom)))
+    prepared = (_recognize_rows(window.crop((left, top, right, bottom))) if strictness == DEFAULT else
+                _recognize_rows(window.crop((left, top, right, bottom)), strictness=strictness))
     if not any(prefix.match(row["text"]) for row in prepared):
         return rows
     for row in prepared:

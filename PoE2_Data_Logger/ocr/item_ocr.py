@@ -20,6 +20,7 @@ from PIL import Image, ImageOps
 
 from PoE2_Data_Logger.ocr.opened_scan import OCR_LOCK, _engine
 from PoE2_Data_Logger.ocr import currency_ocr
+from PoE2_Data_Logger.core import ocr_sensitivity
 from PoE2_Data_Logger.ocr.affix_capture import affix_key, affix_unit, modifier_value, looks_like_modifier
 
 
@@ -85,11 +86,12 @@ def _reviewed_bank(reader, references, shape=(1, 1)):
     return examples, kinds, shape
 
 
-def _reviewed_match(reader, image, bank, catalog=None):
+def _reviewed_match(reader, image, bank, catalog=None, strictness=ocr_sensitivity.DEFAULT):
     """Accept a reviewed-reference override only for an unambiguous score > -450 and lead > 250.
 
     Shared catalog artwork still uses tier resolution, so a reviewed label cannot
-    replace the badge check for multiple currency variants.
+    replace the badge check for multiple currency variants. Strictness adjusts
+    the score and lead around their existing defaults without bypassing tiers.
     """
     examples, kinds, shape = bank
     if not examples or (catalog and (catalog.get("shared_icon") or len(catalog.get("members") or []) > 1)):
@@ -103,7 +105,8 @@ def _reviewed_match(reader, image, bank, catalog=None):
     runner = next((row["score"] for row in ranked[1:] if row["name"] != top["name"]), float("-inf"))
     # Only a close, unambiguous captured match overrides a bundled label.
     # We retain the legacy fallback threshold for existing manual references.
-    if top["score"] > -450 and top["score"] - runner > 250:
+    if (top["score"] > ocr_sensitivity.clear_threshold(-450, strictness, 250) and
+            top["score"] - runner > ocr_sensitivity.clear_threshold(250, strictness, 150)):
         return top["name"], max(0, 1 + top["score"] / 8000), kinds[top["name"]]
     return None
 
@@ -475,8 +478,9 @@ def _inventory_equipment_slots(image):
     return equipment
 
 
-def scan_inventory_grid(image, references=(), read=None):
-    """Match inventory stacks and hold incomplete or conflicting counts for review."""
+def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitivity.DEFAULT):
+    """Match stacks using a frozen strictness while retaining count, tier and occupied-slot review."""
+    strictness = ocr_sensitivity.validate(strictness)
     if not isinstance(image, Image.Image):
         with Image.open(image) as source:
             image = source.convert("RGB")
@@ -509,11 +513,15 @@ def scan_inventory_grid(image, references=(), read=None):
         if float(np.asarray(cell, dtype=np.uint8).std(axis=(0, 1)).mean()) < 8:
             continue
         count_hint = labels[slot].get("count") if labels is not None and labels[slot]["count_present"] else None
-        icon = reader.icon(cell, count_digits=len(str(count_hint)) if count_hint is not None else None)
+        icon = (reader.icon(cell, count_digits=len(str(count_hint)) if count_hint is not None else None)
+                if strictness == ocr_sensitivity.DEFAULT else
+                reader.icon(cell, count_digits=len(str(count_hint)) if count_hint is not None else None,
+                            strictness=strictness))
         # A saved reference must not turn a confirmed empty cell into a reward.
         if icon.get("empty"):
             continue
-        correction = _reviewed_match(reader, cell, reviewed, catalog=icon) if slot not in equipment else None
+        correction = (_reviewed_match(reader, cell, reviewed, catalog=icon, strictness=strictness)
+                      if slot not in equipment else None)
         name = correction[0] if correction else None
         score = icon.get("score", 0)
         if correction:
@@ -539,12 +547,14 @@ def scan_inventory_grid(image, references=(), read=None):
                 top = ranked[0]
                 runner = next((entry["score"] for entry in ranked[1:]
                                if entry["name"] != top["name"]), float("-inf"))
-                if top["score"] > -1200 and top["score"] - runner > 150:
+                if (top["score"] > ocr_sensitivity.clear_threshold(-1200, strictness, 500) and
+                        top["score"] - runner > ocr_sensitivity.clear_threshold(150, strictness, 100)):
                     name = top["name"]
                     score = top["score"]
-                elif top["score"] > -1200:
+                elif top["score"] > ocr_sensitivity.review_threshold(-1200, strictness, 1200):
                     unknown.append({"slot": slot, "candidate": " / ".join(
-                        entry["name"] for entry in ranked if top["score"] - entry["score"] <= 150),
+                        entry["name"] for entry in ranked if top["score"] - entry["score"] <=
+                        max(150, ocr_sensitivity.review_threshold(150, 100 - strictness, 150))),
                         "score": round(top["score"], 3), "reason": "shared reference; check name"})
                     continue
         if name:
@@ -572,13 +582,21 @@ def scan_inventory_grid(image, references=(), read=None):
                 guessed = native_count is None and generic_unclear
             found.append({"slot": slot, "name": name, "quantity": quantity,
                           "score": round(score, 3), "count_needs_review": guessed})
+            if strictness == 100:
+                found[-1]["name_needs_review"] = True
         elif slot not in equipment and icon.get("all") and (icon.get("uncertain") or score >= .55):
             unknown.append({"slot": slot, "candidate": icon["all"][0]["name"],
                             "score": round(score, 3)})
         elif slot not in equipment and icon.get("ignored"):
             unknown.append({"slot": slot, "candidate": icon.get("candidate", "Unrecognized item"),
                             "score": round(score, 3), "reason": "label if tracked"})
-    return {"items": found, "unknown": unknown, "status": "review"}
+        elif strictness != ocr_sensitivity.DEFAULT and slot not in equipment:
+            # A stricter suggestion gate must retain occupied cells for manual labels.
+            unknown.append({"slot": slot, "candidate": "Unrecognized item", "score": round(score, 3)})
+    result = {"items": found, "unknown": unknown, "status": "review"}
+    if strictness != ocr_sensitivity.DEFAULT:
+        result["_ocr_strictness"] = strictness
+    return result
 
 
 def _ritual_header_index(lines):
@@ -605,12 +623,13 @@ def _ritual_header_index(lines):
     return None
 
 
-def parse_ritual(lines, omen_names):
+def parse_ritual(lines, omen_names, strictness=ocr_sensitivity.DEFAULT):
     """Extract reviewable reward names, quantities and prices while excluding Ritual controls.
 
     Separate prices attach only to nearby aligned proposals; fuzzy Omen names
-    need .75 similarity and a .035 lead, while unmatched text stays visible.
+    use strictness-adjusted similarity and lead floors, while unmatched text stays visible.
     """
+    strictness = ocr_sensitivity.validate(strictness)
     proposals, unmatched, anchors = [], [], []
     excluded = re.compile(r"^(?:ritual|favou?rs?|defer|reroll|tribute|purchase|refresh|remaining|"
                           r"items?|rewards?|cost|cancel|close|\d[\d, ]*)$", re.I)
@@ -659,7 +678,7 @@ def parse_ritual(lines, omen_names):
         if excluded.fullmatch(title) or len(title) < 4 or len(title) > 160 or not re.search("[A-Za-z]", title):
             continue
         score = float(line.get("score", 1)) if isinstance(line, dict) else 1.0
-        if score < .55:
+        if score < ocr_sensitivity.review_threshold(.55, strictness, .2):
             unmatched.append(raw)
             continue
         is_omen = bool(re.search(r"\b[O0]men\b", title, re.I))
@@ -668,10 +687,11 @@ def parse_ritual(lines, omen_names):
                              for name, key in known), reverse=True)
             best = ranked[0] if ranked else (0.0, title)
             next_score = ranked[1][0] if len(ranked) > 1 else 0.0
-            name = best[1] if best[0] >= .75 and best[0] - next_score >= .035 else title
+            name = best[1] if (best[0] >= ocr_sensitivity.review_threshold(.75, strictness, .2) and
+                              best[0] - next_score >= ocr_sensitivity.review_threshold(.035, strictness, .025)) else title
             category = "Omen"
             name_match = best[0] if name == best[1] else 0.0
-        elif re.fullmatch(r"[A-Za-z][A-Za-z' -]{3,70}", title) and score >= .72:
+        elif re.fullmatch(r"[A-Za-z][A-Za-z' -]{3,70}", title) and score >= ocr_sensitivity.review_threshold(.72, strictness, .15):
             name, category = title, "Item"
             name_match = 1.0
         else:
@@ -994,15 +1014,18 @@ def _ritual_cell_labels(cells):
     return labels
 
 
-def _ritual_reward_icon(reader, cell, label, examples, icon=None):
+def _ritual_reward_icon(reader, cell, label, examples, icon=None, strictness=ocr_sensitivity.DEFAULT):
     """Resolve one-cell Ritual artwork with count masking, tier checks and local reference margins.
 
     Inventory-ignored families remain eligible as Ritual rewards, and ambiguous
-    shared tiers or example names stay as candidates for review.
+    shared tiers or example names stay as candidates for review. Captured strictness
+    adjusts identity evidence floors while retaining separate count and tier guards.
     """
     count = label.get("count") or label.get("count_candidate")
     count_digits = len(str(count)) if count is not None else None
-    icon = reader.icon(cell, count_digits=count_digits) if icon is None else icon
+    if icon is None:
+        icon = (reader.icon(cell, count_digits=count_digits) if strictness == ocr_sensitivity.DEFAULT else
+                reader.icon(cell, count_digits=count_digits, strictness=strictness))
     candidates = []
     # Maps, tablets and runes are excluded from currency inventories, but they
     # are legitimate Ritual rewards. Keep the same weighted match thresholds.
@@ -1011,8 +1034,10 @@ def _ritual_reward_icon(reader, cell, label, examples, icon=None):
         if ranked:
             top = ranked[0]
             margin = top["score"] - ranked[1]["score"] if len(ranked) > 1 else float("inf")
-            clear = ((top["score"] > -3000 and margin > 300) or
-                     (top["score"] > -3200 and margin > 1500))
+            clear = ((top["score"] > ocr_sensitivity.clear_threshold(-3000, strictness, 800) and
+                      margin > ocr_sensitivity.clear_threshold(300, strictness, 200)) or
+                     (top["score"] > ocr_sensitivity.clear_threshold(-3200, strictness, 800) and
+                      margin > ocr_sensitivity.clear_threshold(1500, strictness, 500)))
             if clear:
                 icon = {"family": top["name"], "members": reader.inventory_members[top["name"]],
                         "score": max(0, 1 + top["score"] / 8000), "method": "inventory"}
@@ -1032,15 +1057,17 @@ def _ritual_reward_icon(reader, cell, label, examples, icon=None):
                 top = ranked[0]
                 runner = next((row["score"] for row in ranked[1:]
                                if row["name"] != top["name"]), float("-inf"))
-                if top["score"] > -1200 and top["score"] - runner > 150:
+                if (top["score"] > ocr_sensitivity.clear_threshold(-1200, strictness, 500) and
+                        top["score"] - runner > ocr_sensitivity.clear_threshold(150, strictness, 100)):
                     name = top["name"]
                     icon = {"score": max(0, 1 + top["score"] / 8000), "method": "local reference"}
-                elif top["score"] > -1200:
-                    candidates = [row["name"] for row in ranked if top["score"] - row["score"] <= 150]
+                elif top["score"] > ocr_sensitivity.review_threshold(-1200, strictness, 1200):
+                    lead = max(150, ocr_sensitivity.review_threshold(150, 100 - strictness, 150))
+                    candidates = [row["name"] for row in ranked if top["score"] - row["score"] <= lead]
     return name, float(icon.get("score", 0)), candidates
 
 
-def _ritual_grid_items(image, grid, parsed, markers, omen_names, references):
+def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, strictness=ocr_sensitivity.DEFAULT):
     """Identify each verified reward footprint without including its frame.
 
     The frame grows with the reward grid at higher game resolutions. Keeping
@@ -1092,19 +1119,22 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references):
         catalog_icon = None
         if not multiple:
             count = label.get("count") or label.get("count_candidate")
-            catalog_icon = reader.icon(cells[index], count_digits=len(str(count)) if count is not None else None)
+            digits = len(str(count)) if count is not None else None
+            catalog_icon = (reader.icon(cells[index], count_digits=digits) if strictness == ocr_sensitivity.DEFAULT else
+                            reader.icon(cells[index], count_digits=digits, strictness=strictness))
         if shape is not None:
             if shape not in reviewed:
                 reviewed[shape] = _reviewed_bank(reader, references, shape)
             shown = (image.crop((box[0] + frame_inset, box[1] + frame_inset, box[2], box[3])).convert("RGB")
                      if multiple else cells[index])
-            correction = _reviewed_match(reader, shown, reviewed[shape], catalog=catalog_icon)
+            correction = _reviewed_match(reader, shown, reviewed[shape], catalog=catalog_icon,
+                                         strictness=strictness)
         if correction:
             name, score, kind = correction
             candidates = []
         else:
             name, score, candidates = (None, 0.0, []) if multiple else _ritual_reward_icon(
-                reader, cells[index], label, examples, icon=catalog_icon)
+                reader, cells[index], label, examples, icon=catalog_icon, strictness=strictness)
             kind = "omen" if name in omen_names else "item"
         quantity = 1 if multiple else label.get("count") or label.get("count_candidate") or 1
         deferred = index in deferred_rewards
@@ -1134,18 +1164,23 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references):
     return items
 
 
-def scan_ritual_page(image, omen_names, references=()):
+def scan_ritual_page(image, omen_names, references=(), strictness=ocr_sensitivity.DEFAULT):
     """Combine OCR metadata, grid footprints, icon references and deferred markers for review.
 
     A complete grid limits rewards to occupied footprints; without one, text and
     Omen occurrences form a fallback with partial-grid coverage uncertainty retained.
-    Identity, quantity and page coverage remain separate review evidence.
+    Identity, quantity and page coverage remain separate review evidence;
+    Captured strictness adjusts text and icon identity gates; structural evidence
+    and unreadable quantities, prices or deferred states remain reviewable.
     """
+    strictness = ocr_sensitivity.validate(strictness)
     if not isinstance(image, Image.Image):
         with Image.open(image) as source:
             image = source.convert("RGB")
     rows = ocr_lines(image)
-    result = parse_ritual(rows, omen_names)
+    result = parse_ritual(rows, omen_names, strictness=strictness)
+    if strictness != ocr_sensitivity.DEFAULT:
+        result["_ocr_strictness"] = strictness
     from PoE2_Data_Logger.ocr.ritual_grid import detect_reward_grid, has_grid_structure
     header = next((row for row in rows if re.fullmatch(r"favou?rs", row["text"].strip(), re.I)
                    and float(row.get("score", 0)) >= .75), None)
@@ -1155,7 +1190,8 @@ def scan_ritual_page(image, omen_names, references=()):
     markers = deferred_markers(image, grid=grid)
     result.update(ritual_totals(rows, image, grid=grid))
     if grid is not None:
-        result["items"] = _ritual_grid_items(image, grid, result["items"], markers, omen_names, references)
+        result["items"] = _ritual_grid_items(image, grid, result["items"], markers, omen_names, references,
+                                             strictness=strictness)
         result.update(grid_detected=True, grid_reward_count=len(grid["rewards"]),
                       grid_bounds=tuple(grid["bounds"]), grid_confidence=grid.get("confidence"),
                       grid_evidence=dict(grid.get("evidence") or {}),

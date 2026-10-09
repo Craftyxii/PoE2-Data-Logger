@@ -1,3 +1,9 @@
+# PoE2 Data Logger 1.3.2.4 Beta
+
+- Add separate OCR Strictness sliders for each scan type in the OCR Sensitivity tab: 0 accepts more tentative matches, 50 retains previous behavior, and 100 requires manual confirmation. Keep semantic and capture-context safety checks.
+- Save propagation chain parts directly from the recipe's Approve button; retain Complete chain for advancing the expedition and simplify the propagation review controls.
+- Make the live Map # and Remnant # indicators larger and align beta app, installer and executable metadata.
+
 # PoE2 Data Logger 1.3.2
 
 - Promote the reviewed main-branch code to a stable installer with consistent executable, installer, window and release metadata.
