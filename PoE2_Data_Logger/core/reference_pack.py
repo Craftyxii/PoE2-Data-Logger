@@ -183,6 +183,31 @@ def _review_image(raw, entry):
     return raw
 
 
+def save_export_file(folder):
+    """Save a shareable reference ZIP under an unused name, preserving earlier packs and racing exports."""
+    from PoE2_Data_Logger.core.export_files import ExportWriteError, write_export_files
+
+    data = export_pack()
+    directory = Path(folder)
+    number = 1
+    while True:
+        suffix = "" if number == 1 else f"_{number}"
+        destination = directory / f"PoE2_OCR_References{suffix}.zip"
+        if destination.exists() or destination.is_symlink():
+            number += 1
+            continue
+        try:
+            write_export_files({destination: data}, replace=False)
+        except ExportWriteError as error:
+            # The exclusive reservation also protects against another app
+            # instance claiming this filename after the existence check.
+            if isinstance(error.__cause__, FileExistsError):
+                number += 1
+                continue
+            raise
+        return {"path": str(destination), "bytes": len(data)}
+
+
 def export_pack():
     """Package reference tables, labelled examples and seed screenshots from one read transaction.
 

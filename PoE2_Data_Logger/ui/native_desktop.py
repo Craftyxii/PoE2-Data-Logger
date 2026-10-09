@@ -4064,29 +4064,13 @@ class LoggerWindow(QMainWindow):
         set_message(self.reference_status, "✓ Icon example removed.", "success")
 
     def export_reference_pack(self):
-        """Persist the reference destination and submit an atomic ZIP export to the worker
-        pool.
-        """
+        """Persist the destination and export a reference ZIP without replacing older packs."""
         default = DEFAULT_REFERENCE_FOLDER
         if Path(value(self.reference_folder)) == default:
             default.mkdir(parents=True, exist_ok=True)
         folder = logger.save_reference_export_folder(value(self.reference_folder))
-        destination = Path(folder) / "PoE2_OCR_References.zip"
         set_message(self.reference_status, "Exporting OCR references…")
-        def work():
-            """Build the reference ZIP and atomically replace its destination using a temporary
-            file.
-            """
-            data = reference_pack.export_pack()
-            fd, temporary = tempfile.mkstemp(dir=destination.parent, suffix=".tmp")
-            try:
-                with os.fdopen(fd, "wb") as output:
-                    output.write(data)
-                os.replace(temporary, destination)
-            finally:
-                Path(temporary).unlink(missing_ok=True)
-            return {"path": str(destination), "bytes": len(data)}
-        self._submit("Exporting OCR references…", work,
+        self._submit("Exporting OCR references…", lambda: reference_pack.save_export_file(folder),
                      lambda result: self._reference_exported(result))
 
     def _reference_exported(self, result):

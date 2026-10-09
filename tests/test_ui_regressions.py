@@ -60,6 +60,42 @@ class UIRegressionTests(unittest.TestCase):
         Image.new("RGB", (600, 400), color).save(raw, format="PNG")
         return raw.getvalue()
 
+    def test_reference_pack_folder_button_preserves_earlier_reference_exports(self):
+        """Save twice through the real button, keeping the older pack and each snapshot's names."""
+        from zipfile import ZipFile
+        import json
+        logger.add_item_name("First shared custom item")
+        folder = Path(self.tmp.name) / "reference-exports"
+        folder.mkdir()
+        older = folder / "PoE2_OCR_References.zip"
+        older.write_bytes(b"An earlier reference pack must remain untouched")
+        self.window.reference_folder.setText(str(folder))
+        self.window.show()
+        self.window.tabs.setCurrentIndex(8)
+        self.app.processEvents()
+        action = next(widget for widget in self.window.findChildren(native_desktop.QPushButton)
+                      if widget.text() == "Save reference pack to folder")
+        self.window.tabs.currentWidget().ensureWidgetVisible(action)
+        self.app.processEvents()
+        exports = []
+        for index in range(2):
+            if index:
+                logger.add_item_name("Second shared custom item")
+            QTest.mouseClick(action, Qt.MouseButton.LeftButton)
+            work, done = self.jobs.pop()
+            result = work()
+            done(result)
+            destination = Path(result["path"])
+            self.assertNotIn(destination, exports)
+            exports.append(destination)
+            with ZipFile(destination) as pack:
+                names = [entry["name"] for entry in json.loads(pack.read("manifest.json"))["data"]["item_names"]]
+            self.assertIn("First shared custom item", names)
+            self.assertEqual("Second shared custom item" in names, bool(index))
+            self.assertEqual(older.read_bytes(), b"An earlier reference pack must remain untouched")
+        self.assertEqual(sorted(path.name for path in folder.iterdir()),
+                         ["PoE2_OCR_References.zip", "PoE2_OCR_References_2.zip", "PoE2_OCR_References_3.zip"])
+
     def test_inventory_and_ritual_review_compact_preview_without_affecting_other_scans(self):
         """Show both item reviews at compact/wide sizes while keeping recipe previews full-size."""
         self.window.show()
