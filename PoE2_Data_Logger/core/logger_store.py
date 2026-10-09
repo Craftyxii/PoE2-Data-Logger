@@ -299,7 +299,7 @@ def _cancel_prepared_waystone(db):
 
 
 def initialize():
-    """Create and migrate logger tables, seed bundled data and repair defaults once per process."""
+    """Create/migrate tables and frozen-origin analysis views, seed data and repair defaults once per process."""
     global _READY
     if _READY:
         return
@@ -352,6 +352,31 @@ def initialize():
                 CREATE TABLE IF NOT EXISTS chain_append_receipts(
                     request_id TEXT PRIMARY KEY,session_generation INTEGER NOT NULL,
                     expedition_id TEXT NOT NULL,payload_json TEXT NOT NULL,result_json TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS chain_step_provenance(
+                    expedition_id TEXT NOT NULL,chain_step INTEGER NOT NULL,recipe TEXT NOT NULL,
+                    family_id INTEGER,family_status TEXT NOT NULL,family_source TEXT NOT NULL,
+                    family_candidates_json TEXT NOT NULL,propagation_commit_number INTEGER NOT NULL,
+                    chain_commit_number INTEGER NOT NULL,PRIMARY KEY(expedition_id,chain_step));
+                CREATE VIEW IF NOT EXISTS chain_rune_provenance AS
+                    WITH chain_rows AS (
+                        SELECT expedition_id,chain_step,json_extract(row_json,'$[26]') AS rune1,
+                               json_extract(row_json,'$[27]') AS rune2 FROM new_export WHERE chain_step>0
+                        UNION ALL
+                        SELECT expedition_id,chain_step,json_extract(row_json,'$[26]'),
+                               json_extract(row_json,'$[27]') FROM legacy_export WHERE chain_step>0
+                    ), rune_rows AS (
+                        SELECT *,1 AS rune_slot,rune1 AS rune FROM chain_rows WHERE rune1<>''
+                        UNION ALL
+                        SELECT *,2 AS rune_slot,rune2 AS rune FROM chain_rows WHERE rune2<>''
+                    )
+                    SELECT r.*,COALESCE(p.recipe,'') AS recipe,p.family_id,
+                           COALESCE(CAST(p.family_id AS TEXT),'Unknown') AS family,
+                           COALESCE(p.family_status,'unknown') AS family_status,
+                           COALESCE(p.family_source,'unknown') AS family_source,
+                           COALESCE(p.family_candidates_json,'[]') AS family_candidates_json,
+                           p.propagation_commit_number,p.chain_commit_number
+                    FROM rune_rows r LEFT JOIN chain_step_provenance p
+                    ON p.expedition_id=r.expedition_id AND p.chain_step=r.chain_step;
                 CREATE TABLE IF NOT EXISTS scan_links(
                     remnant_id TEXT PRIMARY KEY,scan_id INTEGER NOT NULL);
                 CREATE TABLE IF NOT EXISTS seed_states(
@@ -1658,6 +1683,26 @@ def _chain_steps_snapshot(db, eid):
     return [{key: row[key] for key in ("step", "rune1", "rune2")} for row in _saved_chain_rows(db, eid)]
 
 
+def _stored_chain_origins(db, eid=None):
+    """Index frozen stored origins for one expedition or an entire consistent export snapshot."""
+    query = "SELECT * FROM chain_step_provenance"
+    rows = db.execute(query + " WHERE expedition_id=?", (eid,)) if eid is not None else db.execute(query)
+    return {(row["expedition_id"], row["chain_step"]): {
+                "step": row["chain_step"], "recipe": row["recipe"], "family": row["family_id"],
+                "family_status": row["family_status"], "family_source": row["family_source"],
+                "family_candidates": _load(row["family_candidates_json"]),
+                "propagation_commit_number": row["propagation_commit_number"],
+                "chain_commit_number": row["chain_commit_number"]} for row in rows}
+
+
+def _chain_provenance(db, eid, steps):
+    """Read frozen recipe/family origins beside steps, leaving legacy/manual origins explicitly unknown."""
+    saved = _stored_chain_origins(db, eid)
+    return [saved.get((eid, step["step"]), {"step": step["step"], "recipe": "", "family": None,
+             "family_status": "unknown", "family_source": "unknown", "family_candidates": [],
+             "propagation_commit_number": None, "chain_commit_number": None}) for step in steps]
+
+
 def _require_open_chain(db, eid):
     """Reject writes to an expedition already present in chain completions."""
     if db.execute("SELECT 1 FROM chain_completions WHERE expedition_id=?", (eid,)).fetchone():
@@ -1694,8 +1739,8 @@ def _save_chain_receipt(db, request_id, payload, result):
             request_id, _meta(db, "session_generation", 0), result["expedition_id"], _dump(payload), _dump(result)))
 
 
-def _append_chain_steps(db, mid, expedition, eid, cleaned):
-    """Append numbered steps and a Chain commit to an open expedition without completing it."""
+def _append_chain_steps(db, mid, expedition, eid, cleaned, *, origin=None, propagation_commit_number=None):
+    """Append numbered steps atomically, retaining approved origins separately from editable rune pairs."""
     _require_open_chain(db, eid)
     step = max([row["step"] for row in _saved_chain_rows(db, eid)] or [0]) + 1
     existing = _first_row(db, "expedition_id", eid)
@@ -1703,8 +1748,12 @@ def _append_chain_steps(db, mid, expedition, eid, cleaned):
     context = _bind_atlas_context(db, mid, _snapshot(_meta(db, "settings")))
     steps = [{"step": step + offset, "rune1": rune1, "rune2": rune2}
              for offset, (rune1, rune2) in enumerate(cleaned)]
+    details = {"detonated": det, "steps": steps}
+    if origin is not None:
+        details["origins"] = [{"step": item["step"], **origin,
+                              "propagation_commit_number": propagation_commit_number} for item in steps]
     commit_number = _record_commit(db, "Chain", mid, eid, f"Steps {step}–{step + len(cleaned) - 1}",
-                                   context=context, details={"detonated": det, "steps": steps})
+                                   context=context, details=details)
     for offset, (rune1, rune2) in enumerate(cleaned):
         row = [""] * 67
         row[22], row[25], row[26], row[27], row[31], row[32] = (
@@ -1714,6 +1763,11 @@ def _append_chain_steps(db, mid, expedition, eid, cleaned):
         row.extend(_extra_export_values(context))
         row[67 + len(BASE_EXTRA_HEADERS) - 1] = commit_number
         _add_new(db, row)
+        if origin is not None:
+            db.execute("INSERT INTO chain_step_provenance VALUES(?,?,?,?,?,?,?,?,?)", (
+                eid, step + offset, origin["recipe"], origin["family"], origin["family_status"],
+                origin["family_source"], _dump(origin["family_candidates"]),
+                propagation_commit_number, commit_number))
     db.execute("INSERT OR IGNORE INTO expeditions VALUES(?,?,?,?)", (eid, mid, expedition, None))
     return {"map_id": mid, "expedition_id": eid, "steps": [item["step"] for item in steps],
             "scan_commit_number": commit_number, "reused": False}
@@ -1772,7 +1826,7 @@ def _completion_result(mid, eid, row, *, already_completed):
 
 
 def _complete_chain(db, mid, expedition, eid):
-    """Record a nonempty chain's final steps and advance selection once; reuse existing completion."""
+    """Record final runes and their frozen origins, advancing once while retaining completed history."""
     existing = db.execute("SELECT * FROM chain_completions WHERE expedition_id=?", (eid,)).fetchone()
     if existing:
         return _completion_result(mid, eid, existing, already_completed=True)
@@ -1781,7 +1835,8 @@ def _complete_chain(db, mid, expedition, eid):
         raise ValueError("Save at least one chain part before completing the chain.")
     following = _next_unused_expedition(db, mid, expedition)
     number = _record_commit(db, "Chain completion", mid, eid, f"Completed {len(steps)} chain parts",
-                            details={"steps": steps, "detonated": _detonated_value(db, eid, _UNSET),
+                            details={"steps": steps, "origins": _chain_provenance(db, eid, steps),
+                                     "detonated": _detonated_value(db, eid, _UNSET),
                                      "next_expedition": following, "next_expedition_id": _exp_id(mid, following)})
     db.execute("INSERT INTO chain_completions VALUES(?,?,?,?,?)", (eid, number, len(steps), following, _now()))
     config = _meta(db, "settings")
@@ -1806,7 +1861,7 @@ def complete_chain(expected_context=None):
 
 
 def update_chain_steps(steps, expected_context=None):
-    """Correct existing parts while building, without changing identity, order or counts."""
+    """Correct editable rune pairs while preserving each part's identity, original recipe/family and counts."""
     cleaned = _clean_chain_steps(steps, limit=None)
     ids = [_integer(item.get("step"), "Chain step", 1) for item in steps]
     if len(set(ids)) != len(ids):
@@ -1838,7 +1893,8 @@ def update_chain_steps(steps, expected_context=None):
             values[26], values[27] = rune1, rune2
             db.execute(f"UPDATE {row['table']} SET row_json=? WHERE position=?", (_dump(values), row["position"]))
         number = (_record_commit(db, "Chain correction", mid, eid, f"Corrected {len(changes)} chain parts",
-                                 details={"changes": changes, "detonated": _detonated_value(db, eid, _UNSET)})
+                                 details={"changes": changes, "origins": _chain_provenance(db, eid, changes),
+                                          "detonated": _detonated_value(db, eid, _UNSET)})
                   if changes else None)
         return {"map_id": mid, "expedition_id": eid, "steps": [item["step"] for item in changes],
                 "scan_commit_number": number, "changed": bool(changes), "chain_completed": False}
@@ -1879,8 +1935,58 @@ def _clean_propagation_part(runes, recipe):
     return cleaned, recipe.strip()
 
 
-def _increment_propagation(db, mid, expedition, eid, cleaned, recipe, current_value):
-    """Increase an open expedition's detonated count and record Propagation without appending steps."""
+def _propagation_family_id(value):
+    """Normalize an optional OCR family label or numeric ID without accepting malformed family identifiers."""
+    if value is None or isinstance(value, str) and value.strip().casefold() in ("", "unknown", "unresolved"):
+        return None
+    if isinstance(value, str):
+        match = re.fullmatch(r"Family\s+(\d+)", value.strip(), re.I)
+        if match:
+            value = match.group(1)
+    return _integer(value, "Propagation Family ID", 1, 9999)
+
+
+def _clean_propagation_family(family, family_candidates):
+    """Normalize bounded family hints for stable request replay before opening the approval transaction."""
+    selected = _propagation_family_id(family)
+    if family_candidates is None:
+        family_candidates = []
+    if not isinstance(family_candidates, (list, tuple)) or len(family_candidates) > 9999:
+        raise ValueError("Propagation family candidates must be a list of Family IDs.")
+    candidates = [_propagation_family_id(value) for value in family_candidates]
+    if any(value is None for value in candidates):
+        raise ValueError("Propagation family candidates must identify specific families.")
+    return selected, sorted(set(candidates))
+
+
+def _resolve_propagation_origin(db, recipe, family, candidates):
+    """Validate recipe/family membership and freeze only an explicit or uniquely supported family origin."""
+    try:
+        canonical = _canonical(db, recipe)
+    except ValueError:
+        if family is not None or candidates:
+            raise ValueError("Choose a known propagation recipe before assigning its family.")
+        canonical = recipe
+    matching = []
+    if canonical and db.execute("SELECT 1 FROM recipes WHERE name=?", (canonical,)).fetchone():
+        matching = [row["id"] for row in db.execute("SELECT id,recipes_json FROM families WHERE valid=1 ORDER BY id")
+                    if canonical in _load(row["recipes_json"])]
+    if family is not None and family not in matching:
+        raise ValueError("The propagation family does not contain the selected recipe in the active Family DB.")
+    if any(candidate not in matching for candidate in candidates):
+        raise ValueError("A propagation family candidate does not contain the selected recipe in the active Family DB.")
+    if family is not None and candidates and family not in candidates:
+        raise ValueError("The selected propagation family is not one of the captured family candidates.")
+    possible = candidates or ([family] if family is not None else matching)
+    resolved = family if family is not None else possible[0] if len(possible) == 1 else None
+    return {"recipe": canonical, "family": resolved, "family_candidates": possible,
+            "family_status": "known" if resolved is not None else "ambiguous" if possible else "unknown",
+            "family_source": "supplied" if family is not None else "candidates" if candidates else
+                             "recipe" if matching else "unknown"}
+
+
+def _increment_propagation(db, mid, expedition, eid, cleaned, recipe, current_value, *, origin=None):
+    """Count one accepted scan and retain its optional frozen origin in the existing Propagation audit event."""
     _require_open_chain(db, eid)
     pending = _meta(db, "ocr_pending")
     if pending and (not isinstance(pending, dict) or pending.get("map_id") != mid):
@@ -1889,8 +1995,10 @@ def _increment_propagation(db, mid, expedition, eid, cleaned, recipe, current_va
     db.execute("INSERT INTO expeditions VALUES(?,?,?,?) ON CONFLICT(expedition_id) "
                "DO UPDATE SET detonated=excluded.detonated", (eid, mid, expedition, count))
     _patch_first(db, "expedition_id", eid, {33: count})
-    number = _record_commit(db, "Propagation", mid, eid, recipe,
-                            details={"detonated": count, "runes": cleaned, "recipe": recipe})
+    details = {"detonated": count, "runes": cleaned, "recipe": recipe}
+    if origin is not None:
+        details["origin"] = origin
+    number = _record_commit(db, "Propagation", mid, eid, recipe, details=details)
     return {"map_id": mid, "expedition_id": eid, "detonated": count, "scan_commit_number": number}
 
 
@@ -1916,15 +2024,21 @@ def increment_propagation_detonated(expected_context, *, current_value=_UNSET, r
 
 
 def accept_propagation_part(expected_context, *, runes=None, recipe="", request_id=None,
-                            current_value=_UNSET, wait_for_lock=True):
-    """Count and append once; optionally return SQLite contention immediately for a GUI retry."""
+                            current_value=_UNSET, wait_for_lock=True, family=None, family_candidates=None):
+    """Atomically count/append once with validated frozen family provenance; allow immediate GUI lock retries."""
     cleaned, recipe = _clean_propagation_part(runes, recipe)
+    selected_family, candidates = _clean_propagation_family(family, family_candidates)
     if not isinstance(expected_context, dict):
         raise ValueError("The propagation capture context is invalid. Scan again.")
     request_id = _request_token(request_id)
     payload = {"operation": "propagation", "runes": cleaned, "recipe": recipe,
                "current_value": None if current_value is _UNSET else current_value,
                "count_from_saved": current_value is _UNSET}
+    # Omitted hints retain the historical receipt shape, so old unknown requests still replay unchanged.
+    if selected_family is not None:
+        payload["family"] = selected_family
+    if candidates:
+        payload["family_candidates"] = candidates
     with _connect() as db:
         if not wait_for_lock:
             # This connection alone must not block Qt while another writer finishes.
@@ -1934,9 +2048,13 @@ def accept_propagation_part(expected_context, *, runes=None, recipe="", request_
         if previous is not None:
             return previous
         mid, expedition, eid = _chain_context(db, expected_context)
-        accepted = _increment_propagation(db, mid, expedition, eid, cleaned, recipe, current_value)
-        result = _append_chain_steps(db, mid, expedition, eid, [(cleaned[0], cleaned[1] if len(cleaned) > 1 else "")])
-        result.update(detonated=accepted["detonated"], propagation_commit_number=accepted["scan_commit_number"])
+        origin = _resolve_propagation_origin(db, recipe, selected_family, candidates)
+        accepted = _increment_propagation(db, mid, expedition, eid, cleaned, origin["recipe"], current_value,
+                                          origin=origin)
+        result = _append_chain_steps(db, mid, expedition, eid, [(cleaned[0], cleaned[1] if len(cleaned) > 1 else "")],
+                                     origin=origin, propagation_commit_number=accepted["scan_commit_number"])
+        result.update(detonated=accepted["detonated"], propagation_commit_number=accepted["scan_commit_number"],
+                      provenance=_chain_provenance(db, eid, [{"step": step} for step in result["steps"]]))
         _save_chain_receipt(db, request_id, payload, result)
         return result
 
@@ -2116,7 +2234,7 @@ def undo_empty_map():
 
 
 def clear_export_and_reset_ids():
-    """Clear session records and reset IDs atomically while retaining catalogs and settings.
+    """Clear session records and frozen chain origins atomically, retaining catalogs and settings.
 
     Increment the generation token so pending captures and request receipts cannot carry into the reset session.
     """
@@ -2124,7 +2242,8 @@ def clear_export_and_reset_ids():
         db.execute("BEGIN IMMEDIATE")
         _set_meta(db, "session_generation", _meta(db, "session_generation", 0) + 1)
         for table in ("legacy_export", "new_export", "maps", "map_unique_kills", "expeditions", "scan_links",
-                      "currency_snapshots", "ritual_pages", "commits", "chain_completions", "chain_append_receipts"):
+                      "currency_snapshots", "ritual_pages", "commits", "chain_completions", "chain_append_receipts",
+                      "chain_step_provenance"):
             db.execute(f"DELETE FROM {table}")
         db.execute("DELETE FROM sqlite_sequence WHERE name IN ('new_export','ritual_pages')")
         _set_meta(db, "current_map_number", 0)
@@ -3046,7 +3165,7 @@ def _map_remnant_id(db, map_id, pending):
 
 
 def get_state():
-    """Assemble editable settings, selected IDs and counts, catalogs, current chain and recent remnants for the UI."""
+    """Assemble current UI state, exposing frozen chain origins separately from compatible editable step dictionaries."""
     with _connect() as db:
         config = _meta(db, "settings")
         n = _meta(db, "current_map_number")
@@ -3115,7 +3234,7 @@ def get_state():
             "masters": masters, "families": families, "seed_states": seed_states,
             "recipes": [r[0] for r in db.execute("SELECT name FROM recipes ORDER BY name")],
             "runes": [r[0] for r in db.execute("SELECT DISTINCT seed_rune FROM seed_states WHERE seed_rune!='Unresolved' ORDER BY seed_rune")],
-            "chain": chain, "chain_completed": db.execute(
+            "chain": chain, "chain_provenance": _chain_provenance(db, eid, chain), "chain_completed": db.execute(
                 "SELECT 1 FROM chain_completions WHERE expedition_id=?", (eid,)).fetchone() is not None,
             "recent": recent,
             "counts": {"historical_rows": db.execute("SELECT count(*) FROM legacy_export").fetchone()[0],
@@ -3156,7 +3275,7 @@ def search_catalog(query="", kind="families", limit=100):
 
 
 def export_csv(*, _db=None):
-    """Export imported and new recipe/chain rows with commit-linked Atlas fields and current completion status.
+    """Export recipe/chain rows with frozen family/recipe provenance, Atlas fields and current completion status.
 
     Project unique and total kills once per map; reuse a supplied connection or open a read transaction.
     """
@@ -3171,6 +3290,7 @@ def export_csv(*, _db=None):
         atlas_contexts = {row["number"]: _load(row["snapshot_json"])
                           for row in db.execute("SELECT number,snapshot_json FROM commits")}
         completed = {row[0] for row in db.execute("SELECT expedition_id FROM chain_completions")}
+        origins = _stored_chain_origins(db)
         seen_maps = set()
         for table in ("legacy_export", "new_export"):
             for item in db.execute(f"SELECT row_json FROM {table} ORDER BY position"):
@@ -3189,8 +3309,9 @@ def export_csv(*, _db=None):
                 else:
                     kill_values = ["", ""]
                 status = ("Completed" if values[32] in completed else "Open") if values[25] else ""
+                origin_values = _origin_export_values(origins.get((values[32], int(values[25])))) if values[25] else [""] * len(CHAIN_ORIGIN_HEADERS)
                 writer.writerow(_csv_row([*values[:-2], *_atlas_export_values(context), *values[-2:],
-                                          *kill_values, status]))
+                                          *kill_values, status, *origin_values]))
     return out.getvalue().encode("utf-8-sig")
 
 
@@ -3216,11 +3337,22 @@ HISTORY_DETAIL_HEADERS = ("Inventory Phase", "Currency", "Quantity", "Ritual Pag
                           "Start Recorded UTC", "End Recorded UTC", "Deferred", "New Find Quantity",
                           "Ritual Tribute Available", "Ritual Rerolls Remaining")
 KILL_EXPORT_HEADERS = ("Unique Kills (Map)", "Total Kills")
-CHAIN_EXPORT_HEADERS = ("Chain Status",)
+CHAIN_ORIGIN_HEADERS = ("Propagation Recipe", "Propagation Family ID", "Propagation Family Status",
+                        "Propagation Family Candidates", "Propagation Family Source")
+CHAIN_EXPORT_HEADERS = ("Chain Status", *CHAIN_ORIGIN_HEADERS)
 CHAIN_CORRECTION_HEADERS = ("Previous Rune 1", "Previous Rune 2")
 HISTORY_APPEND_HEADERS = (*KILL_EXPORT_HEADERS, "Remnants Detonated (Scan)", "Start Baseline",
                           "Current Inventory Snapshot", "Session Found Quantity", *CHAIN_EXPORT_HEADERS,
                           *CHAIN_CORRECTION_HEADERS)
+
+
+def _origin_export_values(origin):
+    """Project frozen provenance for analysis, writing Unknown rather than assigning a legacy or ambiguous family."""
+    origin = origin or {}
+    return [origin.get("recipe", ""), origin.get("family") if origin.get("family") is not None else "Unknown",
+            origin.get("family_status", "unknown"),
+            ";".join(str(value) for value in origin.get("family_candidates", [])),
+            origin.get("family_source", "unknown")]
 
 
 def _current_inventory_projection(db):
@@ -3243,7 +3375,7 @@ def _current_inventory_projection(db):
 
 
 def export_record_history_csv(*, _db=None):
-    """Expand every commit's frozen details and settings into history rows.
+    """Expand each commit's frozen details, chain origins and settings into history rows.
 
     Mark current inventory approvals and credit gains only to the latest end.
     Project current chain completion alongside append and correction history.
@@ -3266,6 +3398,7 @@ def export_record_history_csv(*, _db=None):
             base = [commit[key] for key in ("number", "kind", "map_id", "expedition_id", "reference", "recorded_at")]
             shared = {}
             entries = []
+            origins = {origin["step"]: origin for origin in details.get("origins", [])}
             if commit["kind"] == "Currency":
                 phase = details.get("phase", "")
                 shared["Inventory Phase"] = phase
@@ -3326,16 +3459,19 @@ def export_record_history_csv(*, _db=None):
                            for item in details.get("recipes", [])]
             elif commit["kind"] in ("Chain", "Chain completion"):
                 entries = [{"Chain Step #": item["step"], "Propagation Rune 1": item["rune1"],
-                            "Propagation Rune 2": item["rune2"]} for item in details.get("steps", [])]
+                            "Propagation Rune 2": item["rune2"], "_origin": origins.get(item["step"])}
+                           for item in details.get("steps", [])]
             elif commit["kind"] == "Chain correction":
                 entries = [{"Chain Step #": item["step"], "Propagation Rune 1": item["rune1"],
                             "Propagation Rune 2": item["rune2"], "Previous Rune 1": item["previous_rune1"],
-                            "Previous Rune 2": item["previous_rune2"]} for item in details.get("changes", [])]
+                            "Previous Rune 2": item["previous_rune2"], "_origin": origins.get(item["step"])}
+                           for item in details.get("changes", [])]
             elif commit["kind"] == "Propagation":
                 runes = details.get("runes") or []
                 entries = [{"Recipe": details.get("recipe", ""),
                             "Propagation Rune 1": runes[0] if runes else "",
-                            "Propagation Rune 2": runes[1] if len(runes) > 1 else ""}]
+                            "Propagation Rune 2": runes[1] if len(runes) > 1 else "",
+                            "_origin": details.get("origin")}]
             kills = details.get("kills", [])
             shared.update({name: amount for name, amount in zip(HISTORY_DETAIL_HEADERS[16:19], kills)})
             if "detonated" in details:
@@ -3348,6 +3484,12 @@ def export_record_history_csv(*, _db=None):
                              *config[-4:-2], *config[-2:]]
             for entry in entries or [{}]:
                 values = {**shared, **entry}
+                chain_event = commit["kind"] in ("Chain", "Chain correction", "Chain completion", "Propagation")
+                origin = entry.get("_origin") or {}
+                if origin.get("family") is not None:
+                    values["Family ID"] = origin["family"]
+                if origin.get("recipe"):
+                    values.setdefault("Recipe", origin["recipe"])
                 entry_base = [*base]
                 if commit["kind"] == "Currency" and entry.get("Item Name"):
                     entry_base[1] = "Item"
@@ -3360,7 +3502,8 @@ def export_record_history_csv(*, _db=None):
                                            shared.get("Current Inventory Snapshot", ""),
                                            values.get("Session Found Quantity", ""),
                                            ("Completed" if commit["expedition_id"] in completed else "Open")
-                                           if commit["kind"] in ("Chain", "Chain correction", "Chain completion", "Propagation") else "",
+                                           if chain_event else "",
+                                           *(_origin_export_values(origin) if chain_event else [""] * len(CHAIN_ORIGIN_HEADERS)),
                                            *(values.get(name, "") for name in CHAIN_CORRECTION_HEADERS)]))
     return output.getvalue().encode("utf-8-sig")
 

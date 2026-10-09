@@ -1121,6 +1121,9 @@ class LoggerWindow(QMainWindow):
                 action.setEnabled(editable)
             for row in range(table.rowCount()):
                 if review_kind == "currency":
+                    name_editor = table.cellWidget(row, 1)
+                    if name_editor:
+                        name_editor.setEnabled(editable)
                     controls = table.cellWidget(row, 3)
                     if controls:
                         controls.setEnabled(editable)
@@ -1529,7 +1532,7 @@ class LoggerWindow(QMainWindow):
         hotkey.addLayout(keys)
         propagation_help = QLabel("Propagation uses only its own key. Each accepted scan counts one detonated remnant "
                                   "and saves its runes to the selected expedition. "
-                                  "Clear scans save automatically; recipe Approve saves reviewed runes directly. "
+                                  "Every propagation scan requires manual review; recipe Approve saves its runes directly. "
                                   "Complete chain finishes the chain and advances the expedition number.")
         propagation_help.setWordWrap(True)
         hotkey.addWidget(propagation_help)
@@ -3479,7 +3482,7 @@ class LoggerWindow(QMainWindow):
                 self._refresh_chain_review()
 
     def approve_propagation_recipe(self, row):
-        """Approve this row's recipe-only selections through the existing chain-part workflow."""
+        """Approve this row's rune selections and carry its own family evidence into the chain save."""
         if not self._manual_propagation_context:
             raise ValueError("Scan propagation before choosing a recipe.")
         logger.validate_scan_context(self._manual_propagation_context)
@@ -3496,7 +3499,7 @@ class LoggerWindow(QMainWindow):
                 self._focus_manual_propagation()
                 self.statusBar().showMessage(str(error), 15000)
                 return
-            result = {**choice, **self._manual_propagation_context,
+            result = {**self._manual_propagation_context, **choice,
                       "can_use": True, "runes": runes,
                       "selected_recipe": choice["selected_recipe"]}
             self._accept_manual_propagation(result)
@@ -3513,7 +3516,7 @@ class LoggerWindow(QMainWindow):
                 return
         else:
             runes = choice["runes"]
-        result = {**choice, **self._manual_propagation_context,
+        result = {**self._manual_propagation_context, **choice,
                   "can_use": True, "runes": runes,
                   "selected_recipe": choice["selected_recipe"]}
         self._accept_manual_propagation(result)
@@ -3606,7 +3609,7 @@ class LoggerWindow(QMainWindow):
         self._prepare_manual_propagation(result)
 
     def _append_propagation(self, result=None, *, preserve_remnant_review=False, auto_save=False):
-        """Persist accepted parts atomically, or stage an explicitly requested draft, without advancing."""
+        """Freeze approved rune/family evidence for atomic retries, or stage an explicit draft, without advancing."""
         result = result if preserve_remnant_review else self._propagation_reading
         if ((not preserve_remnant_review and self.pending_review_kind != "propagation") or
                 not result or not result.get("can_use")):
@@ -3624,7 +3627,10 @@ class LoggerWindow(QMainWindow):
             request_id = result.setdefault("_chain_accept_request", uuid4().hex)
             if self._manual_propagation_context is not None:
                 self._manual_propagation_context.setdefault("_chain_accept_request", request_id)
-            pending = {"result": {**result, "runes": list(runes)},
+            frozen = {**result, "runes": list(runes)}
+            if isinstance(result.get("candidates"), (list, tuple)):
+                frozen["candidates"] = list(result["candidates"])
+            pending = {"result": frozen,
                        "context": dict(self._chain_context), "preserve_review": preserve_remnant_review,
                        "deadline": time.monotonic() + 10}
             self._chain_save_pending = pending
@@ -3730,7 +3736,7 @@ class LoggerWindow(QMainWindow):
                 raise TimeoutError("The database is busy. The chain part was not saved; Approve again.")
             saved = logger.accept_propagation_part(pending["context"], runes=result["runes"],
                 recipe=result.get("selected_recipe") or "", request_id=result["_chain_accept_request"],
-                wait_for_lock=False)
+                family=result.get("family"), family_candidates=result.get("candidates"), wait_for_lock=False)
         except sqlite3.OperationalError as error:
             if (getattr(error, "sqlite_errorcode", 0) & 255) not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
                 self._cancel_pending_chain_save()
@@ -5763,13 +5769,19 @@ class LoggerWindow(QMainWindow):
                 cell.setToolTip("Double-click to edit the currency or item name." if column == 1 else
                                 "Double-click to edit the whole-number count, then approve the row.")
             if column == 1 and item.get("candidate"):
-                cell.setToolTip("Possible match: " + item["candidate"] + ". Enter the correct name, then approve.")
+                cell.setToolTip("Possible match: " + item["candidate"] + ". Choose a suggestion or type the correct name, then approve the row.")
             if column == 1:
                 cell.setData(Qt.ItemDataRole.UserRole, {"original": dict(item),
                              "has_capture": isinstance(image, Image.Image) and type(item.get("slot")) is int
                              and 1 <= item["slot"] <= 60})
             self.inventory_table.setItem(row, column, cell)
+        candidate = str(item.get("candidate") or "").strip()
+        if currency_review_rank({"candidate": candidate}) == 1:
+            self._add_currency_name_selector(row, candidate)
         controls = QWidget()
+        # A stable focus target keeps disabling the clicked approval button
+        # from transferring focus to an earlier row or the top of Review.
+        controls.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         layout = QVBoxLayout(controls)
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(2)
@@ -5796,6 +5808,51 @@ class LoggerWindow(QMainWindow):
         self.inventory_table.setRowHeight(row, 62)
         self._set_currency_review(controls, "pending" if controls.property("requiresApproval") else "approved")
 
+    def _add_currency_name_selector(self, row, candidate):
+        """Expose this slot's suggested labels while keeping its table item authoritative.
+
+        Only the captured suggestions populate the dropdown; manual names remain
+        editable without loading the full inventory catalog for each review row.
+        """
+        names, seen = [], set()
+        for name in candidate.split(" / "):
+            name = name.strip()
+            if name.casefold() in seen or currency_review_rank({"candidate": name}) != 1:
+                continue
+            seen.add(name.casefold())
+            names.append(name)
+        if not names:
+            return
+        cell = self.inventory_table.item(row, 1)
+        selector = QComboBox()
+        selector.setObjectName("currencyNameSuggestion")
+        selector.setAccessibleName(f"Currency or item name for inventory slot {self.inventory_table.item(row, 0).data(Qt.ItemDataRole.UserRole)}")
+        selector.setEditable(True)
+        selector.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        selector.setCompleter(None)
+        selector.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        selector.setMinimumContentsLength(12)
+        selector.setToolTip(cell.toolTip())
+        selector.lineEdit().setPlaceholderText("Possible match: " + " / ".join(names))
+        for name in names:
+            selector.addItem(name, name)
+        # Candidate guesses never prefill an unnamed row or grant approval.
+        selector.setCurrentIndex(-1)
+        selector.setEditText(cell.text())
+        selector.setEnabled(self.pending_review_kind == "currency" and self.approve_scan_button.isEnabled())
+        self.inventory_table.setCellWidget(row, 1, selector)
+        selector.currentTextChanged.connect(lambda text, editor=selector:
+                                            self._currency_suggestion_changed(editor, text))
+
+    def _currency_suggestion_changed(self, selector, text):
+        """Route an editable suggestion into its current row without retaining stale row numbers."""
+        row = next((row for row in range(self.inventory_table.rowCount())
+                    if self.inventory_table.cellWidget(row, 1) is selector), None)
+        if row is not None:
+            cell = self.inventory_table.item(row, 1)
+            if cell.text() != text:
+                cell.setText(text)
+
     def _set_currency_review(self, controls, state, *, unnamed=False):
         """Display candidate certainty and review state without changing a row's captured evidence."""
         controls.setProperty("reviewStatus", state)
@@ -5810,9 +5867,14 @@ class LoggerWindow(QMainWindow):
         controls.findChild(QPushButton, "rejectCurrency").setEnabled(state != "rejected")
 
     def _inventory_row_changed(self, item):
-        """Require renewed row approval after an inventory name or count is edited."""
+        """Synchronize name selectors and require renewed approval after name or count edits."""
         if item.column() not in (1, 2):
             return
+        if item.column() == 1:
+            selector = self.inventory_table.cellWidget(item.row(), 1)
+            if selector is not None and selector.currentText() != item.text():
+                with QSignalBlocker(selector):
+                    selector.setEditText(item.text())
         controls = self.inventory_table.cellWidget(item.row(), 3)
         if controls:
             controls.setProperty("requiresApproval", True)
@@ -5820,7 +5882,7 @@ class LoggerWindow(QMainWindow):
 
     def review_currency_row(self, controls, approve):
         """Validate a requested inventory-row approval, rejecting unnamed rows and recording
-        the resulting review status.
+        the resulting review status while retaining the user's scroll and row selection.
         """
         row = next((r for r in range(self.inventory_table.rowCount())
                     if self.inventory_table.cellWidget(r, 3) is controls), None)
@@ -5837,7 +5899,32 @@ class LoggerWindow(QMainWindow):
                 omen_names = {entry.casefold() for entry in logger.ritual_names()}
                 review_learning.validate_name(name, "Omen" if name.casefold() in omen_names else "Currency")
                 logger._integer(quantity, name + " stack count", 0, 1000000)
+        positions = []
+        ancestor = self.inventory_table
+        while ancestor is not None:
+            if isinstance(ancestor, QAbstractScrollArea):
+                for bar in (ancestor.verticalScrollBar(), ancestor.horizontalScrollBar()):
+                    positions.append((bar, bar.value()))
+            ancestor = ancestor.parentWidget()
+        action = controls.findChild(QPushButton, "approveCurrency" if approve else "rejectCurrency")
+        if QApplication.focusWidget() is action:
+            controls.setFocus(Qt.FocusReason.OtherFocusReason)
         self._set_currency_review(controls, "approved" if approve else "rejected", unnamed=unnamed)
+        token = getattr(self, "_currency_row_scroll_token", 0) + 1
+        self._currency_row_scroll_token = token
+        owner = self.pending_review_kind, self._overlay_review_token
+
+        def restore_position():
+            """Restore after immediate and queued focus/layout work only for this live row."""
+            if (self._closed or self._currency_row_scroll_token != token
+                    or (self.pending_review_kind, self._overlay_review_token) != owner
+                    or self.inventory_table.cellWidget(row, 3) is not controls):
+                return
+            for bar, position in positions:
+                bar.setValue(position)
+
+        restore_position()
+        QTimer.singleShot(0, self, restore_position)
 
     def save_icon_example(self):
         """Save an icon example from the selected captured slot, then rescan the grid without

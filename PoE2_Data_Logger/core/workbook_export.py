@@ -109,13 +109,13 @@ class Sheet:
 
 
 def _numeric_column(name):
-    """Identify logger count/stat columns, including prefixed start/end snapshots, for numeric cells."""
+    """Identify counts, stats and known propagation family IDs for numeric cells, preserving Unknown as text."""
     return (name.startswith(("Item: ", "Currency: ", "Omen: ", "Stat: ", "Applied Stat: ", "Atlas Choice: ")) or name in {"Socket Count", "Tier", "Area Level", "Base Map Mods", "Map Mods", "# +2 Mod Tablets",
         "Tablet Mods", "Total Mods", "Master +Mods", "Waystone %", "Tablets Used", "Item Rarity %",
         "Monster Rarity %", "Pack Size %", "Effectiveness %", "Source Row", "Chain Step #", "Expedition #",
         "Normal Kills (Map)", "Magic Kills (Map)", "Rare Kills (Map)", "Unique Kills (Map)", "Remnants Detonated (Expedition)",
         "Remnants Detonated (Scan)",
-        "Scan Commit #", "Family ID", "Quantity", "Ritual Page", "Tribute", "Tablet Slot Capacity",
+        "Scan Commit #", "Family ID", "Propagation Family ID", "Quantity", "Ritual Page", "Tribute", "Tablet Slot Capacity",
         "Start Count", "End Count", "Net Change", "Normal Kills", "Magic Kills", "Rare Kills", "Unique Kills", "Total Kills",
         "New Find Quantity", "Session Found Quantity", "Ritual Tribute Available", "Ritual Rerolls Remaining", "Visible Seed Sockets",
         "Page", "Currency Commit #", "Ritual Commit #", "Start Scan Commit #", "End Scan Commit #",

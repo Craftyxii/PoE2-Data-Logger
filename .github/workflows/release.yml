@@ -58,6 +58,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Platform fixture checks failed.' }
           python tools/run_tests.py --pattern test_user_review_navigation.py
           if ($LASTEXITCODE -ne 0) { throw 'Review navigation fixture checks failed.' }
+          python tools/run_tests.py --pattern test_chain_approval_responsiveness.py
+          if ($LASTEXITCODE -ne 0) { throw 'Chain contention and cleanup fixture checks failed.' }
       - name: Check native Windows HUD interaction
         # Real Windows input and hit testing complement offscreen workflow checks.
         # A failed native pass blocks installer publication and retains screenshots.

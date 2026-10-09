@@ -20,8 +20,8 @@ import unittest
 from unittest.mock import patch
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageGrab, ImageStat
-from PySide6.QtCore import QEvent, QObject, QTimer
-from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer
+from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QComboBox, QMessageBox, QPushButton, QStyle, QStyleOptionSlider
 
 from PoE2_Data_Logger.core import logger_store as logger, ocr_sensitivity, reference_pack, service, store
 from PoE2_Data_Logger.ocr import propagation_scan, runehelper_ocr
@@ -392,26 +392,80 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.phase("07-waystone-manual-review")
 
     def check_currency_and_ritual(self):
-        """Approve corrected rows and ensure only the final end-inventory save updates totals."""
+        """Choose possible matches with OS input, retain deep rows, and save only approved amounts."""
         self.tab(4)
         reading = {"items":[{"slot":1,"name":"Chaos Orb","quantity":4}],
-                   "unknown":[{"slot":2,"candidate":"Divine Orb"}], "_ocr_strictness":100}
+                   "unknown":[{"slot":slot,"candidate":"Exalted Orb / Divine Orb" if slot == 55 else
+                               "Regal Orb / Exalted Orb"} for slot in range(2,61)], "_ocr_strictness":100}
         self.deliver("currency",reading,lambda r:self.window._inventory_read(r,live=True,expected_map_id="M0001"),
-                     lambda:self.window.pending_review_kind == "currency" and self.window.inventory_table.rowCount()==2)
+                     lambda:self.window.pending_review_kind == "currency" and self.window.inventory_table.rowCount()==60)
         # The phase selector is on the held Review page; select End before saving.
         self.native.choose(self.window.inventory_phase,"end")
         self.assertEqual(self.window._pending_currency_phase,"end")
         table = self.window.inventory_table
         self.assertFalse(table.cellWidget(0,3).findChild(QPushButton,"approveCurrency").isEnabled())
         self.assertTrue(table.cellWidget(1,3).findChild(QPushButton,"approveCurrency").isEnabled())
-        self.table_edit(table,1,1,"Divine Orb")
-        self.table_edit(table,1,2,"2")
-        self.native.click(table.cellWidget(1,3).findChild(QPushButton,"approveCurrency"))
+        self.report["currency_suggestion_review"] = {"fixture":"60 inventory slots with explicit injected recognition",
+            "input":"Win32 SendInput popup choice; native count edits and row/final buttons", "decisions":[]}
+        self._native_currency_slots = [table.item(row,0).data(Qt.ItemDataRole.UserRole)
+                                       for row in range(table.rowCount())]
+        before = logger.get_state()["scan_commit_count"]
+        self.choose_currency_suggestion(1,"Regal Orb")
+        self.table_edit(table,1,2,"3")
+        self.assertEqual(table.cellWidget(1,3).property("reviewStatus"),"pending")
+        self.assertEqual(logger.get_state()["scan_commit_count"],before)
         self.assertEqual(logger.currency_for_map("M0001")["end"],{})
+        # The selected, valid top-row guess must remain excluded at final save.
+        self.choose_currency_suggestion(54,"Divine Orb")
+        self.table_edit(table,54,2,"2")
+        self.choose_currency_suggestion(55,"Regal Orb")
+        self.table_edit(table,55,2,"8")
+        self.assertEqual(table.cellWidget(54,3).property("reviewStatus"),"pending")
+        self.assertEqual(table.cellWidget(55,3).property("reviewStatus"),"pending")
+        self.phase("08a-native-currency-possible-match-dropdown")
+        original_width = table.columnWidth(3)
+        # A wide Review column creates real horizontal scrolling on every CI
+        # desktop size; the original layout is restored before final saving.
+        table.setColumnWidth(3,max(self.window.width(),900))
+        self.native.pump()
+        self.native_currency_horizontal_scroll(True)
+        self.native_currency_decision(54,True)
+        self.native_currency_decision(54,False)
+        selector = table.cellWidget(54,1)
+        self.assertTrue(selector.isEnabled(),"Reject must retain an editable possible-match selector")
+        self.native_currency_horizontal_scroll(False)
+        self.choose_currency_suggestion(54,"Exalted Orb")
+        self.assertEqual(table.cellWidget(54,3).property("reviewStatus"),"pending")
+        self.choose_currency_suggestion(54,"Divine Orb")
+        self.table_edit(table,54,2,"2")
+        self.native_currency_horizontal_scroll(True)
+        self.native_currency_decision(54,True)
+        self.native_currency_decision(55,False)
+        self.native_currency_horizontal_scroll(False)
+        self.table_edit(table,55,2,"9")
+        self.assertEqual(table.cellWidget(55,3).property("reviewStatus"),"pending",
+                         "A rejected row's corrected count must request a fresh decision")
+        self.native_currency_horizontal_scroll(True)
+        self.native_currency_decision(55,True)
+        self.native_currency_decision(55,False)
+        self.assertEqual(table.cellWidget(54,3).property("reviewStatus"),"approved")
+        self.assertEqual(table.cellWidget(55,3).property("reviewStatus"),"rejected")
+        self.assertEqual(logger.currency_for_map("M0001")["end"],{})
+        self.assertEqual(logger.get_state()["scan_commit_count"],before)
+        self.phase("08b-native-currency-approval-retains-deep-row")
+        table.setColumnWidth(3,original_width)
+        self.native.pump()
         before = logger.get_state()["scan_commit_count"]
         self.native.click(self.window.approve_scan_button)
         self.assertEqual(logger.currency_for_map("M0001")["end"],{"Chaos Orb":4,"Divine Orb":2})
         self.assertEqual(logger.get_state()["scan_commit_count"],before+1)
+        self.assertEqual(table.cellWidget(1,3).property("reviewStatus"),"rejected",
+                         "Choosing a possible match must never count as uncertain-row approval")
+        self.assertFalse(table.cellWidget(1,1).isEnabled())
+        self.assertFalse(table.cellWidget(54,1).isEnabled())
+        self.report["currency_suggestion_review"].update({"selected_unapproved_slot":2,
+            "approved_slot":55,"corrected_rejected_slot":56,
+            "final_end_inventory":logger.currency_for_map("M0001")["end"],"unapproved_excluded":True})
         self.assertEqual(self.window.session_currency.cards["Chaos Orb"].quantity,4)
         self.assertEqual(self.window.session_currency.cards["Divine Orb"].quantity,2)
         self.phase("08-currency-row-and-final-approval")
@@ -430,6 +484,106 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"],before+1)
         self.assertIsNone(self.window.pending_review_kind)
         self.phase("09-ritual-correction-and-approval")
+
+    def choose_currency_suggestion(self, row, name):
+        """Pick a visible editable-combo candidate through its arrow and actual OS navigation."""
+        table = self.window.inventory_table
+        selector = table.cellWidget(row,1)
+        self.assertIsInstance(selector,QComboBox)
+        self.assertEqual(selector.objectName(),"currencyNameSuggestion")
+        self.assertTrue(selector.isEditable())
+        self.assertTrue(selector.isEnabled())
+        target = selector.findData(name)
+        self.assertGreaterEqual(target,0)
+        self.native.expose(table)
+        table.scrollToItem(table.item(row,1))
+        self.native.pump()
+        event_start = len(self.native.events)
+        # Editable combos focus their line edit when clicked in the middle;
+        # native users open the actual dropdown with its visible arrow.
+        self.native.click(selector,QPoint(selector.width()-10,selector.height()//2))
+        self.native.wait(selector.view().isVisible,"native possible-match dropdown")
+        self.native.assert_target(selector.view().viewport())
+        self.native.key(0x24)
+        for _ in range(target):
+            self.native.key(0x28)
+        self.native.key(0x0D)
+        self.native.wait(lambda:selector.currentData()==name and not selector.view().isVisible(),
+                         "possible match chosen without typing its name")
+        self.assertEqual(table.item(row,1).text(),name)
+        self.assertEqual(table.cellWidget(row,3).property("reviewStatus"),"pending")
+        self.assertFalse(any(event.get("kind")=="Unicode text" for event in self.native.events[event_start:]),
+                         "Candidate selection must use the popup, not a hidden text-entry workaround")
+
+    def native_currency_horizontal_scroll(self, end):
+        """Drag the real scrollbar with OS mouse input instead of keys on a NoFocus control."""
+        bar = self.window.inventory_table.horizontalScrollBar()
+        self.native.expose(bar)
+        self.assertGreater(bar.maximum(),0)
+        option = QStyleOptionSlider()
+        bar.initStyleOption(option)
+        handle = bar.style().subControlRect(QStyle.ComplexControl.CC_ScrollBar,option,
+                                           QStyle.SubControl.SC_ScrollBarSlider,bar)
+        x,y = self.native.assert_target(bar,handle.center())
+        target = bar.maximum() if end else bar.minimum()
+        destination = QPoint(bar.width()-1 if end else 0,handle.center().y())
+        destination_x,destination_y,_ = self.native.point(bar,destination)
+        self.assertTrue(self.native.user.SetCursorPos(x,y))
+        down = self.native.Input(0,self.native.InputUnion(mi=self.native.MouseInput(0,0,0,2,0,0)))
+        up = self.native.Input(0,self.native.InputUnion(mi=self.native.MouseInput(0,0,0,4,0,0)))
+        self.native._send([down],"horizontal scrollbar mouse down")
+        try:
+            self.assertTrue(self.native.user.SetCursorPos(destination_x,destination_y))
+            self.native.pump()
+        finally:
+            self.native._send([up],"horizontal scrollbar mouse up")
+        self.native.wait(lambda:bar.value()==target,"native horizontal scrollbar drag")
+
+    def native_currency_decision(self, row, approved):
+        """Verify a real deep-row decision keeps every scroll bar and the same physical row location."""
+        table = self.window.inventory_table
+        controls = table.cellWidget(row,3)
+        action = controls.findChild(QPushButton,"approveCurrency" if approved else "rejectCurrency")
+        self.native.assert_target(action)
+        bars = []
+        ancestor = table
+        while ancestor is not None:
+            if isinstance(ancestor,QAbstractScrollArea):
+                bars.extend((ancestor.verticalScrollBar(),ancestor.horizontalScrollBar()))
+            ancestor = ancestor.parentWidget()
+        positions = [bar.value() for bar in bars]
+        self.assertGreater(table.verticalScrollBar().value(),0,"Exercise a row below the initial table view")
+        self.assertGreater(table.horizontalScrollBar().value(),0,"Exercise horizontal inner scrolling")
+        self.assertTrue(any(bar.value()>0 for bar in bars[2:]),"Exercise the enclosing Review page's scroll")
+        current = table.currentRow()
+        selected = {index.row() for index in table.selectedIndexes()}
+        slot = table.item(row,0).data(Qt.ItemDataRole.UserRole)
+        point = self.native.point(table.viewport(),table.visualItemRect(table.item(row,3)).center())[:2]
+        self.native.click(action)
+        state = "approved" if approved else "rejected"
+        self.assertEqual(controls.property("reviewStatus"),state)
+        self.assertEqual([bar.value() for bar in bars],positions)
+        queued = []
+
+        def settle_layout():
+            """Force another queued layout pass after the clicked action became disabled."""
+            table.updateGeometry()
+            queued.append(True)
+
+        QTimer.singleShot(0,settle_layout)
+        self.native.wait(lambda:bool(queued),"queued layout after currency-row decision")
+        self.native.pump(.2)
+        self.assertEqual([bar.value() for bar in bars],positions)
+        self.assertEqual(table.currentRow(),current)
+        self.assertEqual({index.row() for index in table.selectedIndexes()},selected)
+        self.assertEqual(table.item(row,0).data(Qt.ItemDataRole.UserRole),slot)
+        self.assertEqual([table.item(index,0).data(Qt.ItemDataRole.UserRole)
+                          for index in range(table.rowCount())],self._native_currency_slots)
+        self.assertEqual(self.native.point(table.viewport(),table.visualItemRect(table.item(row,3)).center())[:2],point)
+        self.assertIs(self.app.focusWidget(),controls)
+        self.report["currency_suggestion_review"]["decisions"].append({"slot":slot,"state":state,
+            "scroll_values":positions,"row_center_pixels":list(point),"current_row":current,
+            "queued_layout_preserved_position":True})
 
     def start_external_fixture(self):
         """Launch an external PID with a real capture image and the game's exact focus title."""

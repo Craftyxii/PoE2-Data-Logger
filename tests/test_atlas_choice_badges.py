@@ -251,6 +251,7 @@ class AtlasChoiceBadgeTests(unittest.TestCase):
             point = page.view.mapFromScene(badge.scenePos()) + QPoint(11, 0)
             self.assertFalse(item.shape().contains(item.mapFromScene(page.view.mapToScene(point))))
             QTest.mouseMove(page.view.viewport(), QPoint(5, 5))
+            self.app.processEvents()
             QTest.mouseMove(page.view.viewport(), point)
             self.app.processEvents()
             self.assertTrue(item.hovered)

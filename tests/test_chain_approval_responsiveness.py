@@ -1,6 +1,6 @@
 """Native chain approval stays responsive under SQLite contention and preserves other drafts."""
 
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 import io
 import json
 import os
@@ -68,7 +68,7 @@ class ChainApprovalResponsivenessTests(unittest.TestCase):
 
     @contextmanager
     def writer_lock(self, duration, metadata=None):
-        """Hold an actual writer lock, optionally committing a competing context change."""
+        """Hold a competing writer lock and close its handle before Windows fixture cleanup."""
         path = store.DATA_DIR / "scans.sqlite3"
         ready = threading.Event()
         release = threading.Event()
@@ -78,7 +78,7 @@ class ChainApprovalResponsivenessTests(unittest.TestCase):
 
         def write():
             try:
-                with sqlite3.connect(path, timeout=2) as db:
+                with closing(sqlite3.connect(path, timeout=2)) as db:
                     db.execute("BEGIN IMMEDIATE")
                     ready.set()
                     release.wait(duration)
