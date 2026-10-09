@@ -47,11 +47,13 @@ class UserReviewNavigationTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def saved_part(self):
-        """Deliver a confident Tidal propagation scan to save a chain part in the current context."""
+        """Deliver a confident Tidal scan and explicitly approve its held recipe."""
         self.window._propagation_read({
             "mode": "propagation", "can_use": True, "runes": ["Tidal"],
             "selected_recipe": "Regal Orb x3", "positions": [3],
             **logger.scan_context()}, self.raw)
+        self.assertEqual(logger.get_state()["chain"], [])
+        self.window.approve_propagation_recipe(self.window.propagation_recipe_table.currentRow())
 
     def test_return_from_unaccepted_propagation_does_not_leave_a_hidden_chain_blocker(self):
         """Verify return from unaccepted propagation does not leave a hidden chain blocker."""

@@ -1,5 +1,7 @@
 # PoE2 Data Logger 1.3.2.6 Beta
 
+- Require manual recipe/rune approval for every propagation scan; strictness adjusts recognition without enabling automatic chain saves.
+
 - Compact shared layouts and Currency/Ritual previews; wrap long guidance and keep recipe rune dropdowns readable.
 - Retain the map's remnant number across chain completion and preserve propagation corrections when independent remnant scans finish.
 - Keep conflicting stack counts for manual review, and protect pending Currency/Ritual context from expedition changes.

@@ -69,12 +69,16 @@ class RitualItemWorkflowAdversarialTests(unittest.TestCase):
         self.assertIsNotNone(self.window._remnant_reading)
         return self.jobs[-1][1], context
 
-    def uncertain_propagation_with_selection(self, context):
-        """Use a normal recipe-only selector to correct an independent propagation read."""
-        self.window._propagation_read({"mode": "propagation", "can_use": False,
-            "runes": [], "status": "Choose the marked runes.",
-            "choices": [{"selected_recipe": "Divine Orb x2", "runes": [],
-                         "can_use": False}], **context}, self.raw)
+    def uncertain_propagation_with_selection(self, context, confident=False):
+        """Keep both uncertain corrections and confident prefilled runes pending for approval."""
+        self.window._propagation_read({"mode": "propagation", "can_use": confident,
+            "runes": ["Death"] if confident else [], "positions": [1] if confident else [],
+            "selected_recipe": "Divine Orb x2", "_ocr_strictness": 0,
+            "status": "Choose the marked runes.",
+            "choices": [{"selected_recipe": "Divine Orb x2",
+                         "runes": ["Death"] if confident else [],
+                         "positions": [1] if confident else [],
+                         "can_use": confident}], **context}, self.raw)
         table = self.window.propagation_recipe_table
         table.setCurrentCell(0, 0)
         first, _second = self.window._propagation_row_inputs[0]
@@ -91,6 +95,8 @@ class RitualItemWorkflowAdversarialTests(unittest.TestCase):
         approve = table.cellWidget(0, 2).findChild(QPushButton, "approvePropagationRecipe")
         self.assertTrue(approve.isEnabled())
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+        self.assertEqual(logger.get_state()["chain"], [])
+        self.assertIsNone(logger.get_state()["detonated"])
         return copy.deepcopy(self.window._manual_propagation_context)
 
     def opened_result(self, context):
@@ -115,6 +121,8 @@ class RitualItemWorkflowAdversarialTests(unittest.TestCase):
 
     def finish_independent_reviews(self, kind, expected_propagation):
         """Finish both activities through their buttons without rescanning lost corrections."""
+        self.assertEqual(logger.get_state()["chain"], [])
+        self.assertIsNone(logger.get_state()["detonated"])
         self.assertEqual(self.window.review_kind.property("scanKind"), "propagation")
         self.assertEqual(self.window.pending_review_kind, kind)
         self.assertEqual(self.window._manual_propagation_context, expected_propagation)
@@ -148,6 +156,22 @@ class RitualItemWorkflowAdversarialTests(unittest.TestCase):
         """An earlier seed OCR completion must not erase a newer propagation selection."""
         callback, context = self.pending_remnant("seed")
         expected = self.uncertain_propagation_with_selection(context)
+        callback(self.seed_result(context))
+        self.finish_independent_reviews("seed", expected)
+
+    def test_confident_propagation_waits_for_approval_during_opened_completion(self):
+        """Auto settings cannot save a confident propagation part behind an opened result."""
+        self.window.set_auto_all(True)
+        callback, context = self.pending_remnant("opened")
+        expected = self.uncertain_propagation_with_selection(context, confident=True)
+        callback(self.opened_result(context))
+        self.finish_independent_reviews("remnant", expected)
+
+    def test_confident_propagation_waits_for_approval_during_seed_completion(self):
+        """Auto settings cannot save a confident propagation part behind a seed result."""
+        self.window.set_auto_all(True)
+        callback, context = self.pending_remnant("seed")
+        expected = self.uncertain_propagation_with_selection(context, confident=True)
         callback(self.seed_result(context))
         self.finish_independent_reviews("seed", expected)
 

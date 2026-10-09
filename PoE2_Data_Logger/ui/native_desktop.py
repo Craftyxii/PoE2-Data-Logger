@@ -1605,7 +1605,10 @@ class LoggerWindow(QMainWindow):
             slider.setPageStep(5)
             slider.setValue(self._ocr_sensitivity_saved[kind])
             slider.setAccessibleName(f"{title} OCR Strictness")
-            slider.setToolTip("0: looser matches. 50: current defaults. 100: manual confirmation for OCR.")
+            slider.setToolTip(
+                "0: looser matches. 50: current defaults. Propagation always needs manual approval."
+                if kind == "propagation" else
+                "0: looser matches. 50: current defaults. 100: manual confirmation for OCR.")
             self.ocr_sensitivity_sliders[kind] = slider
             number = QLabel(str(slider.value()))
             number.setMinimumWidth(30)
@@ -1617,6 +1620,7 @@ class LoggerWindow(QMainWindow):
         sensitivity_help = QLabel("Lower strictness accepts more tentative matches automatically. "
                                   "50 preserves the current settings for each scan type. "
                                   "At 100, OCR results require manual confirmation. "
+                                  "Propagation always needs manual approval at every setting; its slider adjusts recognition only. "
                                   "Missing counts, conflicting recipes and incomplete scans still need review. "
                                   "Changes apply to the next scan.")
         sensitivity_help.setWordWrap(True)
@@ -3091,7 +3095,7 @@ class LoggerWindow(QMainWindow):
         set_message(self.chain_review_status,
                     f"{expedition_id} · {detonated} remnants detonated · {len(saved_chain)} saved chain parts"
                     + draft_summary + ". "
-                    "Each propagation scan counts one remnant. "
+                    "Each approved propagation scan counts one remnant. "
                     "Approve saves a recipe's marked runes to this expedition. Complete chain finishes the chain and starts the next expedition.")
 
     def _refresh_saved_chain_editor(self):
@@ -3351,7 +3355,7 @@ class LoggerWindow(QMainWindow):
         self._manual_propagation_changed()
 
     def _prepare_manual_propagation(self, result, *, manual=False):
-        """Create recipe-only rune dropdowns beside each uncertain scan's approval action."""
+        """Create recipe-only rune dropdowns for mandatory approval of every propagation scan."""
         self._clear_manual_propagation()
         self._manual_propagation_context = dict(result)
         self._propagation_manual_requested = manual
@@ -3559,44 +3563,38 @@ class LoggerWindow(QMainWindow):
                         " saved to the expedition. Scan the next part, or Complete chain when finished.", "success")
 
     def _propagation_read(self, result, raw=None):
-        """Route propagation results to their own review and accepted chain parts."""
+        """Hold every propagation capture for explicit approval, regardless of OCR confidence or settings."""
         logger.validate_scan_context(result)
-        can_auto_use = (result.get("can_use") and
-                        ocr_sensitivity.validate(result.get("_ocr_strictness", ocr_sensitivity.DEFAULT)) != 100)
-        if result.get("can_use"):
-            result.setdefault("_chain_accept_request", uuid4().hex)
-            if result["_chain_accept_request"] in self._accepted_propagation_requests:
-                return
+        runes = result.get("runes") or []
+        if (not isinstance(runes, (list, tuple)) or
+                any(not isinstance(rune, str) or len(rune) > 80 for rune in runes)
+                or (result.get("can_use") and
+                    (not 1 <= len(runes) <= 2 or any(not rune.strip() for rune in runes)))):
+            raise ValueError("Scan a selected recipe with one or two clear propagation marks.")
+        # Replayed callbacks for a manually accepted capture must not reopen or duplicate it.
+        result.setdefault("_chain_accept_request", uuid4().hex)
+        if result["_chain_accept_request"] in self._accepted_propagation_requests:
+            return
         preserve_remnant = (self.pending_review_kind in ("remnant", "seed") or
                             bool(logger.get_state()["ocr_pending"]))
         self._load_chain_context()
-        runes = result.get("runes", [])
         if preserve_remnant:
             self._show_independent_propagation_review(
                 result.get("status") or "Check the selected recipe and marked runes.", raw)
-            if can_auto_use and 1 <= len(runes) <= 2:
-                self._append_propagation(result, preserve_remnant_review=True, auto_save=True)
-                self._clear_manual_propagation()
-            else:
-                self._prepare_manual_propagation(result)
-                text = (result.get("status") or "Check the selected recipe and marked runes.")
-                text += " The pending remnant remains open for review."
-                set_message(self.chain_review_status, text, "error")
-                self.statusBar().showMessage(text, 15000)
-                self.tabs.setCurrentIndex(0)
+            self._prepare_manual_propagation(result)
+            text = "Review the recipe and marked runes, then Approve. The pending remnant remains open for review."
+            set_message(self.chain_review_status, text, "info")
+            self.statusBar().showMessage(text, 15000)
+            self.tabs.setCurrentIndex(0)
             token = self._overlay_review_token
             QTimer.singleShot(0, lambda: self._reveal_review_overlay(token))
             return
         self._propagation_reading = dict(result)
         self._show_image(raw)
         rows = [(f"Rune {index + 1}", rune, "Left to right") for index, rune in enumerate(runes)]
-        self._review_pending("propagation", result.get("status") or "Check the selected recipe and marked runes.",
+        self._review_pending("propagation", "Review the recipe and marked runes, then Approve.",
                              bool(result.get("can_use") and 1 <= len(runes) <= 2), rows)
-        if can_auto_use and 1 <= len(runes) <= 2:
-            self._append_propagation(auto_save=True)
-            self._clear_manual_propagation()
-        else:
-            self._prepare_manual_propagation(result)
+        self._prepare_manual_propagation(result)
 
     def _append_propagation(self, result=None, *, preserve_remnant_review=False, auto_save=False):
         """Persist accepted parts atomically, or stage an explicitly requested draft, without advancing."""
@@ -3610,6 +3608,7 @@ class LoggerWindow(QMainWindow):
         if not 1 <= len(runes) <= 2 or any(not isinstance(rune, str) or not rune.strip() for rune in runes):
             raise ValueError("Scan a selected recipe with one or two clear propagation marks.")
         # Accepted scans persist independently of an unrelated manual draft in this expedition.
+        # This flag saves explicitly reviewed parts immediately; OCR ingress never uses it.
         if auto_save:
             request_id = result.setdefault("_chain_accept_request", uuid4().hex)
             saved = logger.accept_propagation_part(self._chain_context, runes=runes,

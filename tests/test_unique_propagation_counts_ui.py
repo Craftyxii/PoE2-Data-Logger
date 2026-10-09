@@ -10,7 +10,7 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
-from PySide6.QtWidgets import QApplication, QLineEdit
+from PySide6.QtWidgets import QApplication, QLineEdit, QPushButton
 
 from PoE2_Data_Logger.core import logger_store as logger, service, store
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, select
@@ -46,12 +46,31 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.tmp.cleanup()
 
     def scan(self, runes, clear=True, context=None):
-        """Deliver a propagation result with supplied runes, clarity and optional capture context."""
+        """Deliver a held scan and explicitly approve valid synthetic recipe selections."""
+        valid = (1 <= len(runes) <= 2 and all(isinstance(rune, str) and
+                 0 < len(rune.strip()) <= 80 for rune in runes))
+        if clear and valid:
+            with logger._connect() as db:
+                original = db.execute("SELECT combo FROM recipes WHERE name=?",
+                                      ("Medved's Saga",)).fetchone()[0].split("+")
+                db.execute("UPDATE recipes SET combo=? WHERE name=?",
+                           (" + ".join([*runes, *[rune.strip() for rune in original[len(runes):]]]),
+                            "Medved's Saga"))
         result = {"mode": "propagation", "runes": runes,
                   "positions": list(range(1, len(runes) + 1)),
                   "selected_recipe": "Medved's Saga", "can_use": clear,
                   "status": "Propagation read", **(logger.scan_context() if context is None else context)}
+        before = logger.get_state()
         self.window._propagation_read(result, self.raw)
+        self.assertEqual(logger.get_state()["chain"], before["chain"])
+        self.assertEqual(logger.get_state()["detonated"], before["detonated"])
+        self.assertEqual(logger.get_state()["scan_commit_count"], before["scan_commit_count"])
+        if clear and valid:
+            row = self.window.propagation_recipe_table.currentRow()
+            approve = self.window.propagation_recipe_table.cellWidget(row, 2).findChild(
+                QPushButton, "approvePropagationRecipe")
+            self.assertTrue(approve.isEnabled())
+            approve.click()
 
     def counts(self, normal="", magic="", rare="", unique=""):
         """Populate all four editable kill-count fields."""
@@ -235,7 +254,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
         self.assert_current_detonated(1)
 
     def test_malformed_scans_neither_count_nor_append_runes(self):
-        """Verify malformed propagation runes neither increment counts nor append chain parts."""
+        """Reject malformed rune payloads before creating unsafe approval controls."""
         for runes in ([None], [""], ["x" * 81], ["Death", 1]):
             with self.subTest(runes=runes):
                 with self.assertRaises(ValueError):
@@ -245,7 +264,7 @@ class UniquePropagationCountsUITests(unittest.TestCase):
                 self.window.reject_review()
 
     def test_full_chain_draft_does_not_count_an_unaccepted_scan(self):
-        """Save confident OCR independently while rejecting additions beyond the manual draft limit."""
+        """Save approved OCR independently while rejecting additions beyond the manual draft limit."""
         self.window.add_runes(96 - len(self.window.rune_inputs))
         for field in self.window.rune_inputs:
             field.setText("Death")

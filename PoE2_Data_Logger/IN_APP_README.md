@@ -4,7 +4,7 @@
 
 Set hotkeys in **Scan settings**. Capture regions have defaults. On **Scan regions**, choose an activity to see its labelled box. Use **Select region in game** to adjust it, or **Use own screenshot…** to replace its reference image.
 
-Auto-commit saves scans that meet their selected strictness and safety checks. If Overlay is turned on, items held for review open it automatically. Press **Esc** to close the overlay. Large live **Map #** and **Remnant #** indicators keep the active records visible.
+Auto-commit saves eligible non-propagation scans that meet their selected strictness and safety checks. Propagation always requires manual approval. If Overlay is turned on, items held for review open it automatically. Press **Esc** to close the overlay. Large live **Map #** and **Remnant #** indicators keep the active records visible.
 
 Each scan needs a hotkey press. Scanning pauses when PoE2 is not the active window.
 
@@ -24,11 +24,11 @@ New maps clear waystone settings. Tablets, Atlas Master settings and map tags—
 
 On **Review**, correct anything held for review, then **Approve** to save it. **Reject** skips it. Waystones and tablets update their settings; other scans save to the log.
 
-**Chains:** the dedicated **Propagation scan** key reads the selected recipe and its marked runes from left to right. The general key cannot activate it. Each accepted scan adds one remnant detonation, even with two runes. Eligible scans save their parts automatically unless strictness is 100. For a held recipe, **Approve** beside its row saves the part directly. Normal propagation review keeps its recipe rows, Approve and Complete controls together. Use **Enter propagation manually** to open the recipe-only rune dropdowns when needed; they show rune icons and names in socket order. **Complete chain**, on Review or Expedition, finishes the saved chain and advances this map's expedition number. Saved parts remain editable on Expedition until completion.
+**Chains:** the dedicated **Propagation scan** key reads the selected recipe and its marked runes from left to right. The general key cannot activate it. Each accepted scan adds one remnant detonation, even with two runes. Every propagation scan requires manual review, regardless of confidence, strictness or auto-commit settings. Check the recipe and its rune dropdowns; **Approve** beside its row saves the part directly. Normal propagation review keeps its recipe rows, Approve and Complete controls together. Use **Enter propagation manually** to open the recipe-only rune dropdowns when needed; they show rune icons and names in socket order. **Complete chain**, on Review or Expedition, finishes the saved chain and advances this map's expedition number. Saved parts remain editable on Expedition until completion.
 
 The three peaks above each propagated rune identify its mark. Include the gold arrow beside the selected recipe in the capture. Remnant review and propagation remain separate: a pending remnant can be reviewed later and still saves to the expedition it was captured for.
 
-**Counts:** enter Normal, Magic, Rare and Unique kills per map. Propagation counts remnants detonated per expedition automatically. **+ New map** saves kill totals for the map you’re leaving.
+**Counts:** enter Normal, Magic, Rare and Unique kills per map. Approving a propagation scan adds one remnant detonation to its expedition, even with two runes. **+ New map** saves kill totals for the map you’re leaving.
 
 **Currency/items:** select **Start of map** or **End of map** before scanning the inventory. These snapshots measure the change in item quantities.
 

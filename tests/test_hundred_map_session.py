@@ -178,8 +178,8 @@ class HundredMapSession(unittest.TestCase):
         with logger._connect() as db:
             row = db.execute("SELECT * FROM commits WHERE number=?", (number,)).fetchone()
             count = db.execute("SELECT count(*) FROM commits").fetchone()[0]
-        # A confident propagation scan atomically saves its accepted count and
-        # chain part. Verify both audit entries in order against the ledger.
+        # A manually approved propagation row atomically saves its accepted count
+        # and chain part. Verify both audit entries in order against the ledger.
         expected_count = number + batch_remaining
         self.check(count, expected_count, "commits:count")
         if not row or count != expected_count:
@@ -551,61 +551,82 @@ class HundredMapSession(unittest.TestCase):
         self.check(self.w.first_recipe.text(), "", "review:remnant-draft-cleared")
         self.check(self.w.pending_review_kind, None, "review:remnant-pending-cleared")
 
+    def review_propagation(self, result, *, row=0, corrections=(), denied_rows=()):
+        """Require an unchanged log until a visible recipe-row approval, at every strictness setting."""
+        strictness = (0, 50, 100)[self.current % 3]
+        before = logger.get_state()
+        self.w._propagation_read({**result, **logger.scan_context(), "_ocr_strictness": strictness},
+                                 self.raw.getvalue())
+        self.check(logger.get_state()["scan_commit_count"], len(self.commit_log),
+                   "propagation:capture-does-not-commit")
+        self.check(logger.get_state()["detonated"], before["detonated"],
+                   "propagation:capture-does-not-count-detonation")
+        self.check(logger.get_state()["chain"], before["chain"],
+                   "propagation:capture-does-not-save-chain-part")
+        self.check(self.w.pending_review_kind, "propagation", "propagation:capture-requires-review")
+        self.w.tabs.setCurrentIndex(0)
+        self.app.processEvents()
+        for denied in denied_rows:
+            self.w.propagation_recipe_table.cellWidget(denied, 2).findChildren(QPushButton)[1].click()
+        self.w.propagation_recipe_table.setCurrentCell(row, 0)
+        for field, rune in zip(self.w._propagation_row_inputs[row], corrections):
+            self.choose(field, rune)
+        approve = self.w.propagation_recipe_table.cellWidget(row, 2).findChild(
+            QPushButton, "approvePropagationRecipe")
+        self.check(approve.isEnabled(), True, "propagation:reviewed-row-can-be-approved")
+        QTest.mouseClick(approve, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        self.coverage["propagation manual recipe approvals"] += 1
+        self.coverage[f"propagation strictness {strictness} held for manual approval"] += 1
+
     def propagation(self, n):
-        """Exercise automatic and reviewed chain parts, corrections and completion with ledger checks."""
+        """Review every chain capture, correct ambiguous rows and verify completion against the ledger."""
         mid = f"M{n:04}"
         eid = mid + "-E01"
         steps = [{"step": 1, "rune1": "Death", "rune2": "Power"},
                  {"step": 2, "rune1": "Opulent", "rune2": ""}]
         context = {**self.expected[mid]["snapshot"], "expedition": self.expedition}
         if n % 3:
-            self.w._propagation_read({"mode": "propagation", "can_use": True, "runes": ["Death", "Power"],
-                "positions": [1, 2], "selected_recipe": "Divine Orb x2", "status": "Pair scan", **logger.scan_context()}, self.raw.getvalue())
-            self.record("Propagation", {"runes": ["Death", "Power"], "recipe": "Divine Orb x2", "detonated": 1},
-                        context, reference="Divine Orb x2", batch_remaining=1)
-            self.record("Chain", {"steps": steps[:1], "detonated": 1}, context, reference="Steps 1–1")
-            self.coverage["confident propagation automatically saves chain part"] += 1
+            # Name-only fixtures let recipe review derive real socket positions;
+            # fabricated positions must not bypass the recipe's slot validation.
+            self.review_propagation({"mode": "propagation", "can_use": True, "runes": ["Death", "Power"],
+                "selected_recipe": "Divine Orb x2", "status": "Pair scan"})
+            self.coverage["confident propagation requires manual row approval"] += 1
         else:
             clear_candidate = n % 6 == 0
-            self.w._propagation_read({"mode": "propagation", "can_use": False, "runes": [],
+            self.review_propagation({"mode": "propagation", "can_use": False, "runes": [],
                 "status": "Choose recipe", "choices": [
                     {"selected_recipe": "Wrong recipe", "runes": ["Rage", "Time"], "can_use": True},
                     {"selected_recipe": "Divine Orb x2", "runes": ["Death", "Power"] if clear_candidate else [],
-                     "can_use": clear_candidate}], **logger.scan_context()}, self.raw.getvalue())
-            self.w.propagation_recipe_table.cellWidget(0, 2).findChildren(QPushButton)[1].click()
-            self.w.propagation_recipe_table.setCurrentCell(1, 0)
+                     "can_use": clear_candidate}]}, row=1, denied_rows=(0,),
+                corrections=() if clear_candidate else ("Death", "Power"))
             if clear_candidate:
-                self.w.propagation_recipe_table.cellWidget(1, 2).findChildren(QPushButton)[0].click()
                 self.coverage["held recipe row approval saves directly"] += 1
             else:
-                for field, rune in zip(self.w._propagation_row_inputs[1], ("Death", "Power")):
-                    self.choose(field, rune)
-                self.w.propagation_recipe_table.cellWidget(1, 2).findChild(
-                    QPushButton, "approvePropagationRecipe").click()
                 self.coverage["held recipe dropdown corrections save directly"] += 1
-            self.record("Propagation", {"runes": ["Death", "Power"], "recipe": "Divine Orb x2", "detonated": 1},
-                        context, reference="Divine Orb x2", batch_remaining=1)
-            self.check(logger.get_state()["chain"], steps[:1], "propagation:manual-part-saved-directly")
-            self.check(self.w.chain_review_table.rowCount(), 0, "propagation:no-manual-paired-draft")
-            self.check(self.w.review_complete_chain_button.isEnabled(), True,
-                       "propagation:reviewed-part-ready-for-completion")
-            self.record("Chain", {"steps": steps[:1], "detonated": 1}, context, reference="Steps 1–1")
             self.coverage["propagation deny and row approval"] += 1
+        self.record("Propagation", {"runes": ["Death", "Power"], "recipe": "Divine Orb x2", "detonated": 1},
+                    context, reference="Divine Orb x2", batch_remaining=1)
+        self.check(logger.get_state()["chain"], steps[:1], "propagation:manual-part-saved-directly")
+        self.check(self.w.chain_review_table.rowCount(), 0, "propagation:no-manual-paired-draft")
+        self.check(self.w.review_complete_chain_button.isEnabled(), True,
+                   "propagation:reviewed-part-ready-for-completion")
+        self.record("Chain", {"steps": steps[:1], "detonated": 1}, context, reference="Steps 1–1")
         self.check(logger.get_state()["current_expedition_id"], eid, "propagation:first-part-stays-in-expedition")
         self.check(logger.get_state()["chain"], steps[:1], "propagation:first-saved-paired-part")
         self.check(self.w.chain_review_table.rowCount(), 0, "propagation:saved-part-clears-draft")
-        self.w._propagation_read({"mode": "propagation", "can_use": True, "runes": ["Opulent"], "positions": [1],
-            "selected_recipe": "Greater Regal Orb x3", "status": "Second chain part", **logger.scan_context()}, self.raw.getvalue())
+        self.review_propagation({"mode": "propagation", "can_use": True, "runes": ["Opulent"],
+            "selected_recipe": "Greater Regal Orb x3", "status": "Second chain part"})
         self.record("Propagation", {"runes": ["Opulent"], "recipe": "Greater Regal Orb x3", "detonated": 2},
                     context, reference="Greater Regal Orb x3", batch_remaining=1)
         self.record("Chain", {"steps": steps[1:], "detonated": 2}, context, reference="Steps 2–2")
-        self.coverage["confident propagation automatically saves chain part"] += 1
-        self.check(logger.get_state()["current_expedition_id"], eid, "propagation:repeated-auto-save-same-expedition")
+        self.coverage["confident propagation requires manual row approval"] += 1
+        self.check(logger.get_state()["current_expedition_id"], eid, "propagation:repeated-approval-same-expedition")
         self.check(logger.get_state()["chain"], steps, "propagation:saved-part-order")
         self.check(logger.get_state()["detonated"], 2, "propagation:pair-counts-one")
         self.check(self.w.expedition_chain_table.rowCount(), 2, "propagation:saved-parts-visible-on-expedition")
         self.check([field.text() for field in self.w.rune_inputs], [""] * len(self.w.rune_inputs),
-                   "propagation:automatic-save-clears-draft")
+                   "propagation:manual-approval-clears-draft")
         if n % 10 == 0:
             with logger._connect() as db:
                 identities = [tuple(row) for row in db.execute(
@@ -870,8 +891,13 @@ class HundredMapSession(unittest.TestCase):
                          "clear live Ritual automatic commit", "clear live opened remnant automatic commit",
                          "clear live seed automatic commit", "paired chain parts and order", "Map totals"):
             self.check(self.coverage[activity] >= 100, True, "coverage:at-least-100:" + activity)
-        self.check(self.coverage["confident propagation automatically saves chain part"] >= 100,
-                   True, "coverage:at-least-100:automatic-propagation")
+        self.check(self.coverage["propagation manual recipe approvals"], 200,
+                   "coverage:every-propagation-capture-manually-approved")
+        self.check(self.coverage["confident propagation requires manual row approval"] >= 100,
+                   True, "coverage:confident-propagation-still-requires-review")
+        for strictness in (0, 50, 100):
+            self.check(self.coverage[f"propagation strictness {strictness} held for manual approval"] >= 60,
+                       True, f"coverage:propagation-review-at-strictness-{strictness}")
         for activity in ("unclear waystone held with auto-all enabled", "unclear tablet held with auto-all enabled",
                          "unclear currency held with auto-all enabled", "unclear Ritual held with auto-all enabled",
                          "unclear opened remnant held with auto-all enabled", "unclear seed held with auto-all enabled"):

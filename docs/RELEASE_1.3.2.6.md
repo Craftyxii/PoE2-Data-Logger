@@ -2,6 +2,7 @@
 
 - Tighten shared page spacing and group padding. Reduce Currency and Ritual preview height by 30% to leave more room for review rows.
 - Keep Map # and Remnant # together in compact windows, place Complete chain beside them, and reduce counter text by 15% while enlarging their captions by 20%. Retain the wide-window arrangement.
+- Require explicit manual review for every propagation scan, at all OCR strictness levels and auto-commit settings. Keep recipe-only rune dropdowns, confidence-based prefills, and direct saving from the row's Approve button.
 - Keep the map's latest remnant number visible when Complete chain advances the expedition. Preserve expedition-specific remnant records, pending reservations, and ID allocation.
 - Wrap review guidance so populated Ritual and Currency pages do not push approval controls outside the page. Keep long recipe rune names and PNG icons readable in compact propagation dropdowns.
 - Preserve manual propagation corrections when an earlier independent remnant scan finishes. Hold expedition changes while Currency or Ritual review still belongs to the captured expedition.
@@ -12,7 +13,7 @@
 - Reduce repeated currency-card redraw and layout work during filtering and catalog updates. Retain zero-count cards and existing counter behavior.
 - Update running-client guards to recognize the previous beta during installation and application startup.
 
-Confident items still use automatic approval, tentative readings still require review, and final Currency approval rejects unapproved uncertain rows. Recipe approval saves propagation directly; Complete chain finishes the saved chain and advances the expedition. CSV/XLSX retain the saved Atlas-settings requirement. OCR strictness defaults remain unchanged.
+Propagation always requires manual approval. Confident items in other activities still use automatic approval, tentative readings still require review, and final Currency approval rejects unapproved uncertain rows. Recipe approval saves propagation directly; Complete chain finishes the saved chain and advances the expedition. CSV/XLSX retain the saved Atlas-settings requirement. OCR strictness defaults remain unchanged.
 
 The release pipeline checks native Windows HUD input, a 100-map workflow with independently reopened exports, the complete regression suite, packaged runtime/OCR checks, and installer update/file retention. Native HUD testing uses a simulated game window; the workflow simulation injects OCR results, and real OCR fixtures are tested separately.
 

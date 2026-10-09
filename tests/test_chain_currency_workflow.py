@@ -206,11 +206,15 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
         self.assert_workbook_matches_csv()
 
     def test_repeated_confident_callback_behind_manual_draft_keeps_one_part_and_count(self):
-        """Save OCR once independently of the manual draft, including callback replays."""
+        """Save manually approved OCR once independently of a draft and callback replays."""
+        self.recipe_prefix("Chaos Orb", "Rage", "Time")
         self.window.rune_inputs[0].setText("Death")
         result = {"can_use": True, "runes": ["Rage", "Time"],
                   "selected_recipe": "Chaos Orb", **logger.scan_context()}
         self.window._propagation_read(result, self.raw)
+        self.assertEqual(logger.get_state()["chain"], [])
+        self.assertIsNone(logger.get_state()["detonated"])
+        self.approve_row_runes(0, "Rage", "Time")
         expected = [{"rune1": "Death", "rune2": ""}]
         self.assertEqual(self.window._chain_steps(), expected)
         self.assertEqual([(row["rune1"], row["rune2"]) for row in logger.get_state()["chain"]],
@@ -233,6 +237,8 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
         # Matching runes in a genuinely new capture still append normally.
         self.window._propagation_read({"can_use": True, "runes": ["Rage", "Time"],
                                       "selected_recipe": "Chaos Orb", **logger.scan_context()}, self.raw)
+        self.assertEqual(logger.get_state()["detonated"], 1)
+        self.approve_row_runes(0, "Rage", "Time")
         self.assertEqual(logger.get_state()["detonated"], 2)
         self.assertEqual([(row["rune1"], row["rune2"]) for row in logger.get_state()["chain"]],
                          [("Rage", "Time"), ("Death", ""), ("Rage", "Time")])

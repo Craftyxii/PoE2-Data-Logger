@@ -50,26 +50,42 @@ class PropagationUITests(unittest.TestCase):
         self.tmp.cleanup()
 
     def scan(self, runes, recipe="Medved's Saga", clear=True, context=None, draft=False):
-        """Deliver a scan or stage an Expedition draft for its separate editor checks."""
+        """Review and explicitly approve matching scans, or stage an Expedition editor draft."""
         result = {"mode": "propagation", "runes": runes, "positions": list(range(1, len(runes) + 1)),
                   "selected_recipe": recipe, "can_use": clear, "status": "Propagation read",
                   **(logger.scan_context() if context is None else context)}
-        if draft:
+        if runes and all(isinstance(rune, str) for rune in runes):
             with logger._connect() as db:
                 entry = db.execute("SELECT sockets,combo FROM recipes WHERE name=?", (recipe,)).fetchone()
                 original = [rune.strip() for rune in entry["combo"].split("+")]
                 ordered = [*runes, *original[len(runes):]]
                 db.execute("UPDATE recipes SET combo=? WHERE name=?", (" + ".join(ordered), recipe))
+        if draft:
             result.update(can_use=False, choices=[{"selected_recipe": recipe,
                                                    "runes": runes, "positions": result["positions"],
                                                    "can_use": True}])
+        before = logger.get_state()
         self.window._propagation_read(result, self.raw.getvalue())
+        self.assertEqual(logger.get_state()["chain"], before["chain"])
+        self.assertEqual(logger.get_state()["detonated"], before["detonated"])
+        self.assertEqual(logger.get_state()["scan_commit_count"], before["scan_commit_count"])
+        if clear and not draft:
+            self.approve_current_recipe()
         if draft:
             result["can_use"] = True
             self.window._propagation_reading = result
             self.window._append_propagation(result, preserve_remnant_review=
                 self.window.pending_review_kind in ("remnant", "seed"))
             self.window._clear_manual_propagation()
+
+    def approve_current_recipe(self):
+        """Click the visible approval action for the held recipe selected by OCR."""
+        row = self.window.propagation_recipe_table.currentRow()
+        self.assertGreaterEqual(row, 0)
+        approve = self.window.propagation_recipe_table.cellWidget(row, 2).findChild(
+            QPushButton, "approvePropagationRecipe")
+        self.assertTrue(approve.isEnabled())
+        approve.click()
 
     def saved_parts(self):
         """Return the persisted rune pairs for the currently selected chain."""
@@ -243,7 +259,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.window.chain_review_table.item(1, 2).text(), "")
 
     def test_new_scan_saves_independently_of_cleared_trailing_pair_member(self):
-        """Keep the corrected manual part unchanged when confident OCR saves its own part."""
+        """Keep the corrected manual draft unchanged when an approved OCR part is saved."""
         self.scan(["Death", "Power"], "Divine Orb x2", draft=True)
         self.window.rune_inputs[1].clear()
         self.scan(["Opulent"], "Greater Regal Orb x3")
@@ -898,6 +914,9 @@ class PropagationUITests(unittest.TestCase):
             self.window._propagation_read(reading, raw.getvalue())
             if scale == .72:
                 self.assertTrue(reading["can_use"])
+                self.assertEqual(self.saved_parts(), [])
+                self.assertEqual(self.window.pending_review_kind, "propagation")
+                self.approve_current_recipe()
                 self.assertEqual(self.saved_parts(), [("Tidal", "")])
                 self.assertEqual(logger.get_state()["detonated"], 1)
                 self.assertIsNone(self.window.pending_review_kind)
@@ -922,6 +941,9 @@ class PropagationUITests(unittest.TestCase):
 
     def test_review_reject_remnant_button_keeps_inflight_propagation_result(self):
         """Verify review reject remnant button keeps inflight propagation result."""
+        with logger._connect() as db:
+            db.execute("UPDATE recipes SET combo=? WHERE name=?",
+                       ("Death + Rebirth + Life + Rage", "Medved's Saga"))
         self.window.manual_remnant_button.click()
         self.assertEqual(self.window.pending_review_kind, "remnant")
 
@@ -941,6 +963,8 @@ class PropagationUITests(unittest.TestCase):
             self.assertIsNotNone(event)
             self.assertEqual(event["mode"], "propagation")
             self.window.poll()
+        self.assertEqual(self.saved_parts(), [])
+        self.approve_current_recipe()
         self.assertEqual(self.draft(), [])
         self.assertEqual(self.saved_parts(), [("Death", "Rebirth")])
         self.assertEqual(logger.get_state()["detonated"], 1)
@@ -996,6 +1020,8 @@ class PropagationUITests(unittest.TestCase):
             self.assertIsNotNone(manager.status()["latest"])
             pending_capture = self.window._remnant_reading
             self.window.poll()
+        self.assertEqual(self.saved_parts(), [])
+        self.approve_current_recipe()
         self.assertEqual(len(jobs), 1)
         self.assertEqual(self.draft(), [])
         self.assertEqual(self.saved_parts(), [("Rage", "")])
@@ -1283,6 +1309,8 @@ class PropagationUITests(unittest.TestCase):
              patch.object(logger, "assign_ocr_id", side_effect=AssertionError("remnant path")):
             self.window.poll()
             self.window.poll()
+        self.assertEqual(self.saved_parts(), [])
+        self.approve_current_recipe()
         self.assertEqual(self.draft(), [])
         self.assertEqual(self.saved_parts(), [("Rage", "")])
         self.assertEqual(logger.get_state()["scan_commit_count"], 2)

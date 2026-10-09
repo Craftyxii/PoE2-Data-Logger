@@ -272,9 +272,21 @@ class NativeWindowsHUDTests(unittest.TestCase):
             caption_size = (14 if compact else 17) if index < 2 else (12 if compact else 14)
             self.assertEqual(caption.font().pixelSize(),caption_size)
         self.phase("04-large-map-remnant-counters")
-        # Seed a saved chain, then exercise its completion through actual Windows input.
-        logger.commit_chain("Death")
-        self.window.refresh()
+        # Even a confident, loose-threshold result must wait for actual Windows approval.
+        reading = {"mode": "propagation", "runes": ["Tidal"], "positions": [3],
+                   "selected_recipe": "Regal Orb x3", "can_use": True,
+                   "_ocr_strictness": 0, **logger.scan_context()}
+        before_review = logger.get_state()
+        self.deliver("confident propagation requires approval", reading,
+                     lambda r: self.window._propagation_read(r, self.raw),
+                     lambda: self.window.pending_review_kind == "propagation")
+        held = logger.get_state()
+        self.assertEqual((held["scan_commit_count"], held["chain"], held["detonated"]),
+                         (before_review["scan_commit_count"], before_review["chain"], before_review["detonated"]))
+        approve = self.window.propagation_recipe_table.cellWidget(0, 2).findChild(
+            QPushButton, "approvePropagationRecipe")
+        self.native.click(approve)
+        self.assertEqual(logger.get_state()["chain"][0]["rune1"], "Tidal")
         before_remnant = self.window.header_remnant_id.text()
         self.native.click(self.window.header_complete_chain_button)
         self.native.wait(lambda: logger.get_state()["current_expedition_id"] == "M0001-E03",

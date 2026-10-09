@@ -108,7 +108,7 @@ class SkyfallPropagationTests(unittest.TestCase):
                 self.assertNotIn("Tempest", result["runes"])
 
     def test_clear_skyfall_saves_celestial_once_without_advancing_expedition(self):
-        """Verify repeated Skyfall scans append Celestial once and retain the current expedition."""
+        """Hold real Skyfall OCR until approval, then deduplicate its accepted callback."""
         image, result = self.composite()
         raw = io.BytesIO()
         image.save(raw, format="PNG")
@@ -118,6 +118,10 @@ class SkyfallPropagationTests(unittest.TestCase):
             result.update(logger.scan_context())
             expedition = logger.get_state()["current_expedition_id"]
             window._propagation_read(result, raw.getvalue())
+            window._propagation_read(result, raw.getvalue())
+            self.assertEqual(logger.get_state()["chain"], [])
+            self.assertIsNone(logger.get_state()["detonated"])
+            window.approve_propagation_recipe(window.propagation_recipe_table.currentRow())
             window._propagation_read(result, raw.getvalue())
             state = logger.get_state()
             self.assertEqual([(part["rune1"], part["rune2"]) for part in state["chain"]],

@@ -194,6 +194,36 @@ class OCRStrictnessUITests(unittest.TestCase):
                     self.window.approve_scan_button.click()
                     self.assertEqual(logger.get_state()["scan_commit_count"], before + 1)
 
+    def test_propagation_always_requires_review_at_every_strictness_and_auto_setting(self):
+        """Prefill confident recipe runes without saving until the user clicks Approve."""
+        for auto_enabled in (False, True):
+            self.window.set_auto_all(auto_enabled)
+            for level in (0, 50, 100):
+                with self.subTest(auto_commit=auto_enabled, strictness=level):
+                    before = logger.get_state()
+                    reading = {"mode": "propagation", "selected_recipe": "Regal Orb x3",
+                               "runes": ["Tidal"], "positions": [3], "can_use": True,
+                               "_ocr_strictness": level, **logger.scan_context()}
+                    self.window._propagation_read(reading)
+                    self.assertEqual(self.window.pending_review_kind, "propagation")
+                    self.assertEqual(logger.get_state()["chain"], before["chain"])
+                    self.assertEqual(logger.get_state()["detonated"], before["detonated"])
+                    self.assertEqual(logger.get_state()["scan_commit_count"], before["scan_commit_count"])
+                    fields = self.window._propagation_row_inputs[0]
+                    self.assertEqual(fields[0].currentText(), "Tidal")
+                    self.assertEqual(fields[1].currentText(), "")
+                    approve = self.window.propagation_recipe_table.cellWidget(0, 2).findChild(
+                        QPushButton, "approvePropagationRecipe")
+                    self.assertTrue(approve.isEnabled())
+                    approve.click()
+                    saved = logger.get_state()
+                    self.assertEqual(len(saved["chain"]), len(before["chain"]) + 1)
+                    self.assertEqual(saved["detonated"], (before["detonated"] or 0) + 1)
+                    self.assertEqual(saved["current_expedition_id"], before["current_expedition_id"])
+                    self.assertIsNone(self.window.pending_review_kind)
+                    self.window._propagation_read(reading)
+                    self.assertEqual(logger.get_state()["scan_commit_count"], saved["scan_commit_count"])
+
 
 if __name__ == "__main__":
     unittest.main()
