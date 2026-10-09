@@ -184,7 +184,8 @@ def verify(installer):
                                 r"Software\Microsoft\Windows\CurrentVersion\Uninstall\PoE2DataLogger",
                                 0, winreg.KEY_READ | winreg.KEY_WOW64_32KEY) as key:
                 display = f"{version} Beta" if beta else version
-                expected_name = f"PoE2 Data Logger {display}" if beta else "PoE2 Data Logger"
+                # Installed stable and beta labels both include their display version.
+                expected_name = f"PoE2 Data Logger {display}"
                 if winreg.QueryValueEx(key, "DisplayVersion")[0] != display:
                     raise RuntimeError("Installed version does not match the release.")
                 if winreg.QueryValueEx(key, "DisplayName")[0] != expected_name:

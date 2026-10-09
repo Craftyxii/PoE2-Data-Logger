@@ -6,7 +6,7 @@ import re
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from tools.verify_installer import check_version, running_client_titles, verify, verify_blocked_launch
 
@@ -84,6 +84,45 @@ class InstallerReleaseTests(unittest.TestCase):
                             verify(Path(f"PoE2-Data-Logger-Setup-v{version}.exe"))
                         check.assert_not_called()
                         launch.assert_not_called()
+
+    def check_registry_label(self, beta, display_name, accepted):
+        """Exercise install/update registry validation up to the native running-client gate."""
+        display = "1.3.2 Beta" if beta else "1.3.2"
+        registry = MagicMock(KEY_READ=1, KEY_WOW64_32KEY=2)
+        labels = {"DisplayVersion": display, "DisplayName": display_name}
+        registry.QueryValueEx.side_effect = lambda key, name: (labels[name], 1)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+
+            def install_runtime(*args, **kwargs):
+                """Plant install outputs while retaining the verifier's saved-file sentinels."""
+                (directory / "_internal").mkdir(exist_ok=True)
+                for name in ("PoE2-Data-Logger.exe", "Uninstall.exe", "CRAFTYXII_ASSETS_LICENSE.txt"):
+                    (directory / name).write_bytes(b"installed runtime")
+
+            with (patch.dict("sys.modules", {"winreg": registry}),
+                  patch("tools.verify_installer.tempfile.mkdtemp", return_value=temporary),
+                  patch("tools.verify_installer.check_version"),
+                  patch("tools.verify_installer.launch", side_effect=install_runtime) as launch,
+                  patch("tools.verify_installer.verify_running_guards",
+                        side_effect=RuntimeError("native guard boundary")) as guards):
+                expected = "native guard boundary" if accepted else "application label does not match"
+                with self.assertRaisesRegex(RuntimeError, expected):
+                    verify(Path(f"PoE2-Data-Logger-Setup-v1.3.2{'-beta' if beta else ''}.exe"))
+                self.assertEqual(launch.call_count, 2 if accepted else 1)
+                self.assertEqual(guards.call_count, 1 if accepted else 0)
+
+    def test_versioned_stable_and_beta_registry_labels_reach_native_guard(self):
+        """Require both release channels to accept installed labels during install and update."""
+        for beta in (False, True):
+            with self.subTest(beta=beta):
+                self.check_registry_label(beta, f"PoE2 Data Logger 1.3.2{' Beta' if beta else ''}", True)
+
+    def test_unversioned_and_stale_stable_registry_labels_are_rejected(self):
+        """Reject legacy or stale installed labels even when the numeric registry version matches."""
+        for name in ("PoE2 Data Logger", "PoE2 Data Logger 1.3.1.3 Beta"):
+            with self.subTest(name=name):
+                self.check_registry_label(False, name, False)
 
 
 class ReleasePackagingTests(unittest.TestCase):
