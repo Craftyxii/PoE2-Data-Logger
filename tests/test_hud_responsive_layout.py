@@ -81,6 +81,28 @@ class ResponsiveHUDTests(unittest.TestCase):
                 self.expose(self.window.atlas_settings_page.gear_rarity)
                 self.expose(self.window.atlas_settings_page.save_button)
 
+    def test_item_review_help_does_not_push_approval_columns_outside_the_page(self):
+        """Keep whole-page horizontal scrolling out of populated currency and Ritual reviews."""
+        inventory = {"items": [{"slot": slot, "name": "Chaos Orb", "quantity": slot}
+                               for slot in range(1, 21)], "unknown": []}
+        ritual = {"items": [{"name": "Omen of Whittling", "category": "Omen", "quantity": 1,
+                             "tribute": 100, "deferred": False} for _ in range(20)],
+                  "raw_text": "FAVOURS\n900 TRIBUTE", "tribute_available": 900,
+                  "rerolls_remaining": 1}
+        for width in (900, 1024, 1366, 1920):
+            for kind, reading in (("currency", inventory), ("ritual", ritual)):
+                with self.subTest(width=width, kind=kind):
+                    self.window.resize(width, 1000)
+                    if kind == "currency":
+                        self.window._inventory_read(reading, live=False)
+                    else:
+                        self.window._ritual_read(reading, live=False)
+                    self.app.processEvents()
+                    page = self.window.tabs.widget(0)
+                    self.assertEqual(page.horizontalScrollBar().maximum(), 0)
+                    self.expose(self.window.approve_scan_button)
+                    self.window.reject_scan_button.click()
+
     def test_header_reflow_retains_typed_kills_and_commits_once(self):
         """Resize through both layouts, then save and clear typed kills with New map."""
         self.window.resize(900, 650)

@@ -109,6 +109,13 @@ def line(placeholder=""):
     return widget
 
 
+def paragraph(text):
+    """Wrap explanatory text inside its section instead of widening the whole scroll page."""
+    widget = QLabel(text)
+    widget.setWordWrap(True)
+    return widget
+
+
 def combo(values, selected=None):
     """Build choices with separate display labels and stored values, then select a default."""
     widget = QComboBox()
@@ -1483,7 +1490,7 @@ class LoggerWindow(QMainWindow):
         self.inventory_region_label = QLabel()
         self.ritual_region_label = QLabel()
         hotkey = self._group("Scan hotkey", content)
-        hotkey.addWidget(QLabel("General scan reads the hovered item or selected remnant view. Optional direct keys target one scanner."))
+        hotkey.addWidget(paragraph("General scan reads the hovered item or selected remnant view. Optional direct keys target one scanner."))
         keys = QGridLayout()
         keys.setHorizontalSpacing(12)
         keys.setVerticalSpacing(7)
@@ -1572,7 +1579,7 @@ class LoggerWindow(QMainWindow):
         row.addWidget(self.mode_select)
         row.addStretch()
         mode.addLayout(row)
-        mode.addWidget(QLabel("Hover a waystone or tablet and press its scan hotkey."
+        mode.addWidget(paragraph("Hover a waystone or tablet and press its scan hotkey."
                               " Results open on Review."))
         mode.addWidget(QLabel("Each scan is triggered by a hotkey press."))
         self.tablet_scan_number = combo([1, 2, 3, 4])
@@ -1945,7 +1952,7 @@ class LoggerWindow(QMainWindow):
         self.inventory_table.setMinimumHeight(360)
         review.addWidget(self.inventory_table)
         self.inventory_table.hide()
-        review.addWidget(QLabel("Repeat scans keep their history and update this map's current totals."))
+        review.addWidget(paragraph("Repeat scans keep their history and update this map's current totals."))
         self.currency_saved = message("Start and end snapshots show each currency's net change per map.")
         review.addWidget(self.currency_saved)
         content.addStretch()
@@ -1954,7 +1961,7 @@ class LoggerWindow(QMainWindow):
         """Build local captured-slot icon labeling and reference maintenance controls."""
         examples = self._group("LOCAL INVENTORY ICON REFERENCES", content)
         self.inventory_reference_group = examples.parentWidget()
-        examples.addWidget(QLabel("For artwork missing from the bundled catalog, choose a captured slot and label it. "
+        examples.addWidget(paragraph("For artwork missing from the bundled catalog, choose a captured slot and label it. "
                                   "Examples stay local for later scans."))
         examples.addWidget(self.inventory_preview)
         controls = QHBoxLayout()
@@ -2020,7 +2027,7 @@ class LoggerWindow(QMainWindow):
         actions.addWidget(self.ritual_remove_row_button)
         actions.addStretch()
         review.addLayout(actions)
-        review.addWidget(QLabel("Type is Omen or Item. Correct quantity and Tribute if visible; "
+        review.addWidget(paragraph("Type is Omen or Item. Correct quantity and Tribute if visible; "
                                 "leave Tribute blank if unreadable. Unnamed rows are rejected when you Approve. "
                                 "Approved name corrections teach future icon scans."))
         self.ritual_saved = message("")
