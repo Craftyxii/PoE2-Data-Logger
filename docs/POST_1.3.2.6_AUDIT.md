@@ -22,6 +22,11 @@ test, including real screenshot recognition at 150% and 200% scale.
 
 ## Validation
 
+- The first 1.3.2.7 Windows release run caught a timing error in the offscreen
+  currency confirmation fixture: its delayed synthetic focus event represented
+  taskbar activation instead of the HUD's own focus request. Reproducing deadline
+  expiry isolated the cause. The fixture now delivers activation at the focus
+  request; production activation rules and native Windows checks are unchanged.
 - Full Linux/offscreen suite on the final code: 1,046 tests, zero failures/errors,
   three platform/opt-in skips (1,109.9 seconds).
 - Native Windows HUD gate: passed 22 phases with 902 Win32 input events, covering

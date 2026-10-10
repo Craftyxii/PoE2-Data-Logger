@@ -323,17 +323,19 @@ class OverlayRecoveryTests(unittest.TestCase):
         self.app.processEvents()
         self.window.hide_overlay()
         self.window.inventory_phase.setCurrentIndex(self.window.inventory_phase.findData("end"))
-        self.window._inventory_read({"items": [{"slot": 1, "name": "Chaos Orb", "quantity": 4,
-            "count_needs_review": True}], "unknown": []})
-        QTest.qWait(20)
+        # Offscreen Qt omits activation after hide/show. Deliver that event at
+        # the actual focus request; injecting it after rendering can exceed the
+        # HUD focus deadline and instead simulate a later taskbar activation.
+        with patch.object(self.window, "activateWindow", wraps=self.window.activateWindow) as activate:
+            if self.app.platformName() == "offscreen":
+                activate.side_effect = lambda: QApplication.setActiveWindow(self.window)
+            self.window._inventory_read({"items": [{"slot": 1, "name": "Chaos Orb", "quantity": 4,
+                "count_needs_review": True}], "unknown": []})
+            QTest.qWait(20)
         self.assertEqual(self.window.pending_review_kind, "currency")
         self.assertTrue(self.window.isMaximized())
         self.assertEqual(self.window.windowOpacity(), 1.0)
-        if self.app.platformName() == "offscreen":
-            # The offscreen window system does not deliver activation after
-            # hide/show, even for a plain Qt window. Supply that OS event so
-            # the rest of this check uses real editor and button input.
-            QApplication.setActiveWindow(self.window)
+        self.assertTrue(self.window._overlay_auto_review)
         table = self.window.inventory_table
         page = self.window.tabs.widget(0)
         page.ensureWidgetVisible(table)
