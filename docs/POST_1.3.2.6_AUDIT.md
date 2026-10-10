@@ -2,7 +2,7 @@
 
 This audit fixes demonstrated failures without changing manual propagation approval,
 currency confidence grouping, saved-chain completion or existing export formats.
-It does not publish a new release.
+The release target is 1.3.2.7 Beta; the 1.3.2 stable release remains unchanged.
 
 ## Changes and user impact
 
@@ -22,12 +22,19 @@ test, including real screenshot recognition at 150% and 200% scale.
 
 ## Validation
 
+- Full Linux/offscreen suite on the final code: 1,046 tests, zero failures/errors,
+  three platform/opt-in skips (1,109.9 seconds).
+- Native Windows HUD gate: passed 22 phases with 902 Win32 input events, covering
+  sliders, review edits, deep-row scroll retention, overlay/taskbar restoration,
+  reference reset and raw SQLite export. It uses an external simulated game view.
 - Targeted storage/export checks: 96 passed.
 - Targeted platform/capture checks: 71 passed.
 - HUD failure/cancellation checks: 2 passed.
 - Tablet ambiguity checks: 3 passed; existing item regressions: 17 passed.
 - Fresh 100-map Qt workflow: 2,587 commits, zero ledger mismatches; saved exports,
   full SQLite backup and restart checks passed. Scan results in this workflow are injected.
+- The same 100-map workflow also passed on Windows: 2,587 commits, zero mismatches
+  (983.0 seconds).
 - Ten repeated 60-row currency review/navigation cycles under the normal Qt event
   loop: constant widget count, RSS increase 1.93 MiB, individual row approvals at
   most 2.8 ms. Largest observed full-review rendering pause was 635 ms.

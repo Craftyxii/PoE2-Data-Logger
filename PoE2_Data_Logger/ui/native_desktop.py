@@ -48,7 +48,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.6 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.7 Beta"
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
                             if getattr(sys, "frozen", False) else
@@ -6663,7 +6663,7 @@ class LoggerWindow(QMainWindow):
 
 def instance_lock():
     """Acquire the data-directory instance lock, or focus an existing Windows logger and return
-    None when another instance owns it, including the previous stable client.
+    None when another instance owns it, including previous beta and stable clients.
     """
     store.DATA_DIR.mkdir(parents=True, exist_ok=True)
     lock = QLockFile(str(store.DATA_DIR / "logger.lock"))
@@ -6681,6 +6681,7 @@ def instance_lock():
         user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
         user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
         window = (user32.FindWindowW(None, WINDOW_TITLE)
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.6 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.5 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.4 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2")
