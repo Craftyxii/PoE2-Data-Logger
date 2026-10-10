@@ -173,6 +173,73 @@ class HotkeyListenerTests(unittest.TestCase):
         self.assertTrue(manager._capture_lock.acquire(False))
         manager._capture_lock.release()
 
+    def test_cancellation_during_overlay_preparation_skips_capture(self):
+        """Cancel a reserved request during the GUI handoff before it takes a screenshot."""
+        reader, grabber = Mock(), Mock(return_value=Image.new("RGB", (400, 300)))
+        manager = hotkey.HotkeyManager(supported=False, grabber=grabber,
+                                      readers={"opened": reader})
+        manager.before_capture = manager.cancel_capture
+        manager.capture("remnant")
+        grabber.assert_not_called()
+        reader.assert_not_called()
+        self.assertIsNone(manager.status()["latest"])
+        self.assertIsNone(manager._active_capture_mode)
+        self.assertTrue(manager._capture_lock.acquire(False))
+        manager._capture_lock.release()
+
+    def test_cancellation_during_screenshot_skips_clipboard_and_ocr(self):
+        """Finish an in-flight screenshot after cancellation without copying or recognizing."""
+        copied, reader = Mock(), Mock()
+        manager = hotkey.HotkeyManager(supported=True, focused=lambda: True,
+            hover_reader=copied, readers={"opened": reader})
+
+        def grab():
+            """Cancel while an external capture adapter owns the request."""
+            manager.cancel_capture()
+            return Image.new("RGB", (400, 300))
+
+        manager.tooltip_grabber = grab
+        with patch.object(hotkey.sys, "platform", "linux"), patch.object(
+                manager, "_read_capture") as read_capture:
+            manager.capture("waystone")
+        copied.assert_not_called()
+        reader.assert_not_called()
+        read_capture.assert_not_called()
+        self.assertIsNone(manager.status()["latest"])
+        self.assertTrue(manager._capture_lock.acquire(False))
+        manager._capture_lock.release()
+
+    def test_cancellation_during_clipboard_skips_ocr(self):
+        """Skip recognition when cancellation occurs inside the bounded clipboard adapter."""
+        manager = hotkey.HotkeyManager(supported=True, focused=lambda: True,
+            tooltip_grabber=lambda: Image.new("RGB", (400, 300)))
+        manager.hover_reader = manager.cancel_capture
+        with patch.object(hotkey.sys, "platform", "linux"), patch.object(
+                manager, "_read_capture") as read_capture:
+            manager.capture("waystone")
+        read_capture.assert_not_called()
+        self.assertIsNone(manager.status()["latest"])
+        self.assertTrue(manager._capture_lock.acquire(False))
+        manager._capture_lock.release()
+
+    def test_native_message_error_is_reported_and_registrations_released(self):
+        """Treat GetMessageW's negative error result separately from orderly WM_QUIT."""
+        manager = hotkey.HotkeyManager(supported=True, focused=lambda: True)
+        user32, kernel32 = Mock(), Mock()
+        user32.RegisterHotKey.return_value = True
+        user32.SetTimer.return_value = 41
+        user32.GetMessageW.return_value = -1
+        kernel32.GetCurrentThreadId.return_value = 17
+        ready, stop, outcome = threading.Event(), threading.Event(), {}
+        with patch("ctypes.WinDLL", create=True,
+                   side_effect=lambda name, **_: user32 if name == "user32" else kernel32):
+            manager._message_loop({"overlay": (0, 0x78)}, ready, outcome, stop)
+        self.assertTrue(ready.is_set())
+        self.assertIn("shortcut messages", manager.status()["error"])
+        self.assertIn("error", outcome)
+        user32.KillTimer.assert_called_once_with(None, 41)
+        user32.UnregisterHotKey.assert_called_once_with(None, hotkey.HOTKEY_ID)
+
 
 if __name__ == "__main__":
     unittest.main()

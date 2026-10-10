@@ -2849,16 +2849,15 @@ class LoggerWindow(QMainWindow):
 
     def finish_map(self):
         """Save current-map kills when needed, start the next map and clear map-scoped review
-        drafts.
+        drafts. Keep active scan ownership until map validation and creation succeed.
         """
-        service.HOTKEY.cancel_capture()
-        self._remnant_reading = None
         if self.state["current_map_id"] and not self.state["pending_new_map"]:
             previous = self.state["current_map_id"]
             service.dispatch("/api/finish-map", self.counts_data())
         else:
             previous = None
         state = logger.start_map()
+        service.HOTKEY.cancel_capture()
         self._clear_map_review()
         self.refresh()
         self.review_kind.setText("New map")
@@ -6636,9 +6635,11 @@ class LoggerWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Stop timers and hotkey listening, detach global callbacks, and cancel queued workers
-        as the window closes. Running workers finish during main's final shutdown.
+        as the window closes. Invalidate captures before releasing their HUD preparation
+        callback so cancelled workers cannot resume capture or clipboard work after shutdown.
         """
         self._closed = True
+        service.HOTKEY.cancel_capture()
         self._commit_badge_timer.stop()
         self._region_selection_token += 1
         if self._region_editor is not None:

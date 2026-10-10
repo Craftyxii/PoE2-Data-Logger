@@ -41,13 +41,19 @@ def _stage_bytes(destination: Path, data: bytes) -> Path:
 
 
 def _backup_file(destination: Path) -> Path:
-    """Copy an existing destination and its metadata to a same-directory recovery file."""
+    """Copy the destination file or symlink itself to a same-directory recovery path."""
     descriptor, filename = tempfile.mkstemp(
         prefix=".PoE2_Data_Export_", suffix=".recovery", dir=destination.parent)
     os.close(descriptor)
     backup = Path(filename)
     try:
-        shutil.copy2(destination, backup)
+        if destination.is_symlink():
+            # Replacement removes the link itself, so rollback must restore
+            # that link, including a relative or currently missing target.
+            backup.unlink()
+            shutil.copy2(destination, backup, follow_symlinks=False)
+        else:
+            shutil.copy2(destination, backup)
     except BaseException:
         _remove_temporary(backup)
         raise

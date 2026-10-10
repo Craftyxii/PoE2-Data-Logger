@@ -1238,8 +1238,9 @@ def session_generation():
 
 
 def scan_context():
-    """Capture session, map marker and selected expedition tokens for later stale-scan checks."""
+    """Capture session, map marker and expedition tokens from one snapshot for stale-scan checks."""
     with _connect() as db:
+        db.execute("BEGIN")
         number = _meta(db, "current_map_number", 0)
         return {"_scan_generation": _meta(db, "session_generation", 0),
                 "_capture_map_id": _map_id(number) if number else None,
@@ -2077,9 +2078,10 @@ def save_kills(normal, magic, rare, *, unique=_UNSET):
 
 
 def save_detonated(value):
-    """Replace the selected expedition's detonated total and first export-row value, then record it."""
+    """Atomically select an expedition, replace its detonated totals and record the update."""
     count = _integer(value, "Remnants Detonated", 0, blank=True)
     with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
         number = _meta(db, "current_map_number")
         if number == 0:
             raise ValueError("Start a map before saving detonated totals.")
@@ -2146,8 +2148,9 @@ def finish_map(normal, magic, rare, detonated=_UNSET, *, unique=_UNSET):
 
 
 def mark_next_map(pending):
-    """Toggle the next-map marker when no remnant awaits review; cancellation restores staged waystone fields."""
+    """Atomically validate and toggle the next-map marker, restoring staged fields on cancellation."""
     with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
         if _meta(db, "ocr_pending"):
             raise ValueError("Save or discard the scanned remnant before changing the map marker.")
         if not _meta(db, "current_map_number"):
@@ -3165,8 +3168,9 @@ def _map_remnant_id(db, map_id, pending):
 
 
 def get_state():
-    """Assemble current UI state, exposing frozen chain origins separately from compatible editable step dictionaries."""
+    """Read consistent UI state and frozen chain origins from one database snapshot."""
     with _connect() as db:
+        db.execute("BEGIN")
         config = _meta(db, "settings")
         n = _meta(db, "current_map_number")
         mid = _map_id(n) if n else ""

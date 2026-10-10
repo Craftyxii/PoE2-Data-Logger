@@ -373,8 +373,11 @@ class HotkeyManager:
             ready.set()
             if outcome.get("error"):
                 return
-            while not stop.is_set() and user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
-                if stop.is_set():
+            while not stop.is_set():
+                result = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+                if result == -1:
+                    raise ValueError("Could not read shortcut messages from Windows.")
+                if not result or stop.is_set():
                     break
                 if msg.message == WM_TIMER and msg.wParam == timer:
                     active = self.focused()
@@ -433,16 +436,22 @@ class HotkeyManager:
             self._finish_capture({"mode": mode, "result": None,
                                   "error": f"Screen scan failed: {exc}"}, None, revision)
 
+    def _capture_cancelled(self, revision):
+        """Check request ownership between adapters that may block during cancellation."""
+        with self._lock:
+            return revision != self._capture_revision
+
     def _capture(self, kind, mode, revision, strictness_values=None):
-        """Prepare the screenshot and forward the request's frozen strictness to its reader."""
+        """Stop canceled requests between GUI preparation, capture, clipboard and recognition."""
         try:
-            with self._lock:
-                cancelled = revision != self._capture_revision
-            if cancelled:
+            if self._capture_cancelled(revision):
                 self._finish_capture(None, None, revision)
                 return
             if self.before_capture:
                 self.before_capture()
+            if self._capture_cancelled(revision):
+                self._finish_capture(None, None, revision)
+                return
             if self.focused is not None and not self.focused():
                 with self._lock:
                     self._active_capture_mode = None
@@ -484,6 +493,9 @@ class HotkeyManager:
                     right = max(r["x"] + r["w"] for r in selected)
                     bottom = max(r["y"] + r["h"] for r in selected)
                     region = {"x": left, "y": top, "w": right - left, "h": bottom - top}
+            if self._capture_cancelled(revision):
+                self._finish_capture(None, None, revision)
+                return
             image = tooltip = None
             if kind in ("default", "remnant"):
                 if kind == "default" and self.supported and self.tooltip_grabber is None:
@@ -521,6 +533,9 @@ class HotkeyManager:
                     raise ValueError(f"Select the {mode} capture region in Scan settings first.")
                 image = self._grab(region)
                 self._check_image(image)
+            if self._capture_cancelled(revision):
+                self._finish_capture(None, None, revision)
+                return
             activity_crops = {}
             if kind == "default" and tooltip is not None:
                 from PoE2_Data_Logger.ui.region_select import region_for
@@ -537,6 +552,9 @@ class HotkeyManager:
             copied = None
             if self.hover_reader is not None and self.supported and kind in ("default", "waystone", "tablet"):
                 copied = self.hover_reader()
+            if self._capture_cancelled(revision):
+                self._finish_capture(None, None, revision)
+                return
             args = (kind, mode, region, image, tooltip, remnant_map, capture_map, generation, expedition, activity_crops, copied, phase, pending_map, revision, strictness_values)
             self._read_capture(*args)
         except Exception as exc:

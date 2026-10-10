@@ -131,7 +131,9 @@ def _families(db, lines, list_complete=False):
 
 
 def _list_complete(image, lines, right):
-    """Check unused list space within the panel rather than the surrounding game."""
+    """Check unused parchment at reference scale so text margins, frame edges and ink
+    runs have the same meaning on enlarged captures.
+    """
     if not lines:
         return False
     if image.width >= 900 and image.height >= 600 and image.width >= image.height * 1.25:
@@ -142,8 +144,15 @@ def _list_complete(image, lines, right):
     panel = image.crop((0, 0, min(image.width, int(right)), image.height)).convert("RGB")
     import cv2
     gray = cv2.cvtColor(np.asarray(panel), cv2.COLOR_RGB2GRAY)
-    _, _, edge, bottom = runehelper_ocr._find_panel(gray)
-    top = int(lines[-1]["y"] + 45)
+    left, _, edge, bottom = runehelper_ocr._find_panel(gray)
+    scale = (edge - left) / 575
+    if scale > 1:
+        gray = cv2.resize(gray, (round(gray.shape[1] / scale), round(gray.shape[0] / scale)),
+                          interpolation=cv2.INTER_AREA)
+        _, _, edge, bottom = runehelper_ocr._find_panel(gray)
+    else:
+        scale = 1
+    top = int(lines[-1]["y"] / scale + 45)
     bottom -= 12
     if bottom - top < 120:
         return False
@@ -154,7 +163,10 @@ def _list_complete(image, lines, right):
     if low < 75 or not 95 <= median <= 205 or high > 235:
         return False
     ink = (sample < min(75, median * .52)).mean(axis=1)
-    return not any(np.convolve((ink > .075).astype(np.int8), np.ones(3), "valid") >= 3)
+    # Short right-aligned reward names occupy little of this wide parchment
+    # sample. Three sustained rows still distinguish their ink from isolated
+    # frame noise without treating an unread short reward as empty space.
+    return not any(np.convolve((ink > .04).astype(np.int8), np.ones(3), "valid") >= 3)
 
 
 def _reference_icon_count(image, reward_y):
@@ -292,8 +304,15 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
         title = {"x1": 0, "x2": image.width // 2, "y1": max(0, first_y - 32),
                  "y2": first_y - 16}
         if verify_header:
-            top = max(0, first_y - 180)
-            header = image.crop((0, top, image.width, max(top + 1, first_y - 8)))
+            # Native rows end at the detected panel edge. Restrict heading
+            # OCR to that panel so a large game window cannot shrink the
+            # title out of the detector's usable resolution. Search margins
+            # scale with the panel, while returned boxes stay capture-based.
+            header_right = min(image.width, max(row["x2"] for row in detections))
+            header_scale = header_right / 575
+            top = max(0, round(first_y - 180 * header_scale))
+            header = image.crop((0, top, header_right,
+                                 max(top + 1, round(first_y - 8 * header_scale))))
             canvas = Image.new("RGB", (header.width, max(header.width, header.height)), (190, 190, 190))
             canvas.paste(header, (0, 0))
             with OCR_LOCK:

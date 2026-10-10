@@ -69,7 +69,13 @@ def modifier_value(raw):
     if percentages:
         if len(percentages) != 1:
             return None
-        value = float(percentages[0].group().replace("%", "").replace(",", ".").strip())
+        percentage = percentages[0]
+        # Matching affix names removes numeric tokens. Require the percentage
+        # to account for every digit first, so extra rolls or malformed decimal
+        # prefixes cannot disappear into an otherwise exact catalog match.
+        if re.search(r"\d", text[:percentage.start()] + text[percentage.end():]):
+            return None
+        value = float(percentage.group().replace("%", "").replace(",", ".").strip())
         unit = "%"
     else:
         if "%" in text:
