@@ -14,7 +14,7 @@ from PIL import Image
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QFileDialog, QListWidgetItem
 
-from PoE2_Data_Logger.core import logger_store as logger, service, store
+from PoE2_Data_Logger.core import logger_store as logger, ocr_workers, service, store
 from PoE2_Data_Logger.ocr.item_text import parse_item_text
 from PoE2_Data_Logger.ui import native_desktop
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, select
@@ -232,7 +232,7 @@ class UIScanConflictTests(unittest.TestCase):
                 self.window.reject_review()
 
     def test_delayed_inventory_and_ritual_results_cannot_replace_new_remnant_review(self):
-        """Verify delayed inventory and ritual results cannot replace new remnant review."""
+        """Verify retired capture callbacks cannot replace a newer remnant, even with late success or failure."""
         for incoming, result in (("currency_capture", self.inventory_result),
                                  ("ritual_capture", self.ritual_result)):
             with self.subTest(incoming=incoming):
@@ -240,10 +240,18 @@ class UIScanConflictTests(unittest.TestCase):
                 work, callback = self.jobs[-1]
                 self.prepare_pending("opened")
                 before = self.review_state()
-                self.assertIsNone(work())
-                callback(result())
-                self.assertEqual(self.review_state(), before)
-                self.window.reject_review()
+                try:
+                    # Requests freeze recognition inputs; cancellation belongs to
+                    # their admitted Future, not to invoking the descriptor again.
+                    # This queued-submit fixture checks the independent callback
+                    # identity guard. Real child retirement is covered separately.
+                    self.assertIsInstance(work, ocr_workers.Request)
+                    self.assertIsNot(getattr(self.window, callback._scan_field), callback._scan_capture)
+                    callback(result())
+                    self.assertFalse(callback._scan_failure(RuntimeError("late retired reader failure")))
+                    self.assertEqual(self.review_state(), before)
+                finally:
+                    self.window.reject_review()
 
     def capture_file(self):
         """Queue an opened-remnant file scan and return its completion callback."""

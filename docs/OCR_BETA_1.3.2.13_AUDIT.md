@@ -44,12 +44,14 @@ All 61 original complete panels were also processed end to end without recogniti
 - Real process broker lifecycle: nine tests passed, including cancellation waiter notification and both startup-failure pipe endpoints.
 - UI preparation failures: three tests passed with both executor admission assertions.
 - Real hotkey transport integration: three tests passed.
-- Real desktop child ownership integration: three tests passed.
+- Real desktop child ownership integration: four tests passed, including remnant supersession of inventory/Ritual readers and preservation of reservation, preview and draft after late success/error callbacks.
 - Existing hotkey watchdog/listener/resolution/propagation routing/CPU preference: 49 tests passed.
 - Source `python -m PoE2_Data_Logger --smoke-test`: passed with real child/bundled OCR.
 - Production child/direct opened-remnant and visible-seed results: exact parity.
 
 Artifacts are under `/tmp/poe2-*-final.log`, `/tmp/poe2-desktop-worker-integration-final.log`, `/tmp/poe2-hotkey-worker-integration.log`, `/tmp/poe2-child-smoke-check.log` and `/tmp/poe2-ocr-worker-model-audit.json`.
+
+The full-suite delayed-review fixture had mocked `_submit`, so no owned Future existed. Its old `work()` assertion invoked the new Request descriptor afresh after retirement; a returned reading caused the first assertion to fail before cleanup, and the next subtest correctly refused to overwrite the leftover remnant. The queued fixture now asserts the upstream capture identity is retired and checks both late success/error callbacks without submitting new recognition. A separate integration test uses actual blocked children and proves their cancellation/reaping plus preservation of the newer remnant reservation, screenshot and recipe draft. Both modules passed all 15 tests. No production change was needed for this test mismatch.
 
 ## Real-model memory evidence
 

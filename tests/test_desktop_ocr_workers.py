@@ -138,6 +138,30 @@ class DesktopOCRWorkerTests(unittest.TestCase):
                 self.window.reject_review()
                 self.assert_retired(current, current_pid)
 
+    def test_remnant_review_reaps_old_inventory_and_ritual_readers_and_ignores_late_callbacks(self):
+        """A new remnant preserves its reservation, preview and drafts after real child cancellation and late replies."""
+        for mode in ("currency", "ritual"):
+            with self.subTest(mode=mode):
+                future, pid = self.blocked_capture(mode)
+                callback, _ = next(iter(self.window._pending_tasks.values()))
+                result = {"mode": "opened", "status": "Review this new remnant.", "can_use": False,
+                          "first_recipe": None, "opened_recipes": [{"raw": "Unreadable reward", "recipe": None}],
+                          **logger.scan_context()}
+                self.window.show_result("opened", result, self.path.read_bytes())
+                self.window.first_recipe.setText("Keep this recipe draft")
+                snapshot = (logger.get_state()["ocr_pending"], self.window.review_summary.text(),
+                            self.window.preview.pixmap().cacheKey(), self.window.first_recipe.text())
+                try:
+                    self.assert_retired(future, pid)
+                    self.assertEqual(self.window._pending_tasks, {})
+                    callback({"items": [], "unknown": [], "raw_text": "obsolete"})
+                    self.assertFalse(callback._scan_failure(RuntimeError("late cancelled reader")))
+                    self.assertEqual(self.window.pending_review_kind, "remnant")
+                    self.assertEqual((logger.get_state()["ocr_pending"], self.window.review_summary.text(),
+                                      self.window.preview.pixmap().cacheKey(), self.window.first_recipe.text()), snapshot)
+                finally:
+                    self.window.reject_review()
+
     def test_session_reset_reaps_pending_reader_before_retiring_callback_state(self):
         """A confirmed reset cancels the old session's reader and prevents stale results from reaching new logs."""
         future, pid = self.blocked_capture("currency")
