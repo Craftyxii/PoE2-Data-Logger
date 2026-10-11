@@ -23,6 +23,17 @@ Propagation remains manually reviewed with the existing recipe-limited selectors
 
 ## Validation
 
+The published 1.3.2.12 Beta passed all required Windows release gates:
+
+- Full regression suite: 1,218 passed. The two dedicated native HUD/session tests were skipped in this suite and passed in their separate required runs.
+- Native Windows HUD: 22 phases and 902 Win32 input events, with reference-reset preservation and raw SQL export checks.
+- 100-map logging/export workflow: 2,587 expected saved commits and zero independent-ledger mismatches; CSV/XLSX exports, backups and restart persistence verified.
+- Installer/update, running-client guards, startup, recognition and saved-file retention checks passed. The downloaded installer matched its published SHA-256 checksum.
+
+See [the successful release workflow](https://github.com/Craftyxii/PoE2-Data-Logger/actions/runs/38116647068) for logs and artifacts.
+
+### Development checks
+
 - Dedicated regressions reproduce the failures above and verify their corrected results, including actual captured inventory/Ritual pixels and rendered tooltip OCR.
 - HUD audit exercised 498 control targets across compact and large windows. Modal crop selection, keyboard edits, rejected-row state and actual export callbacks were tested through Qt events.
 - A blocked-reader probe exercised 12 timeout/retry cycles: two bounded worker threads, no stranded Reading state, no stale saves, and successful recovery with quantity 292.
@@ -33,7 +44,7 @@ Propagation remains manually reviewed with the existing recipe-limited selectors
 
 The final release review additionally reproduced reset → automatic affix rediscovery → Undo through the held-tablet UI. The correction journals implicit discovery with the latest action; dedicated regressions also cover repeated discoveries and discovery without prior Undo history. All 89 affected UI, Undo, reference and waystone-recovery checks passed after that correction. An independent HUD replay verified both reset/rediscovery/Undo and New map/discovery/Undo. All 19 installer/version checks passed; all 148 changed Python functions have purpose notes.
 
-Local HUD tests use Qt offscreen on Linux. Publication is blocked until the new commit passes the separate native Windows HUD, full regression, 100-map logging/export and installer/update gates. Native interaction tests and OCR fixtures cannot exhaust every user action sequence or establish perfect live-game recognition.
+Local HUD tests use Qt offscreen on Linux; the separate Windows release gates above passed on the published source commit. Native interaction tests and OCR fixtures cannot exhaust every user action sequence or establish perfect live-game recognition.
 
 The first native release run stopped at the reference-reset preservation assertion: it included `undo_actions` and `sqlite_sequence`, both intentionally changed by the new reset inverse. The corrected assertion checks exactly one reset action, unchanged earlier inverses and unchanged unrelated sequences, while retaining all logging/settings preservation checks. No 1.3.2.10 installer was published.
 

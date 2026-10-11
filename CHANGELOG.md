@@ -1,23 +1,45 @@
-# PoE2 Data Logger 1.3.2.12 Beta
+# Changelog
 
-- Keep the export regression's 10-second deadline while yielding to the Python worker during Qt event polling.
-- Publish the reviewed OCR/Undo fixes with aligned beta metadata; application behavior and screenshot previews are unchanged from 1.3.2.11.
+## 1.3.2.12 Beta
 
-# PoE2 Data Logger 1.3.2.11 Beta
+- Preserve visible currency stack digits instead of accepting a truncated count. Uncertain quantities still require confirmation.
+- Keep recognized Currency names filled in and request **Confirm count** when only the quantity needs review.
+- Keep validated Ritual equipment in one reward row and join supported wrapped waystone modifiers.
+- Retain seed corrections and rejected rows when switching review modes; preserve Family DB drafts and selected seed families during unrelated refreshes.
+- Open catalog results in the correct editor after changing the next search type.
+- Make reference reset, removal, import and automatic affix rediscovery compatible with Universal Undo. Group screenshot/name creation and seed approval/learning into single actions.
+- Preserve restored retired names in reference packs, including names without icon examples.
+- Correct Unicode recipe identity conflicts and related historical propagation records without changing remnant logging.
 
-- Publish the 1.3.2.10 fixes after updating the native Windows reset test to require the intended Undo entry while preserving logged data, settings and earlier inverses.
-- Align beta metadata and prior-client guards; application behavior is unchanged from 1.3.2.10.
+Screenshot previews, manual propagation approval, recipe-limited rune selectors and OCR strictness defaults remain unchanged.
 
-# PoE2 Data Logger 1.3.2.10 Beta
+Validation passed: the full regression suite, native Windows HUD input, 100-map logging/export workflow, installer/update and saved-file retention checks. See [release notes](docs/RELEASE_1.3.2.12.md) for counts and scope.
 
-- Preserve currency digit evidence and distinguish count-only confirmation from name review.
-- Keep validated Ritual equipment together and join supported wrapped waystone modifiers.
-- Preserve seed review corrections, family drafts and catalog result editor types across refreshes.
-- Make reference reset/removal/import and implicit affix rediscovery compatible with Universal Undo.
-- Preserve restored retired names in reference packs and correct Unicode recipe identity/provenance conflicts.
-- Retain manual propagation review and existing remnant logging; update installer and prior-client guards.
+Versions 1.3.2.10 and 1.3.2.11 were unpublished builds. Their fixes are included in 1.3.2.12.
 
-# PoE2 Data Logger 1.3.2.6 Beta
+## 1.3.2.9 Beta
+
+- Add persistent Universal Undo for saved scans, chains, counts, settings and New map; retain the latest 100 actions across restarts. Undoing New map reopens the previous map for editing.
+- Add **Discard chain** and **Discard last chain step** on Expedition, with Undo support and retained remnant logs and detonation counts.
+- Recover shared propagation socket positions from complete crowns or corroborating fragments across recipe rows. Keep conflicting evidence unresolved and require manual approval.
+- Retain stable recipe and family IDs for propagated runes.
+- Add an **Analysis Context** sheet to Excel exports and equivalent interpretation notes to the raw SQL database.
+- Improve enlarged opened-remnant icon counting and reject false crown fragments from frame speckles.
+- Clear Reading after scan submission failures or a 90-second timeout; prevent late results from replacing newer reviews or saving data.
+- Preserve partial seed capture context after an implicit map start and reject test selectors that match no tests.
+
+These changes were prepared in the unpublished 1.3.2.8 build and first shipped in 1.3.2.9.
+
+## 1.3.2.7 Beta
+
+- Clear stuck Reading states after invalid New map input and stop cancelled scans before subsequent capture, clipboard or OCR work.
+- Report shortcut listener failures and clean up registrations.
+- Keep resets and remnant writes consistent, without orphan detonation records or stale next-map markers.
+- Improve opened-remnant recognition in enlarged captures and retain ambiguous tablet numbers for review.
+- Preserve existing symbolic links when paired exports roll back.
+- Recognize the previous beta during installation and single-instance checks.
+
+## 1.3.2.6 Beta
 
 - Require manual recipe/rune approval for every propagation scan; strictness adjusts recognition without enabling automatic chain saves.
 - Retain source recipe/family attribution for approved propagation runes, including unresolved origins for later analysis.
@@ -30,19 +52,19 @@
 - Add reference reset and complete raw SQLite export; preserve older backups/reference exports and block writes over the active database.
 - Reduce redundant currency-card redraws and update previous-beta running-client guards.
 
-# PoE2 Data Logger 1.3.2.5 Beta
+## 1.3.2.5 Beta
 
 - Enlarge live map/remnant counters and make Complete chain available in the shared header.
 - Refresh saved Expedition runes immediately after recipe approval, retain independent manual drafts, and keep chain status visible.
 - Size pages from the active tab to keep scan-region controls reachable in shorter windows.
 
-# PoE2 Data Logger 1.3.2.4 Beta
+## 1.3.2.4 Beta
 
 - Add separate OCR Strictness sliders for each scan type in the OCR Sensitivity tab: 0 accepts more tentative matches, 50 retains previous behavior, and 100 requires manual confirmation. Keep semantic and capture-context safety checks.
 - Save propagation chain parts directly from the recipe's Approve button; retain Complete chain for advancing the expedition and simplify the propagation review controls.
 - Make the live Map # and Remnant # indicators larger and align beta app, installer and executable metadata.
 
-# PoE2 Data Logger 1.3.2
+## 1.3.2
 
 - Promote the reviewed main-branch code to a stable installer with consistent executable, installer, window and release metadata.
 - Provide recipe-only propagation dropdowns with rune artwork, confidence-grouped currency review and guarded linked seed corrections.
@@ -50,7 +72,7 @@
 - Fix fractional gear-rarity stepping and scaled scan-region resizing, and keep shared HUD controls accessible in smaller windows.
 - Remove proven unused helpers and build triggers, retain old-data compatibility, and complete first-party function notes.
 
-# PoE2 Data Logger 1.3.1.1 Beta
+## 1.3.1.1 Beta
 
 - Keep currency row approval separate from the final Start/End inventory commit; preserve the captured map and phase through review.
 - Reconcile the currency counter and exports with the latest approved End snapshot, subtracting Start when present and treating a missing Start as empty.
@@ -61,14 +83,14 @@
 - Resolve propagation from three crown marks, their rune positions and the cursor-selected recipe, using the database for rune order. Gold frames and readable unmarked sockets are not prerequisites. Retain explicit recipe approval when the cursor is absent and keep unrelated scans independent.
 - Add a 100-map GUI workflow gate with custom labels, inventory corrections, chain commits, automatic kill saves, restarts, backups and independently reopened CSV/XLSX exports.
 
-# PoE2 Data Logger v33.3
+## v33.3
 
 - Prevent hotkey changes and region navigation from waiting on the logger's own window-title response.
 - Restore existing shortcuts after a rejected assignment and keep the error visible.
 - Cancel key capture when clearing a shortcut, leaving scan settings or hiding the HUD.
 - Open the region selector directly from screenshot pixels without PNG compression.
 
-# PoE2 Data Logger v33.2
+## v33.2
 
 - Preserve all tablet modifiers, including modifiers without a numeric percentage.
 - Keep separate occurrences of the same Ritual Omen and their deferred states.
@@ -82,7 +104,7 @@
 - Check foreground focus before copying and reading clipboard text.
 - Resolve the installer's permission tool from the Windows system directory and check installation with a planted filename present.
 
-# PoE2 Data Logger v33.1
+## v33.1
 
 - Preserve inventory phases and capture context through recognition and review; discard superseded and rejected results.
 - Preserve unapproved waystone edits during refresh and correct deferred Omen and Ritual tribute associations.
@@ -93,9 +115,9 @@
 - Serialize commit numbering and reject chain entries for finished maps.
 - Correct packaged-module verification and installer resource paths; preserve saved Databases during uninstallation.
 
-# PoE2 Data Logger v33
+## v33
 
-## Windows runtime
+### Windows runtime
 
 - The launcher locates the bundled Python 3.12 runtime in `_internal`.
 - The package includes the complete PySide6 software-rendering DLL.

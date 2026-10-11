@@ -1,6 +1,6 @@
 # PoE2 Data Logger 1.3.2.9 Beta
 
-This beta includes the logging corrections and propagation improvements prepared for 1.3.2.8. Its installer was blocked before publication by a stale cancellation-test fixture. The fixture now reserves a capture through the real admission path, including its owner and watchdog. Application behavior is unchanged from the 1.3.2.8 source; all release gates remain required.
+This release adds Universal Undo, chain discard, analysis context and more reliable scan recovery. These changes were prepared in the unpublished 1.3.2.8 build and first shipped here.
 
 - **Undo** reverses the latest saved action, including scan approvals, chain actions, counts, settings and starting a map. Its latest 100 actions survive restarting the logger. Undoing New map reopens the previous map for edits.
 - Expedition provides **Discard chain** and **Discard last chain step**. The latter removes the latest saved part without selecting a row. Both retain remnant logs and actual detonation counts, support selected completed chains, and can be undone. Stale propagation results cannot restore discarded steps.
