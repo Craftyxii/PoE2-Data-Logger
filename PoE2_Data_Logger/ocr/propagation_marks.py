@@ -63,7 +63,7 @@ def _fragment_peak_boxes(mask, recipe_rows, *, tile_layout, tile_size):
     for box in _partial_peak_boxes(mask, recipe_rows, tile_layout=tile_layout, tile_size=tile_size):
         centre, bottom = box[:2]
         left, right = max(0, round(centre - tile_size / 2)), min(pixels.shape[1], round(centre + tile_size / 2))
-        band = pixels[max(0, bottom - band_height):bottom, left:right]
+        band = _peak_band(pixels[:, left:right], bottom, band_height, tile_size)
         columns = band.sum(axis=0)
         active = np.flatnonzero(columns)
         runs = [run for run in np.split(active, np.flatnonzero(np.diff(active) > join_gap) + 1) if run.size]
@@ -112,8 +112,8 @@ def _supported_boxes(masks, recipe_rows, tile_layout, tile_size, finder):
             left = max(0, round(box[0] - tile_size / 2))
             right = min(pixels.shape[1], round(box[0] + tile_size / 2))
             local = pixels[:, left:right]
-            native = factor == 1 and (finder is not three_peak_boxes or np.array_equal(
-                local[max(0, bottom - height):bottom], _peak_band(local, bottom, height, tile_size)))
+            native = factor == 1 and np.array_equal(
+                local[max(0, bottom - height):bottom], _peak_band(local, bottom, height, tile_size))
             match = next((entry for entry in groups if abs(box[0] - entry[0][0]) < 6
                           and abs(box[1] - entry[0][1]) < 8), None)
             if match is None:
@@ -148,7 +148,9 @@ def _partial_peak_boxes(mask, recipe_rows, *, tile_layout, tile_size):
             for bottom in range(max(2, round(target) - radius),
                                 min(pixels.shape[0] - 2,
                                     round(target) + (1 if "crown_top" in row else radius + 1))):
-                band = pixels[max(0, bottom - band_height):bottom, left:right]
+                if bottom > target + 1.5:
+                    continue
+                band = _peak_band(pixels[:, left:right], bottom, band_height, tile_size)
                 columns = band.sum(axis=0)
                 active = np.flatnonzero(columns)
                 if not active.size:

@@ -1,0 +1,1562 @@
+{
+  "dataset": {
+    "panels": 61,
+    "rows": 251,
+    "full_marks": 263,
+    "partial_marks": 0,
+    "uncertain_marks": 0
+  },
+  "protocol": {
+    "full_marks": "Known annotated rows/lattice, unchanged pixels, one 575px panel resize, exposure bracket.",
+    "exposure_factors": "Each detector declares its production exposure bracket below.",
+    "scope": "Direct physical marks only; excludes text OCR, family matching and inferred missing marks.",
+    "partials": "Controlled captured-tip erasure; natural partial accuracy is unmeasured when labels are zero.",
+    "rss": "Independent child-process peak RSS, including imports; not application runtime model RSS."
+  },
+  "baseline_reference": "36e3943",
+  "detectors": {
+    "baseline": {
+      "detector": "baseline",
+      "baseline_ref": "36e3943",
+      "helper_source_sha256": "dfa86c571221ee7191b7e1723d57fd7572a602d8f8ad584072ce6e64abfb01f5",
+      "exposure_factors": [
+        1,
+        0.9,
+        1.1,
+        0.8,
+        1.2,
+        1.35,
+        1.5,
+        0.95,
+        1.05,
+        1.25
+      ],
+      "elapsed_seconds": 150.07838359699963,
+      "peak_rss_bytes": 98009088,
+      "full_marks": {
+        "counts": {
+          "tp": 159,
+          "fp": 4,
+          "fn": 104,
+          "exact_rows": 165,
+          "rows": 251,
+          "precision": 0.9754601226993865,
+          "recall": 0.6045627376425855
+        },
+        "errors": [
+          {
+            "source": "Pair01_6socket_ChillingFlux_opened.png",
+            "row": 1,
+            "expected": [
+              1,
+              5
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair01_6socket_ChillingFlux_opened.png",
+            "row": 2,
+            "expected": [
+              1
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair03_6socket_CountessSeske_opened.png",
+            "row": 1,
+            "expected": [
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair03_6socket_CountessSeske_opened.png",
+            "row": 2,
+            "expected": [
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair03_6socket_CountessSeske_opened.png",
+            "row": 4,
+            "expected": [
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair04_5socket_Craiceann_opened.png",
+            "row": 1,
+            "expected": [
+              5
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair05_6socket_Divine_opened.png",
+            "row": 1,
+            "expected": [
+              6
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair06_8socket_Runefather_PerfectTransmutation_opened.png",
+            "row": 1,
+            "expected": [
+              5,
+              7
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair06_8socket_Runefather_PerfectTransmutation_opened.png",
+            "row": 2,
+            "expected": [
+              5,
+              7
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair09_6socket_Family41_Uhtred_opened.png",
+            "row": 1,
+            "expected": [
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair09_6socket_Family41_Uhtred_opened.png",
+            "row": 2,
+            "expected": [
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair10_9socket_Annulment_opened.png",
+            "row": 1,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair10_9socket_Annulment_opened.png",
+            "row": 2,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair10_9socket_Annulment_opened.png",
+            "row": 3,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair10_9socket_Annulment_opened.png",
+            "row": 6,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair11_7socket_Family24_BreathOfAldur_opened.png",
+            "row": 1,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair11_7socket_Family24_BreathOfAldur_opened.png",
+            "row": 2,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair11_7socket_Family24_BreathOfAldur_opened.png",
+            "row": 3,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair12_3socket_Family70_Warding_opened.png",
+            "row": 1,
+            "expected": [
+              1,
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair12_3socket_Family70_Warding_opened.png",
+            "row": 2,
+            "expected": [
+              1,
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair12_3socket_Family70_Warding_opened.png",
+            "row": 4,
+            "expected": [
+              1,
+              3
+            ],
+            "found": [
+              3
+            ],
+            "fragment_positions": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair12_3socket_Family70_Warding_opened.png",
+            "row": 5,
+            "expected": [
+              1,
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair13_6socket_Family36_GreaterCurrency_opened.png",
+            "row": 1,
+            "expected": [
+              5
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair13_6socket_Family36_GreaterCurrency_opened.png",
+            "row": 2,
+            "expected": [
+              5
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair13_6socket_Family36_GreaterCurrency_opened.png",
+            "row": 3,
+            "expected": [
+              5
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair18_8socket_Family8_Katla_opened.png",
+            "row": 1,
+            "expected": [
+              1,
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair18_8socket_Family8_Katla_opened.png",
+            "row": 2,
+            "expected": [
+              1,
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair19_4socket_Family52_Jeweller_Gemcutter_opened.png",
+            "row": 1,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair19_4socket_Family52_Jeweller_Gemcutter_opened.png",
+            "row": 2,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair19_4socket_Family52_Jeweller_Gemcutter_opened.png",
+            "row": 5,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair22_4socket_Family66_VitalFlame_opened.png",
+            "row": 1,
+            "expected": [
+              1
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair22_4socket_Family66_VitalFlame_opened.png",
+            "row": 2,
+            "expected": [
+              1
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair22_4socket_Family66_VitalFlame_opened.png",
+            "row": 6,
+            "expected": [
+              1
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair24_3socket_Family51_Blacksmith_Etcher_Armourer_opened.jpg",
+            "row": 1,
+            "expected": [
+              1
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair24_3socket_Family51_Blacksmith_Etcher_Armourer_opened.jpg",
+            "row": 2,
+            "expected": [
+              1
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair25_9socket_Family4_PerfectChaos_Olroth_opened.jpg",
+            "row": 1,
+            "expected": [
+              5,
+              9
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair25_9socket_Family4_PerfectChaos_Olroth_opened.jpg",
+            "row": 2,
+            "expected": [
+              5
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair26_6socket_Family38_Sky_GemChain_opened.jpg",
+            "row": 1,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair26_6socket_Family38_Sky_GemChain_opened.jpg",
+            "row": 2,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair33_5socket_Family56_RandomCurrency_SpiritGem_opened.jpg",
+            "row": 1,
+            "expected": [
+              1
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair33_5socket_Family56_RandomCurrency_SpiritGem_opened.jpg",
+            "row": 2,
+            "expected": [
+              1
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair34_6socket_Family38_Sky_GemChain_opened.jpg",
+            "row": 1,
+            "expected": [
+              1,
+              6
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair34_6socket_Family38_Sky_GemChain_opened.jpg",
+            "row": 2,
+            "expected": [
+              1,
+              6
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair37_7socket_Family_25_opened.jpg",
+            "row": 1,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair38_7socket_Family_27_opened.jpg",
+            "row": 1,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair38_7socket_Family_27_opened.jpg",
+            "row": 2,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair38_7socket_Family_27_opened.jpg",
+            "row": 4,
+            "expected": [
+              3
+            ],
+            "found": [
+              1,
+              3
+            ],
+            "fragment_positions": [],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair39_8socket_Family_10_opened.jpg",
+            "row": 1,
+            "expected": [
+              8
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair39_8socket_Family_10_opened.jpg",
+            "row": 2,
+            "expected": [
+              8
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair40_6socket_Family_33_opened.jpg",
+            "row": 1,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair40_6socket_Family_33_opened.jpg",
+            "row": 2,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair43_6socket_family_29_opened.jpg",
+            "row": 1,
+            "expected": [
+              2
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair43_6socket_family_29_opened.jpg",
+            "row": 2,
+            "expected": [
+              2
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair44_6socket_Family_43_opened.jpg",
+            "row": 1,
+            "expected": [
+              2,
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair44_6socket_Family_43_opened.jpg",
+            "row": 2,
+            "expected": [
+              2,
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair45_8socket_Family_10_opened.jpg",
+            "row": 1,
+            "expected": [
+              1,
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair45_8socket_Family_10_opened.jpg",
+            "row": 2,
+            "expected": [
+              1,
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair47_9socket_Family_1_opened.jpg",
+            "row": 1,
+            "expected": [
+              5
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair47_9socket_Family_1_opened.jpg",
+            "row": 2,
+            "expected": [
+              5
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair48_7socket_Family_26_opened.jpg",
+            "row": 1,
+            "expected": [
+              4,
+              6
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair48_7socket_Family_26_opened.jpg",
+            "row": 2,
+            "expected": [
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair59_8socket_Family_11_VoranaCarnage_PerfectAug_opened.jpg",
+            "row": 1,
+            "expected": [
+              1,
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair59_8socket_Family_11_VoranaCarnage_PerfectAug_opened.jpg",
+            "row": 2,
+            "expected": [
+              1,
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair61_5socket_Family_57_Thaumaturgic_Verisuim_chain_opened.jpg",
+            "row": 1,
+            "expected": [
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair61_5socket_Family_57_Thaumaturgic_Verisuim_chain_opened.jpg",
+            "row": 2,
+            "expected": [
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair64_3socket_Family_3_Currency_Alloy_opened.jpg",
+            "row": 1,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair65_5socket_Family_37_RareUnique_Chance_UniqueArmor_opened.jpg",
+            "row": 1,
+            "expected": [
+              2,
+              4
+            ],
+            "found": [
+              2
+            ],
+            "fragment_positions": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair65_5socket_Family_37_RareUnique_Chance_UniqueArmor_opened.jpg",
+            "row": 2,
+            "expected": [
+              2,
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair72_3socket_Family_65_Expansive_Glassblower_Regal_Exalted_opened.jpg",
+            "row": 1,
+            "expected": [
+              1,
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair72_3socket_Family_65_Expansive_Glassblower_Regal_Exalted_opened.jpg",
+            "row": 2,
+            "expected": [
+              1,
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair73_5socket_Family_17_ThaneRunes_opened.jpg",
+            "row": 4,
+            "expected": [
+              4
+            ],
+            "found": [
+              3,
+              4
+            ],
+            "fragment_positions": [],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair74_6socket_Family30_ChillingFlux_opened.jpg",
+            "row": 1,
+            "expected": [
+              6
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair82_4socket_MISSING_DB_ROW_GreaterJeweller_Chaos2_opened.jpg",
+            "row": 1,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair84_4socket_Family61_AncientControl_chain_opened.jpg",
+            "row": 1,
+            "expected": [
+              2
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair84_4socket_Family61_AncientControl_chain_opened.jpg",
+            "row": 2,
+            "expected": [
+              2
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair84_4socket_Family61_AncientControl_chain_opened.jpg",
+            "row": 7,
+            "expected": [
+              2
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair85_4socket_Family36_GreaterChaos_Exalted_Regal_opened.jpg",
+            "row": 2,
+            "expected": [
+              2
+            ],
+            "found": [
+              1,
+              2
+            ],
+            "fragment_positions": [],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair87_7socket_Family27_Alloy_chain_opened.jpg",
+            "row": 1,
+            "expected": [
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair87_7socket_Family27_Alloy_chain_opened.jpg",
+            "row": 2,
+            "expected": [
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair90_6socket_Family3_PerfectCurrency_Alloy_opened.jpg",
+            "row": 7,
+            "expected": [
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair94_5socket_Family56_RandomCurrency_SpiritGem19_opened.jpg",
+            "row": 1,
+            "expected": [
+              1,
+              3
+            ],
+            "found": [
+              1
+            ],
+            "fragment_positions": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair95_6socket_Family36_GreaterRegal_Chaos_Exalted_opened.jpg",
+            "row": 1,
+            "expected": [
+              2,
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair95_6socket_Family36_GreaterRegal_Chaos_Exalted_opened.jpg",
+            "row": 2,
+            "expected": [
+              2,
+              4
+            ],
+            "found": [
+              4
+            ],
+            "fragment_positions": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair95_6socket_Family36_GreaterRegal_Chaos_Exalted_opened.jpg",
+            "row": 4,
+            "expected": [
+              2,
+              4
+            ],
+            "found": [
+              2,
+              3,
+              4
+            ],
+            "fragment_positions": [],
+            "tp": 2,
+            "fp": 1,
+            "fn": 0,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair96_8socket_Family15_UhtredSidereus_PerfectTrans_opened.jpg",
+            "row": 1,
+            "expected": [
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair96_8socket_Family15_UhtredSidereus_PerfectTrans_opened.jpg",
+            "row": 2,
+            "expected": [
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          }
+        ]
+      },
+      "controlled_partials": {
+        "synthetic": true,
+        "naturally_partial_marks": 0,
+        "eligible_detected_source_crowns": 159,
+        "undetected_source_crowns_skipped": 104,
+        "sample_limit": null,
+        "tip_removal": {
+          "1": {
+            "cases": 429,
+            "fragment_detected": 184,
+            "full_detected": 0,
+            "unsupported": 48,
+            "other_fragment_positions": 3,
+            "other_full_positions": 15,
+            "fragment_recovery": 0.4289044289044289
+          },
+          "2": {
+            "cases": 429,
+            "fragment_detected": 362,
+            "full_detected": 0,
+            "unsupported": 48,
+            "other_fragment_positions": 3,
+            "other_full_positions": 15,
+            "fragment_recovery": 0.8438228438228438
+          },
+          "3": {
+            "cases": 143,
+            "fragment_detected": 0,
+            "full_detected": 0,
+            "unsupported": 16,
+            "other_fragment_positions": 1,
+            "other_full_positions": 5,
+            "fragment_recovery": 0.0
+          }
+        },
+        "elapsed_seconds": 113.75636877999932,
+        "limitation": "Conditional direct-fragment evidence; no family inference or cross-row consensus."
+      }
+    },
+    "current": {
+      "detector": "current",
+      "baseline_ref": null,
+      "helper_source_sha256": "d91d96560e61f4f7c2f9b13974b2e28e7f3220fe58a26a46ee742ae7ad01b98c",
+      "exposure_factors": [
+        1,
+        0.9,
+        1.1,
+        0.8,
+        1.2,
+        1.35,
+        1.5,
+        0.95,
+        1.05,
+        1.25,
+        1.075,
+        1.125,
+        1.15
+      ],
+      "elapsed_seconds": 146.02295748599863,
+      "peak_rss_bytes": 100569088,
+      "full_marks": {
+        "counts": {
+          "tp": 252,
+          "fp": 0,
+          "fn": 11,
+          "exact_rows": 241,
+          "rows": 251,
+          "precision": 1.0,
+          "recall": 0.9581749049429658
+        },
+        "errors": [
+          {
+            "source": "Pair10_9socket_Annulment_opened.png",
+            "row": 3,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair11_7socket_Family24_BreathOfAldur_opened.png",
+            "row": 3,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair12_3socket_Family70_Warding_opened.png",
+            "row": 5,
+            "expected": [
+              1,
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 2,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair13_6socket_Family36_GreaterCurrency_opened.png",
+            "row": 1,
+            "expected": [
+              5
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair13_6socket_Family36_GreaterCurrency_opened.png",
+            "row": 3,
+            "expected": [
+              5
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair19_4socket_Family52_Jeweller_Gemcutter_opened.png",
+            "row": 1,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair19_4socket_Family52_Jeweller_Gemcutter_opened.png",
+            "row": 5,
+            "expected": [
+              3
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair22_4socket_Family66_VitalFlame_opened.png",
+            "row": 6,
+            "expected": [
+              1
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair84_4socket_Family61_AncientControl_chain_opened.jpg",
+            "row": 7,
+            "expected": [
+              2
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          },
+          {
+            "source": "Pair90_6socket_Family3_PerfectCurrency_Alloy_opened.jpg",
+            "row": 7,
+            "expected": [
+              4
+            ],
+            "found": [],
+            "fragment_positions": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "exact_rows": 0,
+            "rows": 1
+          }
+        ]
+      },
+      "controlled_partials": {
+        "synthetic": true,
+        "naturally_partial_marks": 0,
+        "eligible_detected_source_crowns": 252,
+        "undetected_source_crowns_skipped": 11,
+        "sample_limit": null,
+        "tip_removal": {
+          "1": {
+            "cases": 624,
+            "fragment_detected": 299,
+            "full_detected": 0,
+            "unsupported": 132,
+            "other_fragment_positions": 0,
+            "other_full_positions": 0,
+            "fragment_recovery": 0.4791666666666667
+          },
+          "2": {
+            "cases": 624,
+            "fragment_detected": 439,
+            "full_detected": 0,
+            "unsupported": 132,
+            "other_fragment_positions": 0,
+            "other_full_positions": 0,
+            "fragment_recovery": 0.7035256410256411
+          },
+          "3": {
+            "cases": 208,
+            "fragment_detected": 0,
+            "full_detected": 0,
+            "unsupported": 44,
+            "other_fragment_positions": 0,
+            "other_full_positions": 0,
+            "fragment_recovery": 0.0
+          }
+        },
+        "elapsed_seconds": 119.55810338300216,
+        "limitation": "Conditional direct-fragment evidence; no family inference or cross-row consensus."
+      }
+    }
+  },
+  "reproduce": "python tools/audit_propagation_crowns.py --baseline-ref 36e3943 --detector both --partial-samples -1 --output crown-benchmark.json",
+  "limitations": [
+    "Known annotated rows and lattice; direct physical mark detection, not end-to-end OCR accuracy.",
+    "Synthetic partials are conditional on detected source crowns with an independently located frame; unsupported damage and undetected crowns are explicit.",
+    "Baseline and current partial cohorts differ because the current detector recognizes additional complete crowns; their partial percentages are not directly comparable.",
+    "The 61 complete original panels were also run through scan_propagation without recognition exceptions. Database ambiguity, incomplete rows and conflicting socket groups remain manual-review cases."
+  ]
+}

@@ -7,7 +7,9 @@ import unittest
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 from PoE2_Data_Logger.ocr import propagation_scan, runehelper_ocr
-from PoE2_Data_Logger.ocr.propagation_marks import PEAK_EXPOSURES, supported_peak_boxes, three_peak_boxes
+from PoE2_Data_Logger.ocr.propagation_marks import (
+    PEAK_EXPOSURES, supported_fragment_peak_boxes, supported_peak_boxes, three_peak_boxes,
+)
 
 
 class PropagationPeakTests(unittest.TestCase):
@@ -77,6 +79,19 @@ class PropagationPeakTests(unittest.TestCase):
                 image = self.crown(offsets, True)
                 ImageDraw.Draw(image).line((0, 63, 574, 63), fill=(242, 213, 144))
                 self.assertEqual(self.markers(image, [{"y1": 109, "sockets": 1}], (71, 41)), [])
+
+    def test_border_recovered_fragments_need_corroboration_and_remain_incomplete(self):
+        """Two surviving tips below a border supply tentative fragment evidence, never a full crown."""
+        image = self.crown((-9, 0), True)
+        ImageDraw.Draw(image).line((0, 63, 574, 63), fill=(242, 213, 144))
+        mask = propagation_scan._gold_mask(image)
+        rows, layout = [{"y1": 109, "sockets": 1}], (71, 41)
+        self.assertEqual(supported_fragment_peak_boxes([(1, mask)], rows, tile_layout=layout), [])
+        self.assertEqual(supported_fragment_peak_boxes([(1, mask), (1, mask)],
+                                                       rows, tile_layout=layout), [])
+        masks = [(1, mask), (1.1, mask)]
+        self.assertEqual(len(supported_fragment_peak_boxes(masks, rows, tile_layout=layout)), 1)
+        self.assertEqual(supported_peak_boxes(masks, rows, tile_layout=layout), [])
 
     def test_captured_gold_rune_artwork_is_not_an_extra_propagation_socket(self):
         """Independent capture labels reject gold strokes inside five ordinary sockets."""
