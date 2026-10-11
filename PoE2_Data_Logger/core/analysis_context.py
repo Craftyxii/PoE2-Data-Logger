@@ -43,6 +43,28 @@ ENTRIES = (
      "Export's Scan Commit # is the latest map commit projected once, not necessarily the recipe row's event. "
      "Use Scan History or stored provenance for original event links. "
      "Do not sum cumulative kill or detonated snapshots across Scan History events."),
+    ("effectiveness_analysis", "Map analysis", "Effectiveness versus loot",
+     "Effectiveness % is a recorded numeric map setting, stored as effectiveness in maps.snapshot_json; "
+     "it is not a calculated score for every rune effect. Use the map's saved settings, not current live "
+     "meta settings or repeated history snapshots. Use one observation per Map ID and take "
+     "Effectiveness % and acquired-item totals from that map's first Export row. Blank effectiveness "
+     "is unrecorded, not zero; 0 is an explicit value. Choose a defined outcome, such as Chaos Orb "
+     "quantity per map, and compare observed effectiveness levels or clearly stated ranges. "
+     "Prefer maps with approved Start and End inventories timed to bracket that same map; "
+     "flag or analyze Assumed empty baselines "
+     "separately and exclude maps without an approved End. Acquired quantities are positive inventory "
+     "gains, not direct counts of ground drops: spending, transfers and incomplete scans can affect them. "
+     "Ritual offers are not acquired loot. Compare similar maps or account for Item Rarity %, "
+     "Monster Rarity %, Pack Size %, Gear Item Rarity %, Atlas Setup ID, map/tablet modifiers, tier, "
+     "area level, biome, city, Irradiated, Ocean Map, Deli, Wisp and recorded rune chains. "
+     "Show map counts, means/medians, variation and uncertainty; sparse or inseparable settings "
+     "cannot establish an independent effectiveness effect. Normalize by recorded kills or "
+     "remnants detonated only for a relevant outcome with complete, positive denominators. "
+     "Do not divide map loot among recipe or chain-step rows: inventory gains are map-level, "
+     "so these records do not identify which individual recipe, remnant or step produced a drop. "
+     "Do not convert mixed item quantities into currency value without a separate, dated price source. "
+     "Report observed associations, missing-data exclusions and assumptions rather than claiming "
+     "effectiveness caused a change in drops or inventing unrecorded game mechanics."),
     ("kill_totals", "Aggregation", "Kills and detonated counts",
      "Normal, Magic, Rare and Unique kills are saved map totals. Unknown Unique kills remain blank. "
      "Total Kills adds the known kill categories and can therefore be a partial total when categories are missing. "

@@ -46,7 +46,7 @@ class AnalysisContextExportTests(unittest.TestCase):
         return root, rows
 
     def test_both_exports_carry_identical_sql_readable_context(self):
-        """Deliver shared propagation-analysis guidance with identical SQL, CSV and worksheet-four notes."""
+        """Deliver propagation and map-analysis guidance with identical SQL, CSV and worksheet-four notes."""
         logger.start_map()
         logger.save_currency_snapshot("end", [{"name": "Chaos Orb", "quantity": 7}])
         export_folder = Path(self.temporary.name) / "exports"
@@ -55,7 +55,7 @@ class AnalysisContextExportTests(unittest.TestCase):
         with logger._connect() as db:
             expected = self.context_rows(db)
             keys = {row[0] for row in db.execute("SELECT key FROM analysis_context")}
-            self.assertTrue({"export_sheet", "history_sheet", "map_metrics", "inventory_gains",
+            self.assertTrue({"export_sheet", "history_sheet", "map_metrics", "effectiveness_analysis", "inventory_gains",
                              "inventory_baseline", "ritual_offers", "missing_values", "recipe_ids",
                              "family_provenance", "rune_parts", "rune_chain_analysis", "timestamps",
                              "undo", "sql_provenance"} <= keys)
