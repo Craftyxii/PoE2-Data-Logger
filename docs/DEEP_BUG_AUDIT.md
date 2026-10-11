@@ -1,6 +1,6 @@
 # Deep bug audit
 
-Audit baseline: `b1deccd4c36e1ea0ce6ccf38b2179cfc2f9c3be8` (`1.3.2.9 Beta`). Fixes below are included in `1.3.2.10 Beta`.
+Audit baseline: `b1deccd4c36e1ea0ce6ccf38b2179cfc2f9c3be8` (`1.3.2.9 Beta`). Fixes below were prepared in `1.3.2.10 Beta` and published as `1.3.2.11 Beta` after correcting an outdated native test assertion.
 
 ## Confirmed defects
 
@@ -34,3 +34,5 @@ Propagation remains manually reviewed with the existing recipe-limited selectors
 The final release review additionally reproduced reset → automatic affix rediscovery → Undo through the held-tablet UI. The correction journals implicit discovery with the latest action; dedicated regressions also cover repeated discoveries and discovery without prior Undo history. All 89 affected UI, Undo, reference and waystone-recovery checks passed after that correction. An independent HUD replay verified both reset/rediscovery/Undo and New map/discovery/Undo. All 19 installer/version checks passed; all 148 changed Python functions have purpose notes.
 
 Local HUD tests use Qt offscreen on Linux. Publication is blocked until the new commit passes the separate native Windows HUD, full regression, 100-map logging/export and installer/update gates. Native interaction tests and OCR fixtures cannot exhaust every user action sequence or establish perfect live-game recognition.
+
+The first native release run stopped at the reference-reset preservation assertion: it included `undo_actions` and `sqlite_sequence`, both intentionally changed by the new reset inverse. The corrected assertion checks exactly one reset action, unchanged earlier inverses and unchanged unrelated sequences, while retaining all logging/settings preservation checks. No 1.3.2.10 installer was published.

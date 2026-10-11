@@ -1,14 +1,14 @@
 Unicode true
 ; Install the frozen runtime and shortcuts while leaving user database files
 ; outside the replaceable _internal directory.
-!define APP_VERSION "1.3.2.10"
+!define APP_VERSION "1.3.2.11"
 !define APP_CHANNEL "beta"
 !define APP_DISPLAY_VERSION "${APP_VERSION} Beta"
 !define APP_RELEASE_VERSION "${APP_VERSION}-${APP_CHANNEL}"
 !define APP_NAME "PoE2 Data Logger ${APP_DISPLAY_VERSION}"
 Name "${APP_NAME}"
 OutFile "${__FILEDIR__}\..\PoE2-Data-Logger-Setup-v${APP_RELEASE_VERSION}.exe"
-VIProductVersion "1.3.2.10"
+VIProductVersion "1.3.2.11"
 VIAddVersionKey /LANG=1033 "ProductName" "${APP_NAME}"
 VIAddVersionKey /LANG=1033 "ProductVersion" "${APP_DISPLAY_VERSION}"
 VIAddVersionKey /LANG=1033 "FileVersion" "${APP_DISPLAY_VERSION}"
@@ -86,6 +86,10 @@ Function .onInit
     StrCmp $0 "0" check_previous_reference_beta running
   check_previous_reference_beta:
     System::Call 'user32::FindWindowW(p 0, w "PoE2 Data Logger 1.3.2.9 Beta") p.r0'
+    StrCmp $0 "0" check_previous_deep_audit_beta running
+  check_previous_deep_audit_beta:
+    ; Include build-validation clients even when their release was not published.
+    System::Call 'user32::FindWindowW(p 0, w "PoE2 Data Logger 1.3.2.10 Beta") p.r0'
     StrCmp $0 "0" check_current running
   check_current:
     System::Call 'user32::FindWindowW(p 0, w "${APP_NAME}") p.r0'
@@ -160,6 +164,10 @@ Function un.onInit
     StrCmp $0 "0" check_previous_reference_beta running
   check_previous_reference_beta:
     System::Call 'user32::FindWindowW(p 0, w "PoE2 Data Logger 1.3.2.9 Beta") p.r0'
+    StrCmp $0 "0" check_previous_deep_audit_beta running
+  check_previous_deep_audit_beta:
+    ; Include build-validation clients even when their release was not published.
+    System::Call 'user32::FindWindowW(p 0, w "PoE2 Data Logger 1.3.2.10 Beta") p.r0'
     StrCmp $0 "0" check_current running
   check_current:
     System::Call 'user32::FindWindowW(p 0, w "${APP_NAME}") p.r0'

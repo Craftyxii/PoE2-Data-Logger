@@ -1,3 +1,8 @@
+# PoE2 Data Logger 1.3.2.11 Beta
+
+- Publish the 1.3.2.10 fixes after updating the native Windows reset test to require the intended Undo entry while preserving logged data, settings and earlier inverses.
+- Align beta metadata and prior-client guards; application behavior is unchanged from 1.3.2.10.
+
 # PoE2 Data Logger 1.3.2.10 Beta
 
 - Preserve currency digit evidence and distinguish count-only confirmation from name review.

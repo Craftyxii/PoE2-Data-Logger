@@ -919,7 +919,7 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.assertIsNone(QApplication.activeModalWidget())
 
     def check_reference_reset_and_raw_export(self):
-        """Use visible reset/export controls, preserving logged history, settings and older backups."""
+        """Verify native reset preserves logs and adds one Undo entry; raw exports retain complete data."""
         if self.window._overlay_enabled:
             self.tab(6)
             self.native.click(self.window.overlay_checkbox)
@@ -969,13 +969,21 @@ class NativeWindowsHUDTests(unittest.TestCase):
                          self.default_references)
         self.assertTrue(all(not after[table] for table in reference_pack._EXAMPLE_TABLES))
         preserved = set(before) - set(reference_pack._DEFAULT_TABLES) - set(reference_pack._EXAMPLE_TABLES)
+        preserved -= {"undo_actions", "sqlite_sequence"}
         before["meta"] = [row for row in before["meta"] if row[0] != "active_retired_currency_names"]
         self.assertEqual({table:before[table] for table in preserved},
                          {table:after[table] for table in preserved}, "Reset must preserve all logged data and settings")
+        # Reset's new inverse and its sequence increment are intentional. Keep
+        # every earlier inverse and every unrelated ID sequence unchanged.
+        self.assertEqual(after["undo_actions"][:-1], before["undo_actions"])
+        self.assertEqual(after["undo_actions"][-1][2], "Reset OCR references")
+        self.assertEqual([row for row in before["sqlite_sequence"] if row[0] != "undo_actions"],
+                         [row for row in after["sqlite_sequence"] if row[0] != "undo_actions"])
         self.assertEqual({path.name:path.read_bytes() for path in (store.DATA_DIR / "images").iterdir()}, images)
         self.assertIn("Default OCR references restored", self.window.reference_status.text())
         self.report["reference_reset"] = {"fixture":"Seeded custom names/icons and reviewed icon; real seed PNG/JPEG glyph learning",
             "cancel":"all database rows unchanged", "confirm":"shipped defaults restored; all five example tables empty",
+            "undo":"one Reset OCR references entry; prior inverses and unrelated ID sequences unchanged",
             "preserved_tables":sorted(preserved), "preserved_screenshots":len(images)}
         self.phase("15-reference-reset-confirm-preserves-logs")
 
