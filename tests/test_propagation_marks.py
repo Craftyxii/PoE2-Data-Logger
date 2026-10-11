@@ -1,12 +1,13 @@
 """Pixel geometry checks requiring the three propagation peaks rather than accepting a surrounding frame alone."""
 
 from pathlib import Path
+import json
 import unittest
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 from PoE2_Data_Logger.ocr import propagation_scan, runehelper_ocr
-from PoE2_Data_Logger.ocr.propagation_marks import supported_peak_boxes, three_peak_boxes
+from PoE2_Data_Logger.ocr.propagation_marks import PEAK_EXPOSURES, supported_peak_boxes, three_peak_boxes
 
 
 class PropagationPeakTests(unittest.TestCase):
@@ -20,7 +21,7 @@ class PropagationPeakTests(unittest.TestCase):
 
     def masks(self, image, *, pale=False):
         """Yield strict or pale-capable gold masks under several brightness adjustments."""
-        for factor in (1, .9, 1.1, .8, 1.2, 1.35, 1.5, .95, 1.05, 1.25):
+        for factor in PEAK_EXPOSURES:
             yield factor, propagation_scan._gold_mask(ImageEnhance.Brightness(image).enhance(factor), pale=pale)
 
     def markers(self, image, rows, layout, tile_size=38, *, pale=False):
@@ -47,6 +48,54 @@ class PropagationPeakTests(unittest.TestCase):
                 self.assertEqual(len(boxes), 1)
                 self.assertAlmostEqual(boxes[0][0], 71, delta=1)
                 self.assertAlmostEqual(boxes[0][1], 68, delta=2)
+
+    def test_recipe_border_recovery_needs_distinct_exposure_support(self):
+        """Trace an overlapping gold line through masking without trusting one recovered sample."""
+        image = self.crown((-9, 0, 9), True)
+        ImageDraw.Draw(image).line((0, 63, 574, 63), fill=(242, 213, 144))
+        mask = propagation_scan._gold_mask(image)
+        rows, layout = [{"y1": 109, "sockets": 1}], (71, 41)
+        for masks in ([(1, mask)], [(1, mask), (1, mask)]):
+            self.assertEqual(supported_peak_boxes(masks, rows, tile_layout=layout), [])
+        boxes = supported_peak_boxes([(1, mask), (1.1, mask)], rows, tile_layout=layout)
+        self.assertEqual(len(boxes), 1)
+        self.assertAlmostEqual(boxes[0][0], 71, delta=1)
+
+    def test_border_beside_a_crown_does_not_erase_native_evidence(self):
+        """A line outside the socket footprint cannot change its native confidence assignment."""
+        image = self.crown((-9, 0, 9), True)
+        ImageDraw.Draw(image).line((200, 66, 450, 66), fill=(242, 213, 144))
+        boxes = supported_peak_boxes([(1, propagation_scan._gold_mask(image))],
+                                     [{"y1": 109, "sockets": 1}], tile_layout=(71, 41))
+        self.assertEqual(len(boxes), 1)
+        self.assertAlmostEqual(boxes[0][0], 71, delta=1)
+
+    def test_border_and_highlight_cannot_supply_missing_crown_tips(self):
+        """Overlapping borders preserve rejection of frames and one/two-tip fragments."""
+        for offsets in ((), (0,), (-9, 9)):
+            with self.subTest(offsets=offsets):
+                image = self.crown(offsets, True)
+                ImageDraw.Draw(image).line((0, 63, 574, 63), fill=(242, 213, 144))
+                self.assertEqual(self.markers(image, [{"y1": 109, "sockets": 1}], (71, 41)), [])
+
+    def test_captured_gold_rune_artwork_is_not_an_extra_propagation_socket(self):
+        """Independent capture labels reject gold strokes inside five ordinary sockets."""
+        root = Path(__file__).resolve().parent / "fixtures/propagation_crowns"
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        names = {"Pair38-row04.png", "Pair73-row04.png", "Pair85-row02.png",
+                 "Pair87-row04.png", "Pair95-row04.png"}
+        rows = [row for row in manifest["rows"] if row["image"] in names]
+        self.assertEqual(len(rows), len(names))
+        for row in rows:
+            with self.subTest(image=row["image"]):
+                with Image.open(root / row["image"]) as source:
+                    image = source.convert("RGB")
+                pitch, first = row["pitch"], row["first_x"]
+                boxes = self.markers(image, [{"y1": row["tile_top"] + pitch,
+                                             "sockets": row["sockets"]}],
+                                     (first, pitch), pitch * 38 / 41, pale=True)
+                self.assertEqual(sorted({round((box[0] - first) / pitch) + 1 for box in boxes}),
+                                 row["full_positions"])
 
     def test_ordinary_highlight_and_one_or_two_peaks_never_qualify(self):
         """Verify frames and incomplete peak groups never qualify as crowns."""

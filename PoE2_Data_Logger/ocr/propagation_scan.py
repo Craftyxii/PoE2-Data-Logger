@@ -19,7 +19,7 @@ from PoE2_Data_Logger.core import logger_store as logger
 from PoE2_Data_Logger.core import ocr_sensitivity
 from PoE2_Data_Logger.ocr import opened_scan, runehelper_ocr
 from PoE2_Data_Logger.ocr.propagation_marks import (
-    supported_fragment_peak_boxes, supported_partial_peak_boxes, supported_peak_boxes, three_peak_boxes,
+    PEAK_EXPOSURES, supported_fragment_peak_boxes, supported_partial_peak_boxes, supported_peak_boxes, three_peak_boxes,
 )
 
 
@@ -528,7 +528,7 @@ def scan_propagation(image: Image.Image | Path, strictness=ocr_sensitivity.DEFAU
                 pixels = np.asarray(panel, dtype=np.float32)
                 peak_masks = [(factor, _gold_mask(panel if factor == 1 else Image.fromarray(
                     np.clip(pixels * factor, 0, 255).astype(np.uint8)), pale=True))
-                    for factor in (1, .9, 1.1, .8, 1.2, 1.35, 1.5, .95, 1.05, 1.25)]
+                    for factor in PEAK_EXPOSURES]
             crown_rows = [{**row, "sockets": entry["sockets"]}]
             crowns = supported_peak_boxes(peak_masks, crown_rows,
                                           tile_layout=gray_layout,

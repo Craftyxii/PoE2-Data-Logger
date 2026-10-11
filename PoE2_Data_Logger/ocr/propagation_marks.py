@@ -4,6 +4,35 @@ from __future__ import annotations
 
 import numpy as np
 
+# A narrow intermediate bracket recovers compressed pale tips which disappear
+# between the original 1.05/1.1/1.2 samples. It is used only above verified
+# propagation recipe rows; samples still supply no additional row votes.
+PEAK_EXPOSURES = (1, .9, 1.1, .8, 1.2, 1.35, 1.5, .95, 1.05, 1.25,
+                  1.075, 1.125, 1.15)
+
+
+def _peak_band(pixels, bottom, band_height, tile_size):
+    """Isolate peaks below an overlapping recipe border while retaining their full geometry.
+
+    Real captures can place a horizontal recipe border immediately above the
+    three crown tips. Ignore that border and pixels above it, never pixels
+    inside the remaining peaks. A border at their baseline leaves too little
+    vertical evidence and therefore cannot turn a plain frame into a crown.
+    """
+    band = pixels[max(0, bottom - band_height):bottom]
+    last_border = -1
+    for index, line in enumerate(band):
+        active = np.flatnonzero(line)
+        if not active.size:
+            continue
+        runs = np.split(active, np.flatnonzero(np.diff(active) > 1) + 1)
+        if any(len(run) >= tile_size * .5 for run in runs):
+            last_border = index
+    if last_border >= 0:
+        band = band.copy()
+        band[:last_border + 1] = False
+    return band
+
 
 def supported_peak_boxes(masks, recipe_rows, *, tile_layout, tile_size=38):
     """Retain native crowns or crowns verified at two exposure samples."""
@@ -68,18 +97,31 @@ def _fragment_peak_boxes(mask, recipe_rows, *, tile_layout, tile_size):
 
 
 def _supported_boxes(masks, recipe_rows, tile_layout, tile_size, finder):
-    """Merge nearby boxes across exposures, retaining native or multiply supported detections."""
+    """Merge exposure evidence; crowns recovered below a border need corroboration.
+
+    Native isolated tips retain their usual single-sample support. Removing
+    an overlapping border can expose frame/glyph glints, so those recovered
+    candidates must survive at least two exposure samples.
+    """
     groups = []
     for factor, mask in masks:
         for box in finder(mask, recipe_rows, tile_layout=tile_layout, tile_size=tile_size):
+            pixels = np.asarray(mask, dtype=bool)
+            height = max(4, round(6 * tile_size / 38))
+            bottom = round(box[1])
+            left = max(0, round(box[0] - tile_size / 2))
+            right = min(pixels.shape[1], round(box[0] + tile_size / 2))
+            local = pixels[:, left:right]
+            native = factor == 1 and (finder is not three_peak_boxes or np.array_equal(
+                local[max(0, bottom - height):bottom], _peak_band(local, bottom, height, tile_size)))
             match = next((entry for entry in groups if abs(box[0] - entry[0][0]) < 6
                           and abs(box[1] - entry[0][1]) < 8), None)
             if match is None:
-                groups.append([box, {factor}, factor == 1])
+                groups.append([box, {factor}, native])
             else:
                 match[1].add(factor)
                 if factor == 1:
-                    match[0], match[2] = box, True
+                    match[0], match[2] = box, native
     return [box for box, factors, native in groups if native or len(factors) >= 2]
 
 
@@ -148,6 +190,21 @@ def _partial_peak_boxes(mask, recipe_rows, *, tile_layout, tile_size):
 
 
 def three_peak_boxes(mask, recipe_rows, *, tile_layout=None, tile_size=38):
+    """Keep isolated three-tip crowns and recover tips below an overlapping border.
+
+    The original band remains independent evidence: a border beside a crown
+    must not erase its tips. Recovery only adds distinct anchors; exposure
+    corroboration remains the responsibility of supported_peak_boxes.
+    """
+    original = _three_peak_boxes(mask, recipe_rows, tile_layout=tile_layout,
+                                 tile_size=tile_size, recover_borders=False)
+    recovered = _three_peak_boxes(mask, recipe_rows, tile_layout=tile_layout,
+                                  tile_size=tile_size, recover_borders=True)
+    return original + [box for box in recovered if not any(
+        abs(box[0] - old[0]) < 6 and abs(box[1] - old[1]) < 8 for old in original)]
+
+
+def _three_peak_boxes(mask, recipe_rows, *, tile_layout, tile_size, recover_borders):
     """Return crown tile anchors from three distinct, regularly spaced peaks.
 
     The caller supplies a gold-colour mask from a panel normalized to 575
@@ -168,9 +225,19 @@ def three_peak_boxes(mask, recipe_rows, *, tile_layout=None, tile_size=38):
     join_gap = max(2, int(3 * tile_size / 38))
     candidates = []
     for bottom in range(2, pixels.shape[0]):
-        if min(abs(bottom - top) for top in crown_tops) > 5:
+        nearest_top = min(crown_tops, key=lambda top: abs(bottom - top))
+        # The crown sits above its socket frame. Searching equally far below
+        # that frame admitted three gold rune strokes inside the artwork.
+        # Allow a resampled pixel plus its rounding half-pixel, retaining the existing
+        # tolerance above it for OCR bounds and a raised gold frame.
+        if abs(bottom - nearest_top) > 5 or bottom > nearest_top + 1.5:
             continue
         band = pixels[max(0, bottom - band_height):bottom]
+        if recover_borders:
+            isolated = _peak_band(pixels, bottom, band_height, tile_size)
+            if np.array_equal(band, isolated):
+                continue
+            band = isolated
         columns = band.sum(axis=0)
         active = np.flatnonzero(columns)
         if active.size < 6:
