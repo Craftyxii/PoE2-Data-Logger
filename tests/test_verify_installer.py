@@ -205,12 +205,12 @@ class ReleasePackagingTests(unittest.TestCase):
         current = running_client_titles("1.3.1.3", True)
         self.assertIn("PoE2 Data Logger 1.3.1.2 Beta", current)
         self.assertEqual(current[-1], "PoE2 Data Logger 1.3.1.3 Beta")
-        current_beta = running_client_titles("1.3.2.8", True)
+        current_beta = running_client_titles("1.3.2.9", True)
         self.assertIn("PoE2 Data Logger 1.3.2.4 Beta", current_beta)
         self.assertIn("PoE2 Data Logger 1.3.2.5 Beta", current_beta)
         self.assertIn("PoE2 Data Logger 1.3.2.6 Beta", current_beta)
         self.assertIn("PoE2 Data Logger 1.3.2.7 Beta", current_beta)
-        self.assertEqual(current_beta[-1], "PoE2 Data Logger 1.3.2.8 Beta")
+        self.assertEqual(current_beta[-1], "PoE2 Data Logger 1.3.2.9 Beta")
 
     def test_beta_publication_uses_versioned_notes_without_replacing_stable_latest(self):
         """Require the new beta's reviewable release notes and preserve the stable latest release."""
@@ -218,8 +218,8 @@ class ReleasePackagingTests(unittest.TestCase):
         beta = next(line for line in workflow.splitlines() if "if ($env:PRERELEASE -eq 'True')" in line)
         self.assertIn("'--prerelease'", beta)
         self.assertIn("'--latest=false'", beta)
-        self.assertIn("'--notes-file', 'docs/RELEASE_1.3.2.8.md'", beta)
-        self.assertTrue((self.root / "docs/RELEASE_1.3.2.8.md").is_file())
+        self.assertIn("'--notes-file', 'docs/RELEASE_1.3.2.9.md'", beta)
+        self.assertTrue((self.root / "docs/RELEASE_1.3.2.9.md").is_file())
 
 
 class RunningClientGuardTests(unittest.TestCase):

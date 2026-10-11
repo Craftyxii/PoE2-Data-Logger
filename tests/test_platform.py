@@ -127,10 +127,15 @@ class PlatformTests(unittest.TestCase):
         logger.validate_scan_context(result)
 
     def test_cancelled_hotkey_result_is_discarded_and_capture_lock_released(self):
-        """Verify cancelled hotkey result is discarded and capture lock released."""
+        """Cancel a real capture reservation, suppress its result and release only its owned lock."""
         manager = hotkey.HotkeyManager(supported=False)
-        self.assertTrue(manager._capture_lock.acquire(False))
-        revision = manager._capture_revision
+        # Admission assigns a revision and watchdog owner as well as acquiring
+        # the lock; a bare lock acquisition does not represent a live capture.
+        with patch.object(manager, "_capture"):
+            manager.capture("remnant")
+        revision = manager._capture_owner
+        self.assertIsNotNone(revision)
+        self.assertTrue(manager._capture_lock.locked())
         manager.cancel_capture()
         manager._finish_capture({"mode": "opened", "error": "", "result": {}}, b"capture", revision)
         self.assertIsNone(manager.status()["latest"])

@@ -1,14 +1,14 @@
 Unicode true
 ; Install the frozen runtime and shortcuts while leaving user database files
 ; outside the replaceable _internal directory.
-!define APP_VERSION "1.3.2.8"
+!define APP_VERSION "1.3.2.9"
 !define APP_CHANNEL "beta"
 !define APP_DISPLAY_VERSION "${APP_VERSION} Beta"
 !define APP_RELEASE_VERSION "${APP_VERSION}-${APP_CHANNEL}"
 !define APP_NAME "PoE2 Data Logger ${APP_DISPLAY_VERSION}"
 Name "${APP_NAME}"
 OutFile "${__FILEDIR__}\..\PoE2-Data-Logger-Setup-v${APP_RELEASE_VERSION}.exe"
-VIProductVersion "1.3.2.8"
+VIProductVersion "1.3.2.9"
 VIAddVersionKey /LANG=1033 "ProductName" "${APP_NAME}"
 VIAddVersionKey /LANG=1033 "ProductVersion" "${APP_DISPLAY_VERSION}"
 VIAddVersionKey /LANG=1033 "FileVersion" "${APP_DISPLAY_VERSION}"

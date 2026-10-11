@@ -48,7 +48,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.8 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.9 Beta"
 SCAN_TIMEOUT_MS = 90000
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
