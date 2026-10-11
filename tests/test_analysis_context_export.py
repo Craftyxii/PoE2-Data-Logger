@@ -4,6 +4,7 @@ from contextlib import closing
 import csv
 import io
 from pathlib import Path
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -45,8 +46,32 @@ class AnalysisContextExportTests(unittest.TestCase):
                 for row in root.findall("s:sheetData/s:row", namespace)]
         return root, rows
 
+    def test_every_current_export_field_has_interpretation_guidance(self):
+        """Catch new unexplained export fields, including phase-prefixed settings and dynamic Atlas columns."""
+        patterns = [(key, re.compile(pattern)) for key, pattern, _, _ in analysis_context.COLUMN_GUIDANCE]
+        item_headers = set(logger.map_summary_item_headers())
+        producers = (logger.export_primary_csv, logger.export_atlas_csv, logger.export_record_history_csv,
+                     logger.export_currency_csv, logger.export_maps_csv, logger.export_ritual_csv,
+                     logger.export_map_summary_csv, logger.export_commits_csv, logger.export_csv,
+                     logger.export_all_csv)
+        for producer in producers:
+            with self.subTest(export=producer.__name__):
+                headers = next(csv.reader(io.StringIO(producer().decode("utf-8-sig"))))
+                unexplained = []
+                for header in headers:
+                    if header in item_headers:
+                        continue
+                    matches = [key for key, pattern in patterns if pattern.fullmatch(header)]
+                    if matches == ["field_phase_settings"]:
+                        underlying = header.split(" ", 1)[1]
+                        matches = [key for key, pattern in patterns
+                                   if key != "field_phase_settings" and pattern.fullmatch(underlying)]
+                    if not matches:
+                        unexplained.append(header)
+                self.assertEqual(unexplained, [], "Every current exported field needs a meaning and analysis rule.")
+
     def test_both_exports_carry_identical_sql_readable_context(self):
-        """Deliver propagation and map-analysis guidance with identical SQL, CSV and worksheet-four notes."""
+        """Deliver header mappings and analysis rules with identical SQL, CSV and worksheet-four notes."""
         logger.start_map()
         logger.save_currency_snapshot("end", [{"name": "Chaos Orb", "quantity": 7}])
         export_folder = Path(self.temporary.name) / "exports"
@@ -55,10 +80,14 @@ class AnalysisContextExportTests(unittest.TestCase):
         with logger._connect() as db:
             expected = self.context_rows(db)
             keys = {row[0] for row in db.execute("SELECT key FROM analysis_context")}
-            self.assertTrue({"export_sheet", "history_sheet", "map_metrics", "effectiveness_analysis", "inventory_gains",
+            self.assertTrue({"export_sheet", "history_sheet", "map_metrics", "analysis_method", "effectiveness_analysis", "inventory_gains",
                              "inventory_baseline", "ritual_offers", "missing_values", "recipe_ids",
                              "family_provenance", "rune_parts", "rune_chain_analysis", "timestamps",
                              "undo", "sql_provenance"} <= keys)
+            saved_guides = {row[0]: row[1] for row in db.execute("SELECT key,guidance FROM analysis_context")}
+            for key, pattern, _, guidance in analysis_context.COLUMN_GUIDANCE:
+                self.assertEqual(saved_guides[key],
+                                 f"Column headers (full-match regular expression): {pattern}. {guidance}")
         result = logger.save_export_file("sqlite3")
         with closing(sqlite3.connect(result["path"])) as exported:
             self.assertEqual(exported.execute("PRAGMA integrity_check").fetchone()[0], "ok")
