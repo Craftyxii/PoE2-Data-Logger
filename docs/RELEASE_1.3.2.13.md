@@ -23,7 +23,7 @@ See the [reproducible accuracy report](PROPAGATION_CROWN_ACCURACY_1.3.2.13.json)
 
 ## Validation
 
-Final source and native release gates are in progress:
+Installer publication requires the following source and native release gates:
 
 - Independent captured-mark and controlled partial benchmarks completed; pixel integrity, denominators, cropped/scaled captures and false-mark controls are regression-tested.
 - Actual worker cancellation, timeout, crash, queue admission, cleanup and subsequent-scan recovery.
