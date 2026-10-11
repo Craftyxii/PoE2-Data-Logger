@@ -670,13 +670,17 @@ class HundredMapSession(unittest.TestCase):
         self.check(self.w.chain_list.count(), 0, "propagation:completion-clears-chain-list")
         self.check([field.text() for field in self.w.rune_inputs], [""] * len(self.w.rune_inputs), "propagation:chain-draft-cleared")
         # Use the normal expedition selector to inspect the retained final
-        # chain. Completed parts are readable but their structure is locked.
+        # chain. Completed parts remain correctable; completion cannot run twice.
         self.choose(self.w.expedition, 1)
         self.check(logger.get_state()["chain"], steps, "propagation:completed-history-retained")
         self.check(logger.get_state()["chain_completed"], True, "propagation:completed-chain-locked")
-        self.check(all(not self.w.expedition_chain_table.cellWidget(row, column).isEnabled()
+        self.check(all(self.w.expedition_chain_table.cellWidget(row, column).isEnabled()
                        for row in range(2) for column in (1, 2)), True,
-                   "propagation:completed-rune-dropdowns-locked")
+                   "propagation:completed-rune-dropdowns-correctable")
+        self.check(self.w.expedition_discard_chain_button.isEnabled(), True,
+                   "propagation:completed-chain-discard-available")
+        self.check(self.w.expedition_discard_chain_step_button.isEnabled(), True,
+                   "propagation:completed-last-step-discard-without-selection")
         self.check(self.w.expedition_complete_chain_button.isEnabled(), False,
                    "propagation:cannot-complete-chain-twice")
         self.choose(self.w.expedition, 2)

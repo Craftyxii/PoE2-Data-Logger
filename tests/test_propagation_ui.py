@@ -87,6 +87,36 @@ class PropagationUITests(unittest.TestCase):
         self.assertTrue(approve.isEnabled())
         approve.click()
 
+    def test_fragment_recovery_keeps_dropdown_options_and_requires_manual_approval(self):
+        """Send real backend fragment consensus through unchanged dropdowns and explicit row approval."""
+        from tests import test_propagation_ocr as fixtures
+        helper = fixtures.PropagationOCRTests()
+        helper.glyph = Image.new("RGB", (29, 29), "black")
+        image, rows = helper.family_panel({})
+        helper.fragment(image, 1, 2)
+        helper.fragment(image, 4, 2)
+        reading = {**helper.scan(image, rows), **logger.scan_context()}
+        self.assertEqual(reading["position_source"], "fragment_consensus")
+        before = logger.get_state()
+        self.window._propagation_read(reading, self.raw.getvalue())
+        held = logger.get_state()
+        for key in ("chain", "detonated", "scan_commit_count"):
+            self.assertEqual(held[key], before[key])
+        row = self.window.propagation_recipe_table.currentRow()
+        fields = self.window._propagation_row_inputs[row]
+        with logger._connect() as db:
+            combo = db.execute("SELECT combo FROM recipes WHERE name=?",
+                               (reading["selected_recipe"],)).fetchone()[0].split("+")
+        # The recovered selection changes; the existing recipe-only menu
+        # still contains exactly the same socket choices and optional blank.
+        for field in fields:
+            self.assertEqual([field.itemText(index) for index in range(1, field.count())],
+                             [rune.strip() for rune in combo])
+        self.assertEqual(fields[0].currentText(), combo[1].strip())
+        self.approve_current_recipe()
+        self.assertEqual(self.saved_parts(), [(combo[1].strip(), "")])
+        self.assertEqual(logger.get_state()["detonated"], 1)
+
     def saved_parts(self):
         """Return the persisted rune pairs for the currently selected chain."""
         return [(part["rune1"], part["rune2"]) for part in logger.get_state()["chain"]]
@@ -372,8 +402,14 @@ class PropagationUITests(unittest.TestCase):
         self.window.header_expedition.setCurrentIndex(self.window.header_expedition.findData(1))
         self.assertTrue(logger.get_state()["chain_completed"])
         self.assertEqual(self.saved_parts(), [("Rebirth", "Rebirth")])
-        self.assertFalse(table.cellWidget(0, 1).isEnabled())
-        self.assertFalse(table.cellWidget(0, 2).isEnabled())
+        self.assertTrue(table.cellWidget(0, 1).isEnabled())
+        self.assertTrue(table.cellWidget(0, 2).isEnabled())
+        table.cellWidget(0, 1).setCurrentText("Time")
+        self.assertTrue(self.window.expedition_save_chain_button.isEnabled())
+        self.window.expedition_save_chain_button.click()
+        self.assertEqual(self.saved_parts(), [("Time", "Rebirth")])
+        self.assertTrue(logger.get_state()["chain_completed"])
+        self.assertEqual(logger.get_state()["detonated"], 1)
         self.assertFalse(self.window.header_complete_chain_button.isEnabled())
 
     def test_pending_currency_blocks_header_completion_until_review_is_rejected(self):
@@ -893,7 +929,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertEqual(self.saved_parts(), [])
 
     def test_real_scaled_capture_saves_correct_rune_and_supports_manual_correction(self):
-        """Verify real scaled capture saves correct rune and supports manual correction."""
+        """Recover the correct rune at both scales while retaining editable selectors and explicit approval."""
         from PIL import ImageDraw, ImageEnhance
         from PoE2_Data_Logger.ocr import propagation_scan, runehelper_ocr
 
@@ -921,10 +957,14 @@ class PropagationUITests(unittest.TestCase):
                 self.assertEqual(logger.get_state()["detonated"], 1)
                 self.assertIsNone(self.window.pending_review_kind)
             else:
-                self.assertFalse(reading["can_use"])
+                self.assertTrue(reading["can_use"])
+                self.assertEqual((reading["runes"], reading["positions"]), (["Tidal"], [3]))
                 self.assertEqual(logger.get_state()["detonated"], 1)
+                self.assertEqual(self.saved_parts(), [("Tidal", "")])
                 row = self.window.propagation_recipe_table.currentRow()
                 self.assertEqual(self.window.propagation_recipe_table.item(row, 0).text(), "Regal Orb x3")
+                self.assertTrue(self.recipe_action(row).isEnabled())
+                self.select_row_slots(row, None)
                 self.assertFalse(self.recipe_action(row).isEnabled())
                 self.select_row_slots(row, 2)
                 self.assertTrue(self.recipe_action(row).isEnabled())

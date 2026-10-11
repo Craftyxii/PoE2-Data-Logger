@@ -36,7 +36,8 @@ def run_module_batches(root, modules, *, batch_size=20):
                 child = json.loads(report.read_text(encoding="utf-8"))
                 if (not isinstance(child, dict) or not isinstance(child.get("successful"), bool)
                         or any(type(child.get(key)) is not int or child[key] < 0
-                               for key in ("tests", "failures", "errors", "skipped"))):
+                               for key in ("tests", "failures", "errors", "skipped"))
+                        or child["tests"] == 0):
                     child = None
             except (OSError, ValueError, TypeError):
                 pass
@@ -63,15 +64,19 @@ def run_module_batches(root, modules, *, batch_size=20):
 
 
 def run_selected_tests(root, *, pattern=None, modules=None):
-    """Run a targeted pattern or internal module batch with ordinary unittest and unchanged Qt lifetimes."""
+    """Reject selectors without tests before running a targeted suite with unchanged Qt lifetimes."""
     with tempfile.TemporaryDirectory(prefix="poe2-regression-data-", ignore_cleanup_errors=True) as test_data:
         # Smoke readers consult OCR settings before an individual fixture starts.
         os.environ.setdefault("RUNESHAPE_SCAN_DATA_DIR", test_data)
-        if modules is None:
-            suite = unittest.defaultTestLoader.discover(str(root / "tests"), pattern=pattern)
-        else:
-            suite = unittest.TestSuite(unittest.defaultTestLoader.discover(str(root / "tests"), pattern=name)
-                                       for name in modules)
+        selections = [pattern] if modules is None else modules
+        suites = [unittest.defaultTestLoader.discover(str(root / "tests"), pattern=name)
+                  for name in selections]
+        empty = [name for name, suite in zip(selections, suites) if suite.countTestCases() == 0]
+        if empty or not suites:
+            print(f"No tests matched selectors: {', '.join(empty) or '(empty selection)'}", file=sys.stderr)
+            return {"tests": 0, "failures": 0, "errors": max(1, len(empty)),
+                    "skipped": 0, "successful": False}
+        suite = unittest.TestSuite(suites)
         result = unittest.TextTestRunner(verbosity=2).run(suite)
         if os.environ.get("GITHUB_ACTIONS") == "true":
             for test, trace in result.failures + result.errors:

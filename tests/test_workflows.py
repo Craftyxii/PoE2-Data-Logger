@@ -75,7 +75,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(row["Deferred"], "True")
 
     def test_workbook_numeric_research_fields_and_atlas_sheet(self):
-        """Verify workbook numeric research fields and Atlas sheet."""
+        """Verify numeric research fields and preserve data-sheet indices beside analysis notes."""
         logger.save_ritual_page([{"category": "Omen", "name": "Omen of Whittling", "quantity": 3,
                                  "deferred": True, "tribute": 4000}], tribute_available=1234, rerolls_remaining=2)
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
@@ -83,7 +83,7 @@ class WorkflowTests(unittest.TestCase):
             ns = {"s": workbook_export.NS}
             workbook = ET.fromstring(archive.read("xl/workbook.xml"))
             self.assertEqual([row.get("name") for row in workbook.findall("s:sheets/s:sheet", ns)],
-                             ["Export", "Atlas Character Settings", "Scan History"])
+                             ["Export", "Atlas Character Settings", "Scan History", "Analysis Context"])
             sheet = ET.fromstring(archive.read("xl/worksheets/sheet3.xml"))
             rows = sheet.findall("s:sheetData/s:row", ns)
             headers = {cell.get("r").rstrip("1"): "".join(cell.itertext()) for cell in rows[0]}

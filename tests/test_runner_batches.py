@@ -50,7 +50,7 @@ class RunnerBatchTests(unittest.TestCase):
         passed = {"tests": 2, "failures": 0, "errors": 0, "skipped": 0, "successful": True}
         cases = [(139, passed), (-11, None), (0, None), (0, {"tests": "invalid"}),
                  (0, {**passed, "failures": 1}), (0, {**passed, "errors": 1}),
-                 (0, {**passed, "successful": False})]
+                 (0, {**passed, "successful": False}), (0, {**passed, "tests": 0})]
         for returncode, report in cases:
             with self.subTest(returncode=returncode, report=report):
                 def child(command, **_arguments):
@@ -99,6 +99,41 @@ class RunnerBatchTests(unittest.TestCase):
                     patch.object(run_tests, "run_module_batches", side_effect=AssertionError("Target was batched")):
                 self.assertEqual(run_tests.main(["--pattern", pattern]), 0)
                 self.assertEqual(selected.call_args.kwargs, {"pattern": pattern, "modules": None})
+
+    def test_unmatched_target_returns_nonzero_and_failed_summary(self):
+        """Reject a typo in a targeted filename instead of reporting a zero-test success."""
+        with tempfile.TemporaryDirectory() as folder:
+            report = Path(folder) / 'result.json'
+            with patch.object(unittest.defaultTestLoader, 'discover', return_value=unittest.TestSuite()), \
+                    redirect_stderr(io.StringIO()):
+                code = run_tests.main(['--pattern', 'test_missing_scan.py', '--summary-file', str(report)])
+            summary = json.loads(report.read_text(encoding='utf-8'))
+        self.assertEqual(code, 1)
+        self.assertEqual(summary, {'tests': 0, 'failures': 0, 'errors': 1,
+                                  'skipped': 0, 'successful': False})
+
+    def test_one_unmatched_module_blocks_a_mixed_target_before_any_tests_run(self):
+        """Prevent a valid selector from hiding an unmatched selector in the same request."""
+        executed = []
+        valid = unittest.TestSuite([unittest.FunctionTestCase(lambda: executed.append(True))])
+        with patch.object(unittest.defaultTestLoader, 'discover', side_effect=[valid, unittest.TestSuite()]), \
+                redirect_stderr(io.StringIO()):
+            summary = run_tests.run_selected_tests(Path('unused'),
+                                                  modules=['test_valid.py', 'test_missing.py'])
+        self.assertFalse(summary['successful'])
+        self.assertEqual(summary['errors'], 1)
+        self.assertEqual(executed, [])
+
+    def test_valid_target_executes_its_tests_and_reports_success(self):
+        """Keep ordinary filename and wildcard selection functional after coverage guards."""
+        executed = []
+        valid = unittest.TestSuite([unittest.FunctionTestCase(lambda: executed.append(True))])
+        with patch.object(unittest.defaultTestLoader, 'discover', return_value=valid), \
+                redirect_stderr(io.StringIO()):
+            summary = run_tests.run_selected_tests(Path('unused'), pattern='test_fixture_*.py')
+        self.assertEqual(executed, [True])
+        self.assertEqual(summary, {'tests': 1, 'failures': 0, 'errors': 0,
+                                  'skipped': 0, 'successful': True})
 
 
 if __name__ == "__main__":

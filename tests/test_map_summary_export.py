@@ -228,9 +228,9 @@ class MapSummaryExportTests(unittest.TestCase):
                 return proxy.connection.execute(sql, *arguments)
 
         @contextmanager
-        def interleaved_connect():
-            """Yield the proxy around the original logger connection."""
-            with original_connect() as db:
+        def interleaved_connect(**options):
+            """Forward connection options while yielding the interleaving reader proxy."""
+            with original_connect(**options) as db:
                 yield Connection(db)
 
         with patch.object(logger, "_connect", interleaved_connect):

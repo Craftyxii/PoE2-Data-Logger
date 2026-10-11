@@ -257,9 +257,9 @@ class CurrencyEndOnlyExportTests(unittest.TestCase):
                 return proxy.connection.execute(sql, *arguments)
 
         @contextmanager
-        def interleaved_connect():
-            """Yield a proxied logger connection that injects an approval during export."""
-            with original_connect() as db:
+        def interleaved_connect(**options):
+            """Forward connection options while injecting an approval during export."""
+            with original_connect(**options) as db:
                 yield Connection(db)
 
         with patch.object(logger, "_connect", interleaved_connect):

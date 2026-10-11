@@ -84,6 +84,9 @@ def reset_to_defaults():
         # Explicitly revived retired names are learned catalog state, not a
         # profile preference. Leave every other metadata key untouched.
         db.execute("DELETE FROM meta WHERE key='active_retired_currency_names'")
+        # Restored recipes reuse their identities; logged custom IDs remain
+        # available without returning removed recipes to the active catalog.
+        logger._sync_recipe_ids(db)
     return {"reference_rows": sum(map(len, defaults.values())), "removed_examples": removed}
 
 
@@ -209,7 +212,7 @@ def save_export_file(folder):
 
 
 def export_pack():
-    """Package reference tables, labelled examples and seed screenshots from one read transaction.
+    """Package references with stable recipe IDs, examples and seed screenshots from one read transaction.
 
     Verify stored image hashes and retain learned PNG bytes, then enforce the
     manifest, image-count and size limits used by the importer.
@@ -230,6 +233,11 @@ def export_pack():
             "item_names": "SELECT name FROM item_names ORDER BY name",
         }.items():
             tables[table] = [dict(row) for row in db.execute(query)]
+        # ID derivation also covers fixtures/direct catalog inserts without
+        # writing during this consistent reference export snapshot.
+        recipe_ids = dict(db.execute("SELECT recipe_name,recipe_id FROM recipe_ids"))
+        for recipe in tables["recipes"]:
+            recipe["recipe_id"] = recipe_ids.get(recipe["name"]) or logger._recipe_identifier(recipe["name"])
         tables["glyphs"] = [{"sha256": row[0], "rune": row[1],
                               "vector": base64.b64encode(row[2]).decode("ascii")}
                              for row in db.execute("SELECT image_sha256,seed_rune,vector FROM reviewed_glyphs")]
@@ -365,7 +373,7 @@ def _inspect(path):
 
 
 def import_pack(path, replace_existing=False):
-    """Apply validated references in one write transaction, ignoring collisions by default.
+    """Import references and verify supplied recipe IDs atomically, accepting older packs without IDs.
 
     Optional replacement updates supported reference records; recipe/seed links,
     labels and glyph vectors are checked. Remove newly created screenshot files
@@ -384,6 +392,10 @@ def import_pack(path, replace_existing=False):
             for row in data["recipes"]:
                 name = _name(row["name"])
                 name = _existing_recipe(db, name) or name
+                # Older packs omit IDs; current packs must carry the stable
+                # identity for this canonical name, never a conflicting link.
+                if row.get("recipe_id") is not None and row["recipe_id"] != logger._recipe_identifier(name):
+                    raise ValueError("Reference recipe ID does not match its canonical name.")
                 sockets = logger._integer(row["sockets"], "Recipe sockets", 2, 10)
                 combo = _name(row["combo"], 500)
                 runes = [part.strip() for part in combo.split("+")]
@@ -403,6 +415,7 @@ def import_pack(path, replace_existing=False):
                 counts["recipes"] += result.rowcount
                 if result.rowcount:
                     changed_recipes.add(name)
+                logger._ensure_recipe_id(db, name)
             for row in data["families"]:
                 number = logger._integer(row["id"], "Family", 1, 9999)
                 top = logger._integer(row["top_socket"], "Top socket", 3, 10)

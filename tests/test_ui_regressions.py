@@ -473,12 +473,13 @@ class UIRegressionTests(unittest.TestCase):
             self.assertEqual([tuple(row) for row in db.execute("SELECT * FROM commits ORDER BY number")], history)
 
     def test_failed_undo_preserves_pending_draft(self):
-        """Verify failed undo preserves pending draft."""
+        """Preserve a held waystone correction when the saved action cannot be undone."""
         logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 7}])
         self.window._review_pending("waystone", "Review waystone")
         self.window.waystone.setText("87")
-        with self.assertRaisesRegex(ValueError, "saved activity"):
-            self.window.undo_map()
+        with patch.object(logger, "undo_last_action", side_effect=ValueError("Cannot undo this action")):
+            with self.assertRaisesRegex(ValueError, "Cannot undo"):
+                self.window.undo_map()
         self.assertEqual(self.window.pending_review_kind, "waystone")
         self.assertEqual(self.window.waystone.text(), "87")
 

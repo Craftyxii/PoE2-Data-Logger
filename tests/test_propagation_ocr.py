@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from PIL import Image, ImageDraw, ImageEnhance
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 from PoE2_Data_Logger.core import logger_store as logger, store
 from PoE2_Data_Logger.ocr import propagation_scan, runehelper_ocr
@@ -82,12 +82,222 @@ class PropagationOCRTests(unittest.TestCase):
     def test_cursor_selects_only_its_row_even_when_every_row_has_marks(self):
         """Verify the cursor selects only its row even when other rows also contain crown marks."""
         recipes = ["Lesser Jeweller's Orb", "Regal Orb x3", "Exalted Orb x2"]
-        image, rows = self.panel(recipes, 1, {0: [3], 1: [2], 2: [3]})
+        image, rows = self.panel(recipes, 1, {0: [2], 1: [2], 2: [2]})
         result = self.scan(image, rows)
         self.assertTrue(result["can_use"], result)
         self.assertEqual(result["selected_recipe"], "Regal Orb x3")
         self.assertEqual(result["runes"], ["Arcane"])
         self.assertEqual(result["positions"], [2])
+
+    def family_panel(self, marks, selected=4):
+        """Render five ordered Family 17 recipes with independent observed crown subsets."""
+        return self.panel(["Uhtred's Sidereus", "Medved's Tending", "Kolr's Hunt",
+                           "Thrud's Might", "Katla's Gloom"], selected=selected, marks=marks)
+
+    def assert_group_slots(self, result, sockets):
+        """Check each recipe uses its own database runes at the shared socket indices."""
+        self.assertEqual(result["candidates"], [17], result)
+        with logger._connect() as db:
+            for choice in result["choices"]:
+                runes = db.execute("SELECT combo FROM recipes WHERE name=?",
+                                   (choice["selected_recipe"],)).fetchone()[0].split("+")
+                self.assertTrue(choice["can_use"], choice)
+                self.assertEqual(choice["positions"], sockets, choice)
+                self.assertEqual(choice["runes"], [runes[socket - 1].strip() for socket in sockets])
+
+    def test_one_crown_recovers_every_unmarked_recipe_in_its_family(self):
+        """One verified socket supplies suggestions for all five recipes without writing logs."""
+        image, rows = self.family_panel({0: [2]})
+        with logger._connect() as db:
+            before = list(db.iterdump())
+        result = self.scan(image, rows)
+        self.assert_group_slots(result, [2])
+        self.assertEqual(result["observed_positions"], [])
+        self.assertEqual(result["recovered_positions"], [2])
+        with logger._connect() as db:
+            self.assertEqual(before, list(db.iterdump()))
+
+    def test_two_sockets_found_on_different_recipes_recover_the_entire_group(self):
+        """Socket two on recipe one and socket five on recipe five establish the shared pair."""
+        image, rows = self.family_panel({0: [2], 4: [5]})
+        result = self.scan(image, rows)
+        self.assert_group_slots(result, [2, 5])
+        self.assertEqual(result["observed_positions"], [5])
+        self.assertEqual(result["recovered_positions"], [2])
+
+    def test_repeated_socket_evidence_does_not_create_a_second_crown(self):
+        """Multiple rows detecting the same socket contribute only one propagated position."""
+        image, rows = self.family_panel({0: [2], 2: [2], 4: [2]})
+        self.assert_group_slots(self.scan(image, rows), [2])
+
+    def test_group_recovery_without_cursor_keeps_explicit_recipe_approval(self):
+        """A recovered cursorless group remains a list of suggestions requiring user selection."""
+        image, rows = self.family_panel({0: [2], 4: [5]}, selected=None)
+        result = self.scan(image, rows)
+        self.assertFalse(result["can_use"])
+        self.assertIsNone(result["selected_recipe"])
+        self.assertEqual(result["runes"], [])
+        self.assert_group_slots(result, [2, 5])
+
+    def test_known_socket_elsewhere_recovers_a_partial_second_crown(self):
+        """A partial socket-five mark is recovered only after another recipe proves socket five."""
+        image, rows = self.family_panel({0: [2], 4: [5]})
+        self.false_crown(image, "four", centre=71 + 41 * 4)
+        self.assert_group_slots(self.scan(image, rows), [2, 5])
+
+    def test_partial_unknown_socket_holds_the_group(self):
+        """An additional partial socket cannot be omitted from a seemingly complete group pair."""
+        image, rows = self.family_panel({0: [2], 4: [5]})
+        self.false_crown(image, "four", centre=71 + 41 * 5)
+        result = self.scan(image, rows)
+        self.assertTrue(all(not choice["can_use"] for choice in result["choices"]), result)
+        self.assertEqual(result["runes"], [])
+        self.assertIn("conflict", result["status"])
+
+    def test_three_distinct_group_sockets_hold_every_recipe(self):
+        """Three distinct observed sockets conflict with the maximum two propagated positions."""
+        for marks in ({0: [2], 1: [5], 4: [6]}, {0: [2], 4: [2, 5, 6]}):
+            with self.subTest(marks=marks):
+                image, rows = self.family_panel(marks)
+                result = self.scan(image, rows)
+                self.assertTrue(all(not choice["can_use"] for choice in result["choices"]), result)
+                self.assertEqual(result["positions"], [])
+
+    def test_group_does_not_transfer_crowns_to_an_unrelated_recipe(self):
+        """Crown positions stay local when the recognized recipes are not one family sequence."""
+        image, rows = self.panel(["Medved's Saga", "Divine Orb"], selected=1, marks={0: [1]})
+        result = self.scan(image, rows)
+        self.assertEqual(result["candidates"], [])
+        self.assertFalse(result["can_use"])
+        self.assertEqual(result["runes"], [])
+        self.assertTrue(result["choices"][0]["can_use"])
+
+    def test_ambiguous_family_cannot_transfer_missing_crowns(self):
+        """Duplicate family sequences prevent cross-row inference while direct readings survive."""
+        with logger._connect() as db:
+            db.execute("INSERT INTO families(id,top_socket,recipes_json,valid) SELECT 99999,top_socket,recipes_json,valid "
+                       "FROM families WHERE id=17")
+        image, rows = self.family_panel({0: [2]})
+        result = self.scan(image, rows)
+        self.assertEqual(result["candidates"], [17, 99999])
+        self.assertFalse(result["can_use"])
+        self.assertTrue(result["choices"][0]["can_use"])
+
+    def test_weak_recipe_text_cannot_supply_group_socket_evidence(self):
+        """A low-confidence crown-bearing recipe cannot populate otherwise unmarked recipes."""
+        image, rows = self.family_panel({0: [2]})
+        rows[0]["score"] = .7
+        result = self.scan(image, rows)
+        self.assertTrue(all(not choice["can_use"] for choice in result["choices"]), result)
+
+    def test_group_recovery_retains_target_text_and_socket_bar_guards(self):
+        """Weak target text or a missing first tile remains held despite a verified source crown."""
+        for failure in ("text", "origin"):
+            with self.subTest(failure=failure):
+                image, rows = self.family_panel({0: [2]})
+                if failure == "text":
+                    rows[4]["score"] = .7
+                else:
+                    top = 86 + 4 * 81 - 18
+                    ImageDraw.Draw(image).rectangle((50, top, 90, top + 37), fill=(176, 161, 130))
+                result = self.scan(image, rows)
+                self.assertFalse(result["can_use"], result)
+                self.assertTrue(result["choices"][1]["can_use"], result)
+
+    def test_group_socket_must_exist_in_every_recipe_database_entry(self):
+        """A socket beyond a shorter recipe's stored combination holds the whole group."""
+        recipes = ["Vorana's Carnage", "Thane Girt's Rune of Wildness",
+                   "Thane Grannell's Rune of Mastery", "Thane Leld's Rune of Spring"]
+        image, rows = self.panel(recipes, selected=1, marks={0: [8]})
+        result = self.scan(image, rows)
+        self.assertEqual(result["candidates"], [17])
+        self.assertTrue(all(not choice["can_use"] for choice in result["choices"]), result)
+
+    def fragment(self, image, row, socket, offsets=(0,)):
+        """Draw an isolated incomplete crown above a framed tile at a known socket."""
+        centre, y = 71 + 41 * (socket - 1), 86 + 81 * row
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((centre - 19, y - 18, centre + 18, y + 18),
+                       outline=(242, 213, 144), width=2)
+        for offset in offsets:
+            draw.polygon(((centre + offset, y - 23), (centre + offset - 2, y - 19),
+                          (centre + offset + 2, y - 19)), fill=(242, 213, 144))
+
+    def test_two_matching_fragment_rows_fill_the_group_for_manual_review(self):
+        """Two independent recipe fragments at socket two supply tentative group suggestions."""
+        image, rows = self.family_panel({})
+        self.fragment(image, 1, 2)
+        self.fragment(image, 4, 2)
+        result = self.scan(image, rows)
+        self.assert_group_slots(result, [2])
+        self.assertEqual(result["position_source"], "fragment_consensus")
+        self.assertEqual(result["fragment_votes"], {"2": 2})
+        self.assertIn("suggestion", result["status"])
+
+    def test_one_fragment_in_a_multi_recipe_group_is_insufficient(self):
+        """Exposure retries of one fragment cast one vote and cannot populate the group."""
+        image, rows = self.family_panel({})
+        self.fragment(image, 4, 2)
+        result = self.scan(image, rows)
+        self.assertTrue(all(not choice["can_use"] for choice in result["choices"]), result)
+
+    def test_fragments_in_different_sockets_do_not_vote_for_each_other(self):
+        """One fragment each in two different sockets cannot meet either slot's threshold."""
+        image, rows = self.family_panel({})
+        self.fragment(image, 1, 2)
+        self.fragment(image, 4, 5)
+        result = self.scan(image, rows)
+        self.assertTrue(all(not choice["can_use"] for choice in result["choices"]), result)
+
+    def test_two_fragment_consensus_sockets_keep_their_order(self):
+        """Two separate socket consensus groups produce one ordered pair per recipe."""
+        image, rows = self.family_panel({})
+        for row in (1, 4):
+            for socket in (5, 2):
+                self.fragment(image, row, socket)
+        self.assert_group_slots(self.scan(image, rows), [2, 5])
+
+    def test_complete_crown_and_fragment_consensus_combine_as_a_pair(self):
+        """A verified first slot and two matching fragments recover a missed second slot."""
+        image, rows = self.family_panel({0: [2]})
+        self.fragment(image, 1, 5)
+        self.fragment(image, 4, 5)
+        self.assert_group_slots(self.scan(image, rows), [2, 5])
+
+    def test_extra_peak_artifacts_cannot_form_fragment_consensus(self):
+        """Repeated malformed four-peak artifacts do not supply fragment votes."""
+        image, rows = self.family_panel({})
+        for row in (1, 4):
+            self.fragment(image, row, 2, offsets=(-9, 0, 9, 15))
+        result = self.scan(image, rows)
+        self.assertTrue(all(not choice["can_use"] for choice in result["choices"]), result)
+
+    def test_pale_extra_marks_on_an_unmarked_row_hold_group_recovery(self):
+        """Malformed pale crowns cannot disappear simply because their row lacks complete marks."""
+        for framed in (False, True):
+            with self.subTest(framed=framed):
+                image, rows = self.family_panel({0: [2]})
+                centre, y = 71 + 41 * 4, 86 + 81 * 2
+                draw = ImageDraw.Draw(image)
+                if framed:
+                    draw.rectangle((centre - 19, y - 18, centre + 18, y + 18),
+                                   outline=(244, 231, 204), width=2)
+                for offset in (-9, 0, 9, 15):
+                    draw.polygon(((centre + offset, y - 23), (centre + offset - 2, y - 19),
+                                  (centre + offset + 2, y - 19)), fill=(244, 231, 204))
+                result = self.scan(image, rows)
+                self.assertTrue(all(not choice["can_use"] for choice in result["choices"]), result)
+
+    def test_tapered_gold_strokes_cannot_vote_as_fragments(self):
+        """Triangular tips that continue inside tile artwork cannot supply redundant fragment votes."""
+        image, rows = self.family_panel({})
+        draw = ImageDraw.Draw(image)
+        for row in (1, 4):
+            self.fragment(image, row, 2)
+            centre, y = 112, 86 + 81 * row
+            draw.rectangle((centre - 2, y - 18, centre + 2, y + 10), fill=(242, 213, 144))
+        result = self.scan(image, rows)
+        self.assertTrue(all(not choice["can_use"] for choice in result["choices"]), result)
 
     def test_two_marks_preserve_left_to_right_order(self):
         """Verify two marked runes are returned in their displayed left-to-right order."""
@@ -219,8 +429,8 @@ class PropagationOCRTests(unittest.TestCase):
         self.assertFalse(result["can_use"])
         self.assertEqual(result["runes"], [])
 
-    def test_one_or_two_crown_peaks_are_not_a_mark(self):
-        """Verify one- or two-peak crowns remain unusable for automatic or choice approval."""
+    def test_single_recipe_fragments_supply_tentative_manual_suggestions(self):
+        """A lone recipe permits a plausible fragment suggestion without confirming its crown."""
         for offsets in ((0,), (-9, 9)):
             image, rows = self.panel(["Medved's Saga"], marks={0: []})
             draw = ImageDraw.Draw(image)
@@ -229,8 +439,69 @@ class PropagationOCRTests(unittest.TestCase):
                 draw.polygon([(71 + offset, 63), (69 + offset, 67), (73 + offset, 67)],
                              fill=(242, 213, 144))
             result = self.scan(image, rows)
-            self.assertFalse(result["can_use"], result)
-            self.assertFalse(result["choices"][0]["can_use"], result)
+            self.assertTrue(result["can_use"], result)
+            self.assertEqual(result["runes"], ["Rage"])
+            self.assertEqual(result["position_source"], "fragment_consensus")
+            self.assertIn("suggestion", result["status"])
+
+    def false_crown(self, image, pattern, centre=71, gold=(242, 213, 144)):
+        """Draw framed gold artifacts that do not form three crown peaks."""
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((centre - 19, 68, centre + 18, 104), outline=gold, width=2)
+        if pattern == "line":
+            draw.line((centre - 14, 61, centre + 13, 61), fill=gold)
+        elif pattern == "four":
+            for offset in (-9, 0, 9, 15):
+                draw.polygon(((centre + offset, 63), (centre + offset - 2, 67),
+                              (centre + offset + 2, 67)), fill=gold)
+        elif pattern == "strokes":
+            for offset in (-9, 0, 9):
+                draw.rectangle((centre + offset - 2, 63, centre + offset + 2, 92), fill=gold)
+        else:
+            heights = (61, 64, 67) if pattern == "staggered" else (65, 65, 65)
+            for offset, y in zip((-9, 0, 9), heights):
+                draw.line((centre + offset, y, centre + offset + 1, y), fill=gold)
+
+    def test_framed_gold_artifacts_cannot_be_used_as_propagation(self):
+        """Reject lines, extra peaks and specks even when a gold frame is present."""
+        for pattern in ("line", "four", "staggered", "flat", "strokes"):
+            with self.subTest(pattern=pattern):
+                image, rows = self.panel(["Medved's Saga"], marks={0: []})
+                self.false_crown(image, pattern)
+                result = self.scan(image, rows)
+                self.assertFalse(result["can_use"], result)
+                self.assertFalse(result["choices"][0]["can_use"], result)
+                self.assertEqual(result["runes"], [])
+
+    def test_invalid_second_framed_crown_cannot_be_silently_omitted(self):
+        """Hold a paired reading when a second framed mark has malformed peaks."""
+        image, rows = self.panel(["Medved's Saga"], marks={0: [1]})
+        self.false_crown(image, "four", centre=71 + 41 * 4)
+        result = self.scan(image, rows)
+        self.assertFalse(result["can_use"], result)
+        self.assertFalse(result["choices"][0]["can_use"], result)
+        self.assertEqual(result["runes"], [])
+
+    def test_pale_second_crown_fragments_and_extra_peaks_cannot_be_omitted(self):
+        """Suggest plausible pale fragments for one recipe while holding malformed extra peaks."""
+        pale = (244, 231, 204)
+        for offsets in ((0,), (-9, 9), (-9, 0, 9, 15)):
+            with self.subTest(offsets=offsets):
+                image, rows = self.panel(["Medved's Saga"], marks={0: [1]})
+                draw = ImageDraw.Draw(image)
+                centre = 71 + 41 * 4
+                draw.rectangle((centre - 19, 68, centre + 18, 104), outline=pale, width=2)
+                for offset in offsets:
+                    draw.polygon(((centre + offset, 63), (centre + offset - 2, 67),
+                                  (centre + offset + 2, 67)), fill=pale)
+                result = self.scan(image, rows)
+                if len(offsets) <= 2:
+                    self.assertTrue(result["can_use"], result)
+                    self.assertEqual(result["positions"], [1, 5])
+                    self.assertEqual(result["position_source"], "fragment_consensus")
+                else:
+                    self.assertFalse(result["can_use"], result)
+                    self.assertEqual(result["runes"], [])
 
     def test_unrelated_visible_recipe_does_not_block_the_selected_recipe(self):
         """Verify an unrelated visible recipe does not invalidate the selected marked recipe."""
@@ -284,7 +555,7 @@ class PropagationOCRTests(unittest.TestCase):
         recipes = ["Lesser Jeweller's Orb", "Regal Orb x3", "Exalted Orb x2"]
         for scale in (.7, 1, 1.5, 2, 3):
             with self.subTest(scale=scale):
-                image, rows = self.panel(recipes, 1, {0: [3], 1: [2], 2: [3]})
+                image, rows = self.panel(recipes, 1, {0: [2], 1: [2], 2: [2]})
                 image = image.crop((0, 0, 575, 300)).resize((round(575 * scale), round(300 * scale)),
                                                         Image.Resampling.LANCZOS)
                 prepared = propagation_scan._panel(image)
@@ -331,6 +602,26 @@ class PropagationOCRTests(unittest.TestCase):
         self.assertEqual(result["selected_recipe"], "Regal Orb x3")
         self.assertEqual(result["runes"], ["Tidal"])
 
+    def test_pale_captured_crowns_keep_every_recipe_choice_for_manual_approval(self):
+        """Resolve altered real crown pixels with controlled text, preserving explicit recipe approval."""
+        rows = [{"text": text, "score": .99, "x1": 230, "x2": 540,
+                 "y1": y, "y2": y + 28}
+                for text, y in (("1x Lesser Jeweller's Orb", 109), ("3x Regal Orb", 189),
+                                ("2x Exalted Orb", 270))]
+        for colour, brightness, blur in ((.7, 1, 0), (.7, 1, .7), (1, 1.1, 0), (1, 1.25, .7)):
+            with self.subTest(colour=colour, brightness=brightness, blur=blur):
+                image = ImageEnhance.Color(self.source).enhance(colour)
+                image = ImageEnhance.Brightness(image).enhance(brightness)
+                image = image.filter(ImageFilter.GaussianBlur(blur))
+                result = self.scan(image, rows)
+                self.assertFalse(result["can_use"])
+                self.assertEqual(result["runes"], [])
+                self.assertEqual([choice["positions"] for choice in result["choices"]],
+                                 [[3], [3], [3]], result)
+                self.assertEqual([choice["runes"] for choice in result["choices"]],
+                                 [["Cyclonic"], ["Tidal"], ["Tidal"]], result)
+                self.assertTrue(all(choice["can_use"] for choice in result["choices"]), result)
+
     def scaled_content(self, scale, brightness):
         # Scale the actual panel inside a larger capture, preserving the
         # original crown and glyph pixels rather than drawing new markers.
@@ -355,7 +646,7 @@ class PropagationOCRTests(unittest.TestCase):
 
     def test_real_crown_with_unproven_first_tile_holds_instead_of_saving_the_second_rune(self):
         """Verify uncertain first-tile geometry holds a captured crown without inventing a rune index."""
-        for scale, brightness in ((.74, .9), (.74, 1.1), (.75, 1.2)):
+        for scale, brightness in ((.74, .9), (.74, 1.1)):
             with self.subTest(scale=scale, brightness=brightness):
                 result = propagation_scan.scan_propagation(self.scaled_content(scale, brightness))
                 self.assertEqual(result["selected_recipe"], "Regal Orb x3", result)
@@ -363,6 +654,43 @@ class PropagationOCRTests(unittest.TestCase):
                 self.assertEqual(result["positions"], [])
                 self.assertEqual(result["runes"], [])
                 self.assertIn("first rune position", result["status"])
+
+    def test_agreeing_captured_rows_recover_the_third_rune_at_reduced_scale(self):
+        """Recover the independently known slot-three crown from agreeing visible row origins."""
+        image = self.scaled_content(.75, 1.2)
+        # The captured tiles occupy centers 71 + 41*n before resizing.
+        # Supply the independently observed third crown as the socket-bar
+        # endpoint; visible gray first tiles must still establish the origin.
+        for native_top in (68, 230):
+            with self.subTest(native_top=native_top):
+                crown = (153 * .75, native_top * .75, 38 * .75, 38 * .75)
+                layout = propagation_scan._tile_layout(image, crown[1], crown[3], [crown], 46, 3)
+                self.assertIsNotNone(layout)
+                self.assertAlmostEqual(layout[0], 71 * .75, delta=1)
+                self.assertAlmostEqual(layout[1], 41 * .75, delta=1)
+        result = propagation_scan.scan_propagation(image)
+        self.assertTrue(result["can_use"], result)
+        self.assertEqual(result["selected_recipe"], "Regal Orb x3")
+        self.assertEqual(result["positions"], [3])
+        self.assertEqual(result["runes"], ["Tidal"])
+        self.assertEqual([choice["positions"] for choice in result["choices"]], [[3], [3], [3]])
+
+    def test_reduced_scale_crowns_cannot_replace_erased_first_tile_origins(self):
+        """Hold every captured crown when erased first tiles leave their rune indices unproven."""
+        image = self.scaled_content(.75, 1.2)
+        draw = ImageDraw.Draw(image)
+        # Erase only the first tile bodies, preserving all three slot-three
+        # crowns and the reward text so position evidence is the missing input.
+        for top in (51, 111, 172):
+            draw.rectangle((38, top, 69, top + 30), fill=(211, 193, 156))
+        result = propagation_scan.scan_propagation(image)
+        self.assertEqual(result["selected_recipe"], "Regal Orb x3", result)
+        self.assertFalse(result["can_use"], result)
+        self.assertEqual(result["positions"], [])
+        self.assertEqual(result["runes"], [])
+        self.assertIn("first rune position", result["status"])
+        self.assertEqual([choice["positions"] for choice in result["choices"]], [[], [], []])
+        self.assertTrue(all(not choice["can_use"] for choice in result["choices"]), result)
 
     def test_second_reward_alchemy_three_crown_selects_tidal_at_the_third_position(self):
         """Verify the second Alchemy reward selects Tidal from its third marked tile."""
@@ -474,8 +802,8 @@ class PropagationOCRTests(unittest.TestCase):
         self.assertTrue(result["choices"][0]["can_use"], result)
         self.assertEqual(result["choices"][0]["runes"], ["Rage", "Time"])
 
-    def test_frameless_one_or_two_marks_hold_for_manual_entry(self):
-        """Verify frameless one- and two-peak crown fragments require manual entry."""
+    def test_single_recipe_frameless_fragments_fill_manual_suggestions(self):
+        """Verify frameless fragments at a proven socket can suggest the lone recipe's rune."""
         for offsets in ((0,), (-9, 9)):
             with self.subTest(offsets=offsets):
                 image, rows = self.panel(["Medved's Saga"], marks={0: []})
@@ -484,11 +812,12 @@ class PropagationOCRTests(unittest.TestCase):
                     draw.polygon(((71 + offset, 63), (69 + offset, 67), (73 + offset, 67)),
                                  fill=(242, 213, 144))
                 result = self.scan(image, rows)
-                self.assertFalse(result["can_use"], result)
-                self.assertFalse(result["choices"][0]["can_use"], result)
+                self.assertTrue(result["can_use"], result)
+                self.assertEqual(result["runes"], ["Rage"])
+                self.assertEqual(result["position_source"], "fragment_consensus")
 
     def test_clear_frameless_crown_cannot_hide_an_incomplete_second_crown(self):
-        """Verify a complete frameless crown cannot mask a second incomplete crown."""
+        """Retain both lone-recipe sockets when one frameless crown is only a plausible fragment."""
         for offsets in ((0,), (-9, 9)):
             with self.subTest(offsets=offsets):
                 image, rows = self.panel(["Medved's Saga"], marks={0: [1]})
@@ -500,9 +829,9 @@ class PropagationOCRTests(unittest.TestCase):
                                   (centre + offset + 2, 67)), fill=(242, 213, 144))
                 self.assertEqual(propagation_scan._marked_boxes(propagation_scan._gold_mask(image))[0], [])
                 result = self.scan(image, rows)
-                self.assertFalse(result["can_use"], result)
-                self.assertFalse(result["choices"][0]["can_use"], result)
-                self.assertEqual(result["runes"], [])
+                self.assertTrue(result["can_use"], result)
+                self.assertEqual(result["runes"], ["Rage", "Time"])
+                self.assertEqual(result["position_source"], "fragment_consensus")
 
     def test_isolated_gold_glint_does_not_block_a_clear_frameless_crown(self):
         """Verify an isolated gold glint does not invalidate a complete frameless crown."""
@@ -527,8 +856,8 @@ class PropagationOCRTests(unittest.TestCase):
         self.assertEqual(result["positions"], [3])
         self.assertEqual(result["runes"], ["Tidal"])
 
-    def test_partial_second_crown_cannot_be_hidden_by_a_clear_first_mark(self):
-        """Verify a partial second crown prevents acceptance despite a clear first mark across exposures."""
+    def test_single_recipe_partial_second_crown_remains_in_the_manual_suggestion(self):
+        """Suggest both sockets for a lone recipe instead of silently omitting its partial crown."""
         for brightness in (.85, 1, 1.15):
             image, rows = self.panel(["Medved's Saga"], marks={0: [1]})
             draw = ImageDraw.Draw(image)
@@ -539,8 +868,9 @@ class PropagationOCRTests(unittest.TestCase):
                 draw.polygon([(cx + offset, y - 23), (cx + offset - 2, y - 19),
                               (cx + offset + 2, y - 19)], fill=(242, 213, 144))
             result = self.scan(ImageEnhance.Brightness(image).enhance(brightness), rows)
-            self.assertFalse(result["can_use"], result)
-            self.assertFalse(result["choices"][0]["can_use"], result)
+            self.assertTrue(result["can_use"], result)
+            self.assertEqual(result["positions"], [1, 5])
+            self.assertEqual(result["position_source"], "fragment_consensus")
 
 
 if __name__ == "__main__":

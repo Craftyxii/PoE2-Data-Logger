@@ -28,6 +28,7 @@ WM_HOTKEY = 0x0312
 WM_TIMER = 0x0113
 WM_QUIT = 0x0012
 HOTKEY_ID = 0x4A31
+CAPTURE_TIMEOUT_SECONDS = 90
 DEDICATED = ("remnant", "waystone", "tablet", "currency", "ritual", "propagation", "overlay")
 GENERAL_MODES = ("seed", "opened", "both")
 KEY_CODES = {
@@ -143,6 +144,8 @@ class HotkeyManager:
         self._listener_stop = None
         self._capture_lock = threading.Lock()
         self._capture_revision = 0
+        self._capture_owner = None
+        self._capture_watchdog = None
         self._active_capture_mode = None
         self._latest = None
         self._image = None
@@ -403,7 +406,7 @@ class HotkeyManager:
                 user32.UnregisterHotKey(None, ident)
 
     def capture(self, kind="default", background=False):
-        """Reserve a scan, freeze per-type strictness and keep capture off the listener."""
+        """Reserve a bounded scan, freeze strictness and keep capture off the shortcut listener."""
         if kind == "overlay":
             with logger._connect() as db:
                 enabled = bool(logger._meta(db, "hud_overlay", False))
@@ -422,8 +425,14 @@ class HotkeyManager:
                 mode = "opened"
             self._capture_revision += 1
             revision = self._capture_revision
+            self._capture_owner = revision
             self._active_capture_mode = mode
         try:
+            with self._lock:
+                watchdog = threading.Timer(CAPTURE_TIMEOUT_SECONDS, self._expire_capture, args=(mode, revision))
+                watchdog.daemon = True
+                self._capture_watchdog = watchdog
+                watchdog.start()
             strictness_values = dict(ocr_sensitivity.saved_values())
             if background:
                 # Reserve the settings as well as the capture slot before
@@ -453,9 +462,7 @@ class HotkeyManager:
                 self._finish_capture(None, None, revision)
                 return
             if self.focused is not None and not self.focused():
-                with self._lock:
-                    self._active_capture_mode = None
-                self._capture_lock.release()
+                self._finish_capture(None, None, revision)
                 return
             with logger._connect() as db:
                 region_key = {"opened": "live_region", "propagation": "propagation_region",
@@ -468,6 +475,7 @@ class HotkeyManager:
                 generation = logger._meta(db, "session_generation", 0)
                 pending_map = bool(logger._meta(db, "pending_new_map", False))
                 expedition = 1 if not number or logger._meta(db, "pending_new_map", False) else logger._meta(db, "settings")["expedition"]
+                chain_revision = logger._chain_revision(db, logger._exp_id(capture_map, expedition)) if capture_map else 0
                 phase = logger._meta(db, "inventory_scan_phase", "start")
             if self.supported and sys.platform == "win32":
                 from PoE2_Data_Logger.platform.hover_copy import _tooltip_bounds
@@ -555,7 +563,7 @@ class HotkeyManager:
             if self._capture_cancelled(revision):
                 self._finish_capture(None, None, revision)
                 return
-            args = (kind, mode, region, image, tooltip, remnant_map, capture_map, generation, expedition, activity_crops, copied, phase, pending_map, revision, strictness_values)
+            args = (kind, mode, region, image, tooltip, remnant_map, capture_map, generation, expedition, activity_crops, copied, phase, pending_map, revision, strictness_values, chain_revision)
             self._read_capture(*args)
         except Exception as exc:
             self._finish_capture({"mode": mode, "result": None,
@@ -578,7 +586,7 @@ class HotkeyManager:
         if image.width * image.height > store.MAX_IMAGE_PIXELS:
             raise ValueError("Screen capture exceeds 12 megapixels. Use a smaller game resolution.")
 
-    def _read_capture(self, kind, mode, region, image, tooltip, remnant_map=None, capture_map=None, generation=None, expedition=None, activity_crops=None, copied=None, phase="start", pending_map=False, revision=None, strictness_values=None):
+    def _read_capture(self, kind, mode, region, image, tooltip, remnant_map=None, capture_map=None, generation=None, expedition=None, activity_crops=None, copied=None, phase="start", pending_map=False, revision=None, strictness_values=None, chain_revision=None):
         """Route captured pixels or copied item text to the appropriate reader, preserve
         capture ownership and publish through the revision guard. Built-in OCR
         readers receive frozen per-type strictness; injected readers keep their API.
@@ -742,6 +750,8 @@ class HotkeyManager:
             if event and event.get("result") is not None and generation is not None:
                 event["result"].update({"_scan_generation": generation, "_capture_map_id": capture_map,
                                         "_capture_expedition": expedition, "_capture_map_pending": pending_map})
+                if chain_revision is not None:
+                    event["result"]["_capture_chain_revision"] = chain_revision
                 if event["mode"] == "currency":
                     event["result"]["phase"] = phase
                     event["result"]["map_id"] = remnant_map if phase == "start" else capture_map
@@ -761,20 +771,38 @@ class HotkeyManager:
             if modes is None or self._latest and self._latest.get("mode") in modes:
                 self._latest = self._image = None
 
-    def _finish_capture(self, event, raw, revision=None):
+    def _expire_capture(self, mode, revision):
+        """Release an overdue capture's reservation and publish an error only while it still owns the request."""
+        with self._lock:
+            if self._capture_owner != revision:
+                return
+            self._finish_capture({"mode": mode, "result": None,
+                                  "error": "Screen scan timed out after 90 seconds. Scan again."},
+                                 None, revision, expired=True)
+
+    def _finish_capture(self, event, raw, revision=None, *, expired=False):
         """Suppress canceled results, publish a current event with its image, release the scan
-        reservation and notify the UI.
+        reservation and notify the UI. Expiration invalidates the reader; a late
+        completion cannot release a newer capture's lock or replace its result.
         """
         with self._lock:
+            if revision is not None and revision != self._capture_owner:
+                return
             if revision is not None and revision != self._capture_revision:
                 event = None
+            if expired:
+                self._capture_revision += 1
+            self._capture_owner = None
             self._active_capture_mode = None
+            if self._capture_watchdog is not None:
+                self._capture_watchdog.cancel()
+                self._capture_watchdog = None
             if event is not None:
                 self._sequence += 1
                 event["id"] = self._sequence
                 self._latest = event
                 self._image = raw
-        self._capture_lock.release()
+            self._capture_lock.release()
         if event is not None:
             self._notify_event()
 

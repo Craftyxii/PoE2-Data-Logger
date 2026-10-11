@@ -191,7 +191,11 @@ def _reference_icon_count(image, reward_y):
 
 
 def _icon_count(image, reward_y, expected=None):
-    """Count visible sockets in normalized panel geometry without trusting database counts."""
+    """Count visible sockets at reference scale with room for OCR reward-row position jitter.
+
+    Keep complete frame contours in the search band; their centers, spacing and
+    size determine the count independently of database expectations.
+    """
     import cv2
     if image.width >= 900 and image.height >= 600 and image.width >= image.height * 1.25:
         window = image.crop((0, 0, min(image.width, round(image.height * .70)), image.height))
@@ -218,20 +222,23 @@ def _icon_count(image, reward_y, expected=None):
     tile = (right - left) * .07
     if tile < 10:
         return None
-    # Text row bounds move a few pixels when the OCR line is resized. Leave
-    # enough room for the bottom of the icon frames; clipping that border
-    # breaks their contours and can count parchment texture as another rune.
-    top, bottom = max(0, round(reward_y - tile * 1.8)), min(image.height, round(reward_y - 2))
-    if bottom <= top:
-        return None
-    edges = cv2.Canny(gray[top:bottom, left:right], 60, 130)
-    contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    # One band ends above reward text; the padded band retains frame bottoms
+    # when OCR shifts upward. Merge their frame evidence before counting so
+    # either crop boundary cannot remove a socket. Center distances exclude
+    # reward text that enters the padded band.
+    top = max(0, round(reward_y - tile * 1.8))
     boxes = []
-    for contour in contours:
-        x, y, w, h = cv2.boundingRect(contour)
-        if (tile * .65 <= w <= tile * 1.4 and tile * .55 <= h <= tile * 1.4 and .65 <= w / h <= 1.5
-                and tile * .25 <= reward_y - (top + y + h / 2) <= tile * 1.05):
-            boxes.append((left + x + w / 2, top + y + h / 2, w * h))
+    for edge_y in (reward_y - 2, reward_y + tile * .25):
+        bottom = min(image.height, round(edge_y))
+        if bottom <= top:
+            continue
+        edges = cv2.Canny(gray[top:bottom, left:right], 60, 130)
+        contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            x, y, w, h = cv2.boundingRect(contour)
+            if (tile * .65 <= w <= tile * 1.4 and tile * .55 <= h <= tile * 1.4 and .65 <= w / h <= 1.5
+                    and tile * .25 <= reward_y - (top + y + h / 2) <= tile * 1.05):
+                boxes.append((left + x + w / 2, top + y + h / 2, w * h))
     centres = []
     for x, y, area in sorted(boxes, key=lambda box: -box[2]):
         if not any(abs(x - a) < tile * .65 and abs(y - b) < tile * .65 for a, b in centres):

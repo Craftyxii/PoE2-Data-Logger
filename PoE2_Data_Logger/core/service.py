@@ -153,6 +153,11 @@ def dispatch(path, data=None):
         "/api/chain": lambda: logger.commit_chain(data.get("rune1"), data.get("rune2")),
         "/api/chain/batch": lambda: logger.commit_chain_runes(data.get("runes")) if "runes" in data
                              else logger.commit_chain_steps(data.get("steps")),
+        "/api/chain/discard": lambda: logger.discard_chain(data.get("expected_context")),
+        "/api/chain/step/discard": lambda: logger.discard_chain_step(
+            data.get("step"), data.get("expected_context")),
+        "/api/chain/last/discard": lambda: logger.discard_last_chain_step(data.get("expected_context")),
+        "/api/discard-map": lambda: logger.discard_current_map_logs(data.get("expected_context")),
         "/api/export-folder": lambda: logger.save_export_folder(data.get("folder")),
         "/api/export-file": lambda: logger.save_export_file(data.get("kind", "xlsx")),
         "/api/kills": lambda: logger.save_kills(data.get("normal"), data.get("magic"), data.get("rare"),

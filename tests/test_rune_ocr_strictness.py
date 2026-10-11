@@ -168,7 +168,8 @@ class RuneStrictnessTests(unittest.TestCase):
 
         manager = hotkey.HotkeyManager(supported=False, readers={"propagation": read},
                                       grabber=Mock(return_value=Image.new("RGB", (575, 300))))
-        with patch.object(hotkey.threading, "Thread") as worker:
+        with patch.object(hotkey.threading, "Thread") as worker, \
+                patch.object(hotkey.threading, "Timer"):
             manager.capture("propagation", background=True)
             values["propagation"] = 100
             ocr_sensitivity.save_values(values)

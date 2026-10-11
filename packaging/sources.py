@@ -5,6 +5,8 @@ new modules must be listed here so packaging cannot silently omit them.
 """
 
 CORE_SOURCES = (
+    "core/analysis_context.py",
+    "core/undo_store.py",
     "core/logger_store.py",
     "core/store.py",
     "core/service.py",

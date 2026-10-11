@@ -17,12 +17,12 @@ import sqlite3
 import tempfile
 import threading
 import uuid
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
-from PoE2_Data_Logger.core import store
+from PoE2_Data_Logger.core import analysis_context, store, undo_store
 from PoE2_Data_Logger.ocr.affix_capture import affix_catalog, affix_key, affix_unit, modifier_value, tablet_random_mod_counts
 
 
@@ -299,7 +299,7 @@ def _cancel_prepared_waystone(db):
 
 
 def initialize():
-    """Create/migrate tables and frozen-origin analysis views, seed data and repair defaults once per process."""
+    """Create/migrate session tables, IDs, origin views and analysis notes; seed data and repair defaults once per process."""
     global _READY
     if _READY:
         return
@@ -308,6 +308,7 @@ def initialize():
             return
         with store._connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
+            _migrate_recipe_id_column(db)
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS source_cells(
@@ -319,6 +320,8 @@ def initialize():
                 CREATE TABLE IF NOT EXISTS recipes(
                     name TEXT PRIMARY KEY,sockets INTEGER NOT NULL,combo TEXT NOT NULL,
                     level_band TEXT,category TEXT,source TEXT);
+                CREATE TABLE IF NOT EXISTS recipe_ids(
+                    recipe_name TEXT PRIMARY KEY,recipe_id TEXT NOT NULL UNIQUE);
                 CREATE TABLE IF NOT EXISTS aliases(
                     position INTEGER PRIMARY KEY,alias TEXT NOT NULL,target TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS alias_keys(
@@ -356,7 +359,8 @@ def initialize():
                     expedition_id TEXT NOT NULL,chain_step INTEGER NOT NULL,recipe TEXT NOT NULL,
                     family_id INTEGER,family_status TEXT NOT NULL,family_source TEXT NOT NULL,
                     family_candidates_json TEXT NOT NULL,propagation_commit_number INTEGER NOT NULL,
-                    chain_commit_number INTEGER NOT NULL,PRIMARY KEY(expedition_id,chain_step));
+                    chain_commit_number INTEGER NOT NULL,recipe_id TEXT,
+                    PRIMARY KEY(expedition_id,chain_step));
                 CREATE VIEW IF NOT EXISTS chain_rune_provenance AS
                     WITH chain_rows AS (
                         SELECT expedition_id,chain_step,json_extract(row_json,'$[26]') AS rune1,
@@ -374,7 +378,7 @@ def initialize():
                            COALESCE(p.family_status,'unknown') AS family_status,
                            COALESCE(p.family_source,'unknown') AS family_source,
                            COALESCE(p.family_candidates_json,'[]') AS family_candidates_json,
-                           p.propagation_commit_number,p.chain_commit_number
+                           p.propagation_commit_number,p.chain_commit_number,p.recipe_id
                     FROM rune_rows r LEFT JOIN chain_step_provenance p
                     ON p.expedition_id=r.expedition_id AND p.chain_step=r.chain_step;
                 CREATE TABLE IF NOT EXISTS scan_links(
@@ -434,6 +438,8 @@ def initialize():
                 if column not in columns:
                     db.execute(f"ALTER TABLE commits ADD COLUMN {column} TEXT NOT NULL DEFAULT '{{}}'")
             db.execute("CREATE INDEX IF NOT EXISTS commits_map_kind_idx ON commits(map_id,kind)")
+            undo_store.initialize(db)
+            analysis_context.initialize(db)
             if not _meta(db, "bootstrapped"):
                 with gzip.open(HERE / "bootstrap.json.gz", "rt", encoding="utf-8") as file:
                     snapshot = json.load(file)
@@ -471,6 +477,12 @@ def initialize():
                                    (snapshot["detonated"], eid))
                 _set_meta(db, "bootstrapped", True)
             _initialize_references(db)
+            _sync_recipe_ids(db)
+            # Upgrade only explicitly attributed recipe names; older unknown
+            # origins retain their missing identity instead of being guessed.
+            db.execute("UPDATE chain_step_provenance SET recipe_id=(SELECT recipe_id FROM recipe_ids "
+                       "WHERE recipe_name=chain_step_provenance.recipe) WHERE recipe_id IS NULL "
+                       "AND family_source<>'unknown' AND recipe IN (SELECT name FROM recipes)")
             if not _meta(db, "tablet_flat_values_migrated"):
                 config = _meta(db, "settings")
                 pairs = [dict(pair) for pair in config["tablet_affixes"]]
@@ -515,6 +527,32 @@ def initialize():
                 _set_meta(db, "settings", config)
             _register_atlas_snapshot(db, _atlas_snapshot(config))
         _READY = True
+
+
+def _migrate_recipe_id_column(db):
+    """Add recipe identity to existing propagation origins and rebuild the older analysis view."""
+    columns = {row["name"] for row in db.execute("PRAGMA table_info(chain_step_provenance)")}
+    if columns and "recipe_id" not in columns:
+        db.execute("ALTER TABLE chain_step_provenance ADD COLUMN recipe_id TEXT")
+        db.execute("DROP VIEW IF EXISTS chain_rune_provenance")
+
+
+def _recipe_identifier(name):
+    """Give the same canonical recipe name a stable ID across profiles, imports and combo edits."""
+    return "RCP-" + uuid.uuid5(uuid.NAMESPACE_URL, "poe2-data-logger:recipe:" + name.strip().casefold()).hex
+
+
+def _ensure_recipe_id(db, name):
+    """Register a known recipe identity in the caller's transaction without changing its catalog data."""
+    identifier = _recipe_identifier(name)
+    db.execute("INSERT OR IGNORE INTO recipe_ids(recipe_name,recipe_id) VALUES(?,?)", (name, identifier))
+    return identifier
+
+
+def _sync_recipe_ids(db):
+    """Register missing catalog identities while retaining IDs already referenced by logged chains."""
+    db.executemany("INSERT OR IGNORE INTO recipe_ids(recipe_name,recipe_id) VALUES(?,?)",
+                   ((row[0], _recipe_identifier(row[0])) for row in db.execute("SELECT name FROM recipes")))
 
 
 def _seed_reference_snapshot(db, snapshot):
@@ -610,10 +648,57 @@ def _initialize_references(db):
         _set_meta(db, "ritual_names_initialized", True)
 
 
-def _connect():
-    """Ensure logger initialization before opening a shared-store connection."""
+@contextmanager
+def _connect(*, undo_label=None):
+    """Open shared storage and optionally journal saved row changes in its existing transaction."""
     initialize()
-    return store._connect()
+    with store._connect() as db:
+        if undo_label:
+            with undo_store.capture(db, undo_label):
+                yield db
+        else:
+            yield db
+
+
+def undo_group(label):
+    """Group multiple saves from one UI command into one persistent undo action."""
+    return undo_store.group(label)
+
+
+def undo_action():
+    """Read the latest undo label without constructing the full HUD state."""
+    with _connect() as db:
+        return undo_store.latest(db)
+
+
+def undo_last_action():
+    """Undo saved logging rows atomically, reopen map transitions and retire stale captures.
+
+    Undoing New map retains the preceding map's finalized stats and makes it
+    active again. A fresh generation prevents old OCR callbacks and save retries
+    from writing into restored maps or reused remnant and commit numbers.
+    """
+    with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        generation = _meta(db, "session_generation", 0)
+        previous_waystone = _meta(db, "previous_waystone_settings")
+        action = undo_store.restore(db)
+        if action == "New map":
+            _set_meta(db, "pending_new_map", False)
+            _set_meta(db, "prepared_waystone_setup", None)
+            if _meta(db, "current_map_number", 0) and previous_waystone:
+                settings = _meta(db, "settings")
+                settings.update(_waystone_settings(previous_waystone))
+                _set_meta(db, "settings", settings)
+        _set_meta(db, "session_generation", generation + 1)
+        _set_meta(db, "ocr_pending", None)
+        _set_meta(db, "ocr_pending_mode", None)
+        db.execute("DELETE FROM chain_append_receipts")
+        prepared = _meta(db, "prepared_waystone_setup")
+        if prepared:
+            prepared["session_generation"] = generation + 1
+            _set_meta(db, "prepared_waystone_setup", prepared)
+    return {"action": action, "state": get_state()}
 
 
 def _integer(value, name, low=0, high=None, blank=False):
@@ -793,16 +878,16 @@ def _save_settings(db, data, *, confirmed_affixes=()):
 
 
 def save_settings(data, *, confirmed_affixes=()):
-    """Apply settings and confirmed affixes in one immediate transaction, then return refreshed state."""
-    with _connect() as db:
+    """Apply settings and confirmed affixes in one immediate transaction, then return refreshed state. Saved changes remain undoable."""
+    with _connect(undo_label='Settings') as db:
         db.execute("BEGIN IMMEDIATE")
         _save_settings(db, data, confirmed_affixes=confirmed_affixes)
     return get_state()
 
 
 def save_atlas_settings(data):
-    """Save the editable setup without changing Atlas data already attached to activity."""
-    with _connect() as db:
+    """Save the editable setup without changing Atlas data already attached to activity. Saved changes remain undoable."""
+    with _connect(undo_label='Atlas settings') as db:
         db.execute("BEGIN IMMEDIATE")
         settings = _validate_atlas_settings(data)
         _save_settings(db, {"atlas_settings": settings})
@@ -858,7 +943,7 @@ def _check_seed_references(db, family_ids=(), recipe_names=()):
 
 
 def save_recipe(data):
-    """Upsert a canonical recipe and rune combo, rolling back edits that break family or seed constraints."""
+    """Upsert a canonical recipe with a stable ID, rolling back edits that break family or seed constraints."""
     name = str(data.get("name") or "").strip()
     if not name or len(name) > 200:
         raise ValueError("Recipe name is required and must be under 200 characters.")
@@ -880,7 +965,8 @@ def save_recipe(data):
                    (name, sockets, " + ".join(runes), str(data.get("level_band") or "").strip(),
                     str(data.get("category") or "").strip(), str(data.get("source") or "").strip()))
         _check_seed_references(db, recipe_names=(name,))
-    return {"name": name, "sockets": sockets, "combo": " + ".join(runes)}
+        recipe_id = _ensure_recipe_id(db, name)
+    return {"name": name, "sockets": sockets, "combo": " + ".join(runes), "recipe_id": recipe_id}
 
 
 def save_family(data):
@@ -955,8 +1041,8 @@ def save_seed_state(data):
 
 
 def clear_tablets():
-    """Clear tablet modifiers and reset the scan slot in one immediate transaction."""
-    with _connect() as db:
+    """Clear tablet modifiers and reset the scan slot in one immediate transaction. Saved changes remain undoable."""
+    with _connect(undo_label='Clear tablets') as db:
         db.execute("BEGIN IMMEDIATE")
         _save_settings(db, {"tablets_used": 4, "plus_two_tablets": 0,
                             "tablet_affixes": [{"affix": "", "value": None} for _ in range(16)],
@@ -972,18 +1058,18 @@ def tablet_next_slot():
 
 
 def advance_tablet_slot(number):
-    """Advance the scan slot only when it still equals the supplied slot from one through four."""
-    with _connect() as db:
+    """Advance the scan slot only when it still equals the supplied slot from one through four. Saved changes remain undoable."""
+    with _connect(undo_label='Tablet slot') as db:
         db.execute("BEGIN IMMEDIATE")
         if _meta(db, "tablet_auto_next", 1) == number and 1 <= number <= 4:
             _set_meta(db, "tablet_auto_next", number + 1)
 
 
 def save_scanned_tablet(matches, raw_mods):
-    """Save the next tablet and its configuration commit atomically, clearing the set at slot one."""
+    """Save the next tablet and its configuration commit atomically, clearing the set at slot one. Saved changes remain undoable."""
     if not matches or len(matches) > 4 or not isinstance(raw_mods, list):
         raise ValueError("Review the tablet modifiers before saving.")
-    with _connect() as db:
+    with _connect(undo_label='Tablet scan') as db:
         db.execute("BEGIN IMMEDIATE")
         number = _meta(db, "tablet_auto_next", 1)
         if number > 4:
@@ -1216,10 +1302,10 @@ def _record_commit(db, kind, map_id="", expedition_id="", reference="", *, conte
 
 
 def record_commit(kind, reference=""):
-    """Record an allowed configuration event against the active or upcoming map and expedition."""
+    """Record an allowed configuration event against the active or upcoming map and expedition. Saved changes remain undoable."""
     if kind not in ("Map settings", "Tablet config", "Atlas Master", "Master perks"):
         raise ValueError("Unknown configuration commit.")
-    with _connect() as db:
+    with _connect(undo_label=str(kind)) as db:
         db.execute("BEGIN IMMEDIATE")
         number = _meta(db, "current_map_number", 0)
         pending = not number or _meta(db, "pending_new_map", False)
@@ -1246,7 +1332,9 @@ def scan_context():
                 "_capture_map_id": _map_id(number) if number else None,
                 "_capture_map_pending": bool(_meta(db, "pending_new_map", False)),
                 "_capture_expedition": 1 if not number or _meta(db, "pending_new_map", False)
-                                       else _meta(db, "settings")["expedition"]}
+                                       else _meta(db, "settings")["expedition"],
+                "_capture_chain_revision": _chain_revision(db, _exp_id(_map_id(number),
+                    _meta(db, "settings")["expedition"])) if number else 0}
 
 
 def validate_scan_context(result):
@@ -1358,8 +1446,8 @@ def discard_ocr_id():
 
 
 def start_next_chain():
-    """Complete a nonempty selected chain or advance an empty one to the next unused expedition."""
-    with _connect() as db:
+    """Complete a nonempty selected chain or advance an empty one to the next unused expedition. Saved changes remain undoable."""
+    with _connect(undo_label='Next expedition') as db:
         db.execute("BEGIN IMMEDIATE")
         mid, expedition, eid = _chain_context(db)
         if _saved_chain_rows(db, eid):
@@ -1373,8 +1461,8 @@ def start_next_chain():
 
 def commit_remnant(first, next_recipe=None, family=None, scan_id=None, expected_pending=None, visible_seed=None,
                     *, expected_context=None, seed_context=None):
-    """Validate capture and optional auto-commit reservation checks, then save a remnant atomically."""
-    with _connect() as db:
+    """Validate capture and optional auto-commit reservation checks, then save a remnant atomically. Saved changes remain undoable."""
+    with _connect(undo_label='Remnant approval') as db:
         db.execute("BEGIN IMMEDIATE")
         if expected_context is not None:
             _validate_remnant_context(db, expected_context)
@@ -1517,7 +1605,9 @@ def _seed_recipes(db, family, sockets, rewards):
 def commit_seed_batch(result, selections, automatic=False):
     """Validate and commit selected visible seeds in one immediate transaction.
 
-    Keep their captured expedition and reserve the next remnant ID when unsaved readings remain.
+    Keep their captured expedition and reserve the next remnant ID when unsaved
+    readings remain. Return the refreshed map and chain revision after an implicit
+    map start so the remaining seeds retain consistent context. Saves are undoable.
     """
     if not isinstance(result, dict) or not isinstance(selections, list) or not 1 <= len(selections) <= 24:
         raise ValueError("Select the visible remnants to commit.")
@@ -1526,7 +1616,7 @@ def commit_seed_batch(result, selections, automatic=False):
     readings = result.get("remnants") or [result]
     if not isinstance(readings, list) or not 1 <= len(readings) <= 24:
         raise ValueError("Scan the visible remnants first.")
-    with _connect() as db:
+    with _connect(undo_label='Seed approval') as db:
         db.execute("BEGIN IMMEDIATE")
         _validate_remnant_context(db, result)
         if ("_capture_map_pending" in result and result["_capture_map_pending"] !=
@@ -1591,7 +1681,8 @@ def commit_seed_batch(result, selections, automatic=False):
                 "context": {"_scan_generation": _meta(db, "session_generation", 0),
                             "_capture_map_id": _map_id(number),
                             "_capture_map_pending": bool(_meta(db, "pending_new_map", False)),
-                            "_capture_expedition": expedition},
+                            "_capture_expedition": expedition,
+                            "_capture_chain_revision": _chain_revision(db, _exp_id(_map_id(number), expedition))},
                 "scan_commit_number": saved[-1]["scan_commit_number"]}
 
 
@@ -1664,7 +1755,33 @@ def _chain_context(db, expected_context=None, *, allow_selected_change=False):
             raise ValueError("The map, expedition or session changed. Scan again before saving the chain.")
         if allow_selected_change:
             expedition = _integer(expected_context.get("_capture_expedition"), "Captured expedition", 1)
+        if ("_capture_chain_revision" in expected_context and
+                expected_context["_capture_chain_revision"] != _chain_revision(db, _exp_id(mid, expedition))):
+            raise ValueError("The saved chain changed. Scan again before saving the chain.")
     return mid, expedition, _exp_id(mid, expedition)
+
+
+def _chain_revision(db, eid):
+    """Read the transient revision that retires captures after a chain is discarded."""
+    return _meta(db, "chain_revisions", {}).get(eid, 0)
+
+
+def _retire_chain_requests(db, eid):
+    """Invalidate this chain's old captures and retries without disturbing other pending reviews."""
+    revisions = _meta(db, "chain_revisions", {})
+    revisions[eid] = revisions.get(eid, 0) + 1
+    _set_meta(db, "chain_revisions", revisions)
+    retired = _meta(db, "retired_chain_requests", {})
+    retired.update({row[0]: eid for row in db.execute(
+        "SELECT request_id FROM chain_append_receipts WHERE expedition_id=?", (eid,))})
+    _set_meta(db, "retired_chain_requests", retired)
+    db.execute("DELETE FROM chain_append_receipts WHERE expedition_id=?", (eid,))
+
+
+def validate_chain_context(expected_context):
+    """Check a propagation capture, including any discard revision, before opening its review."""
+    with _connect() as db:
+        _chain_context(db, expected_context)
 
 
 def _saved_chain_rows(db, eid):
@@ -1685,11 +1802,12 @@ def _chain_steps_snapshot(db, eid):
 
 
 def _stored_chain_origins(db, eid=None):
-    """Index frozen stored origins for one expedition or an entire consistent export snapshot."""
+    """Read stored recipe IDs and family evidence for one expedition or a consistent export snapshot."""
     query = "SELECT * FROM chain_step_provenance"
     rows = db.execute(query + " WHERE expedition_id=?", (eid,)) if eid is not None else db.execute(query)
     return {(row["expedition_id"], row["chain_step"]): {
-                "step": row["chain_step"], "recipe": row["recipe"], "family": row["family_id"],
+                "step": row["chain_step"], "recipe": row["recipe"], "recipe_id": row["recipe_id"],
+                "family": row["family_id"],
                 "family_status": row["family_status"], "family_source": row["family_source"],
                 "family_candidates": _load(row["family_candidates_json"]),
                 "propagation_commit_number": row["propagation_commit_number"],
@@ -1699,7 +1817,7 @@ def _stored_chain_origins(db, eid=None):
 def _chain_provenance(db, eid, steps):
     """Read frozen recipe/family origins beside steps, leaving legacy/manual origins explicitly unknown."""
     saved = _stored_chain_origins(db, eid)
-    return [saved.get((eid, step["step"]), {"step": step["step"], "recipe": "", "family": None,
+    return [saved.get((eid, step["step"]), {"step": step["step"], "recipe": "", "recipe_id": None, "family": None,
              "family_status": "unknown", "family_source": "unknown", "family_candidates": [],
              "propagation_commit_number": None, "chain_commit_number": None}) for step in steps]
 
@@ -1723,6 +1841,8 @@ def _chain_receipt(db, request_id, payload, expected_context):
     """Replay a saved request result only when payload, generation and captured expedition match."""
     if request_id is None:
         return None
+    if request_id in _meta(db, "retired_chain_requests", {}):
+        raise ValueError("This chain request was discarded. Scan again with a new request.")
     row = db.execute("SELECT * FROM chain_append_receipts WHERE request_id=?", (request_id,)).fetchone()
     if row is None:
         return None
@@ -1741,7 +1861,7 @@ def _save_chain_receipt(db, request_id, payload, result):
 
 
 def _append_chain_steps(db, mid, expedition, eid, cleaned, *, origin=None, propagation_commit_number=None):
-    """Append numbered steps atomically, retaining approved origins separately from editable rune pairs."""
+    """Append steps atomically with approved recipe IDs and family evidence beside editable rune pairs."""
     _require_open_chain(db, eid)
     step = max([row["step"] for row in _saved_chain_rows(db, eid)] or [0]) + 1
     existing = _first_row(db, "expedition_id", eid)
@@ -1765,10 +1885,12 @@ def _append_chain_steps(db, mid, expedition, eid, cleaned, *, origin=None, propa
         row[67 + len(BASE_EXTRA_HEADERS) - 1] = commit_number
         _add_new(db, row)
         if origin is not None:
-            db.execute("INSERT INTO chain_step_provenance VALUES(?,?,?,?,?,?,?,?,?)", (
+            db.execute("INSERT INTO chain_step_provenance(expedition_id,chain_step,recipe,family_id,"
+                       "family_status,family_source,family_candidates_json,propagation_commit_number,"
+                       "chain_commit_number,recipe_id) VALUES(?,?,?,?,?,?,?,?,?,?)", (
                 eid, step + offset, origin["recipe"], origin["family"], origin["family_status"],
                 origin["family_source"], _dump(origin["family_candidates"]),
-                propagation_commit_number, commit_number))
+                propagation_commit_number, commit_number, origin["recipe_id"]))
     db.execute("INSERT OR IGNORE INTO expeditions VALUES(?,?,?,?)", (eid, mid, expedition, None))
     return {"map_id": mid, "expedition_id": eid, "steps": [item["step"] for item in steps],
             "scan_commit_number": commit_number, "reused": False}
@@ -1780,13 +1902,13 @@ def commit_chain_draft(steps, expected_context=None, *, request_id=None):
 
 
 def commit_chain_steps(steps, *, advance_expedition=False, expected_context=None, request_id=None):
-    """Append steps atomically, optionally complete the chain, and cache a result for a request ID."""
+    """Append steps atomically, optionally complete the chain, and cache a result for a request ID. Saved changes remain undoable."""
     cleaned = _clean_chain_steps(steps)
     request_id = _request_token(request_id)
     payload = {"operation": "append", "steps": cleaned, "complete": bool(advance_expedition)}
     # Persist the same JSON representation used when replaying a receipt.
     payload = _load(_dump(payload))
-    with _connect() as db:
+    with _connect(undo_label='Chain parts') as db:
         db.execute("BEGIN IMMEDIATE")
         previous = _chain_receipt(db, request_id, payload, expected_context)
         if previous is not None:
@@ -1848,8 +1970,8 @@ def _complete_chain(db, mid, expedition, eid):
 
 
 def complete_chain(expected_context=None):
-    """Close saved parts and advance once, retaining the final ordered chain for history."""
-    with _connect() as db:
+    """Close saved parts and advance once, retaining the final ordered chain for history. Saved changes remain undoable."""
+    with _connect(undo_label='Complete chain') as db:
         db.execute("BEGIN IMMEDIATE")
         # A repeated callback may arrive after the first completion selected the next EID.
         mid, expedition, eid = _chain_context(db, expected_context,
@@ -1862,15 +1984,14 @@ def complete_chain(expected_context=None):
 
 
 def update_chain_steps(steps, expected_context=None):
-    """Correct editable rune pairs while preserving each part's identity, original recipe/family and counts."""
+    """Correct editable rune pairs while preserving each part's identity, original recipe/family and counts. Saved changes remain undoable."""
     cleaned = _clean_chain_steps(steps, limit=None)
     ids = [_integer(item.get("step"), "Chain step", 1) for item in steps]
     if len(set(ids)) != len(ids):
         raise ValueError("Each saved chain step may be corrected only once.")
-    with _connect() as db:
+    with _connect(undo_label='Chain correction') as db:
         db.execute("BEGIN IMMEDIATE")
         mid, _, eid = _chain_context(db, expected_context)
-        _require_open_chain(db, eid)
         saved = _saved_chain_rows(db, eid)
         by_step = {row["step"]: row for row in saved}
         if len(by_step) != len(saved) or any(step not in by_step for step in ids):
@@ -1898,7 +2019,122 @@ def update_chain_steps(steps, expected_context=None):
                                           "detonated": _detonated_value(db, eid, _UNSET)})
                   if changes else None)
         return {"map_id": mid, "expedition_id": eid, "steps": [item["step"] for item in changes],
-                "scan_commit_number": number, "changed": bool(changes), "chain_completed": False}
+                "scan_commit_number": number, "changed": bool(changes), "chain_completed": db.execute(
+                    "SELECT 1 FROM chain_completions WHERE expedition_id=?", (eid,)).fetchone() is not None}
+
+
+def _discard_saved_chain_rows(db, mid, eid, rows):
+    """Remove chain cells while retaining any remnant sharing an imported row and relocate live totals."""
+    for row in rows:
+        values = row["values"]
+        if any(values[:22]):
+            values[25:28] = ["", "", ""]
+            db.execute(f"UPDATE {row['table']} SET chain_step=NULL,row_json=? WHERE position=?",
+                       (_dump(values), row["position"]))
+        else:
+            db.execute(f"DELETE FROM {row['table']} WHERE position=?", (row["position"],))
+        db.execute("DELETE FROM chain_step_provenance WHERE expedition_id=? AND chain_step=?",
+                   (eid, row["step"]))
+    kills = db.execute("SELECT kills_json FROM maps WHERE map_id=?", (mid,)).fetchone()
+    if kills:
+        _patch_first(db, "map_id", mid, {28 + index: "" if amount is None else amount
+                                       for index, amount in enumerate(_load(kills[0]))})
+    count = _detonated_value(db, eid, _UNSET)
+    _patch_first(db, "expedition_id", eid, {33: "" if count is None else count})
+    _retire_chain_requests(db, eid)
+
+
+def _discard_chain(steps=None, expected_context=None, *, last=False):
+    """Remove scoped parts reversibly, resolving the last saved step inside the write transaction.
+
+    Last-step removal uses the highest surviving step ID, including chains with
+    gaps. Context validation and selection share the transaction with deletion;
+    actual detonation counts remain unchanged.
+    """
+    kind = "Chain discard" if steps is None and not last else "Chain step discard"
+    with _connect(undo_label=kind) as db:
+        db.execute("BEGIN IMMEDIATE")
+        mid, _, eid = _chain_context(db, expected_context)
+        saved = _saved_chain_rows(db, eid)
+        if last:
+            if not saved:
+                raise ValueError("There are no saved chain parts to discard.")
+            steps = [max(row["step"] for row in saved)]
+        removed = saved if steps is None else [row for row in saved if row["step"] in steps]
+        if not removed:
+            raise ValueError("There are no saved chain parts to discard." if steps is None else
+                             "Select an existing saved chain step to discard.")
+        if steps is not None and (len(removed) != len(steps) or len({row['step'] for row in removed}) != len(removed)):
+            raise ValueError("Discard only an existing, uniquely identified chain step.")
+        removed_steps = [{key: row[key] for key in ("step", "rune1", "rune2")} for row in removed]
+        origins = _chain_provenance(db, eid, removed_steps)
+        completion = db.execute("SELECT * FROM chain_completions WHERE expedition_id=?", (eid,)).fetchone()
+        _discard_saved_chain_rows(db, mid, eid, removed)
+        remaining = _chain_steps_snapshot(db, eid)
+        if steps is None or not remaining:
+            db.execute("DELETE FROM chain_completions WHERE expedition_id=?", (eid,))
+        elif completion:
+            db.execute("UPDATE chain_completions SET step_count=? WHERE expedition_id=?", (len(remaining), eid))
+        number = _record_commit(db, kind, mid, eid, f"Discarded {len(removed)} chain parts", details={
+            "removed_steps": removed_steps, "origins": origins, "remaining_steps": remaining,
+            "previous_completion": dict(completion) if completion else None,
+            "detonated": _detonated_value(db, eid, _UNSET)})
+        return {"map_id": mid, "expedition_id": eid, "steps": [row["step"] for row in removed],
+                "remaining_steps": remaining, "scan_commit_number": number,
+                "chain_completed": bool(completion and remaining and steps is not None)}
+
+
+def discard_chain(expected_context=None):
+    """Discard the selected expedition's logged chain, preserving remnants, loot and actual detonations."""
+    return _discard_chain(expected_context=expected_context)
+
+
+def discard_chain_step(step, expected_context=None):
+    """Discard one logged part while retaining the identities and order of surviving chain steps."""
+    return _discard_chain([_integer(step, "Chain step", 1)], expected_context)
+
+
+def discard_last_chain_step(expected_context=None):
+    """Discard the selected expedition's latest saved part, preserving earlier parts and Undo."""
+    return _discard_chain(expected_context=expected_context, last=True)
+
+
+def discard_current_map_logs(expected_context=None):
+    """Clear active-map activity in one undoable transaction, retaining its ID, settings and learned catalogs."""
+    with _connect(undo_label="Map logs discard") as db:
+        db.execute("BEGIN IMMEDIATE")
+        number = _meta(db, "current_map_number", 0)
+        if not number:
+            raise ValueError("Start a map before discarding its logs.")
+        mid = _map_id(number)
+        if expected_context is not None:
+            if not isinstance(expected_context, dict) or any(expected_context.get(key) != value for key, value in {
+                    "_scan_generation": _meta(db, "session_generation", 0), "_capture_map_id": mid,
+                    "_capture_map_pending": bool(_meta(db, "pending_new_map", False))}.items()):
+                raise ValueError("The map or session changed. Refresh before discarding map logs.")
+        removed_commits = [dict(row) for row in db.execute("SELECT * FROM commits WHERE map_id=? ORDER BY number", (mid,))]
+        remnants = {row[0] for table in ("legacy_export", "new_export") for row in db.execute(
+            f"SELECT remnant_id FROM {table} WHERE map_id=? AND remnant_id IS NOT NULL AND remnant_id!=''", (mid,))}
+        for remnant_id in remnants:
+            db.execute("DELETE FROM scan_links WHERE remnant_id=?", (remnant_id,))
+        for row in db.execute("SELECT DISTINCT expedition_id FROM chain_append_receipts WHERE expedition_id LIKE ?",
+                              (mid + "-E%",)).fetchall():
+            _retire_chain_requests(db, row[0])
+        for table in ("chain_completions", "chain_step_provenance", "chain_append_receipts"):
+            db.execute(f"DELETE FROM {table} WHERE expedition_id LIKE ?", (mid + "-E%",))
+        for table in ("legacy_export", "new_export", "expeditions", "map_unique_kills",
+                      "currency_snapshots", "ritual_pages", "commits"):
+            db.execute(f"DELETE FROM {table} WHERE map_id=?", (mid,))
+        db.execute("UPDATE maps SET kills_json=? WHERE map_id=?", (_dump([None, None, None]), mid))
+        _set_meta(db, "pending_new_map", False)
+        _set_meta(db, "prepared_waystone_setup", None)
+        _set_meta(db, "ocr_pending", None)
+        _set_meta(db, "ocr_pending_mode", None)
+        _set_meta(db, "session_generation", _meta(db, "session_generation", 0) + 1)
+        commit_number = _record_commit(db, "Map logs discard", mid, reference="Discarded current map logs",
+                                      details={"removed_commits": removed_commits,
+                                               "removed_remnant_ids": sorted(remnants)})
+    return {"map_id": mid, "scan_commit_number": commit_number, "state": get_state()}
 
 def _unique_kills_for_map(db, map_id):
     """Read a map's optional unique-kill count, returning None when absent."""
@@ -1961,7 +2197,7 @@ def _clean_propagation_family(family, family_candidates):
 
 
 def _resolve_propagation_origin(db, recipe, family, candidates):
-    """Validate recipe/family membership and freeze only an explicit or uniquely supported family origin."""
+    """Resolve the catalog recipe ID beside existing family evidence without duplicating its rune combo."""
     try:
         canonical = _canonical(db, recipe)
     except ValueError:
@@ -1969,7 +2205,9 @@ def _resolve_propagation_origin(db, recipe, family, candidates):
             raise ValueError("Choose a known propagation recipe before assigning its family.")
         canonical = recipe
     matching = []
+    recipe_id = None
     if canonical and db.execute("SELECT 1 FROM recipes WHERE name=?", (canonical,)).fetchone():
+        recipe_id = _ensure_recipe_id(db, canonical)
         matching = [row["id"] for row in db.execute("SELECT id,recipes_json FROM families WHERE valid=1 ORDER BY id")
                     if canonical in _load(row["recipes_json"])]
     if family is not None and family not in matching:
@@ -1980,7 +2218,7 @@ def _resolve_propagation_origin(db, recipe, family, candidates):
         raise ValueError("The selected propagation family is not one of the captured family candidates.")
     possible = candidates or ([family] if family is not None else matching)
     resolved = family if family is not None else possible[0] if len(possible) == 1 else None
-    return {"recipe": canonical, "family": resolved, "family_candidates": possible,
+    return {"recipe": canonical, "recipe_id": recipe_id, "family": resolved, "family_candidates": possible,
             "family_status": "known" if resolved is not None else "ambiguous" if possible else "unknown",
             "family_source": "supplied" if family is not None else "candidates" if candidates else
                              "recipe" if matching else "unknown"}
@@ -2004,7 +2242,7 @@ def _increment_propagation(db, mid, expedition, eid, cleaned, recipe, current_va
 
 
 def increment_propagation_detonated(expected_context, *, current_value=_UNSET, runes=None, recipe="", request_id=None):
-    """Persist one accepted held/manual scan independently of its unsaved draft."""
+    """Persist one accepted held/manual scan independently of its unsaved draft. Saved changes remain undoable."""
     cleaned, recipe = _clean_propagation_part(runes, recipe)
     if not isinstance(expected_context, dict):
         raise ValueError("The propagation capture context is invalid. Scan again.")
@@ -2012,7 +2250,7 @@ def increment_propagation_detonated(expected_context, *, current_value=_UNSET, r
     payload = {"operation": "propagation-draft", "runes": cleaned, "recipe": recipe,
                "current_value": None if current_value is _UNSET else current_value,
                "count_from_saved": current_value is _UNSET}
-    with _connect() as db:
+    with _connect(undo_label='Propagation scan') as db:
         db.execute("BEGIN IMMEDIATE")
         previous = _chain_receipt(db, request_id, payload, expected_context)
         if previous is not None:
@@ -2026,7 +2264,7 @@ def increment_propagation_detonated(expected_context, *, current_value=_UNSET, r
 
 def accept_propagation_part(expected_context, *, runes=None, recipe="", request_id=None,
                             current_value=_UNSET, wait_for_lock=True, family=None, family_candidates=None):
-    """Atomically count/append once with validated frozen family provenance; allow immediate GUI lock retries."""
+    """Count/append once with recipe ID and validated family provenance; allow immediate GUI lock retries. Saved changes remain undoable."""
     cleaned, recipe = _clean_propagation_part(runes, recipe)
     selected_family, candidates = _clean_propagation_family(family, family_candidates)
     if not isinstance(expected_context, dict):
@@ -2040,7 +2278,7 @@ def accept_propagation_part(expected_context, *, runes=None, recipe="", request_
         payload["family"] = selected_family
     if candidates:
         payload["family_candidates"] = candidates
-    with _connect() as db:
+    with _connect(undo_label='Propagation approval') as db:
         if not wait_for_lock:
             # This connection alone must not block Qt while another writer finishes.
             db.execute("PRAGMA busy_timeout=0")
@@ -2061,10 +2299,10 @@ def accept_propagation_part(expected_context, *, runes=None, recipe="", request_
 
 
 def save_kills(normal, magic, rare, *, unique=_UNSET):
-    """Replace map kill totals and its first export-row counts, retaining the update in commit history."""
+    """Replace map kill totals and its first export-row counts, retaining the update in commit history. Saved changes remain undoable."""
     values = [_integer(v, label, 0, blank=True) for v, label in
               zip((normal, magic, rare), ("Normal kills", "Magic kills", "Rare kills"))]
-    with _connect() as db:
+    with _connect(undo_label='Map kills') as db:
         db.execute("BEGIN IMMEDIATE")
         number = _meta(db, "current_map_number")
         if number == 0:
@@ -2078,9 +2316,9 @@ def save_kills(normal, magic, rare, *, unique=_UNSET):
 
 
 def save_detonated(value):
-    """Atomically select an expedition, replace its detonated totals and record the update."""
+    """Atomically select an expedition, replace its detonated totals and record the update. Saved changes remain undoable."""
     count = _integer(value, "Remnants Detonated", 0, blank=True)
-    with _connect() as db:
+    with _connect(undo_label='Remnant count') as db:
         db.execute("BEGIN IMMEDIATE")
         number = _meta(db, "current_map_number")
         if number == 0:
@@ -2096,10 +2334,10 @@ def save_detonated(value):
 
 
 def save_counts(normal, magic, rare, detonated=_UNSET, *, unique=_UNSET):
-    """Save map kills and expedition totals atomically, preserving unset optional counts and recording history."""
+    """Save map kills and expedition totals atomically, preserving unset optional counts and recording history. Saved changes remain undoable."""
     values = [_integer(v, label, 0, blank=True) for v, label in
               zip((normal, magic, rare), ("Normal kills", "Magic kills", "Rare kills"))]
-    with _connect() as db:
+    with _connect(undo_label='Map stats') as db:
         db.execute("BEGIN IMMEDIATE")
         number = _meta(db, "current_map_number")
         if not number:
@@ -2121,10 +2359,10 @@ def save_counts(normal, magic, rare, detonated=_UNSET, *, unique=_UNSET):
 
 
 def finish_map(normal, magic, rare, detonated=_UNSET, *, unique=_UNSET):
-    """Save final counts, discard pending OCR review and mark the next map in one immediate transaction."""
+    """Save final counts, discard pending OCR review and mark the next map in one immediate transaction. Saved changes remain undoable."""
     values = [_integer(v, label, 0, blank=True) for v, label in
               zip((normal, magic, rare), ("Normal kills", "Magic kills", "Rare kills"))]
-    with _connect() as db:
+    with _connect(undo_label='Finalize map') as db:
         db.execute("BEGIN IMMEDIATE")
         _set_meta(db, "ocr_pending", None)
         _set_meta(db, "ocr_pending_mode", None)
@@ -2148,8 +2386,8 @@ def finish_map(normal, magic, rare, detonated=_UNSET, *, unique=_UNSET):
 
 
 def mark_next_map(pending):
-    """Atomically validate and toggle the next-map marker, restoring staged fields on cancellation."""
-    with _connect() as db:
+    """Atomically validate and toggle the next-map marker, restoring staged fields on cancellation. Saved changes remain undoable."""
+    with _connect(undo_label='Map marker') as db:
         db.execute("BEGIN IMMEDIATE")
         if _meta(db, "ocr_pending"):
             raise ValueError("Save or discard the scanned remnant before changing the map marker.")
@@ -2166,8 +2404,8 @@ def start_map():
 
     Apply staged waystone fields or clear prior-map fields, retain earlier Atlas
     binding and remember settings needed to undo an empty map.
-    """
-    with _connect() as db:
+     Saved changes remain undoable."""
+    with _connect(undo_label='New map') as db:
         db.execute("BEGIN IMMEDIATE")
         current = _meta(db, "current_map_number", 0)
         if current and not _meta(db, "pending_new_map"):
@@ -2243,7 +2481,10 @@ def clear_export_and_reset_ids():
     """
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
+        db.execute("DELETE FROM undo_actions")
         _set_meta(db, "session_generation", _meta(db, "session_generation", 0) + 1)
+        _set_meta(db, "chain_revisions", {})
+        _set_meta(db, "retired_chain_requests", {})
         for table in ("legacy_export", "new_export", "maps", "map_unique_kills", "expeditions", "scan_links",
                       "currency_snapshots", "ritual_pages", "commits", "chain_completions", "chain_append_receipts",
                       "chain_step_provenance"):
@@ -2565,11 +2806,11 @@ def save_currency_snapshot(phase, items, expected_map_id=None, *, register_names
     """Replace a map's approved inventory phase and append its commit atomically.
 
     Aggregate duplicate names, optionally register labels and teach icons, and preserve bound Atlas context.
-    """
+     Saved changes remain undoable."""
     map_id = currency_target_map(phase)
     if not isinstance(items, list) or len(items) > 60:
         raise ValueError("A snapshot needs up to 60 inventory rows.")
-    with _connect() as db:
+    with _connect(undo_label='Currency approval') as db:
         db.execute("BEGIN IMMEDIATE")
         number = _meta(db, "current_map_number", 0)
         if phase == "start" and (not number or _meta(db, "pending_new_map", False)):
@@ -2778,7 +3019,7 @@ def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
 
     A repeated capture hash replaces its page; otherwise append a page.
     Optionally register accepted labels and teach their icons.
-    """
+     Saved changes remain undoable."""
     if not isinstance(items, list) or len(items) > MAX_RITUAL_REWARDS:
         raise ValueError(f"Review up to {MAX_RITUAL_REWARDS} Ritual rewards on a page.")
     raw_text = str(raw_text or "")
@@ -2809,7 +3050,7 @@ def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
                         "tribute": tribute, "source": source, "deferred": deferred})
     if not cleaned:
         raise ValueError("Add or review at least one Ritual reward before saving a page.")
-    with _connect() as db:
+    with _connect(undo_label='Ritual approval') as db:
         db.execute("BEGIN IMMEDIATE")
         number = _meta(db, "current_map_number", 0)
         if not number or _meta(db, "pending_new_map"):
@@ -3229,6 +3470,7 @@ def get_state():
             "map_remnant_id": _map_remnant_id(db, mid, pending),
             "next_remnant_id": f"R{_meta(db, 'next_remnant_number'):04d}",
             "scan_commit_count": _meta(db, "scan_commit_count", 0),
+            "undo_action": undo_store.latest(db),
             "ocr_pending": pending,
             "pending_new_map": _meta(db, "pending_new_map"),
             "kills": _load(k[0]) if k else [None, None, None],
@@ -3290,11 +3532,12 @@ def export_csv(*, _db=None):
             db.execute("BEGIN")
         writer.writerow([*_meta(db, "export_headers"), *EXPORT_EXTRA_HEADERS[:-2],
                          *ATLAS_EXPORT_HEADERS, *EXPORT_EXTRA_HEADERS[-2:], *KILL_EXPORT_HEADERS,
-                         *CHAIN_EXPORT_HEADERS])
+                         *CHAIN_EXPORT_HEADERS, CHAIN_RECIPE_ID_HEADER])
         atlas_contexts = {row["number"]: _load(row["snapshot_json"])
                           for row in db.execute("SELECT number,snapshot_json FROM commits")}
         completed = {row[0] for row in db.execute("SELECT expedition_id FROM chain_completions")}
         origins = _stored_chain_origins(db)
+        recipe_ids = {row["recipe_name"]: row["recipe_id"] for row in db.execute("SELECT * FROM recipe_ids")}
         seen_maps = set()
         for table in ("legacy_export", "new_export"):
             for item in db.execute(f"SELECT row_json FROM {table} ORDER BY position"):
@@ -3313,9 +3556,11 @@ def export_csv(*, _db=None):
                 else:
                     kill_values = ["", ""]
                 status = ("Completed" if values[32] in completed else "Open") if values[25] else ""
-                origin_values = _origin_export_values(origins.get((values[32], int(values[25])))) if values[25] else [""] * len(CHAIN_ORIGIN_HEADERS)
+                origin = origins.get((values[32], int(values[25]))) if values[25] else None
+                origin_values = _origin_export_values(origin) if values[25] else [""] * len(CHAIN_ORIGIN_HEADERS)
                 writer.writerow(_csv_row([*values[:-2], *_atlas_export_values(context), *values[-2:],
-                                          *kill_values, status, *origin_values]))
+                                          *kill_values, status, *origin_values,
+                                          _origin_recipe_id_export_value(origin, recipe_ids)]))
     return out.getvalue().encode("utf-8-sig")
 
 
@@ -3345,9 +3590,10 @@ CHAIN_ORIGIN_HEADERS = ("Propagation Recipe", "Propagation Family ID", "Propagat
                         "Propagation Family Candidates", "Propagation Family Source")
 CHAIN_EXPORT_HEADERS = ("Chain Status", *CHAIN_ORIGIN_HEADERS)
 CHAIN_CORRECTION_HEADERS = ("Previous Rune 1", "Previous Rune 2")
+CHAIN_RECIPE_ID_HEADER = "Propagation Recipe ID"
 HISTORY_APPEND_HEADERS = (*KILL_EXPORT_HEADERS, "Remnants Detonated (Scan)", "Start Baseline",
                           "Current Inventory Snapshot", "Session Found Quantity", *CHAIN_EXPORT_HEADERS,
-                          *CHAIN_CORRECTION_HEADERS)
+                          *CHAIN_CORRECTION_HEADERS, CHAIN_RECIPE_ID_HEADER)
 
 
 def _origin_export_values(origin):
@@ -3357,6 +3603,17 @@ def _origin_export_values(origin):
             origin.get("family_status", "unknown"),
             ";".join(str(value) for value in origin.get("family_candidates", [])),
             origin.get("family_source", "unknown")]
+
+
+def _origin_recipe_id_export_value(origin, recipe_ids):
+    """Read a frozen recipe ID, resolving older explicit origins by exact canonical registry name."""
+    if not origin:
+        return ""
+    if "recipe_id" in origin:
+        return origin["recipe_id"] or ""
+    if origin.get("family_source", "unknown") == "unknown":
+        return ""
+    return recipe_ids.get(origin.get("recipe", ""), "")
 
 
 def _current_inventory_projection(db):
@@ -3396,6 +3653,7 @@ def export_record_history_csv(*, _db=None):
             db.execute("BEGIN")
         current_inventories, current_commits = _current_inventory_projection(db)
         completed = {row[0] for row in db.execute("SELECT expedition_id FROM chain_completions")}
+        recipe_ids = {row["recipe_name"]: row["recipe_id"] for row in db.execute("SELECT * FROM recipe_ids")}
         for commit in db.execute("SELECT * FROM commits ORDER BY number"):
             context = _load(commit["snapshot_json"])
             details = _load(commit["details_json"])
@@ -3470,6 +3728,10 @@ def export_record_history_csv(*, _db=None):
                             "Propagation Rune 2": item["rune2"], "Previous Rune 1": item["previous_rune1"],
                             "Previous Rune 2": item["previous_rune2"], "_origin": origins.get(item["step"])}
                            for item in details.get("changes", [])]
+            elif commit["kind"] in ("Chain discard", "Chain step discard"):
+                entries = [{"Chain Step #": item["step"], "Propagation Rune 1": item["rune1"],
+                            "Propagation Rune 2": item["rune2"], "_origin": origins.get(item["step"])}
+                           for item in details.get("removed_steps", [])]
             elif commit["kind"] == "Propagation":
                 runes = details.get("runes") or []
                 entries = [{"Recipe": details.get("recipe", ""),
@@ -3488,7 +3750,8 @@ def export_record_history_csv(*, _db=None):
                              *config[-4:-2], *config[-2:]]
             for entry in entries or [{}]:
                 values = {**shared, **entry}
-                chain_event = commit["kind"] in ("Chain", "Chain correction", "Chain completion", "Propagation")
+                discarded = commit["kind"] in ("Chain discard", "Chain step discard")
+                chain_event = discarded or commit["kind"] in ("Chain", "Chain correction", "Chain completion", "Propagation")
                 origin = entry.get("_origin") or {}
                 if origin.get("family") is not None:
                     values["Family ID"] = origin["family"]
@@ -3505,10 +3768,12 @@ def export_record_history_csv(*, _db=None):
                                            shared.get("Start Baseline", ""),
                                            shared.get("Current Inventory Snapshot", ""),
                                            values.get("Session Found Quantity", ""),
-                                           ("Completed" if commit["expedition_id"] in completed else "Open")
+                                           ("Discarded" if discarded else
+                                            "Completed" if commit["expedition_id"] in completed else "Open")
                                            if chain_event else "",
                                            *(_origin_export_values(origin) if chain_event else [""] * len(CHAIN_ORIGIN_HEADERS)),
-                                           *(values.get(name, "") for name in CHAIN_CORRECTION_HEADERS)]))
+                                           *(values.get(name, "") for name in CHAIN_CORRECTION_HEADERS),
+                                           _origin_recipe_id_export_value(origin, recipe_ids) if chain_event else ""]))
     return output.getvalue().encode("utf-8-sig")
 
 
@@ -3640,7 +3905,7 @@ def export_primary_csv(*, _db=None):
                     "Base Map Mods", "+2 Tablet Mods"}
         legacy_headers = ["Map Modifiers" if header == "Waystone %" else header
                           for header in legacy.fieldnames
-                          if header not in obsolete and header != "Waystone Modifiers"]
+                          if header not in obsolete and header not in ("Waystone Modifiers", CHAIN_RECIPE_ID_HEADER)]
         item_headers = map_summary_item_headers(_db=db)
         aliases = {"Aldur's Saga": "Aldur's Saga Affix", "Waystone Modifiers": "Map Modifiers",
                    "Last Commit #": "Scan Commit #", "Normal Kills": "Normal Kills (Map)",
@@ -3650,7 +3915,7 @@ def export_primary_csv(*, _db=None):
                         if header not in item_headers and header not in legacy_headers
                         and aliases.get(header) not in legacy_headers
                         and header not in obsolete and header != "Waystone %"]
-        headers = [*legacy_headers, "Type", *supplemental, *item_headers]
+        headers = [*legacy_headers, "Type", *supplemental, *item_headers, CHAIN_RECIPE_ID_HEADER]
         by_map = {row["Map ID"]: row for row in summaries}
         once_per_map = {header for header in headers if header.startswith(("Tablet ", "Map Mod ", "Expedition "))
                         and header not in ("Expedition #", "Expedition ID")}
@@ -3770,6 +4035,14 @@ def export_atlas_csv(*, _db=None):
             writer.writerow(_csv_row([setup_id, ", ".join(sorted(map_ids.get(setup_id, set()))),
                 settings["catalog_version"], "" if rarity is None else rarity, catalog_id, *values]))
     return output.getvalue().encode("utf-8-sig")
+
+
+def export_analysis_context_csv(*, _db=None):
+    """Read the SQL-resident analysis notes for the workbook on its shared export snapshot."""
+    with (nullcontext(_db) if _db is not None else _connect()) as db:
+        if _db is None:
+            db.execute("BEGIN")
+        return analysis_context.export_csv(db)
 
 
 def _csv_row(values):

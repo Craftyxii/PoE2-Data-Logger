@@ -1,6 +1,6 @@
-"""Build a three-sheet XLSX directly from the logger CSV exports.
+"""Build a four-sheet XLSX directly from logger CSV exports and SQL-resident analysis notes.
 
-Export, Atlas Character Settings and Scan History use one SQLite read snapshot.
+Export, Atlas Character Settings, Scan History and Analysis Context use one SQLite read snapshot.
 Saved Atlas setup IDs link the summary/history rows to their exported settings;
 CSV columns determine worksheet order and recognized numeric cell types.
 """
@@ -202,22 +202,41 @@ def _data_sheet(data, *, hyperlinks=None, numeric_columns=()):
     return sheet.bytes()
 
 
-def export_xlsx():
-    # All three worksheets describe one database snapshot, including a concurrent
-    # atlas edit or scan commit that happens while the workbook is generated.
-    """Serialize the summary, saved Atlas settings and scan-history CSVs into one XLSX.
+def _analysis_context_sheet(data):
+    """Format explanatory notes as wrapped, readable rows without changing their SQL text."""
+    sheet = Sheet(_data_sheet(data))
+    widths = (22, 42, 112, 19)
+    for column, width in zip(sheet.root.findall(f"{{{NS}}}cols/{{{NS}}}col"), widths):
+        column.set("width", str(width))
+    for number, row in sheet.rows.items():
+        if number == 1:
+            continue
+        guidance = "".join(sheet._cell(number, 3).itertext())
+        # Approximate lines at the fixed width so wrapped notes stay visible in spreadsheet readers.
+        lines = sum(max(1, (len(line) + 119) // 120) for line in guidance.split("\n"))
+        row.set("ht", str(max(32, lines * 15 + 8)))
+        row.set("customHeight", "1")
+        for cell in row:
+            cell.set("s", "3")
+    return sheet.bytes()
 
-    Read all three tables and dynamic item headers in one database transaction,
-    then add internal setup hyperlinks and worksheet styles to the ZIP package.
+
+def export_xlsx():
+    """Serialize current data, saved Atlas settings, scan history and analysis notes into one XLSX.
+
+    Append the context sheet after the established data sheets to preserve their
+    indices. Read all sources and item headers in one transaction, then add setup
+    hyperlinks and worksheet styles to the ZIP package.
     """
     with logger._connect() as db:
         db.execute("BEGIN")
         data_sheets = [("Export", logger.export_primary_csv(_db=db)),
                        ("Atlas Character Settings", logger.export_atlas_csv(_db=db)),
-                       ("Scan History", logger.export_all_csv(_db=db))]
+                       ("Scan History", logger.export_all_csv(_db=db)),
+                       ("Analysis Context", logger.export_analysis_context_csv(_db=db))]
         item_headers = logger.map_summary_item_headers(_db=db)
     setup_links = {number: _atlas_setup_hyperlinks(data, data_sheets[1][1], data_sheets[1][0])
-                   for number, (_, data) in enumerate(data_sheets, 1) if number != 2}
+                   for number, (_, data) in enumerate(data_sheets, 1) if number in (1, 3)}
     content = ET.Element(f"{{{TYPES}}}Types")
     for extension, kind in (("rels", "application/vnd.openxmlformats-package.relationships+xml"), ("xml", "application/xml")):
         ET.SubElement(content, f"{{{TYPES}}}Default", {"Extension": extension, "ContentType": kind})
@@ -232,8 +251,9 @@ def export_xlsx():
     parts = {}
     for number, (name, data) in enumerate(data_sheets, 1):
         path = f"xl/worksheets/sheet{number}.xml"
-        parts[path] = _data_sheet(data, hyperlinks=setup_links.get(number),
-                                 numeric_columns=item_headers if number == 1 else ())
+        parts[path] = (_analysis_context_sheet(data) if name == "Analysis Context" else
+                       _data_sheet(data, hyperlinks=setup_links.get(number),
+                                   numeric_columns=item_headers if number == 1 else ()))
         ET.SubElement(content, f"{{{TYPES}}}Override", {"PartName": "/" + path,
             "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"})
         ET.SubElement(sheets, f"{{{NS}}}sheet", {"name": name, "sheetId": str(number), f"{{{DOC_REL}}}id": f"rId{number}"})
@@ -252,9 +272,11 @@ def export_xlsx():
         '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
         '<fill><patternFill patternType="solid"><fgColor rgb="FFE2AA2B"/><bgColor indexed="64"/></patternFill></fill></fills>'
         '<borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-        '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+        '<cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
         '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>'
-        '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>'
+        '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+        '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1">'
+        '<alignment vertical="top" wrapText="1"/></xf></cellXfs>'
         '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>').encode()
     out = io.BytesIO()
     with ZipFile(out, "w", compression=ZIP_DEFLATED) as destination:

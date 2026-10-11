@@ -113,7 +113,8 @@ class HotkeyListenerTests(unittest.TestCase):
         manager = hotkey.HotkeyManager(supported=False, focused=lambda: True,
                                       grabber=Mock(), readers={"opened": Mock()})
         manager.before_capture = Mock()
-        with patch.object(hotkey.threading, "Thread") as worker:
+        with patch.object(hotkey.threading, "Thread") as worker, \
+                patch.object(hotkey.threading, "Timer"):
             manager.capture("remnant", background=True)
             manager.capture("remnant", background=True)
             self.assertEqual(worker.call_count, 1)
@@ -239,6 +240,33 @@ class HotkeyListenerTests(unittest.TestCase):
         self.assertIn("error", outcome)
         user32.KillTimer.assert_called_once_with(None, 41)
         user32.UnregisterHotKey.assert_called_once_with(None, hotkey.HOTKEY_ID)
+
+    def test_propagation_capture_keeps_chain_revision_from_before_screenshot(self):
+        """Bind delayed hotkey results to the captured chain revision so discard invalidates them."""
+        logger.start_map()
+        logger.commit_chain("Death")
+        captured = logger.scan_context()
+
+        def grab(**kwargs):
+            """Discard the saved chain after capture tokens freeze but before recognition finishes."""
+            logger.discard_chain(logger.scan_context())
+            return Image.new("RGB", (400, 300))
+
+        reader = Mock(return_value={"runes": ["Power"], "positions": [1]})
+        manager = hotkey.HotkeyManager(supported=False, grabber=grab,
+                                      readers={"propagation": reader}, focused=lambda: True)
+        manager.capture("propagation")
+
+        event = manager.status()["latest"]
+        self.assertEqual(event["error"], "")
+        self.assertEqual(event["result"]["_capture_chain_revision"], captured["_capture_chain_revision"])
+        self.assertNotEqual(event["result"]["_capture_chain_revision"],
+                            logger.scan_context()["_capture_chain_revision"])
+        self.assertEqual(event["result"]["_capture_map_id"], captured["_capture_map_id"])
+        reader.assert_called_once()
+        with self.assertRaises(ValueError):
+            logger.validate_chain_context(event["result"])
+        self.assertEqual(logger.get_state()["chain"], [])
 
 
 if __name__ == "__main__":

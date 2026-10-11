@@ -43,7 +43,7 @@ def memory_database():
 class AtlasWorkbookTests(unittest.TestCase):
     """Check workbook sheet links, typed values and shared export snapshots."""
     def sample_workbook(self):
-        """Build a three-sheet fixture workbook using one transactional connection."""
+        """Build a four-sheet fixture workbook using one transactional connection."""
         main_data = csv_bytes(["Map ID", "Atlas Setup ID", "Gear Item Rarity %", "Chaos Orb"],
                               [["M0001", "ATLAS-1", 0, 7], ["M0002", "ATLAS-2", 175.5, 0],
                                ["M0000", "", "", ""]])
@@ -81,13 +81,21 @@ class AtlasWorkbookTests(unittest.TestCase):
             connections.append(_db)
             return ["Chaos Orb"]
 
+        def context_export(*, _db):
+            """Require notes to share the fixture's data-export read transaction."""
+            self.assertTrue(_db.in_transaction)
+            connections.append(_db)
+            return csv_bytes(["Section", "Topic", "Guidance", "Context Version"],
+                             [["Overview", "Purpose", "Interpret saved observations.", "1"]])
+
         with patch.object(logger, "_connect", memory_database), \
                 patch.object(logger, "export_primary_csv", side_effect=main_export), \
                 patch.object(logger, "export_atlas_csv", side_effect=atlas_export), \
                 patch.object(logger, "export_all_csv", side_effect=history_export), \
+                patch.object(logger, "export_analysis_context_csv", side_effect=context_export), \
                 patch.object(logger, "map_summary_item_headers", side_effect=numeric_item_headers):
             workbook = workbook_export.export_xlsx()
-        self.assertEqual(len(connections), 4)
+        self.assertEqual(len(connections), 5)
         self.assertTrue(all(connection is connections[0] for connection in connections))
         return workbook
 
@@ -100,7 +108,7 @@ class AtlasWorkbookTests(unittest.TestCase):
             workbook = ET.fromstring(archive.read("xl/workbook.xml"))
             sheets = workbook.findall("s:sheets/s:sheet", ns)
             self.assertEqual([sheet.get("name") for sheet in sheets],
-                             ["Export", "Atlas Character Settings", "Scan History"])
+                             ["Export", "Atlas Character Settings", "Scan History", "Analysis Context"])
             relationships = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
             targets = {row.get("Id"): row.get("Target") for row in relationships}
             for number, sheet in enumerate(sheets, 1):
@@ -108,7 +116,7 @@ class AtlasWorkbookTests(unittest.TestCase):
                                  f"worksheets/sheet{number}.xml")
             types = ET.fromstring(archive.read("[Content_Types].xml"))
             overrides = {row.get("PartName"): row.get("ContentType") for row in types}
-            for number in (1, 2, 3):
+            for number in (1, 2, 3, 4):
                 self.assertTrue(overrides[f"/xl/worksheets/sheet{number}.xml"].endswith("worksheet+xml"))
 
             main = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
@@ -337,6 +345,8 @@ class AtlasWorkbookTests(unittest.TestCase):
         with patch.object(logger, "_connect", memory_database), \
                 patch.object(logger, "export_primary_csv", return_value=csv_bytes(["Map ID"], [])), \
                 patch.object(logger, "export_all_csv", return_value=csv_bytes(["Map ID"], [])), \
+                patch.object(logger, "export_analysis_context_csv", return_value=csv_bytes(
+                    ["Section", "Topic", "Guidance", "Context Version"], [])), \
                 patch.object(logger, "export_atlas_csv",
                              return_value=csv_bytes(ATLAS_HEADERS, [["too", "short"]])), \
                 patch.object(logger, "map_summary_item_headers", return_value=[]):
@@ -375,10 +385,17 @@ class AtlasWorkbookTests(unittest.TestCase):
                     rarity = _db.execute("SELECT rarity FROM setup").fetchone()[0]
                     return csv_bytes(["Gear Item Rarity %"], [[rarity]])
 
+                def context_export(*, _db):
+                    """Read a note from the same snapshot as the fixture data sheets."""
+                    rarity = _db.execute("SELECT rarity FROM setup").fetchone()[0]
+                    return csv_bytes(["Section", "Topic", "Guidance", "Context Version"],
+                                     [["Fixture", "Rarity", rarity, "1"]])
+
                 with patch.object(logger, "_connect", reader_database), \
                         patch.object(logger, "export_primary_csv", side_effect=main_export), \
                         patch.object(logger, "export_atlas_csv", side_effect=atlas_export), \
                         patch.object(logger, "export_all_csv", side_effect=atlas_export), \
+                        patch.object(logger, "export_analysis_context_csv", side_effect=context_export), \
                         patch.object(logger, "map_summary_item_headers", return_value=[]):
                     data = workbook_export.export_xlsx()
                 self.assertEqual(writer.execute("SELECT rarity FROM setup").fetchone()[0], 75)
@@ -387,6 +404,8 @@ class AtlasWorkbookTests(unittest.TestCase):
                         sheet = ET.fromstring(archive.read(f"xl/worksheets/sheet{number}.xml"))
                         cell = sheet.find(f".//{{{workbook_export.NS}}}c[@r='A2']")
                         self.assertEqual(cell.findtext(f"{{{workbook_export.NS}}}v"), "25")
+                    context = ET.fromstring(archive.read("xl/worksheets/sheet4.xml"))
+                    self.assertEqual("".join(context.find(f".//{{{workbook_export.NS}}}c[@r='C2']").itertext()), "25")
             finally:
                 writer.close()
 
@@ -396,7 +415,8 @@ class AtlasWorkbookTests(unittest.TestCase):
         from openpyxl import load_workbook
         workbook = load_workbook(io.BytesIO(self.sample_workbook()), data_only=True)
         try:
-            self.assertEqual(workbook.sheetnames, ["Export", "Atlas Character Settings", "Scan History"])
+            self.assertEqual(workbook.sheetnames,
+                             ["Export", "Atlas Character Settings", "Scan History", "Analysis Context"])
             self.assertEqual(workbook["Export"]["C2"].value, 0)
             self.assertEqual(workbook["Export"]["B2"].hyperlink.location,
                              "'Atlas Character Settings'!A2")

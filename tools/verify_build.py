@@ -36,7 +36,7 @@ def pe_machine(path):
 
 def verify(executable, check_files=True):
     """Inspect the PyInstaller archive and, when requested, require the bundled Python 3.12 x64
-    runtime, compatible native libraries and the OCR strictness policy module.
+    runtime, compatible native libraries, undo journal and analysis-context export modules.
     """
     executable = Path(executable)
     archive = CArchiveReader(str(executable))
@@ -57,6 +57,8 @@ def verify(executable, check_files=True):
     module_archive = archive.open_embedded_archive('PYZ.pyz')
     for name in ('PoE2_Data_Logger.ui.native_desktop',
                  'PoE2_Data_Logger.core.logger_store',
+                 'PoE2_Data_Logger.core.analysis_context',
+                 'PoE2_Data_Logger.core.undo_store',
                  'PoE2_Data_Logger.core.service',
                  'PoE2_Data_Logger.platform.hotkey',
                  'PoE2_Data_Logger.ocr.opened_scan',

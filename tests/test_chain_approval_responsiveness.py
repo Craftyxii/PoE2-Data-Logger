@@ -67,8 +67,8 @@ class ChainApprovalResponsivenessTests(unittest.TestCase):
         self.assertTrue(condition(), "The pending chain operation did not finish.")
 
     @contextmanager
-    def writer_lock(self, duration, metadata=None):
-        """Hold a competing writer lock and close its handle before Windows fixture cleanup."""
+    def writer_lock(self, duration, metadata=None, *, heartbeat_ready=None):
+        """Hold a writer for a minimum duration and bounded GUI-heartbeat evidence, then close its handle."""
         path = store.DATA_DIR / "scans.sqlite3"
         ready = threading.Event()
         release = threading.Event()
@@ -77,11 +77,17 @@ class ChainApprovalResponsivenessTests(unittest.TestCase):
         released_at = []
 
         def write():
+            """Keep contention active long enough to observe real GUI progress, with a finite release deadline."""
             try:
                 with closing(sqlite3.connect(path, timeout=2)) as db:
                     db.execute("BEGIN IMMEDIATE")
                     ready.set()
                     release.wait(duration)
+                    if heartbeat_ready is not None and not release.is_set():
+                        # Parallel OCR can consume the short fixture's entire
+                        # duration before Qt pumps its timer. A frozen GUI still
+                        # fails after this bounded evidence wait.
+                        heartbeat_ready.wait(2)
                     for key, value in (metadata or {}).items():
                         db.execute("INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) "
                                    "DO UPDATE SET value=excluded.value", (key, json.dumps(value)))
@@ -137,11 +143,17 @@ class ChainApprovalResponsivenessTests(unittest.TestCase):
                 reading, approve = self.stage()
                 fields = tuple(self.window._propagation_row_inputs[0])
                 ticks = []
+                heartbeat_ready = threading.Event()
                 timer = QTimer(self.window)
                 timer.setInterval(10)
-                timer.timeout.connect(lambda: ticks.append(time.monotonic()))
+                def heartbeat():
+                    """Record GUI progress while the competing transaction remains held."""
+                    ticks.append(time.monotonic())
+                    if len(ticks) > 5:
+                        heartbeat_ready.set()
+                timer.timeout.connect(heartbeat)
                 try:
-                    with self.writer_lock(duration) as (finished, released_at):
+                    with self.writer_lock(duration, heartbeat_ready=heartbeat_ready) as (finished, released_at):
                         timer.start()
                         start = time.monotonic()
                         approve.click()

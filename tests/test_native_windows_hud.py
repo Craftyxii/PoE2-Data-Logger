@@ -346,7 +346,7 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["map_remnant_id"], "R0001")
         self.phase("04b-completion-retains-remnant-number")
         new_map = next(button for button in self.window.findChildren(QPushButton) if button.text() == "+ New map")
-        undo = next(button for button in self.window.findChildren(QPushButton) if button.text() == "Undo new map")
+        undo = next(button for button in self.window.findChildren(QPushButton) if button.text() == "Undo")
         self.native.click(new_map)
         self.assertEqual(self.window.header_map_id.text(), "#2")
         self.assertEqual(self.window.header_remnant_id.text(), "—")

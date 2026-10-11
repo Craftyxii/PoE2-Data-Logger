@@ -1,8 +1,10 @@
 """Read propagated rune positions from a normalized Runeshape recipe panel.
 
 Three crown peaks mark propagation; a gold tile frame is optional. Verified
-positions index the stored recipe combination, rather than classifying glyphs.
-Unclear crowns, row text or tile origins produce manual-review results."""
+positions index each stored recipe combination and can recover missing crowns
+across a recognized family. Two rows with matching plausible fragments, or one
+fragment for a lone recipe, supply tentative suggestions requiring manual approval.
+Unverified text, conflicting marks or tile origins remain unresolved."""
 
 from __future__ import annotations
 
@@ -16,7 +18,9 @@ from PIL import Image
 from PoE2_Data_Logger.core import logger_store as logger
 from PoE2_Data_Logger.core import ocr_sensitivity
 from PoE2_Data_Logger.ocr import opened_scan, runehelper_ocr
-from PoE2_Data_Logger.ocr.propagation_marks import supported_partial_peak_boxes, supported_peak_boxes
+from PoE2_Data_Logger.ocr.propagation_marks import (
+    supported_fragment_peak_boxes, supported_partial_peak_boxes, supported_peak_boxes, three_peak_boxes,
+)
 
 
 def _result(status, **values):
@@ -88,13 +92,20 @@ def _read_panel_rows(image, strictness=ocr_sensitivity.DEFAULT):
     return [row for row in rows if row["y1"] > title["y2"] + 12], title
 
 
-def _gold_mask(image):
-    """Select bright, saturated yellow-gold pixels for crown and cursor geometry."""
+def _gold_mask(image, *, pale=False):
+    """Select gold pixels, optionally recovering bright, desaturated highlights.
+
+    Cursor detection and initial crown searches use saturated gold. Pale gold
+    is limited to frame recovery and crown checks above recognized recipe rows.
+    """
     rgb = np.asarray(image)
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
-    return ((hsv[:, :, 0] >= 15) & (hsv[:, :, 0] <= 40)
-            & (hsv[:, :, 1] >= 55) & (hsv[:, :, 2] >= 155)
-            & (rgb[:, :, 0].astype(np.int16) - rgb[:, :, 2] >= 55)).astype(np.uint8)
+    hue = (hsv[:, :, 0] >= 15) & (hsv[:, :, 0] <= 40)
+    colour = rgb[:, :, 0].astype(np.int16) - rgb[:, :, 2]
+    gold = hue & (hsv[:, :, 1] >= 55) & (hsv[:, :, 2] >= 155) & (colour >= 55)
+    if pale:
+        gold |= hue & (hsv[:, :, 1] >= 25) & (hsv[:, :, 2] >= 225) & (colour >= 25)
+    return gold.astype(np.uint8)
 
 
 def _marked_image(image):
@@ -112,16 +123,10 @@ def _marked_image(image):
     for factor in (1, .9, 1.1, .8, 1.2, 1.35, 1.5, .95, 1.05, 1.25):
         shown = image if factor == 1 else Image.fromarray(np.clip(pixels * factor, 0, 255).astype(np.uint8))
         mask = _gold_mask(shown)
-        rgb = np.asarray(shown)
-        hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
         # Bright captures can make the frame almost white. This additional
-        # mask locates the tile only; all three crown peaks still require
-        # the original gold mask.
-        pale_frame = ((hsv[:, :, 0] >= 15) & (hsv[:, :, 0] <= 40)
-                      & (hsv[:, :, 1] >= 25) & (hsv[:, :, 2] >= 225)
-                      & (rgb[:, :, 0].astype(np.int16) - rgb[:, :, 2] >= 25))
+        # mask locates the tile only; peaks still require saturated gold.
         found, uncertain = _marked_boxes(mask)
-        pale_found, _ = _marked_boxes(mask, mask | pale_frame.astype(np.uint8))
+        pale_found, _ = _marked_boxes(mask, _gold_mask(shown, pale=True))
         for box in pale_found:
             same = next((entry for entry in supplementary if abs(box[0] - entry[0][0]) < 7
                          and abs(box[1] - entry[0][1]) < 7), None)
@@ -185,10 +190,11 @@ def _cursors(mask):
 
 
 def _marked_boxes(mask, frame_mask=None):
-    """Locate framed tiles and check gold peaks above their top border.
+    """Locate framed tiles and validate isolated crown peaks above their border.
 
-    Three peaks with at least two pixels each yield a mark; one or two plausible
-    peaks remain uncertain, and an ordinary frame alone is not propagation.
+    Framed and frameless marks use the same spacing, baseline and vertical
+    support checks. Gold artifacts with insufficient geometry remain uncertain
+    so a second damaged mark cannot disappear from a paired reading.
     """
     joined = cv2.morphologyEx(mask if frame_mask is None else frame_mask,
                             cv2.MORPH_CLOSE, np.ones((3, 1), np.uint8))
@@ -215,13 +221,18 @@ def _marked_boxes(mask, frame_mask=None):
             start, end = max(0, round(width * (centre - .07))), min(width, round(width * (centre + .07)))
             peaks.append(int(band[:, start:end].sum()) if band.size else 0)
         box = (float(x + width / 2), int(y + border_y), int(width), int(height - border_y))
-        if min(peaks) < 2:
-            # An ordinary gold/brown frame has no crown above its border.
-            # A partly visible crown must still block automatic acceptance.
-            if max(peaks) >= 2:
-                uncertain.append(box)
-        else:
+        if max(peaks) < 2:
+            continue
+        top = max(0, box[1] - 7)
+        left, right = max(0, x - 6), min(mask.shape[1], x + width + 6)
+        local_mask = mask[top:box[1] + 2, left:right]
+        crown_rows = [{"y1": box[1] - top + width * 41 / 38, "sockets": 1}]
+        crowns = three_peak_boxes(local_mask, crown_rows,
+                                  tile_layout=(box[0] - left, width * 41 / 38), tile_size=width)
+        if crowns:
             found.append(box)
+        elif max(peaks) >= 2:
+            uncertain.append(box)
     return found, uncertain
 
 
@@ -374,8 +385,109 @@ def _row_reading(db, panel, marked, incomplete, row, all_rows, candidates, share
                    runes=[runes[position - 1] for position in positions], can_use=clear)
 
 
+def _recover_group_slots(db, panel, marked, incomplete, rows, candidates, choices,
+                         row_layouts, shared_layout, min_first_x, strictness, fragments):
+    """Recover shared crown sockets in a verified family group or a lone recipe.
+
+    Independent complete crowns contribute distinct indices across recipes.
+    Plausible fragments can suggest a slot when two separate rows agree, or
+    when just one recipe is visible. Each receiving row still needs its full
+    socket bar and database rune order; contradictions hold the group for review.
+    Fragment consensus is tentative and always requires manual approval.
+    """
+    if not rows or (len(rows) > 1 and len(candidates) != 1):
+        return choices
+    positions = set()
+    observations = []
+    conflict = False
+    for row, choice in zip(rows, choices):
+        boxes = [box for box in marked if 3 <= row["y1"] - box[1] - box[3] / 2 <= 62]
+        # A held partial pair may still contain one independently verified
+        # complete crown. Read it without letting the partial supply evidence.
+        observed = (choice if choice["can_use"] else
+                    _row_reading(db, panel, marked, [], row, rows, candidates,
+                                 shared_layout, min_first_x, strictness=strictness))
+        sockets = observed["positions"] if observed["can_use"] else []
+        observations.append(sockets)
+        positions.update(sockets)
+        conflict |= len(boxes) > 2
+    confirmed = positions.copy()
+    fragment_rows = {}
+    for index, row in enumerate(rows):
+        layout = row_layouts.get(index)
+        if (layout is None or row["score"] < ocr_sensitivity.clear_threshold(.85, strictness, .15)
+                or row["match_score"] < ocr_sensitivity.clear_threshold(.9, strictness, .08)):
+            continue
+        first_x, pitch = layout
+        # One row casts at most one vote for each socket, irrespective of the
+        # number of exposures or duplicate fragment boxes that detected it.
+        for box in fragments.get(index, []):
+            socket = round((box[0] - first_x) / pitch) + 1
+            if abs(box[0] - first_x - (socket - 1) * pitch) <= 6:
+                fragment_rows.setdefault(socket, set()).add(index)
+    minimum_rows = 1 if len(rows) == 1 else 2
+    positions.update(socket for socket, votes in fragment_rows.items() if len(votes) >= minimum_rows)
+    if not positions and not conflict:
+        return choices
+    conflict |= len(positions) > 2
+    for index, row in enumerate(rows):
+        complete = [box for box in marked if 3 <= row["y1"] - box[1] - box[3] / 2 <= 62]
+        partials = [box for box in incomplete if 3 <= row["y1"] - box[1] - box[3] / 2 <= 62]
+        if not complete and not partials:
+            continue
+        layout = row_layouts.get(index)
+        if layout is None:
+            # Missing origins already hold their own rows. An unlocated
+            # partial could hide a second socket, so it also holds recovery.
+            conflict = True
+            continue
+        first_x, pitch = layout
+        for box in complete + partials:
+            socket = round((box[0] - first_x) / pitch) + 1
+            if socket not in positions or abs(box[0] - first_x - (socket - 1) * pitch) > 6:
+                conflict = True
+    combinations = []
+    for row in rows:
+        entry = db.execute("SELECT sockets,combo FROM recipes WHERE name=?", (row["recipe"],)).fetchone()
+        runes = [rune.strip() for rune in entry["combo"].split("+")] if entry else []
+        combinations.append(runes)
+        if (not entry or len(runes) != entry["sockets"] or
+                any(not rune or rune.lower() == "unresolved" for rune in runes) or
+                any(socket < 1 or socket > len(runes) for socket in positions)):
+            conflict = True
+    if conflict:
+        return [{**choice, "positions": [], "runes": [], "can_use": False,
+                 "status": (choice["status"] if "first rune position" in choice["status"] else
+                            "Crown sockets conflict across this recipe group — review its marked runes."),
+                 "position_source": "group_conflict"} for choice in choices]
+    ordered = sorted(positions)
+    recovered = []
+    for index, (row, choice, runes) in enumerate(zip(rows, choices, combinations)):
+        clear = (row["score"] >= ocr_sensitivity.clear_threshold(.85, strictness, .15) and
+                 row["match_score"] >= ocr_sensitivity.clear_threshold(.9, strictness, .08))
+        if index not in row_layouts or not clear:
+            recovered.append(choice)
+            continue
+        recovered.append({**choice, "positions": ordered.copy(),
+                          "runes": [runes[socket - 1] for socket in ordered], "can_use": True,
+                          "status": ("Fragment-based propagation suggestion — verify its marked runes before approving."
+                                     if positions - confirmed else
+                                     "Propagation runes detected — approve this recipe to add them to the chain."),
+                          "position_source": "fragment_consensus" if positions - confirmed else "family_group",
+                          "fragment_votes": {str(socket): len(votes) for socket, votes in fragment_rows.items()},
+                          "observed_positions": observations[index],
+                          "recovered_positions": [socket for socket in ordered if socket not in observations[index]]})
+    return recovered
+
+
 def scan_propagation(image: Image.Image | Path, strictness=ocr_sensitivity.DEFAULT):
-    """Apply frozen capture strictness to recipe suggestions and preserve crown/position guards."""
+    """Resolve recipe suggestions with scoped pale-crown recovery and verified tile positions.
+
+    Capture strictness applies to recipe text. Three-peak geometry confirms
+    crowns; supported fragment consensus can suggest sockets for manual review.
+    Verified origins, paired-mark conflict checks and explicit approval remain
+    mandatory. Recovery changes no database records or dropdown definitions.
+    """
     strictness = ocr_sensitivity.validate(strictness)
     options = {} if strictness == ocr_sensitivity.DEFAULT else {"strictness": strictness}
     if isinstance(image, Image.Image):
@@ -386,11 +498,11 @@ def scan_propagation(image: Image.Image | Path, strictness=ocr_sensitivity.DEFAU
     panel = _panel(source, **options)
     if panel is None:
         return _result("Runeshape panel is too small — capture the full recipe list and cursor.")
-    mask, marked, incomplete = _marked_image(panel)
-    cursors = _cursors(mask)
     detections, title = panel.info.get("propagation_rows") or _read_panel_rows(panel, **options)
     if title is None:
         return _result("Runeshape Combinations panel was not found — review the capture.")
+    mask, marked, incomplete = _marked_image(panel)
+    cursors = _cursors(mask)
     with logger._connect() as db:
         rows = _reward_rows(db, detections, **options)
         candidates = _family_candidates(db, rows)
@@ -398,46 +510,53 @@ def scan_propagation(image: Image.Image | Path, strictness=ocr_sensitivity.DEFAU
         # Plain tile geometry locates the rune positions. The three crown
         # peaks identify propagation; a surrounding gold frame is optional.
         peak_masks = None
-        for row in rows:
+        initial_layouts = {}
+        for row_index, row in enumerate(rows):
             entry = db.execute("SELECT sockets FROM recipes WHERE name=?", (row["recipe"],)).fetchone()
             if entry is None:
                 continue
             gray_layout = _tile_layout(panel, row["y1"] - 41, 38, [], min_first_x, entry["sockets"])
+            if gray_layout is not None:
+                initial_layouts[row_index] = gray_layout
             if gray_layout is None:
                 # The standard full-margin panel has a fixed native lattice.
-                # A crop without that margin needs recoverable gray geometry.
-                if not cursors:
-                    continue
-                gray_layout = (71., 41.)
+                # Without one, locate crown anchors only; the final reading
+                # still requires a verified gray origin and full socket bar.
+                if cursors:
+                    gray_layout = (71., 41.)
             if peak_masks is None:
                 pixels = np.asarray(panel, dtype=np.float32)
                 peak_masks = [(factor, _gold_mask(panel if factor == 1 else Image.fromarray(
-                    np.clip(pixels * factor, 0, 255).astype(np.uint8))))
+                    np.clip(pixels * factor, 0, 255).astype(np.uint8)), pale=True))
                     for factor in (1, .9, 1.1, .8, 1.2, 1.35, 1.5, .95, 1.05, 1.25)]
             crown_rows = [{**row, "sockets": entry["sockets"]}]
             crowns = supported_peak_boxes(peak_masks, crown_rows,
                                           tile_layout=gray_layout,
-                                          tile_size=gray_layout[1] * 38 / 41)
+                                          tile_size=gray_layout[1] * 38 / 41 if gray_layout else 38)
             for box in crowns:
                 if not any(abs(box[0] - old[0]) < 7 and abs(box[1] - old[1]) < 7 for old in marked):
                     marked.append(box)
-            row_crowns = [box for box in marked if 3 <= row["y1"] - box[1] - box[3] / 2 <= 62]
-            if row_crowns:
-                # A clear crown anchors its paired partial crown more
-                # accurately than the OCR text's occasionally shifted top.
-                crown_rows[0]["crown_top"] = float(np.median([box[1] for box in row_crowns]))
-            for box in supported_partial_peak_boxes(peak_masks, crown_rows, tile_layout=gray_layout,
-                                                     tile_size=gray_layout[1] * 38 / 41):
-                if not any(abs(box[0] - old[0]) < 7 and abs(box[1] - old[1]) < 7 for old in incomplete):
-                    incomplete.append(box)
-        incomplete = [box for box in incomplete if not any(
-            abs(box[0] - valid[0]) < 7 and abs(box[1] - valid[1]) < 7 for valid in marked)]
         layouts = []
+        row_layouts = dict(initial_layouts)
         anchors = [(row["y1"] - box[1], box[3]) for row in rows for box in marked
                    if 3 <= row["y1"] - box[1] - box[3] / 2 <= 62]
         body_offset = float(np.median([anchor[0] for anchor in anchors])) if anchors else None
         body_height = float(np.median([anchor[1] for anchor in anchors])) if anchors else None
-        for row in rows:
+        if body_offset is not None and peak_masks is not None:
+            # A panel can contain tiles smaller than the reference width.
+            # Observed crown bodies anchor the other rows at that same scale;
+            # their rune indices still need independent gray-frame validation.
+            for row in rows:
+                entry = db.execute("SELECT sockets FROM recipes WHERE name=?", (row["recipe"],)).fetchone()
+                if entry is None:
+                    continue
+                crown_rows = [{**row, "sockets": entry["sockets"],
+                               "y1": row["y1"] - body_offset + body_height * 41 / 38}]
+                for box in supported_peak_boxes(peak_masks, crown_rows, tile_layout=None,
+                                                 tile_size=body_height):
+                    if not any(abs(box[0] - old[0]) < 7 and abs(box[1] - old[1]) < 7 for old in marked):
+                        marked.append(box)
+        for row_index, row in enumerate(rows):
             boxes = [box for box in marked if 3 <= row["y1"] - box[1] - box[3] / 2 <= 62]
             if boxes or body_offset is not None:
                 entry = db.execute("SELECT sockets FROM recipes WHERE name=?", (row["recipe"],)).fetchone()
@@ -448,13 +567,59 @@ def scan_propagation(image: Image.Image | Path, strictness=ocr_sensitivity.DEFAU
                 layout = _tile_layout(panel, tile_top, tile_height, boxes, min_first_x, entry["sockets"])
                 if layout:
                     layouts.append(layout)
+                    row_layouts[row_index] = layout
         agreeing = max(([other for other in layouts if abs(other[0] - layout[0]) <= 2
                          and abs(other[1] - layout[1]) <= 2] for layout in layouts),
                        key=len, default=[])
         shared = tuple(float(np.median([layout[index] for layout in agreeing]))
                        for index in range(2)) if len(agreeing) >= 2 else None
+        for row_index, row in enumerate(rows):
+            boxes = [box for box in marked if 3 <= row["y1"] - box[1] - box[3] / 2 <= 62]
+            if not 1 <= len(boxes) <= 2:
+                continue
+            entry = db.execute("SELECT sockets FROM recipes WHERE name=?", (row["recipe"],)).fetchone()
+            if entry is None:
+                continue
+            top = float(np.median([box[1] for box in boxes]))
+            height = float(np.median([box[3] for box in boxes]))
+            layout = _tile_layout(panel, top, height, boxes, min_first_x,
+                                  entry["sockets"], reference=shared)
+            if layout is None:
+                continue
+            row_layouts[row_index] = layout
+            # Search paired fragments only after recovering the actual tile
+            # lattice; a missing initial gray frame must not hide rune two.
+            crown_rows = [{**row, "sockets": entry["sockets"], "crown_top": top}]
+            for box in supported_partial_peak_boxes(peak_masks, crown_rows, tile_layout=layout,
+                                                     tile_size=layout[1] * 38 / 41):
+                if not any(abs(box[0] - old[0]) < 7 and abs(box[1] - old[1]) < 7 for old in incomplete):
+                    incomplete.append(box)
+        incomplete = [box for box in incomplete if not any(
+            abs(box[0] - valid[0]) < 7 and abs(box[1] - valid[1]) < 7 for valid in marked)]
+        fragments = {}
+        for index, row in enumerate(rows):
+            layout = row_layouts.get(index)
+            if layout is None or peak_masks is None:
+                continue
+            entry = db.execute("SELECT sockets FROM recipes WHERE name=?", (row["recipe"],)).fetchone()
+            fragment_row = {**row, "sockets": entry["sockets"]}
+            if body_offset is not None:
+                fragment_row["crown_top"] = row["y1"] - body_offset
+            for box in supported_partial_peak_boxes(peak_masks, [fragment_row],
+                                    tile_layout=layout, tile_size=layout[1] * 38 / 41):
+                if not any(abs(box[0] - old[0]) < 7 and abs(box[1] - old[1]) < 7
+                           for old in marked + incomplete):
+                    incomplete.append(box)
+            fragments[index] = supported_fragment_peak_boxes(peak_masks, [fragment_row],
+                                tile_layout=layout, tile_size=layout[1] * 38 / 41)
+            for box in fragments[index]:
+                if not any(abs(box[0] - old[0]) < 7 and abs(box[1] - old[1]) < 7
+                           for old in marked + incomplete):
+                    incomplete.append(box)
         choices = [_row_reading(db, panel, marked, incomplete, row, rows, candidates, shared, min_first_x, **options)
                    for row in rows]
+        choices = _recover_group_slots(db, panel, marked, incomplete, rows, candidates, choices,
+                                       row_layouts, shared, min_first_x, strictness, fragments)
         if strictness != ocr_sensitivity.DEFAULT:
             for choice in choices:
                 choice["_ocr_strictness"] = strictness

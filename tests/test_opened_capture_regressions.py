@@ -97,6 +97,48 @@ class OpenedCaptureRegressions(unittest.TestCase):
                 with self.subTest(scale=scale, database_expected=expected):
                     self.assertEqual(opened_scan._icon_count(image, 109 * scale, expected), 5)
 
+    def test_socket_geometry_survives_small_reward_row_jitter_at_each_scale(self):
+        """Count complete real socket frames despite five pixels of normalized OCR jitter.
+
+        Reused captured frames provide independent three-, four- and five-socket
+        geometry; deliberately conflicting catalog counts must not change it.
+        """
+        for sockets in (3, 4, 5):
+            panel = self.panel_with_icons(sockets)
+            for scale in (.75, 1, 1.25, 2):
+                image = panel.resize((round(panel.width * scale), round(panel.height * scale)),
+                                     Image.Resampling.LANCZOS)
+                for jitter in range(-5, 6):
+                    for expected in (sockets, sockets + 1):
+                        with self.subTest(sockets=sockets, scale=scale, jitter=jitter,
+                                          database_expected=expected):
+                            self.assertEqual(opened_scan._icon_count(
+                                image, (109 + jitter) * scale, expected), sockets)
+
+    def test_known_four_socket_recipes_with_only_three_visible_frames_stay_held(self):
+        """Keep a real missing-frame conflict pending even when every recipe name matches.
+
+        Controlled OCR names exercise Family 69 against the fixture's actual
+        three-frame geometry without claiming this is the user's capture.
+        """
+        panel = self.panel_with_icons(3)
+        names = ["Unique Ring", "Unique Belt", "Unique Amulet"]
+        for jitter in (-5, 0, 1, 5):
+            rows = [{"text": "Runeshape Combinations", "score": .99,
+                     "x": 180, "y": 32, "right": 400, "bottom": 55}]
+            rows.extend({"text": "1x " + name, "score": .99, "x": 250,
+                         "y": 109 + index * 81 + jitter, "right": 533,
+                         "bottom": 137 + index * 81 + jitter}
+                        for index, name in enumerate(names))
+            with self.subTest(jitter=jitter):
+                result = opened_scan.scan_opened(panel, ocr_rows=rows)
+                self.assertEqual(result["family"], "Family 69", result)
+                self.assertEqual([line["recipe"] for line in result["opened_recipes"]], names)
+                self.assertEqual((result["sockets"], result["recipe_sockets"]), (3, 4), result)
+                self.assertFalse(result["can_use"], result)
+                self.assertFalse(auto_commit.candidate(result)["ready"], result)
+                self.assertIn("Opened icons show 3 sockets", result["status"])
+
     def test_five_socket_rare_unique_sequence_is_usable_at_smaller_capture_scale(self):
         """Verify the complete Family 37 sequence remains usable in a reduced capture."""
         panel = self.panel_with_icons(5)

@@ -3,7 +3,7 @@
 from pathlib import Path
 import unittest
 
-from PIL import Image, ImageDraw, ImageEnhance
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 from PoE2_Data_Logger.ocr import propagation_scan, runehelper_ocr
 from PoE2_Data_Logger.ocr.propagation_marks import supported_peak_boxes, three_peak_boxes
@@ -18,14 +18,14 @@ class PropagationPeakTests(unittest.TestCase):
         with Image.open(path) as source:
             cls.source = runehelper_ocr.default_frame(source.convert("RGB"))
 
-    def masks(self, image):
-        """Yield gold masks under several brightness adjustments."""
+    def masks(self, image, *, pale=False):
+        """Yield strict or pale-capable gold masks under several brightness adjustments."""
         for factor in (1, .9, 1.1, .8, 1.2, 1.35, 1.5, .95, 1.05, 1.25):
-            yield factor, propagation_scan._gold_mask(ImageEnhance.Brightness(image).enhance(factor))
+            yield factor, propagation_scan._gold_mask(ImageEnhance.Brightness(image).enhance(factor), pale=pale)
 
-    def markers(self, image, rows, layout, tile_size=38):
+    def markers(self, image, rows, layout, tile_size=38, *, pale=False):
         """Find supported crown boxes and order them vertically."""
-        found = supported_peak_boxes(self.masks(image), rows, tile_layout=layout, tile_size=tile_size)
+        found = supported_peak_boxes(self.masks(image, pale=pale), rows, tile_layout=layout, tile_size=tile_size)
         return sorted(found, key=lambda box: box[1])
 
     def crown(self, offsets, frame=False):
@@ -68,12 +68,48 @@ class PropagationPeakTests(unittest.TestCase):
         mask = propagation_scan._gold_mask(self.crown((-9, 0, 9)))
         self.assertEqual(three_peak_boxes(mask, [], tile_layout=(71, 41)), [])
 
+    def test_flat_gold_specks_are_not_crown_peaks(self):
+        """Reject three aligned glints that have no vertical peak shape."""
+        for frame in (False, True):
+            with self.subTest(frame=frame):
+                image = self.crown((), frame)
+                draw = ImageDraw.Draw(image)
+                for centre in (62, 71, 80):
+                    draw.line((centre, 65, centre + 1, 65), fill=(242, 213, 144))
+                self.assertEqual(self.markers(image, [{"y1": 109}], (71, 41)), [])
+
     def test_real_recipe_crowns_have_no_extra_marks_from_glyphs_or_text(self):
         """Verify the real fixture produces exactly its three slot-three crowns."""
         boxes = self.markers(self.source, [{"y1": y, "sockets": sockets}
                                             for y, sockets in ((109, 4), (189, 3), (270, 3))], (71, 41))
         self.assertEqual(len(boxes), 3)
         self.assertEqual([round((box[0] - 71) / 41) + 1 for box in boxes], [3, 3, 3])
+
+    def test_pale_real_crowns_recover_under_colour_exposure_and_blur_changes(self):
+        """Recover authentic desaturated peaks without adding marks at other tile slots."""
+        rows = [{"y1": y, "sockets": sockets}
+                for y, sockets in ((109, 4), (189, 3), (270, 3))]
+        for colour, brightness, blur in ((.7, 1, 0), (.7, 1, .7), (1, 1.1, 0), (1, 1.25, .7)):
+            with self.subTest(colour=colour, brightness=brightness, blur=blur):
+                image = ImageEnhance.Color(self.source).enhance(colour)
+                image = ImageEnhance.Brightness(image).enhance(brightness)
+                image = image.filter(ImageFilter.GaussianBlur(blur))
+                boxes = self.markers(image, rows, (71, 41), pale=True)
+                self.assertEqual(len(boxes), 3)
+                self.assertEqual([round((box[0] - 71) / 41) + 1 for box in boxes], [3, 3, 3])
+                for box, top in zip(boxes, (68, 149, 230)):
+                    self.assertAlmostEqual(box[1], top, delta=2)
+
+    def test_pale_search_cannot_invent_marks_from_real_frames_or_gray_pixels(self):
+        """Reject real glyphs and frames after crown removal, and pixels with no gold hue."""
+        erased = self.source.copy()
+        draw = ImageDraw.Draw(erased)
+        for top in (68, 149, 230):
+            draw.rectangle((134, top - 8, 171, top - 1), fill=(170, 160, 145))
+        rows = [{"y1": y, "sockets": sockets}
+                for y, sockets in ((109, 4), (189, 3), (270, 3))]
+        for image in (erased, ImageEnhance.Color(self.source).enhance(0)):
+            self.assertEqual(self.markers(image, rows, (71, 41), pale=True), [])
 
     def test_real_crowns_survive_removed_frames_crops_scales_and_exposure(self):
         """Verify real peak detection survives removed frames, cropping, scaling and brightness."""

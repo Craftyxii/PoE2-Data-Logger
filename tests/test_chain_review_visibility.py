@@ -643,8 +643,8 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
         self.assertEqual(self.expedition_counts()["M0001-E01"], 2)
 
-    def test_building_chain_dropdown_corrections_preserve_structure_then_completion_locks_it(self):
-        """Verify rune corrections preserve chain identity and completion locks historical parts."""
+    def test_building_chain_corrections_preserve_structure_and_completion_allows_saved_edits(self):
+        """Verify saved rune corrections retain chain identity and remain available after completion."""
         self.approve_propagate()
         self.approve_propagate(("Opulent",), "Greater Regal Orb x3")
         self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
@@ -682,8 +682,8 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         self.assertEqual(self.expedition_counts(), counts)
         self.assertEqual(self.propagation_audit(), audit)
         self.assertFalse(self.window.expedition_save_chain_button.isEnabled())
-        self.assertFalse(self.window.expedition_chain_table.cellWidget(0, 1).isEnabled())
-        self.assertFalse(self.window.expedition_chain_table.cellWidget(0, 2).isEnabled())
+        self.assertTrue(self.window.expedition_chain_table.cellWidget(0, 1).isEnabled())
+        self.assertTrue(self.window.expedition_chain_table.cellWidget(0, 2).isEnabled())
         self.assertFalse(self.window.expedition_commit_chain_button.isEnabled())
         self.assertFalse(self.window.expedition_commit_chain_button.isEnabled())
         self.assertFalse(self.window.review_complete_chain_button.isEnabled())

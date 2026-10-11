@@ -48,7 +48,8 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.7 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.8 Beta"
+SCAN_TIMEOUT_MS = 90000
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
                             if getattr(sys, "frozen", False) else
@@ -375,6 +376,7 @@ class LoggerWindow(QMainWindow):
         self._both_last_opened = None
         self.resolved = None
         self._pending_tasks = {}
+        self._scan_task_timers = {}
         self._chain_save_pending = None
         self._task_id = 0
         self._latest_hotkey = 0
@@ -465,13 +467,34 @@ class LoggerWindow(QMainWindow):
         QApplication.instance().installEventFilter(self)
 
     def _submit(self, label, function, done=None):
-        """Run work in the pool and dispatch completion through Qt with its session generation."""
+        """Dispatch generation-bound work, handling failed admission and bounding scan review waits."""
         if self._closed:
             return
         self._task_id += 1
         key = str(self._task_id)
-        self._pending_tasks[key] = (done, logger.session_generation())
-        future = self.pool.submit(function)
+        try:
+            generation = logger.session_generation()
+        except Exception as error:
+            failed = getattr(done, "_scan_failure", None)
+            if failed:
+                failed(error)
+            self.error(str(error))
+            return
+        self._pending_tasks[key] = (done, generation)
+        self.statusBar().showMessage(label)
+        try:
+            future = self.pool.submit(function)
+        except Exception as error:
+            # Enqueue failure has no future callback; retire its busy marker and
+            # matching scan draft exactly as a worker failure would.
+            self._task_done(key, None, error)
+            return
+        if getattr(done, "_scan_failure", None):
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda: self._expire_scan_task(key, future))
+            self._scan_task_timers[key] = timer
+            timer.start(SCAN_TIMEOUT_MS)
         def finished(item):
             """Emit a worker result or exception for the GUI thread unless the window has
             closed.
@@ -483,7 +506,22 @@ class LoggerWindow(QMainWindow):
             except Exception as error:
                 self.tasks.completed.emit(key, None, error)
         future.add_done_callback(finished)
-        self.statusBar().showMessage(label)
+
+    def _expire_scan_task(self, key, future):
+        """Retire overdue recognition without accepting a late result or cancelling unrelated saves."""
+        if key not in self._pending_tasks:
+            return
+        self._task_done(key, None, TimeoutError("OCR timed out after 90 seconds"))
+        # Cancel queued work; a running native reader may finish later, but its
+        # retired task ID can no longer modify review or saved logger data.
+        future.cancel()
+
+    def _clear_scan_watchdogs(self):
+        """Release timeout callbacks and retained scan results when reset or close retires all tasks."""
+        for timer in self._scan_task_timers.values():
+            timer.stop()
+            timer.deleteLater()
+        self._scan_task_timers.clear()
 
     def _task_done(self, key, result, error):
         """Handle a worker's Qt completion on the GUI thread, ignoring retired sessions and
@@ -492,10 +530,19 @@ class LoggerWindow(QMainWindow):
         if self._closed:
             return
         pending = self._pending_tasks.pop(key, None)
+        timer = self._scan_task_timers.pop(key, None)
+        if timer is not None:
+            timer.stop()
+            timer.deleteLater()
         if pending is None:
             return
         callback, generation = pending
-        if generation != logger.session_generation():
+        try:
+            retired = generation != logger.session_generation()
+        except Exception as problem:
+            retired = False
+            error = problem
+        if retired:
             return
         self.statusBar().clearMessage()
         if error:
@@ -542,7 +589,12 @@ class LoggerWindow(QMainWindow):
             self._ritual_capture_context = None
             self._pending_ritual_map = None
         else:
-            logger.discard_ocr_id()
+            try:
+                logger.discard_ocr_id()
+            except Exception as cleanup_error:
+                # A storage cleanup failure must be visible, but must not stop
+                # the GUI from leaving Reading and disabling unsafe approval.
+                error = RuntimeError(f"{error}; reservation cleanup failed: {cleanup_error}")
             self.results[kind if kind == "seed" else "opened"] = None
             self.resolved = None
             for widget in (self.first_recipe, self.next_recipe):
@@ -746,7 +798,10 @@ class LoggerWindow(QMainWindow):
         self._compact_header_grid.setVerticalSpacing(3)
         self._compact_header_status.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         actions = QHBoxLayout()
-        actions.addWidget(button("Undo new map", lambda: self.run(self.undo_map)))
+        self.undo_button = button("Undo", lambda: self.run(self.undo_map))
+        self.undo_button.setEnabled(False)
+        self.undo_button.setToolTip("There is no saved action to undo.")
+        actions.addWidget(self.undo_button)
         actions.addWidget(button("+ New map", lambda: self.run(self.finish_map), "primary"))
         self._header_actions = actions
         main_layout.addLayout(top)
@@ -2050,8 +2105,10 @@ class LoggerWindow(QMainWindow):
         review.addWidget(self.ritual_saved)
 
     def _build_chain_controls(self, content):
-        """Build expedition selection, saved-step corrections and the separate uncommitted rune
-        draft.
+        """Build expedition selection, reversible saved-step corrections/discards and rune drafts.
+
+        Discard controls belong to Expedition; propagation review retains its
+        existing recipe dropdowns and explicit approval workflow.
         """
         chain = self._group("PROPAGATION CHAIN", content)
         self.expedition = combo([1, 2])
@@ -2071,6 +2128,8 @@ class LoggerWindow(QMainWindow):
         self.expedition_chain_table = QTableWidget(0, 3)
         self.expedition_chain_table.setAccessibleName("Saved chain rune corrections")
         self.expedition_chain_table.setHorizontalHeaderLabels(["Chain part", "First rune", "Second rune"])
+        self.expedition_chain_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.expedition_chain_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.expedition_chain_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.expedition_chain_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.expedition_chain_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
@@ -2079,6 +2138,18 @@ class LoggerWindow(QMainWindow):
         chain.addWidget(self.expedition_chain_table)
         self.expedition_save_chain_button = button("Save corrections", lambda: self.run(self.save_chain_corrections))
         chain.addWidget(self.expedition_save_chain_button)
+        discard_actions = QHBoxLayout()
+        self.expedition_discard_chain_button = button("Discard chain", lambda: self.run(self.discard_chain))
+        self.expedition_discard_chain_step_button = button(
+            "Discard last chain step", lambda: self.run(self.discard_last_chain_step))
+        self.expedition_discard_chain_button.setToolTip(
+            "Remove this logged chain. Remnants, currency and actual detonation counts are retained. Undo restores it.")
+        self.expedition_discard_chain_step_button.setToolTip(
+            "Remove this expedition's latest saved part. Actual detonation counts are retained. Undo restores it.")
+        discard_actions.addWidget(self.expedition_discard_chain_button)
+        discard_actions.addWidget(self.expedition_discard_chain_step_button)
+        discard_actions.addStretch()
+        chain.addLayout(discard_actions)
         self.expedition_draft_widget = QWidget()
         self.rune_grid = QGridLayout(self.expedition_draft_widget)
         self.rune_grid.setContentsMargins(0, 0, 0, 0)
@@ -2574,7 +2645,7 @@ class LoggerWindow(QMainWindow):
             "font-size:17px;font-weight:700;color:#AAA49B;")
 
     def _set_commit_badge(self, number):
-        """Display a saved-commit badge and start its expiry timer."""
+        """Display a saved-commit badge, refresh the undo action and start badge expiry."""
         if number is None:
             return
         self._saved_badge = int(number)
@@ -2582,6 +2653,13 @@ class LoggerWindow(QMainWindow):
         self.stat_values[3].setText(f"✓ #{number} SAVED")
         self.stat_values[3].setStyleSheet("font-size:17px;font-weight:700;color:#F5C364;")
         self._commit_badge_timer.start()
+        self._sync_undo_control()
+
+    def _sync_undo_control(self, state=None):
+        """Enable Undo only when a saved action exists and identify that action in its tooltip."""
+        action = logger.undo_action() if state is None else state.get("undo_action") or ""
+        self.undo_button.setEnabled(bool(action))
+        self.undo_button.setToolTip(f"Undo {action}." if action else "There is no saved action to undo.")
 
     def _clear_commit_badge(self, expected=None):
         """Expire the saved badge only if its optional expected commit still matches."""
@@ -2600,7 +2678,8 @@ class LoggerWindow(QMainWindow):
                 "wisp": (self.header_wisp, self.wisp)}
 
     def _sync_header_ids(self, state):
-        """Display live IDs, reflow growing counters and sync expedition choices without saving them."""
+        """Display live IDs and undo availability, then sync expedition choices without saving them."""
+        self._sync_undo_control(state)
         mid = state["current_map_id"]
         self.header_map_id.setText(header_counter(mid))
         self.header_map_id.setToolTip(mid or "No active map")
@@ -2635,19 +2714,20 @@ class LoggerWindow(QMainWindow):
         self.update_area()
 
     def _save_map_tag(self, key, widget):
-        """Save one changed map tag immediately, synchronizing both copies or reverting on
-        failure.
+        """Save a changed map tag and its audit as one undo action, synchronizing both control copies.
         """
         selected = widget.isChecked() if isinstance(widget, QCheckBox) else value(widget)
         if selected == self.state["settings"].get(key):
             return
         try:
-            self.state = logger.save_settings({key: selected})
+            with logger.undo_group("Map settings"):
+                self.state = logger.save_settings({key: selected})
+                commit_number = logger.record_commit("Map settings")
         except Exception:
             self._sync_map_tags(self.state["settings"])
             raise
         self._sync_map_tags(self.state["settings"])
-        self._set_commit_badge(logger.record_commit("Map settings"))
+        self._set_commit_badge(commit_number)
 
     def update_area(self):
         """Preview area level from tier, Irradiated and Ocean, disabling uncertain waystone
@@ -2706,21 +2786,22 @@ class LoggerWindow(QMainWindow):
             select(field, selected)
 
     def save_map_settings(self):
-        """Save selected settings and report when the logged map snapshot stays frozen."""
+        """Save selected settings and their audit as one undo action, reporting frozen map snapshots."""
         reviewing = self.pending_review_kind == "waystone"
-        logger.save_settings({"waystone": value(self.waystone), "tier": value(self.tier),
-                              "map_mods": value(self.map_mods), "irradiated": self.irradiated.isChecked(),
-                              "ocean": self.ocean.isChecked(), "aldur": value(self.aldur),
-                              "deli": self.deli.isChecked(), "wisp": self.wisp.isChecked(),
-                              "biome": value(self.biome), "city_type": value(self.city_type),
-                              "item_rarity": value(self.item_rarity),
-                              "monster_rarity": value(self.monster_rarity),
-                              "pack_size": value(self.pack_size),
-                              "effectiveness": value(self.effectiveness),
-                              "waystone_name": value(self.waystone_name),
-                              "waystone_mods": [value(field) for field in self.waystone_mod_fields]
-                                                + self._extra_waystone_mods})
-        commit_number = logger.record_commit("Map settings")
+        with logger.undo_group("Map settings"):
+            logger.save_settings({"waystone": value(self.waystone), "tier": value(self.tier),
+                                  "map_mods": value(self.map_mods), "irradiated": self.irradiated.isChecked(),
+                                  "ocean": self.ocean.isChecked(), "aldur": value(self.aldur),
+                                  "deli": self.deli.isChecked(), "wisp": self.wisp.isChecked(),
+                                  "biome": value(self.biome), "city_type": value(self.city_type),
+                                  "item_rarity": value(self.item_rarity),
+                                  "monster_rarity": value(self.monster_rarity),
+                                  "pack_size": value(self.pack_size),
+                                  "effectiveness": value(self.effectiveness),
+                                  "waystone_name": value(self.waystone_name),
+                                  "waystone_mods": [value(field) for field in self.waystone_mod_fields]
+                                                    + self._extra_waystone_mods})
+            commit_number = logger.record_commit("Map settings")
         self._waystone_form_baseline = None
         self._review_saved("waystone", commit_number)
         self.refresh()
@@ -2751,21 +2832,23 @@ class LoggerWindow(QMainWindow):
         return ""
 
     def save_active_master(self):
-        """Persist the selected active master and retire its unsaved form baseline."""
-        logger.save_settings({"atlas_master": value(self.master)})
-        commit_number = logger.record_commit("Atlas Master")
+        """Save the active master and its audit as one undo action, then retire its form baseline."""
+        with logger.undo_group("Atlas Master"):
+            logger.save_settings({"atlas_master": value(self.master)})
+            commit_number = logger.record_commit("Atlas Master")
         self._active_master_baseline = None
         self.refresh()
         self._set_commit_badge(commit_number)
         self.note("Active Atlas Master saved.", True)
 
     def save_perks(self):
-        """Commit only the selected master's perks and retire that master's draft."""
+        """Save the selected master's perks and audit as one undo action, then retire its draft."""
         master = value(self.perk_master)
         selections = dict(self.state["settings"]["master_selections"])
         selections[master] = [value(item) for item in self.perk_boxes]
-        logger.save_settings({"master_selections": selections})
-        commit_number = logger.record_commit("Master perks", master)
+        with logger.undo_group("Master perks"):
+            logger.save_settings({"master_selections": selections})
+            commit_number = logger.record_commit("Master perks", master)
         self._perk_drafts.pop(master, None)
         self._perk_form_baseline = None
         self.refresh()
@@ -2773,8 +2856,7 @@ class LoggerWindow(QMainWindow):
         self.note(f"{master} perks saved.")
 
     def save_tablets(self):
-        """Save tablet configuration, merging only a reviewed slot and advancing scan order
-        when appropriate.
+        """Save tablet settings, audit and scan progression as one undo action, merging only a reviewed slot.
         """
         if self.pending_review_kind == "tablet" and self._pending_tablet_slot is None:
             raise ValueError("No tablet affixes were read. Scan the tablet again before saving this reading.")
@@ -2799,15 +2881,16 @@ class LoggerWindow(QMainWindow):
         else:
             raw_mods = self.tablet_raw_mods
         used = max(int(value(self.tablets_used)), reviewed) if reviewed is not None else value(self.tablets_used)
-        logger.save_settings({"tablets_used": used,
-                              "tablet_affixes": entries,
-                              "tablet_raw_mods": raw_mods},
-                             confirmed_affixes=sorted({item["affix"] for item in entries
-                                                       if item["affix"] and item["affix"] not in self.state["affixes"]}))
-        commit_number = logger.record_commit("Tablet config")
+        with logger.undo_group("Tablet config"):
+            logger.save_settings({"tablets_used": used,
+                                  "tablet_affixes": entries,
+                                  "tablet_raw_mods": raw_mods},
+                                 confirmed_affixes=sorted({item["affix"] for item in entries
+                                                           if item["affix"] and item["affix"] not in self.state["affixes"]}))
+            commit_number = logger.record_commit("Tablet config")
+            if reviewed == next_slot:
+                logger.advance_tablet_slot(next_slot)
         self._clear_tablet_form_dirty(reviewed)
-        if reviewed == next_slot:
-            logger.advance_tablet_slot(next_slot)
         self._review_saved("tablet", commit_number)
         self.refresh()
         self._set_commit_badge(commit_number)
@@ -2911,16 +2994,49 @@ class LoggerWindow(QMainWindow):
         self._show_image(None)
 
     def undo_map(self):
-        """Undo an empty map and invalidate captures and reviews only when its context changes."""
-        context = logger.scan_context()
-        logger.undo_empty_map()
-        if logger.scan_context() != context:
-            service.HOTKEY.cancel_capture()
-            self._clear_map_review()
-            self.review_kind.setText("Nothing waiting for review")
-            set_message(self.review_summary, "Map change undone. Scan the current map again.")
+        """Undo the latest saved action, retire older scan work and restore saved controls in place."""
+        page = self.tabs.currentWidget()
+        positions = [(bar, bar.value()) for area in page.findChildren(QAbstractScrollArea)
+                     for bar in (area.verticalScrollBar(), area.horizontalScrollBar())]
+        if isinstance(page, QAbstractScrollArea):
+            positions.extend((bar, bar.value()) for bar in
+                             (page.verticalScrollBar(), page.horizontalScrollBar()))
+        saved = logger.undo_last_action()
+        service.HOTKEY.cancel_capture()
+        self._cancel_pending_chain_save()
+        self._overlay_review_token += 1
+        self._overlay_capture_restore = None
+        self._accepted_propagation_requests.clear()
+        self._held_remnant_review = None
+        self._clear_map_review()
+        self.current_file = {"seed": "", "opened": ""}
+        self.found_table.setRowCount(0)
+        self._render_recipe_rows([])
+        self.opened_lines.clear()
+        self.scan_status.hide()
+        self.review_kind.setText("Nothing waiting for review")
+        self.review_kind.setProperty("scanKind", None)
+        self._form_map_context = None
+        self._saved_badge = None
+        self._commit_badge_timer.stop()
+        self.atlas_settings_page.set_settings(saved["state"]["settings"].get("atlas_settings"), force=True)
         self.refresh()
-        self.note("Empty map undone.")
+        self.tabs.setCurrentWidget(page)
+        action = saved["action"]
+        set_message(self.review_summary, f"{action} undone. Saved totals and chain state restored.", "success")
+        owner = self._overlay_review_token
+
+        def restore_position():
+            """Retain the current page's scroll after the saved state and Qt layouts refresh."""
+            if self._closed or owner != self._overlay_review_token or self.tabs.currentWidget() is not page:
+                return
+            for bar, position in positions:
+                bar.setValue(position)
+
+        restore_position()
+        QTimer.singleShot(0, self, restore_position)
+        self.note(f"{action} undone.", True)
+        return saved
 
     def set_expedition(self, widget=None):
         """Save expedition selection from either control, reverting both to persisted state on
@@ -2945,8 +3061,9 @@ class LoggerWindow(QMainWindow):
         self.refresh()
 
     def _chain_key(self, context):
-        """Key a chain draft by session generation, captured map and expedition."""
-        return (context["_scan_generation"], context["_capture_map_id"], context["_capture_expedition"])
+        """Keep drafts bound to their session, map, expedition and latest discard revision."""
+        return (context["_scan_generation"], context["_capture_map_id"], context["_capture_expedition"],
+                context.get("_capture_chain_revision", 0))
 
     def _chain_fields_changed(self, *, defer_review=False):
         # A correction can briefly empty one rune of a scanned pair. Keep its
@@ -3119,7 +3236,7 @@ class LoggerWindow(QMainWindow):
         if key == self._saved_chain_view_key:
             return
         previous_view = self._saved_chain_view_key
-        if self._saved_chain_view_key and not self._saved_chain_view_key[2]:
+        if self._saved_chain_view_key:
             baseline = {step: (rune1, rune2) for step, rune1, rune2 in self._saved_chain_view_key[1]}
             edits = {entry["step"]: entry for entry in self._saved_chain_edits()
                      if (entry["rune1"], entry["rune2"]) != baseline.get(entry["step"])}
@@ -3130,7 +3247,7 @@ class LoggerWindow(QMainWindow):
                 self._saved_chain_correction_drafts.pop(previous, None)
         current = {entry["step"]: (entry["rune1"], entry["rune2"]) for entry in entries}
         edits = {step: entry for step, entry in self._saved_chain_correction_drafts.get(key[0], {}).items()
-                 if not closed and step in current and (entry["rune1"], entry["rune2"]) != current[step]}
+                 if step in current and (entry["rune1"], entry["rune2"]) != current[step]}
         if edits:
             self._saved_chain_correction_drafts[key[0]] = edits
         else:
@@ -3140,7 +3257,7 @@ class LoggerWindow(QMainWindow):
         table = self.expedition_chain_table
         # Appending one accepted part must retain existing dropdowns and their correction drafts.
         append_only = bool(previous_view and previous_view[0] == key[0] and
-                           not previous_view[2] and not closed and
+                           previous_view[2] == closed and
                            key[1][:len(previous_view[1])] == previous_view[1] and
                            table.rowCount() == len(previous_view[1]))
         first_row = table.rowCount() if append_only else 0
@@ -3161,11 +3278,12 @@ class LoggerWindow(QMainWindow):
                     options.append(name)
                 field = combo(options, name)
                 field.setAccessibleName(f"Chain part {entry['step']} rune {column}")
-                field.setEnabled(not closed)
+                field.setEnabled(True)
                 table.setCellWidget(row, column, field)
                 field.currentIndexChanged.connect(self._chain_corrections_changed)
         table.setVisible(bool(entries))
         self._chain_corrections_changed()
+        self._update_chain_discard_controls()
 
     def _saved_chain_edits(self):
         """Read the saved-step correction controls with their original logger step numbers."""
@@ -3175,13 +3293,53 @@ class LoggerWindow(QMainWindow):
                 for row in range(self.expedition_chain_table.rowCount())]
 
     def _chain_corrections_changed(self, *_):
-        """Enable correction saving when saved-step edits differ from persisted open-chain
-        state.
-        """
+        """Enable correction saving for changed saved parts, including completed chains."""
         dirty = self._saved_chain_edits() != (self.state.get("chain") or [])
         self.expedition_save_chain_button.setVisible(bool(self.state.get("chain")))
-        self.expedition_save_chain_button.setEnabled(dirty and not self.state.get("chain_completed"))
+        self.expedition_save_chain_button.setEnabled(dirty)
         self._update_chain_completion_controls()
+
+    def _update_chain_discard_controls(self):
+        """Enable full-chain and last-step discard whenever the selected expedition has saved parts."""
+        if not hasattr(self, "expedition_discard_chain_button"):
+            return
+        ready = bool(self.state.get("chain") and not self.state.get("pending_new_map"))
+        self.expedition_discard_chain_button.setEnabled(ready)
+        self.expedition_discard_chain_step_button.setEnabled(ready)
+
+    def _after_chain_discard(self, saved):
+        """Retire propagation work and refresh the selected chain while retaining separate pending reviews."""
+        page = self.tabs.currentWidget()
+        key = self._chain_key(self._chain_context) if self._chain_context else None
+        service.HOTKEY.cancel_capture(modes=("propagation",))
+        self._cancel_pending_chain_save()
+        if self._held_remnant_review and self.pending_review_kind == self._held_remnant_review[0]:
+            self.start_manual_remnant_review()
+        if self.pending_review_kind == "propagation":
+            self.pending_review_kind = None
+            self._review_controls(None)
+            self.review_kind.setText("Nothing waiting for review")
+            self.review_kind.setProperty("scanKind", None)
+            self.approve_scan_button.setEnabled(False)
+        self._propagation_reading = None
+        self._discard_chain_review_draft()
+        self._chain_drafts.pop(key, None)
+        self._saved_chain_correction_drafts.pop(key, None)
+        self._saved_chain_view_key = None
+        self._refresh_after_chain_save()
+        self.tabs.setCurrentWidget(page)
+        self._set_commit_badge(saved["scan_commit_number"])
+        self.note(f"{saved['expedition_id']} · Logged chain parts discarded. Undo restores them.", True)
+
+    def discard_chain(self):
+        """Discard the Expedition page's current saved chain as one reversible correction."""
+        saved = logger.discard_chain(expected_context=self._saved_chain_edit_context)
+        self._after_chain_discard(saved)
+
+    def discard_last_chain_step(self):
+        """Remove the latest persisted part regardless of the editor's selected row."""
+        saved = logger.discard_last_chain_step(expected_context=self._saved_chain_edit_context)
+        self._after_chain_discard(saved)
 
     def _update_chain_completion_controls(self):
         """Enable completion for saved open chains without drafts, corrections or context-bound scans."""
@@ -3576,6 +3734,7 @@ class LoggerWindow(QMainWindow):
         if self._chain_save_pending:
             raise ValueError("Wait for the approved chain part to save before scanning propagation again.")
         logger.validate_scan_context(result)
+        logger.validate_chain_context(result)
         runes = result.get("runes") or []
         if (not isinstance(runes, (list, tuple)) or
                 any(not isinstance(rune, str) or len(rune) > 80 for rune in runes)
@@ -6477,6 +6636,7 @@ class LoggerWindow(QMainWindow):
         self.saved_scan = self._saved_scan_capture = self.resolved = None
         self._inventory_capture = self._ritual_hash = None
         self._pending_tasks.clear()
+        self._clear_scan_watchdogs()
         self.inventory_table.setRowCount(0)
         self.ritual_table.setRowCount(0)
         self.found_table.setRowCount(0)
@@ -6656,6 +6816,7 @@ class LoggerWindow(QMainWindow):
         self._poll.stop()
         service.HOTKEY._unregister()
         self._pending_tasks.clear()
+        self._clear_scan_watchdogs()
         self.pool.shutdown(wait=False, cancel_futures=True)
         QApplication.instance().removeEventFilter(self)
         super().closeEvent(event)
@@ -6663,7 +6824,7 @@ class LoggerWindow(QMainWindow):
 
 def instance_lock():
     """Acquire the data-directory instance lock, or focus an existing Windows logger and return
-    None when another instance owns it, including previous beta and stable clients.
+    None when another instance owns it, including the previous 1.3.2.7 beta and stable clients.
     """
     store.DATA_DIR.mkdir(parents=True, exist_ok=True)
     lock = QLockFile(str(store.DATA_DIR / "logger.lock"))
@@ -6681,6 +6842,7 @@ def instance_lock():
         user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
         user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
         window = (user32.FindWindowW(None, WINDOW_TITLE)
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.7 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.6 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.5 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.4 Beta")

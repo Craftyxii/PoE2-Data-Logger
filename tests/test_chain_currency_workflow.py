@@ -88,13 +88,13 @@ class ChainCurrencyWorkflowTests(unittest.TestCase):
         approve.click()
 
     def assert_workbook_matches_csv(self):
-        """Assert all three XLSX sheets match their CSV exports and contain no formulas."""
+        """Keep the three data sheets matched to CSV while the fourth sheet supplies analysis notes."""
         ns = {"s": workbook_export.NS}
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
             self.assertIsNone(archive.testzip())
             manifest = ET.fromstring(archive.read("xl/workbook.xml"))
             self.assertEqual([sheet.get("name") for sheet in manifest.findall("s:sheets/s:sheet", ns)],
-                             ["Export", "Atlas Character Settings", "Scan History"])
+                             ["Export", "Atlas Character Settings", "Scan History", "Analysis Context"])
             for index, csv_data in enumerate((logger.export_primary_csv(), logger.export_atlas_csv(),
                                               logger.export_all_csv()), 1):
                 root = ET.fromstring(archive.read(f"xl/worksheets/sheet{index}.xml"))

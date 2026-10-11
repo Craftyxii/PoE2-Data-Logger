@@ -68,9 +68,9 @@ class StorageConcurrencyAuditTests(unittest.TestCase):
         attempted = delayed = False
 
         @contextmanager
-        def impatient_connection():
-            """Fail immediately on a write conflict so this single-threaded interleaving cannot deadlock."""
-            with connect() as db:
+        def impatient_connection(**options):
+            """Retain action journaling while failing immediately on a competing write lock."""
+            with connect(**options) as db:
                 db.execute("PRAGMA busy_timeout=0")
                 yield db
 

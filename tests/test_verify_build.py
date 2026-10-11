@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from runpy import run_path
 import struct
 import tempfile
 import unittest
@@ -16,6 +17,8 @@ from tools.verify_build import pe_machine, verify
 MODULES = (
     'PoE2_Data_Logger.ui.native_desktop',
     'PoE2_Data_Logger.core.logger_store',
+    'PoE2_Data_Logger.core.analysis_context',
+    'PoE2_Data_Logger.core.undo_store',
     'PoE2_Data_Logger.core.service',
     'PoE2_Data_Logger.platform.hotkey',
     'PoE2_Data_Logger.ocr.opened_scan',
@@ -93,6 +96,16 @@ class BuildVerificationTests(unittest.TestCase):
         self.archive.open_embedded_archive.assert_called_once_with('PYZ.pyz')
         self.assertEqual([call.args[0] for call in self.module_archive.extract.call_args_list],
                          list(MODULES))
+
+    def test_source_manifest_covers_every_application_module(self):
+        """Catch new modules omitted from the manifest before the Windows freeze starts."""
+        project = Path(__file__).resolve().parents[1]
+        sources = run_path(str(project / 'packaging/sources.py'))
+        application = project / 'PoE2_Data_Logger'
+        actual = {path.relative_to(application).as_posix()
+                  for path in application.rglob('*.py')}
+        self.assertEqual(set(sources['APP_SOURCES']), actual)
+        self.assertEqual(len(sources['APP_SOURCES']), len(actual))
 
     def test_missing_entry_point_or_module_archive_is_rejected(self):
         """Verify launchers missing the entry point or embedded module archive fail validation."""

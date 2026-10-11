@@ -227,7 +227,7 @@ class StableWorkflowAudit(unittest.TestCase):
         self.assertIsNone(self.w.pending_review_kind)
         self.assertIsNone(logger.get_state()["ocr_pending"])
         self.assertEqual(self.w.seed_table.rowCount(), 0)
-        self.click(self.named("Undo new map"))
+        self.click(self.named("Undo"))
         self.assertEqual(logger.get_state()["current_map_id"], "M0001")
         self.assertEqual([w.text() for w in (self.w.normal, self.w.magic, self.w.rare, self.w.unique)],
                          ["123", "9", "2", "1"])
@@ -249,7 +249,7 @@ class StableWorkflowAudit(unittest.TestCase):
         result = copy.deepcopy(self.seed)
         result.update(logger.scan_context())
         result["mode"] = "seed"
-        self.click(self.named("Undo new map"))
+        self.click(self.named("Undo"))
         self.click(self.named("+ New map"))
         self.assertEqual(logger.get_state()["current_map_id"], "M0002")
         count = logger.get_state()["scan_commit_count"]

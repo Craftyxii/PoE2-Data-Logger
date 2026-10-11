@@ -195,8 +195,8 @@ class ChainCommitAdvanceTests(unittest.TestCase):
                 operation()
             self.assertEqual(self.records(), before)
 
-    def test_closed_chain_rejects_new_parts_counts_and_corrections_but_remnant_is_independent(self):
-        """Verify completed chains reject edits while an independently reserved remnant can still save."""
+    def test_closed_chain_rejects_new_parts_but_allows_correction_and_independent_remnants(self):
+        """Verify completion blocks new propagation while saved rune corrections and retained remnant review remain valid."""
         context = logger.scan_context()
         pending = logger.assign_ocr_id("opened")
         logger.accept_propagation_part(context, runes=["Death"], request_id="accepted")
@@ -211,11 +211,13 @@ class ChainCommitAdvanceTests(unittest.TestCase):
         before = self.records()
         for operation in (lambda: logger.commit_chain("Power"),
                           lambda: logger.increment_propagation_detonated(context, runes=["Power"]),
-                          lambda: logger.accept_propagation_part(context, runes=["Power"], request_id="new"),
-                          lambda: logger.update_chain_steps([{"step": 1, "rune1": "Time"}], context)):
+                          lambda: logger.accept_propagation_part(context, runes=["Power"], request_id="new")):
             with self.assertRaisesRegex(ValueError, "completed"):
                 operation()
             self.assertEqual(self.records(), before)
+        changed = logger.update_chain_steps([{"step": 1, "rune1": "Time"}], context)
+        self.assertTrue(changed["chain_completed"])
+        self.assertEqual(logger.get_state()["chain"], [{"step": 1, "rune1": "Time", "rune2": ""}])
 
     def test_building_correction_preserves_ids_counts_original_commits_and_final_snapshot(self):
         """Verify chain correction changes only intended rune fields and records the final corrected snapshot."""
