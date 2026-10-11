@@ -13,6 +13,32 @@ from pathlib import Path
 _NUMBER = re.compile(r"(?<![\d.])[+-]?\d+(?:[.,]\d+)?\s*%?")
 _PERCENT = re.compile(r"(?<!\w)[+-]?\d+(?:[.,]\d+)?\s*%")
 _ROLL_RANGE = re.compile(r"\(\s*[+-]?\d+(?:[.,]\d+)?\s*%?\s*[-–—]\s*[+-]?\d+(?:[.,]\d+)?\s*%?\s*\)")
+_NUMERIC_SIGNS = "+-−–—﹣－＋﹢➕➖"
+
+
+def numeric_token_complete(text, match):
+    """Reject a numeric suffix whose preceding sign/decimal or trailing token was omitted.
+
+    Only ASCII signs and decimals with a leading digit are supported. Unicode
+    signs and separated/doubled signs remain uncertain rather than becoming a
+    positive value. This leaves ordinary prose punctuation outside the token.
+    """
+    prefix, suffix = text[:match.start()], text[match.end():]
+    if prefix and (prefix[-1].isalnum() or prefix[-1] in "_.," + _NUMERIC_SIGNS):
+        return False
+    preceding = prefix.rstrip()
+    if preceding:
+        if preceding[-1] in _NUMERIC_SIGNS:
+            return False
+        if (preceding[-1] in ".," and
+                (len(preceding) < 2 or not preceding[-2].isalpha())):
+            return False
+    if not match.group()[-1:].isspace() and suffix:
+        if suffix[0].isalnum() or suffix[0] in "_%":
+            return False
+        if match.group()[-1:].isdigit() and suffix[0] in ".,":
+            return False
+    return True
 
 
 def affix_name(raw):
@@ -70,10 +96,10 @@ def modifier_value(raw):
         if len(percentages) != 1:
             return None
         percentage = percentages[0]
-        # Matching affix names removes numeric tokens. Require the percentage
-        # to account for every digit first, so extra rolls or malformed decimal
-        # prefixes cannot disappear into an otherwise exact catalog match.
-        if re.search(r"\d", text[:percentage.start()] + text[percentage.end():]):
+        # Name normalization strips punctuation as well as numbers. Validate
+        # the complete observed token before a known name can make it ready.
+        if (not numeric_token_complete(text, percentage) or
+                re.search(r"[\d%]", text[:percentage.start()] + text[percentage.end():])):
             return None
         value = float(percentage.group().replace("%", "").replace(",", ".").strip())
         unit = "%"
@@ -82,11 +108,15 @@ def modifier_value(raw):
             return None
         amounts = list(_NUMBER.finditer(text))
         if len(amounts) == 1 and re.search(r"\b(?:additional|extra|seconds?|times|first)\b", text, re.I):
+            if (not numeric_token_complete(text, amounts[0]) or
+                    re.search(r"\d", text[:amounts[0].start()] + text[amounts[0].end():])):
+                return None
             value = float(amounts[0].group().replace(",", "."))
             unit = "seconds" if re.search(r"\bseconds?\b", text, re.I) else "count"
-        elif not amounts and re.search(r"\ban? additional\b|\bthe first unearthed\b", text, re.I):
+        elif (not amounts and not re.search(r"\d", text) and
+              re.search(r"\ban? additional\b|\bthe first unearthed\b", text, re.I)):
             value, unit = 1, "count"
-        elif not amounts and affix_unit(text) == "flag":
+        elif not amounts and not re.search(r"\d", text) and affix_unit(text) == "flag":
             value, unit = 1, "flag"
         else:
             return None

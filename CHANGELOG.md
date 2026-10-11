@@ -5,7 +5,12 @@
 - Fill the existing propagation rune dropdowns from verified shared family sockets instead of clearing the entire family because of duplicate anchors or gold glyph glints.
 - Recover interrupted tile-frame contours from validated visible tile bodies and a verified sibling lattice; retain quantity, text, origin and conflicting-mark guards.
 - Apply each shared socket only to recipes containing that socket, preserving valid selections on longer recipes without inventing sockets on shorter ones.
-- Keep the manual review HUD, screenshot preview, dropdown options and explicit approval unchanged. Other scan modes, remnant logging and Analysis Context are unchanged.
+- Keep the manual review layout, screenshot preview, dropdown options and explicit propagation approval unchanged. Remnant logging and Analysis Context are retained.
+- Hold incomplete decimal and malformed sign tokens in Tablet and Waystone readings for review instead of saving an incorrect positive value.
+- Validate catalog relationships inside the writer transaction; resolve Unicode-equivalent icon labels consistently and enforce reference-export image budgets during collection.
+- Release cancelled capture admission promptly while bounding unfinished capture adapters and reporting a retryable busy state.
+- Fail promptly on contended user saves, retain drafts, refresh reference Undo controls and restored artwork, and finish shutdown cleanup after a listener error.
+- Align region picker and Save minimum dimensions; roll back failed screenshot saves and remove newly created unreferenced images.
 
 See [release notes](docs/RELEASE_1.3.2.14.md) for original-capture accuracy, regression coverage and installer gates.
 

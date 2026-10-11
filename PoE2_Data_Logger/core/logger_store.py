@@ -1054,6 +1054,9 @@ def save_recipe(data):
     if len(runes) != sockets or any(not part for part in runes):
         raise ValueError("Exact Rune Combo must contain one rune per socket, separated by +.")
     with _connect(undo_label="Recipe reference") as db:
+        # Background imports can change these constraints while the editor is open.
+        # Reserve the writer before validation so the checked catalog is the one saved.
+        db.execute("BEGIN IMMEDIATE")
         name = _recipe_catalog_name(db, name, include_retired=True) or name
         for family in db.execute("SELECT id,top_socket,recipes_json FROM families"):
             if name in _load(family["recipes_json"]) and sockets > family["top_socket"]:
@@ -1081,6 +1084,7 @@ def save_family(data):
     if not names or len(names) > 100 or len(set(names)) != len(names):
         raise ValueError("Enter 1–100 distinct recipes in family order.")
     with _connect(undo_label="Family reference") as db:
+        db.execute("BEGIN IMMEDIATE")
         resolved = []
         for name in names:
             canonical = _recipe_catalog_name(db, name)
@@ -1120,6 +1124,7 @@ def save_seed_state(data):
         raise ValueError("Enter stage rewards one per line.")
     rewards = [str(item).strip() for item in supplied if str(item).strip()]
     with _connect(undo_label="Seed reference") as db:
+        db.execute("BEGIN IMMEDIATE")
         family = db.execute("SELECT top_socket,recipes_json FROM families WHERE id=?", (family_id,)).fetchone()
         if family is None or sockets > family[0]:
             raise ValueError("Choose an existing family and a socket stage at or below its Top Socket.")

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from PoE2_Data_Logger.core import ocr_sensitivity
-from PoE2_Data_Logger.ocr.affix_capture import looks_like_modifier
+from PoE2_Data_Logger.ocr.affix_capture import looks_like_modifier, numeric_token_complete
 
 
 MAX_ITEM_TEXT = 30000
@@ -35,8 +35,7 @@ def _number(line):
     match = matches[0]
     remaining = value_text[:match.start()] + value_text[match.end():]
     if (re.search(r"[\d%+-]", remaining) or
-            match.start() and re.match(r"[\w.,]", value_text[match.start() - 1]) or
-            match.end() < len(value_text) and re.match(r"\w", value_text[match.end()])):
+            not numeric_token_complete(value_text, match)):
         return None
     n = float(match.group(1).replace(",", "."))
     return int(n) if n.is_integer() else n

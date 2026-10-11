@@ -119,7 +119,7 @@ def parse_combo(value):
 
 class HotkeyManager:
     """Own shortcut registration, a single reserved scan and latest-result publication with
-    cancellation revisions.
+    cancellation revisions and bounded physical capture adapters.
     """
     def __init__(self, grabber=None, readers=None, supported=None, hover_reader=None,
                  tooltip_grabber=None, focused=None):
@@ -145,6 +145,10 @@ class HotkeyManager:
         self._configuration_lock = threading.RLock()
         self._listener_stop = None
         self._capture_lock = threading.Lock()
+        # Cancellation retires the logical scan immediately, but an external
+        # adapter cannot be killed safely. Keep one physical owner until it
+        # returns so repeated retries cannot create abandoned capture threads.
+        self._capture_adapter_owner = None
         self._capture_revision = 0
         self._capture_owner = None
         self._capture_watchdog = None
@@ -411,7 +415,7 @@ class HotkeyManager:
                 user32.UnregisterHotKey(None, ident)
 
     def capture(self, kind="default", background=False):
-        """Reserve a bounded scan, freeze strictness and keep capture off the shortcut listener."""
+        """Reserve a bounded scan or report a retired adapter that has not yet returned."""
         if kind == "overlay":
             with logger._connect() as db:
                 enabled = bool(logger._meta(db, "hud_overlay", False))
@@ -422,24 +426,47 @@ class HotkeyManager:
             return
         if self.focused is not None and not self.focused():
             return
-        if not self._capture_lock.acquire(blocking=False):
-            return
         with self._lock:
             mode = self.mode if kind in ("default", "remnant") else kind
             if kind in ("default", "remnant") and mode not in GENERAL_MODES:
                 mode = "opened"
-            self._capture_revision += 1
-            revision = self._capture_revision
-            self._capture_owner = revision
-            self._active_capture_mode = mode
-            self._capture_deadline = time.monotonic() + CAPTURE_TIMEOUT_SECONDS
+            if not self._capture_lock.acquire(blocking=False):
+                return
+            if self._capture_adapter_owner is not None:
+                self._capture_lock.release()
+                self._sequence += 1
+                self._latest = {"mode": mode, "result": None, "id": self._sequence,
+                                "error": "The previous screen capture adapter is still busy. "
+                                         "Wait for it to finish, then scan again."}
+                self._image = None
+                busy = True
+            else:
+                busy = False
+            if not busy:
+                self._capture_revision += 1
+                revision = self._capture_revision
+                self._capture_owner = revision
+                self._capture_adapter_owner = revision
+                self._active_capture_mode = mode
+                self._capture_deadline = time.monotonic() + CAPTURE_TIMEOUT_SECONDS
+        if busy:
+            self._notify_event()
+            return
         try:
             with self._lock:
+                if self._capture_owner != revision:
+                    self._release_capture_adapter(revision)
+                    return
                 watchdog = threading.Timer(CAPTURE_TIMEOUT_SECONDS, self._expire_capture, args=(mode, revision))
                 watchdog.daemon = True
                 self._capture_watchdog = watchdog
                 watchdog.start()
-            strictness_values = dict(ocr_sensitivity.saved_values())
+            try:
+                strictness_values = dict(ocr_sensitivity.saved_values())
+            finally:
+                self._release_capture_adapter(revision)
+            if self._capture_cancelled(revision):
+                return
             if background:
                 # Reserve the settings as well as the capture slot before
                 # scheduling, so changes cannot alter an already queued scan.
@@ -448,6 +475,7 @@ class HotkeyManager:
             else:
                 self._capture(kind, mode, revision, strictness_values)
         except Exception as exc:
+            self._release_capture_adapter(revision)
             self._finish_capture({"mode": mode, "result": None,
                                   "error": f"Screen scan failed: {exc}"}, None, revision)
 
@@ -457,6 +485,23 @@ class HotkeyManager:
             return revision != self._capture_revision
 
     def _capture(self, kind, mode, revision, strictness_values=None):
+        """Bound physical capture work independently of its cancellable logical reservation."""
+        with self._lock:
+            if revision != self._capture_owner or revision != self._capture_revision:
+                return
+            self._capture_adapter_owner = revision
+        try:
+            self._perform_capture(kind, mode, revision, strictness_values)
+        finally:
+            self._release_capture_adapter(revision)
+
+    def _release_capture_adapter(self, revision):
+        """Retire only the adapter that actually returned, preserving another request's owner."""
+        with self._lock:
+            if self._capture_adapter_owner == revision:
+                self._capture_adapter_owner = None
+
+    def _perform_capture(self, kind, mode, revision, strictness_values=None):
         """Stop canceled requests between GUI preparation, capture, clipboard and recognition."""
         try:
             if self._capture_cancelled(revision):
@@ -468,7 +513,7 @@ class HotkeyManager:
                 self._finish_capture(None, None, revision)
                 return
             if self.focused is not None and not self.focused():
-                self._finish_capture(None, None, revision)
+                self._finish_capture(None, None, revision, adapter_complete=True)
                 return
             with logger._connect() as db:
                 region_key = {"opened": "live_region", "propagation": "propagation_region",
@@ -573,7 +618,8 @@ class HotkeyManager:
             self._read_capture(*args)
         except Exception as exc:
             self._finish_capture({"mode": mode, "result": None,
-                                  "error": f"Screen scan failed: {exc}"}, None, revision)
+                                  "error": f"Screen scan failed: {exc}"}, None, revision,
+                                 adapter_complete=True)
 
     def _grab(self, region):
         """Validate an explicit screen rectangle before capture, or grab the primary screen
@@ -763,7 +809,7 @@ class HotkeyManager:
                 if event["mode"] == "currency":
                     event["result"]["phase"] = phase
                     event["result"]["map_id"] = remnant_map if phase == "start" else capture_map
-            self._finish_capture(event, raw, revision)
+            self._finish_capture(event, raw, revision, adapter_complete=True)
 
     def _ocr_capture_call(self, revision, function, *args, **kwargs):
         """Run unchanged recognition with the original capture deadline and cancellable native-child ownership."""
@@ -794,14 +840,19 @@ class HotkeyManager:
 
         With no modes specified, retain the global cancellation used when the
         map, session or application changes. Terminate the matching isolated
-        reader and retire its revision so it cannot publish a late result.
+        reader and promptly retire its logical reservation and revision. A
+        still-running physical adapter retains its separate owner until return,
+        so new shortcuts report a busy adapter rather than spawning more work.
         """
         modes = None if modes is None else frozenset((modes,) if isinstance(modes, str) else modes)
         with self._lock:
             if modes is None or self._active_capture_mode in modes:
+                owner = self._capture_owner
                 self._capture_revision += 1
                 if self._ocr_capture_future is not None:
                     self._ocr_capture_future.cancel()
+                if owner is not None:
+                    self._finish_capture(None, None, owner)
             if modes is None or self._latest and self._latest.get("mode") in modes:
                 self._latest = self._image = None
 
@@ -816,12 +867,16 @@ class HotkeyManager:
                                   "error": "Screen scan timed out after 90 seconds. Scan again."},
                                  None, revision, expired=True)
 
-    def _finish_capture(self, event, raw, revision=None, *, expired=False):
+    def _finish_capture(self, event, raw, revision=None, *, expired=False, adapter_complete=False):
         """Suppress canceled results, publish a current event with its image, release the scan
         reservation and notify the UI. Expiration invalidates the reader; a late
         completion cannot release a newer capture's lock or replace its result.
+        Returned adapters relinquish physical ownership before notifying the UI;
+        cancellation and timeout retain physical ownership until actual return.
         """
         with self._lock:
+            if adapter_complete:
+                self._release_capture_adapter(revision)
             if revision is not None and revision != self._capture_owner:
                 return
             if revision is not None and revision != self._capture_revision:

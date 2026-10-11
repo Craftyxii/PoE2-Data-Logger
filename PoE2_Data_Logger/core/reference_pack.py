@@ -89,8 +89,9 @@ def reset_to_defaults():
     restored row count and the number of discarded image examples.
     """
     with logger._connect(undo_label="Reset OCR references") as db:
-        defaults = _default_reference_rows(db)
+        # Reject a busy writer before rebuilding the bundled reference snapshot.
         db.execute("BEGIN IMMEDIATE")
+        defaults = _default_reference_rows(db)
         removed = 0
         for table in _EXAMPLE_TABLES:
             removed += db.execute(f"DELETE FROM {table}").rowcount
@@ -271,10 +272,29 @@ def save_export_file(folder):
 def export_pack():
     """Package references, recipe IDs, explicit name revivals and images from one read transaction.
 
-    Verify stored image hashes and retain learned PNG bytes, then enforce the
-    manifest, image-count and size limits used by the importer.
+    Verify stored image hashes and retain learned PNG bytes while enforcing the
+    importer's asset budgets before loading or decoding further screenshots.
+    Check the completed manifest and compressed archive against the same limits.
     """
     assets = {}
+    asset_bytes = 0
+
+    def check_asset(path, size):
+        """Reject an asset before collection exceeds the archive's entry or byte budget."""
+        if path not in assets and len(assets) + 2 > MAX_ENTRIES:
+            raise ValueError("Reference pack has too many images. Export fewer than 2000 unique images.")
+        if size > MAX_IMAGE:
+            raise ValueError("Reference image is too large.")
+        if asset_bytes - len(assets.get(path, b"")) + size > MAX_PACK:
+            raise ValueError("Reference pack exceeds the import size limits. Remove some saved references first.")
+
+    def retain_asset(path, raw):
+        """Keep validated bytes and count each unique archive path only once."""
+        nonlocal asset_bytes
+        check_asset(path, len(raw))
+        asset_bytes += len(raw) - len(assets.get(path, b""))
+        assets[path] = raw
+
     with logger._connect() as db:
         db.execute("BEGIN")
         tables = {}
@@ -304,7 +324,7 @@ def export_pack():
         for kind, table in (("currency", "currency_icons"), ("omen", "omen_icons"), ("item", "item_icons")):
             for row in db.execute(f"SELECT name,image_png FROM {table} ORDER BY id"):
                 path = f"icons/{len(icons):04d}.png"
-                assets[path] = bytes(row[1])
+                retain_asset(path, bytes(row[1]))
                 icons.append({"kind": kind, "name": row[0], "file": path,
                               "sha256": hashlib.sha256(assets[path]).hexdigest()})
         tables["icons"] = icons
@@ -315,11 +335,12 @@ def export_pack():
             entry = {"name": row["name"], "kind": row["kind"],
                      "columns": row["columns"], "rows": row["rows"],
                      "file": path, "sha256": row["image_sha256"]}
+            check_asset(path, len(row["image_png"]))
             _review_entry(entry)
             raw = _review_image(bytes(row["image_png"]), entry)
             if hashlib.sha256(raw).hexdigest() != entry["sha256"]:
                 raise ValueError("Saved learned icon hash does not match its record.")
-            assets[path] = raw
+            retain_asset(path, raw)
             learned.append(entry)
         tables["review_icon_examples"] = learned
         scans = []
@@ -327,12 +348,15 @@ def export_pack():
                               "seed_rune,family,rewards_json,mapping_status FROM scans ORDER BY id"):
             if not re.fullmatch(r"[a-f0-9]{64}\.(png|jpg)", row["image_name"]):
                 raise ValueError("Saved screenshot has an invalid local filename.")
-            raw = (store.DATA_DIR / "images" / row["image_name"]).read_bytes()
+            path = "screens/" + row["image_name"]
+            screenshot = store.DATA_DIR / "images" / row["image_name"]
+            check_asset(path, screenshot.stat().st_size)
+            raw = screenshot.read_bytes()
+            check_asset(path, len(raw))
             _image(raw)
             if hashlib.sha256(raw).hexdigest() != row["image_sha256"]:
                 raise ValueError("Saved screenshot hash does not match its record.")
-            path = "screens/" + row["image_name"]
-            assets[path] = raw
+            retain_asset(path, raw)
             scans.append({"file_name": row["file_name"], "file": path,
                           "sha256": row["image_sha256"], "sockets": row["sockets"],
                           "slot": row["seed_slot"], "rune": row["seed_rune"],
@@ -343,7 +367,7 @@ def export_pack():
     if len(assets) + 1 > MAX_ENTRIES:
         raise ValueError("Reference pack has too many images. Export fewer than 2000 unique images.")
     manifest_raw = json.dumps(manifest, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    if len(manifest_raw) > 5_000_000 or len(manifest_raw) + sum(map(len, assets.values())) > MAX_PACK:
+    if len(manifest_raw) > 5_000_000 or len(manifest_raw) + asset_bytes > MAX_PACK:
         raise ValueError("Reference pack exceeds the import size limits. Remove some saved references first.")
     output = io.BytesIO()
     with ZipFile(output, "w", ZIP_DEFLATED, compresslevel=6) as archive:
@@ -622,10 +646,11 @@ def import_pack(path, replace_existing=False):
                 names_table, icons_table = {"currency": ("currency_items", "currency_icons"),
                                             "omen": ("ritual_names", "omen_icons"),
                                             "item": ("item_names", "item_icons")}[kind]
-                canonical = db.execute(f"SELECT name FROM {names_table} WHERE name=? COLLATE NOCASE", (name,)).fetchone()
+                # Use the same Unicode identity as the catalog-name import above.
+                canonical = logger._catalog_name(db, names_table, name)
                 if canonical is None:
                     raise ValueError("Icon label is missing from its name database.")
-                name = canonical[0]
+                name = canonical
                 if (name, sha) not in known_icons[kind]:
                     db.execute(f"INSERT INTO {icons_table} "
                                "(name,image_png,recorded_at) VALUES(?,?,?)",

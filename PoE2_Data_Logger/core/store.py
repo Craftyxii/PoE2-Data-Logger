@@ -12,9 +12,11 @@ from contextlib import contextmanager
 import hashlib
 import io
 import json
+import math
 import os
 import sqlite3
 import tempfile
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,6 +25,30 @@ HERE = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("RUNESHAPE_SCAN_DATA_DIR", str(Path.home() / "Runeshape Scan")))
 MAX_IMAGE_PIXELS = 12_000_000
 STATES = json.loads((HERE / "catalog.json").read_text())["states"]
+_DATABASE_TIMEOUT = threading.local()
+
+
+@contextmanager
+def database_timeout(seconds):
+    """Scope SQLite lock waits to this thread, restoring nested overrides on exit.
+
+    GUI commands can fail immediately on a busy writer while OCR/save/export
+    workers keep the normal ten-second allowance on their own connections.
+    """
+    if isinstance(seconds, bool):
+        raise ValueError("Database timeout must be a finite nonnegative number.")
+    try:
+        seconds = float(seconds)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError("Database timeout must be a finite nonnegative number.") from error
+    if not math.isfinite(seconds) or seconds < 0:
+        raise ValueError("Database timeout must be a finite nonnegative number.")
+    previous = getattr(_DATABASE_TIMEOUT, "seconds", 10)
+    _DATABASE_TIMEOUT.seconds = seconds
+    try:
+        yield
+    finally:
+        _DATABASE_TIMEOUT.seconds = previous
 
 
 def states() -> list[dict]:
@@ -74,7 +100,8 @@ def validate(sockets, slot, rune, family=None):
 def _connect():
     """Ensure the screenshot table exists and commit or roll back the yielded SQLite work."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(DATA_DIR / "scans.sqlite3", timeout=10)
+    db = sqlite3.connect(DATA_DIR / "scans.sqlite3",
+                         timeout=getattr(_DATABASE_TIMEOUT, "seconds", 10))
     try:
         db.row_factory = sqlite3.Row
         db.execute("""CREATE TABLE IF NOT EXISTS scans (
@@ -102,6 +129,8 @@ def save_scan(raw: bytes, file_name: str, sockets, slot: str, rune: str, family=
     Keep the selected stage rewards and status on the scan row, and reuse a
     hash-named image file when the same screenshot is reviewed again. Journal
     metadata and glyph learning together; Undo retains the raw capture bytes.
+    Serialize creation with other reference writers and remove only this save's
+    unreferenced image if its metadata or journal transaction fails.
     """
     depth, selected = validate(sockets, slot, rune, family)
     suffix = ".png" if raw.startswith(b"\x89PNG\r\n\x1a\n") else ".jpg"
@@ -114,38 +143,77 @@ def save_scan(raw: bytes, file_name: str, sockets, slot: str, rune: str, family=
     image_name = digest + suffix
     destination = images / image_name
     glyph = _reviewed_vector(raw, depth, slot)
-    if not destination.exists():
-        fd, name = tempfile.mkstemp(dir=images, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "wb") as file:
-                file.write(raw)
-            os.replace(name, destination)
-        finally:
-            Path(name).unlink(missing_ok=True)
     rewards = selected["rewards"] if selected else []
     status = selected["status"] if selected else "unresolved"
     family_text = f"Family {selected['family']}" if selected else ""
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     from PoE2_Data_Logger.core import logger_store
-    with logger_store._connect(undo_label="Seed screenshot review") as db:
-        db.execute("""INSERT INTO scans (recorded_at,file_name,image_name,image_sha256,
-                     sockets,seed_slot,seed_rune,family,rewards_json,mapping_status)
-                     VALUES (?,?,?,?,?,?,?,?,?,?)
-                     ON CONFLICT(image_sha256) DO UPDATE SET
-                       file_name=excluded.file_name, sockets=excluded.sockets,
-                       seed_slot=excluded.seed_slot, seed_rune=excluded.seed_rune,
-                       family=excluded.family, rewards_json=excluded.rewards_json,
-                       mapping_status=excluded.mapping_status""",
-                   (now, safe_name, image_name, digest, depth, slot, rune,
-                    family_text, json.dumps(rewards), status))
-        row = db.execute("SELECT * FROM scans WHERE image_sha256=?", (digest,)).fetchone()
-        if glyph is not None:
-            db.execute("INSERT INTO reviewed_glyphs VALUES(?,?,?) ON CONFLICT(image_sha256) "
-                       "DO UPDATE SET seed_rune=excluded.seed_rune,vector=excluded.vector",
-                       (digest, rune, glyph))
+    created = False
+    try:
+        with logger_store._connect(undo_label="Seed screenshot review") as db:
+            db.execute("BEGIN IMMEDIATE")
+            # Both saved screenshots and reference imports use the writer lock,
+            # so a failed save cannot own another writer's newly shared file.
+            if not destination.exists():
+                fd, name = tempfile.mkstemp(dir=images, suffix=".tmp")
+                try:
+                    with os.fdopen(fd, "wb") as file:
+                        file.write(raw)
+                    os.replace(name, destination)
+                    created = True
+                finally:
+                    Path(name).unlink(missing_ok=True)
+            db.execute("""INSERT INTO scans (recorded_at,file_name,image_name,image_sha256,
+                         sockets,seed_slot,seed_rune,family,rewards_json,mapping_status)
+                         VALUES (?,?,?,?,?,?,?,?,?,?)
+                         ON CONFLICT(image_sha256) DO UPDATE SET
+                           file_name=excluded.file_name, sockets=excluded.sockets,
+                           seed_slot=excluded.seed_slot, seed_rune=excluded.seed_rune,
+                           family=excluded.family, rewards_json=excluded.rewards_json,
+                           mapping_status=excluded.mapping_status""",
+                       (now, safe_name, image_name, digest, depth, slot, rune,
+                        family_text, json.dumps(rewards), status))
+            row = db.execute("SELECT * FROM scans WHERE image_sha256=?", (digest,)).fetchone()
+            if glyph is not None:
+                db.execute("INSERT INTO reviewed_glyphs VALUES(?,?,?) ON CONFLICT(image_sha256) "
+                           "DO UPDATE SET seed_rune=excluded.seed_rune,vector=excluded.vector",
+                           (digest, rune, glyph))
+    except Exception:
+        if created:
+            _remove_failed_scan_image(destination)
+        raise
     result = _record(row)
     result["reference_added"] = glyph is not None
     return result
+
+
+def _remove_failed_scan_image(destination):
+    """Remove a failed save's new image only when no saved scan or Undo row needs it.
+
+    A second writer may have reused the hash after rollback, so check references
+    under the same SQLite writer lock before unlinking. If storage cannot be
+    checked, retain the capture and let the original save error reach the user.
+    """
+    from PoE2_Data_Logger.core import logger_store, undo_store
+
+    try:
+        with logger_store._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("SELECT 1 FROM scans WHERE image_name=? LIMIT 1",
+                          (destination.name,)).fetchone():
+                return
+            columns = [row["name"] for row in db.execute("PRAGMA table_info(scans)")]
+            image_column = columns.index("image_name")
+            for action in db.execute("SELECT changes FROM undo_actions"):
+                for table, old, new in undo_store._unpack(action["changes"]):
+                    if table == "scans" and any(
+                            row is not None and row[image_column] == destination.name
+                            for row in (old, new)):
+                        return
+            destination.unlink(missing_ok=True)
+    except (sqlite3.Error, OSError, ValueError, TypeError, IndexError, EOFError):
+        # Cleanup must neither mask the original failure nor risk a shared capture.
+        return
 
 
 def _reviewed_vector(raw: bytes, sockets: int, slot: str):

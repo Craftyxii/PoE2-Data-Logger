@@ -1,6 +1,6 @@
 # PoE2 Data Logger 1.3.2.14 Beta
 
-This beta fixes propagation scans that recognize the recipe family but leave its existing rune dropdowns blank. It retains all changes shipped in [1.3.2.13](RELEASE_1.3.2.13.md).
+This beta fixes propagation scans that recognize the recipe family but leave its existing rune dropdowns blank, and repairs the eleven confirmed defects from the subsequent code review. It retains all changes shipped in [1.3.2.13](RELEASE_1.3.2.13.md).
 
 ## Changes
 
@@ -9,7 +9,9 @@ This beta fixes propagation scans that recognize the recipe family but leave its
 - Deduplicate evidence by socket and share one or two confirmed positions across the recognized family. Each recipe receives its own rune names at those positions; shorter recipes receive only sockets that actually exist.
 - Preserve corroborating partial-mark recovery: two distinct recipe rows must support a fragment socket, with the existing exception for a single visible recipe. Exposure retries do not supply extra row votes.
 
-The manual review HUD has no layout or control changes. Both existing dropdowns, their recipe-limited options, the screenshot preview and explicit Approve action remain. Recognition never logs a chain automatically. Other OCR modes, remnant logging, the reference catalog, saved logs and Analysis Context are unchanged. Version labels and installer metadata identify this new beta.
+The manual review HUD has no layout or control changes. Both existing dropdowns, their recipe-limited options, the screenshot preview and explicit Approve action remain. Recognition never logs a chain automatically. Remnant logging, the supplied catalog data, saved logs and Analysis Context are retained. Version labels and installer metadata identify this new beta.
+
+The code-review repairs hold malformed Tablet/Waystone numeric tokens for review, serialize catalog validation with imports, make cancelled capture admission bounded and retryable, prevent SQLite writer waits on user-action callbacks, refresh reference Undo and restored artwork, and ensure shutdown completes after listener errors. Reference import uses Unicode-equivalent name resolution, export checks image budgets during collection, failed screenshot saves clean up newly created unreferenced files, and region picker/Save share the same intended minimum. See [causes and regression coverage](CODE_REVIEW_FIXES_1.3.2.14.md). OCR models, matching thresholds and propagation evidence rules are retained.
 
 ## Accuracy and limitations
 

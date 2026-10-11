@@ -6,6 +6,7 @@ Windows overlays match physical monitor bounds to Qt logical geometry using DPI.
 from __future__ import annotations
 
 import math
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -37,6 +38,14 @@ GAME_RESOLUTIONS = {
     "3440x1440": ("Ultrawide · 3440 × 1440", (3440, 1440)),
     "3840x1600": ("Ultrawide · 3840 × 1600", (3840, 1600)),
 }
+
+MINIMUM_REGION_FRACTIONS = (200 / 1920, 100 / 1080)
+
+
+def minimum_region_pixels(width=1920, height=1080):
+    """Scale the shared 200×100-at-1080p minimum to the native capture resolution."""
+    return (math.ceil(width * MINIMUM_REGION_FRACTIONS[0]),
+            math.ceil(height * MINIMUM_REGION_FRACTIONS[1]))
 
 
 def validate_capture_resolution(bounds, resolution=None):
@@ -424,15 +433,19 @@ class ScanRegionsPage(QWidget):
         self.canvas.changed.emit()
 
     def save_regions(self):
-        """Save trusted normalized boxes while retaining unresolved legacy crops."""
+        """Save trusted normalized boxes without waiting on a writer; retain drafts on failure."""
         try:
             boxes = {key: checked_box(box) for key, box in self.canvas.boxes.items()
                      if key not in self._legacy_regions}
             if not boxes:
                 raise ValueError(self._legacy_instruction())
-            if any(box[2] < 200 / 1920 or box[3] < 100 / 1080 for box in boxes.values()):
+            if any(box[2] < MINIMUM_REGION_FRACTIONS[0] or
+                   box[3] < MINIMUM_REGION_FRACTIONS[1] for box in boxes.values()):
                 raise ValueError("Make each region at least 200×100 pixels at 1080p.")
-            with logger._connect() as db:
+            with store.database_timeout(0), logger._connect() as db:
+                # A concurrent reader/worker may own the write lock. Do not
+                # spend SQLite's default ten-second wait on the GUI thread.
+                db.execute("BEGIN IMMEDIATE")
                 logger._set_meta(db, "scan_region_boxes", boxes)
                 logger._set_meta(db, "scan_region_resolution", self.game_resolution.currentData())
             status = "✓ Scan regions saved."
@@ -441,6 +454,9 @@ class ScanRegionsPage(QWidget):
             self.status.setText(status)
             self.saved.emit()
         except ValueError as error:
+            QMessageBox.warning(self, "Region could not be saved", str(error))
+        except (sqlite3.Error, OSError) as error:
+            self.status.setText("Scan regions could not be saved. Your changes are kept; try Save regions again.")
             QMessageBox.warning(self, "Region could not be saved", str(error))
 
 
@@ -592,12 +608,14 @@ class RegionEditor(QDialog):
             moved.moveTop(max(0, min(moved.top(), self.height() - moved.height())))
             self.selection = moved
         elif self.operation == "resize":
-            minimum_width, minimum_height = 200, 100
+            minimum_width, minimum_height = minimum_region_pixels()
             if self.capture_bounds is not None:
-                # The acceptance threshold is in native capture pixels, while
-                # mouse positions and the overlay selection use Qt logical pixels.
-                minimum_width = math.ceil(200 * self.width() / self.capture_bounds.width())
-                minimum_height = math.ceil(100 * self.height() / self.capture_bounds.height())
+                # The normalized minimum is shared with Save regions. Convert
+                # it to native pixels before applying the overlay's DPI scale.
+                native_width, native_height = minimum_region_pixels(
+                    self.capture_bounds.width(), self.capture_bounds.height())
+                minimum_width = math.ceil(native_width * self.width() / self.capture_bounds.width())
+                minimum_height = math.ceil(native_height * self.height() / self.capture_bounds.height())
             end = QPoint(min(self.width() - 1, max(self.initial.left() + minimum_width - 1, pos.x())),
                          min(self.height() - 1, max(self.initial.top() + minimum_height - 1, pos.y())))
             self.selection = QRect(self.initial.topLeft(), end).normalized()
@@ -619,13 +637,18 @@ class RegionEditor(QDialog):
             super().keyPressEvent(event)
 
     def confirm(self):
-        """Accept a clipped selection whose returned region is at least 200 by 100."""
+        """Accept the same normalized minimum as Save regions, expressed in native capture pixels."""
         self.selection = self.selection.intersected(self.rect())
         region = self.region()
-        if region["w"] >= 200 and region["h"] >= 100:
+        minimum_width, minimum_height = minimum_region_pixels()
+        if self.capture_bounds is not None:
+            minimum_width, minimum_height = minimum_region_pixels(
+                self.capture_bounds.width(), self.capture_bounds.height())
+        if region["w"] >= minimum_width and region["h"] >= minimum_height:
             self.accept()
         else:
-            self.hint = "Select a region at least 200×100 pixels.\nEnter to save · Esc to cancel"
+            self.hint = (f"Select a region at least {minimum_width}×{minimum_height} pixels "
+                         "(200×100 at 1080p).\nEnter to save · Esc to cancel")
             self.update()
 
     def region(self):

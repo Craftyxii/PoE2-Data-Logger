@@ -10,6 +10,7 @@ import base64
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -645,9 +646,23 @@ class LoggerWindow(QMainWindow):
         return True
 
     def run(self, action):
-        """Execute a UI action and show exceptions through the window's error feedback."""
+        """Execute a UI action without waiting on a competing writer; retain drafts on failure."""
         try:
-            return action()
+            with store.database_timeout(0):
+                return action()
+        except sqlite3.OperationalError as error:
+            busy = (getattr(error, "sqlite_errorcode", 0) & 255) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+            self.error("The database is busy. The action could not finish; check saved values and try again."
+                       if busy else str(error))
+            if busy:
+                # Commands containing several transactions may have completed
+                # an earlier save. Keep its actual Undo action available.
+                with store.database_timeout(0):
+                    try:
+                        self._sync_undo_control()
+                    except sqlite3.Error:
+                        pass
+            return None
         except Exception as error:
             self.error(str(error))
             return None
@@ -3070,6 +3085,10 @@ class LoggerWindow(QMainWindow):
         self._commit_badge_timer.stop()
         self.atlas_settings_page.set_settings(saved["state"]["settings"].get("atlas_settings"), force=True)
         self.refresh()
+        # Undo can restore names and artwork without changing the session totals.
+        self.refresh_reference_names()
+        self.refresh_reference_examples()
+        self.refresh_currency_references()
         self.tabs.setCurrentWidget(page)
         action = saved["action"]
         set_message(self.review_summary, f"{action} undone. Saved totals and chain state restored.", "success")
@@ -4030,7 +4049,8 @@ class LoggerWindow(QMainWindow):
     def save_counts(self):
         """Save map kill counts, clear their draft baseline and refresh the commit badge."""
         data = self.counts_data()
-        saved = logger.save_counts(data["normal"], data["magic"], data["rare"], unique=data["unique"])
+        with store.database_timeout(0):
+            saved = logger.save_counts(data["normal"], data["magic"], data["rare"], unique=data["unique"])
         self._counts_form_baseline = None
         self.refresh()
         self._set_commit_badge(saved["scan_commit_number"])
@@ -4446,7 +4466,8 @@ class LoggerWindow(QMainWindow):
         # The confirmation runs a nested event loop; recheck workers before replacing reference rows.
         if self._pending_tasks:
             raise ValueError("Wait for the current scan, import or export to finish before resetting references.")
-        reference_pack.reset_to_defaults()
+        with store.database_timeout(0):
+            reference_pack.reset_to_defaults()
         self.refresh()
         self.refresh_currency_references()
         self.refresh_reference_names()
@@ -6234,6 +6255,7 @@ class LoggerWindow(QMainWindow):
             entry.setData(Qt.ItemDataRole.UserRole, ("review" if reference.get("reviewed") else reference["kind"], reference["id"]))
             self.icon_list.addItem(entry)
         self.refresh_session_currency(force_icons=True)
+        self._sync_undo_control()
 
     def save_inventory(self):
         """Commit approved stacks only; reject pending rows without registering or learning their guesses."""
@@ -6894,33 +6916,37 @@ class LoggerWindow(QMainWindow):
         self.note("Saved screenshot loaded for review.")
 
     def closeEvent(self, event):
-        """Stop callbacks and queue cleanup while isolated OCR supervisors reap native readers off the GUI thread.
+        """Retire every window resource even when a listener or another shutdown phase fails."""
+        def cleanup(action):
+            """Report a failed phase independently so subsequent cleanup always runs."""
+            try:
+                action()
+            except Exception:
+                logging.getLogger(__name__).exception("Window shutdown cleanup failed")
 
-        Invalidate captures before releasing HUD preparation so cancelled workers cannot
-        resume capture or clipboard work after shutdown.
-        """
         self._closed = True
-        service.HOTKEY.cancel_capture()
+        cleanup(service.HOTKEY.cancel_capture)
         self._commit_badge_timer.stop()
         self._region_selection_token += 1
         if self._region_editor is not None:
-            self._region_editor.reject()
+            cleanup(self._region_editor.reject)
         if service.HOTKEY.on_event is self._scan_ready_callback:
             service.HOTKEY.on_event = None
         if self._overlay_opacity_timer.isActive():
             self._overlay_opacity_timer.stop()
-            self.run(self._save_overlay_opacity)
+            cleanup(lambda: self.run(self._save_overlay_opacity))
         self._overlay_enabled = False
         self._overlay_review_token += 1
         if service.HOTKEY.before_capture == self._prepare_overlay_capture:
             service.HOTKEY.before_capture = None
         self._poll.stop()
-        service.HOTKEY._unregister()
+        cleanup(service.HOTKEY._unregister)
+        self._cancel_pending_chain_save()
         self._pending_tasks.clear()
-        self._clear_scan_watchdogs()
-        ocr_workers.shutdown(wait=False)
-        self.pool.shutdown(wait=False, cancel_futures=True)
-        QApplication.instance().removeEventFilter(self)
+        cleanup(self._clear_scan_watchdogs)
+        cleanup(lambda: ocr_workers.shutdown(wait=False))
+        cleanup(lambda: self.pool.shutdown(wait=False, cancel_futures=True))
+        cleanup(lambda: QApplication.instance().removeEventFilter(self))
         super().closeEvent(event)
 
 
@@ -6944,6 +6970,7 @@ def instance_lock():
         user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
         user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
         window = (user32.FindWindowW(None, WINDOW_TITLE)
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.13 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.12 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.11 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.10 Beta")
