@@ -1,6 +1,7 @@
 """Ritual panel/lattice checks retaining multi-cell equipment footprints and holding clipped or unsupported grids."""
 
 from pathlib import Path
+import io
 import json
 import unittest
 
@@ -147,6 +148,20 @@ class RitualGridGeometryTests(unittest.TestCase):
                                      [slot for group in actual for slot in group])
                 if expected["bottom_at_image_edge"]:
                     self.assertTrue(grid["evidence"]["image_boundary"])
+
+    def test_moderate_jpeg_compression_keeps_each_real_equipment_footprint(self):
+        """Preserve all fifteen real reward layouts when JPEG blur weakens an ornate upper corner."""
+        fixtures = Path(__file__).resolve().parent / "fixtures/ritual_rewards"
+        for expected in json.loads((fixtures / "expected.json").read_text(encoding="utf-8")):
+            with self.subTest(capture=expected["file"]):
+                buffer = io.BytesIO()
+                with Image.open(fixtures / expected["file"]) as image:
+                    image.convert("RGB").save(buffer, format="JPEG", quality=85)
+                buffer.seek(0)
+                with Image.open(buffer) as compressed:
+                    grid = detect_reward_grid(compressed)
+                self.assertIsNotNone(grid)
+                self.assertEqual([reward["slots"] for reward in grid["rewards"]], expected["footprints"])
 
     def test_scaled_supplied_pages_keep_all_reward_footprints(self):
         """Verify scaled supplied pages keep all reward footprints."""

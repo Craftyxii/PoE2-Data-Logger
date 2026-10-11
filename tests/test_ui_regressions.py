@@ -574,19 +574,23 @@ class UIRegressionTests(unittest.TestCase):
             self.assertEqual([tuple(row) for row in db.execute("SELECT remnant_id,scan_id FROM scan_links")], [("R0001", saved["id"])])
 
     def test_clear_tablets_drops_inflight_autosave_result(self):
-        """Verify clear tablets drops inflight autosave result."""
+        """Clear tablets during an owned capture, discard its late result and release the next scan slot."""
         self.window.set_auto_tablets(True)
         revision = service.HOTKEY._capture_revision
         event = {"mode": "item", "error": "", "result": {"kind": "tablet",
                  "mods": ["30% increased Pack Size"], "matches": [], "uncertain": [],
                  "source": "clipboard", **logger.scan_context()}}
-        service.HOTKEY._capture_lock.acquire()
+        self.assertTrue(service.HOTKEY._capture_lock.acquire(blocking=False))
+        with service.HOTKEY._lock:
+            service.HOTKEY._capture_owner = revision
+            service.HOTKEY._active_capture_mode = "item"
         try:
             self.window.clear_tablets()
         finally:
             service.HOTKEY._finish_capture(event, None, revision)
         self.window.poll()
         self.assertIsNone(service.HOTKEY.status()["latest"])
+        self.assertFalse(service.HOTKEY._capture_lock.locked())
         self.assertEqual(logger.tablet_next_slot(), 1)
         self.assertFalse(any(row["affix"] for row in logger.get_state()["settings"]["tablet_affixes"]))
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)

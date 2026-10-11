@@ -94,25 +94,24 @@ class OCRStrictnessUITests(unittest.TestCase):
         self.assertEqual(self.window.ocr_sensitivity_sliders["currency"].value(), 50)
 
     def test_currency_and_ritual_workers_freeze_their_own_capture_values(self):
-        """Changing preferences after queuing work must not reinterpret that capture."""
+        """Inject readers before admission and verify queued captures retain their original strictness."""
         values = ocr_sensitivity.saved_values()
         ocr_sensitivity.save_values({**values, "currency": 0, "ritual": 100})
         image = Image.new("RGB", (480, 200), "navy")
-        self.window._inventory_captured(image, live=False)
-        currency_work, _ = self.jobs[-1]
-        self.window.discard_scan()
-        self.window._ritual_captured(image, live=False, expected_strictness=25)
-        ritual_work, _ = self.jobs[-1]
-        ocr_sensitivity.save_values(values)
-        # Each worker's cancellation guard needs its own current capture restored.
-        inventory = self.window._inventory_capture_context
-        self.window._inventory_reading = inventory
-        with patch.object(item_ocr, "scan_inventory_grid", return_value={}) as scan:
+        # Install mocks before freezing work so queued recognition retains the
+        # injected reader instead of trying to pickle a replaced module symbol.
+        with patch.object(item_ocr, "scan_inventory_grid", return_value={}) as currency_scan, \
+                patch.object(item_ocr, "scan_ritual_page", return_value={}) as ritual_scan:
+            self.window._inventory_captured(image, live=False)
+            currency_work, _ = self.jobs[-1]
+            self.window.discard_scan()
+            self.window._ritual_captured(image, live=False, expected_strictness=25)
+            ritual_work, _ = self.jobs[-1]
+            ocr_sensitivity.save_values(values)
             currency_work()
-            self.assertEqual(scan.call_args.kwargs["strictness"], 0)
-        with patch.object(item_ocr, "scan_ritual_page", return_value={}) as scan:
+            self.assertEqual(currency_scan.call_args.kwargs["strictness"], 0)
             ritual_work()
-            self.assertEqual(scan.call_args.kwargs["strictness"], 25)
+            self.assertEqual(ritual_scan.call_args.kwargs["strictness"], 25)
 
     def test_loose_ocr_can_accept_tentative_evidence_but_missing_data_still_holds(self):
         """Different evidence floors cannot bypass missing counts, modifiers or Ritual prices."""

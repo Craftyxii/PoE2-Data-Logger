@@ -19,6 +19,7 @@ CORE_SOURCES = (
     "core/catalog_repairs.py",
     "core/currency_display.py",
     "core/ocr_runtime.py",
+    "core/ocr_workers.py",
     "core/ocr_sensitivity.py",
     "core/review_learning.py",
 )

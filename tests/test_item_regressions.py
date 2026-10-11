@@ -61,6 +61,39 @@ class ItemRegressionTests(unittest.TestCase):
         self.assertIsNone(result["fields"]["map_mods"])
         self.assertFalse(clear_waystone_read(result))
 
+    def test_waystone_malformed_property_rolls_remain_unknown_and_block_automatic_save(self):
+        """Hold malformed letters, extra rolls, decimals, signs and percent tokens instead of numeric suffixes."""
+        for key, label in (("waystone", "Waystone Drop Chance"), ("item_rarity", "Item Rarity"),
+                           ("pack_size", "Monster Pack Size")):
+            for raw in ("+21O5%", "10 215%", "+1.2.3%", "215% 30%",
+                        "++215%", "--215%", "-+215%", "215%%"):
+                lines = ["Wasteland", "Waystone (Tier 15)", "Item Rarity: +125%",
+                         "Monster Pack Size: +35%", "Waystone Drop Chance: +215%",
+                         "Monsters have 20% increased Attack Speed", "Can be used in a Map Device"]
+                lines = [f"{label}: {raw}" if text.startswith(label + ":") else text for text in lines]
+                with self.subTest(property=key, raw=raw):
+                    result = item_text.read_screen_tooltip(Image.new("RGB", (800, 500)), self.affixes,
+                                                         ocr_rows=[self.row(text, y=i * 30)
+                                                                   for i, text in enumerate(lines)])
+                    self.assertIsNone(result["fields"][key])
+                    self.assertEqual(result["uncertain"], [f"{label}: {raw}"])
+                    self.assertFalse(clear_waystone_read(result))
+                    copied = item_text.parse_item_text("\n".join(
+                        ["Item Class: Waystones", *lines[:5], "Item Level: 82", *lines[5:]]), self.affixes)
+                    self.assertIsNone(copied["fields"][key])
+                    self.assertFalse(clear_waystone_read(copied))
+
+    def test_waystone_complete_property_rolls_preserve_decimals_and_augmented_text(self):
+        """Keep valid signed, comma-decimal and augmented property values while absent optional stats stay allowed."""
+        for raw, expected in (("+215%", 215), ("10.5%", 10.5), ("+10,5% (augmented)", 10.5)):
+            with self.subTest(raw=raw):
+                rows = self.waystone_rows(["Monsters have 20% increased Attack Speed"])
+                rows[2]["text"] = f"Waystone Drop Chance: {raw}"
+                result = item_text.read_screen_tooltip(Image.new("RGB", (800, 500)), self.affixes, ocr_rows=rows)
+                self.assertEqual(result["fields"]["waystone"], expected)
+                self.assertEqual(result["uncertain"], [])
+                self.assertTrue(clear_waystone_read(result))
+
     def test_every_tablet_flag_survives_copy_and_screen_parsing(self):
         """Verify all tablet flags parse identically from copied text and screen OCR."""
         self.assertEqual(len(self.flags), 4)

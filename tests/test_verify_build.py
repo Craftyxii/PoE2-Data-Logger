@@ -28,6 +28,7 @@ MODULES = (
     'PoE2_Data_Logger.core.catalog_repairs',
     'PoE2_Data_Logger.core.currency_display',
     'PoE2_Data_Logger.core.ocr_runtime',
+    'PoE2_Data_Logger.core.ocr_workers',
     'PoE2_Data_Logger.core.ocr_sensitivity',
     'PoE2_Data_Logger.core.review_learning',
     'PoE2_Data_Logger.ui.currency_counter',

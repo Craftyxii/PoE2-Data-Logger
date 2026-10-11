@@ -27,9 +27,16 @@ _WRAP_END = re.compile(r"\b(?:an?|in|of|to|from|with|and|for)$", re.I)
 
 
 def _number(line):
-    """Read the first signed percentage, accepting comma decimals and preserving integers."""
-    match = _PERCENT.search(line)
-    if not match:
+    """Read one complete percentage without accepting suffixes of malformed or extra rolls."""
+    value_text = line.split(":", 1)[-1]
+    matches = list(_PERCENT.finditer(value_text))
+    if len(matches) != 1:
+        return None
+    match = matches[0]
+    remaining = value_text[:match.start()] + value_text[match.end():]
+    if (re.search(r"[\d%+-]", remaining) or
+            match.start() and re.match(r"[\w.,]", value_text[match.start() - 1]) or
+            match.end() < len(value_text) and re.match(r"\w", value_text[match.end()])):
         return None
     n = float(match.group(1).replace(",", "."))
     return int(n) if n.is_integer() else n
@@ -105,7 +112,7 @@ def _waystone_modifiers(lines):
 
 
 def parse_item_text(text, affixes=()):
-    """Parse supported copied items into reviewable waystone fields or tablet affix matches."""
+    """Parse supported copied items into reviewable fields, holding ambiguous observed waystone rolls."""
     lines = _normal_lines(text)
     kind = _item_kind(lines)
     if not kind:
@@ -124,19 +131,22 @@ def parse_item_text(text, affixes=()):
         tier_match = next((match for line in lines[:8]
                            if (match := re.search(r"Waystone\s*\(Tier\s*(\d{1,2})\)", line, re.I))), None)
     tier = int(tier_match.group(1)) if tier_match else None
-    fields = {"tier": tier}
+    fields, uncertain = {"tier": tier}, []
     for key, pattern in (("waystone", r"^Waystone Drop Chance\s*:"),
                          ("item_rarity", r"^Item Rarity\s*:"),
                          ("monster_rarity", r"^Monster Rarity\s*:"),
                          ("pack_size", r"^(?:Monster )?Pack Size\s*:"),
                          ("effectiveness", r"^(?:Monster )?Effectiveness\s*:")):
-        fields[key] = next((_number(line) for line in lines if re.search(pattern, line, re.I)), None)
+        property_line = next((line for line in lines if re.search(pattern, line, re.I)), None)
+        fields[key] = _number(property_line) if property_line is not None else None
+        if property_line is not None and fields[key] is None:
+            uncertain.append(property_line)
     explicit = [line for line in mods if "(enchant)" not in line.lower()]
     fields["map_mods"] = len(explicit) if mods else None
     base = next((i for i, line in enumerate(lines[:8])
                  if re.search(r"Waystone\s*\(Tier", line, re.I)), None)
     name = lines[base - 1] if base is not None and base >= 1 else ""
-    return {"kind": kind, "fields": fields, "mods": mods, "name": name,
+    return {"kind": kind, "fields": fields, "mods": mods, "name": name, "uncertain": uncertain,
             "status": "review"}
 
 

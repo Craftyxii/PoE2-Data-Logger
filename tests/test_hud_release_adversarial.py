@@ -69,10 +69,10 @@ class ReleaseHUDAuditTests(unittest.TestCase):
                 self.window.scan_file()
 
     def test_enqueue_failure_retires_busy_marker_and_scan_draft_for_every_capture_path(self):
-        """Rejected thread-pool submissions must become rejectable failed scans, never permanent busy work."""
+        """Rejected isolated OCR submissions must become rejectable failed scans, never permanent busy work."""
         for mode in ("currency", "ritual", "opened", "seed", "both"):
             with self.subTest(mode=mode):
-                with patch.object(self.window.pool, "submit", side_effect=RuntimeError("Worker queue unavailable")):
+                with patch.object(native_desktop.ocr_workers, "submit", side_effect=RuntimeError("Worker queue unavailable")):
                     self.capture(mode)
                 self.assertEqual(self.window._pending_tasks, {})
                 self.assertIsNone(self.window._inventory_reading)
@@ -105,13 +105,13 @@ class ReleaseHUDAuditTests(unittest.TestCase):
         self.assertEqual(self.window.statusBar().currentMessage(), "")
 
     def test_scan_watchdog_clears_every_reading_and_ignores_late_worker_results(self):
-        """Overdue readers become rejectable failures and cannot later approve or overwrite another scan."""
+        """Hold isolated OCR admission, then verify overdue readers cannot approve or overwrite another scan."""
         for mode in ("currency", "ritual", "opened", "seed", "both"):
             with self.subTest(mode=mode):
                 future = Future()
                 future.set_running_or_notify_cancel()
                 with patch.object(native_desktop, "SCAN_TIMEOUT_MS", 10), \
-                        patch.object(self.window.pool, "submit", return_value=future):
+                        patch.object(native_desktop.ocr_workers, "submit", return_value=future):
                     self.capture(mode)
                 QTest.qWait(40)
                 self.assertEqual(self.window._pending_tasks, {})
@@ -130,9 +130,9 @@ class ReleaseHUDAuditTests(unittest.TestCase):
                 self.window.reject_scan_button.click()
 
     def test_old_scan_watchdog_cannot_fail_a_replacement_review(self):
-        """Expiring replaced inventory work must leave a newer Ritual capture's reading intact."""
+        """Expire isolated inventory work while retaining a newer Ritual capture's reading."""
         old, new = Future(), Future()
-        with patch.object(self.window.pool, "submit", side_effect=[old, new]):
+        with patch.object(native_desktop.ocr_workers, "submit", side_effect=[old, new]):
             self.capture("currency")
             old_key = next(iter(self.window._pending_tasks))
             self.capture("ritual")
@@ -148,10 +148,10 @@ class ReleaseHUDAuditTests(unittest.TestCase):
         self.assertEqual(self.window._pending_tasks, {})
 
     def test_close_retires_scan_watchdog_callbacks(self):
-        """Closing a logger must release timeout callbacks even while a reader has not returned."""
+        """Close with held isolated OCR admission and release timeout callbacks before the reader returns."""
         future = Future()
         future.set_running_or_notify_cancel()
-        with patch.object(self.window.pool, "submit", return_value=future):
+        with patch.object(native_desktop.ocr_workers, "submit", return_value=future):
             self.capture("currency")
         self.assertTrue(self.window._scan_task_timers)
         self.window.close()
@@ -162,7 +162,7 @@ class ReleaseHUDAuditTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
     def test_storage_errors_cannot_leave_remnant_review_on_reading(self):
-        """Fail context reads and reservation cleanup during scan admission and completion, retaining error review."""
+        """Fail context reads and cleanup around isolated OCR admission/completion while retaining error review."""
         with patch.object(logger, "session_generation", side_effect=OSError("Profile unavailable")), \
                 patch.object(logger, "discard_ocr_id", side_effect=OSError("Cleanup unavailable")):
             self.capture("opened")
@@ -174,7 +174,7 @@ class ReleaseHUDAuditTests(unittest.TestCase):
         self.window.reject_scan_button.click()
         future = Future()
         future.set_running_or_notify_cancel()
-        with patch.object(self.window.pool, "submit", return_value=future):
+        with patch.object(native_desktop.ocr_workers, "submit", return_value=future):
             self.capture("seed")
         with patch.object(logger, "session_generation", side_effect=OSError("Profile unavailable")), \
                 patch.object(logger, "discard_ocr_id", side_effect=OSError("Cleanup unavailable")):

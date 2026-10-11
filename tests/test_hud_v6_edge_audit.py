@@ -69,7 +69,7 @@ class HUDEdgeAuditTests(unittest.TestCase):
         self.assertNotIn("Reading remnant image", self.window.review_summary.text())
 
     def test_close_retires_active_hotkey_capture_before_detaching_callbacks(self):
-        """Closing the HUD must invalidate an in-flight capture and suppress its late result."""
+        """Model an owned capture, then verify close suppresses its result and releases its reservation."""
         manager = service.HOTKEY
         revision = manager._capture_revision
         callback_owners = []
@@ -81,6 +81,9 @@ class HUDEdgeAuditTests(unittest.TestCase):
             return cancel(*args, **kwargs)
 
         self.assertTrue(manager._capture_lock.acquire(blocking=False))
+        with manager._lock:
+            manager._capture_owner = revision
+            manager._active_capture_mode = "opened"
         try:
             with patch.object(manager, "cancel_capture", side_effect=record_cancellation):
                 self.window.close()
@@ -92,6 +95,8 @@ class HUDEdgeAuditTests(unittest.TestCase):
         self.assertIsNone(manager.on_event)
         self.assertIsNone(manager.status()["latest"],
                           "A closed window's worker must not publish a stale capture.")
+        self.assertFalse(manager._capture_lock.locked(),
+                         "A canceled owned capture must release the next scan's reservation.")
 
 
 if __name__ == "__main__":

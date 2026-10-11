@@ -289,7 +289,7 @@ def _corner_template(bottom_right):
 def _corner_strength(pixels, box, pitch, bottom_right=False):
     """Return binary corner support from local correlation and brown ornament color.
 
-    The threshold depends on corner orientation and pitch to accommodate resampling.
+    Orientation and pitch accommodate resampling; mild JPEG blur needs stronger color support.
     """
     left, top, right, bottom = box
     # Brown equipment artwork alone is not an ornate frame.  Verify the
@@ -316,6 +316,12 @@ def _corner_strength(pixels, box, pitch, bottom_right=False):
     # Icon artwork sometimes overlaps the lower ornament.  At small capture
     # scales the upper eight-pixel ornament also loses detail to resampling.
     threshold = .60 if bottom_right else (.65 if pitch < 35 else .72)
+    # Compression can blur a partly covered upper curl below the ordinary
+    # shape floor. Require three quarters of its matched patch to have the
+    # frame's gold color before using the modestly lower shape threshold.
+    # Rectangle grouping still requires an independent matching lower corner.
+    if not bottom_right and float(ornate.mean()) >= .75:
+        threshold = min(threshold, .68)
     return float(score >= threshold)
 
 

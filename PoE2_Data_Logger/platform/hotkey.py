@@ -6,13 +6,15 @@ import io
 import sys
 import tempfile
 import threading
+import time
+from dataclasses import replace
 from pathlib import Path
 
 from PIL import ImageGrab
 
 from PoE2_Data_Logger.core import logger_store as logger
 from PoE2_Data_Logger.core import store
-from PoE2_Data_Logger.core import ocr_sensitivity
+from PoE2_Data_Logger.core import ocr_sensitivity, ocr_workers
 from PoE2_Data_Logger.ocr.opened_scan import scan_opened, scan_both
 from PoE2_Data_Logger.ocr.scan import scan
 from PoE2_Data_Logger.platform.hover_copy import read_hovered_text
@@ -146,6 +148,9 @@ class HotkeyManager:
         self._capture_revision = 0
         self._capture_owner = None
         self._capture_watchdog = None
+        self._capture_deadline = None
+        self._ocr_capture_future = None
+        self._ocr_capture_revision = None
         self._active_capture_mode = None
         self._latest = None
         self._image = None
@@ -427,6 +432,7 @@ class HotkeyManager:
             revision = self._capture_revision
             self._capture_owner = revision
             self._active_capture_mode = mode
+            self._capture_deadline = time.monotonic() + CAPTURE_TIMEOUT_SECONDS
         try:
             with self._lock:
                 watchdog = threading.Timer(CAPTURE_TIMEOUT_SECONDS, self._expire_capture, args=(mode, revision))
@@ -588,8 +594,8 @@ class HotkeyManager:
 
     def _read_capture(self, kind, mode, region, image, tooltip, remnant_map=None, capture_map=None, generation=None, expedition=None, activity_crops=None, copied=None, phase="start", pending_map=False, revision=None, strictness_values=None, chain_revision=None):
         """Route captured pixels or copied item text to the appropriate reader, preserve
-        capture ownership and publish through the revision guard. Built-in OCR
-        readers receive frozen per-type strictness; injected readers keep their API.
+        ownership and publish through the revision guard. Built-in recognition runs
+        in bounded killable children with frozen strictness; injected readers retain their API.
         """
         event = None
         raw = None
@@ -608,7 +614,7 @@ class HotkeyManager:
                 raw = memory.getvalue()
                 level = strictness_values.get("propagation", ocr_sensitivity.DEFAULT)
                 options = {"strictness": level} if reader is scan_propagation and level != ocr_sensitivity.DEFAULT else {}
-                result = reader(image, **options)
+                result = self._ocr_capture_call(revision, reader, image, **options)
                 result["mode"] = "propagation"
                 event = {"mode": "propagation", "result": result, "error": ""}
                 return
@@ -629,7 +635,8 @@ class HotkeyManager:
             if (kind == "default" and mode == "opened" and not copied and
                     self.readers.get("opened") is scan_opened):
                 from PoE2_Data_Logger.core.auto_commit import candidate
-                native = scan_opened(image, allow_fallback=False, verify_header=True, **remnant_options)
+                native = self._ocr_capture_call(revision, scan_opened, image, allow_fallback=False,
+                                         verify_header=True, **remnant_options)
                 if not candidate(native)["ready"]:
                     native = None
             if native and not copied:
@@ -648,7 +655,7 @@ class HotkeyManager:
                 tooltip_image = tooltip if tooltip is not None else (self.tooltip_grabber or capture_near_cursor)()
                 with logger._connect() as db:
                     affixes = [row[0] for row in db.execute("SELECT name FROM affixes ORDER BY rowid")]
-                rows = item_ocr.ocr_lines(tooltip_image)
+                rows = self._ocr_capture_call(revision, item_ocr.ocr_lines, tooltip_image)
                 if kind == "default" and item_ocr.is_ritual_page(rows):
                     box = (activity_crops or {}).get("ritual")
                     picture = tooltip_image.crop(box) if box else tooltip_image
@@ -665,7 +672,8 @@ class HotkeyManager:
                 elif any(strictness_values.get(key, ocr_sensitivity.DEFAULT) != ocr_sensitivity.DEFAULT
                          for key in ("waystone", "tablet")):
                     item_options["strictness"] = dict(strictness_values)
-                result = item_text.read_screen_tooltip(tooltip_image, affixes, ocr_rows=rows, **item_options)
+                result = self._ocr_capture_call(revision, item_text.read_screen_tooltip, tooltip_image, affixes,
+                                         ocr_rows=rows, **item_options)
                 if result and (kind == "default" or result["kind"] == mode):
                     memory = io.BytesIO()
                     tooltip_image.convert("RGB").save(memory, format="JPEG", quality=92)
@@ -676,7 +684,7 @@ class HotkeyManager:
                         self.readers.get("opened") is scan_opened and
                         any("runeshapecombinations" in "".join(c for c in row["text"].lower()
                             if c.isalnum()) for row in rows)):
-                    result = scan_opened(tooltip_image, ocr_rows=rows, **remnant_options)
+                    result = self._ocr_capture_call(revision, scan_opened, tooltip_image, ocr_rows=rows, **remnant_options)
                     result["_target_map_id"] = remnant_map
                     memory = io.BytesIO()
                     tooltip_image.convert("RGB").save(memory, format="JPEG", quality=92)
@@ -711,7 +719,7 @@ class HotkeyManager:
                 event = {"mode": mode, "result": {"captured": True, "map_id": capture_map}, "error": ""}
                 return
             if mode == "opened" and self.readers.get(mode) is scan_opened:
-                result = scan_opened(image, **remnant_options)
+                result = self._ocr_capture_call(revision, scan_opened, image, **remnant_options)
             else:
                 with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp:
                     temp.write(raw)
@@ -726,7 +734,7 @@ class HotkeyManager:
                         options.update(remnant_options)
                         if seed_strictness != remnant_strictness:
                             options["seed_strictness"] = seed_strictness
-                    result = reader(name, **options)
+                    result = self._ocr_capture_call(revision, reader, name, **options)
                 finally:
                     name.unlink(missing_ok=True)
             if mode == "both":
@@ -757,25 +765,53 @@ class HotkeyManager:
                     event["result"]["map_id"] = remnant_map if phase == "start" else capture_map
             self._finish_capture(event, raw, revision)
 
+    def _ocr_capture_call(self, revision, function, *args, **kwargs):
+        """Run unchanged recognition with the original capture deadline and cancellable native-child ownership."""
+        if revision is not None and self._capture_cancelled(revision):
+            raise RuntimeError("Screen capture was cancelled.")
+        job = ocr_workers.request(function, *args, **kwargs)
+        if not isinstance(job, ocr_workers.Request):
+            return job()
+        with self._lock:
+            if revision is not None:
+                if revision != self._capture_revision:
+                    raise RuntimeError("Screen capture was cancelled.")
+                if self._capture_deadline is not None:
+                    job = replace(job, deadline=self._capture_deadline)
+            future = ocr_workers.submit(job)
+            if revision is not None:
+                self._ocr_capture_future = future
+                self._ocr_capture_revision = revision
+        try:
+            return future.result()
+        finally:
+            with self._lock:
+                if self._ocr_capture_future is future:
+                    self._ocr_capture_future = self._ocr_capture_revision = None
+
     def cancel_capture(self, modes=None):
         """Discard selected scan modes without cancelling an unrelated worker.
 
         With no modes specified, retain the global cancellation used when the
-        map, session or application changes. An active worker keeps the capture
-        lock until it finishes; changing its revision prevents publication.
+        map, session or application changes. Terminate the matching isolated
+        reader and retire its revision so it cannot publish a late result.
         """
         modes = None if modes is None else frozenset((modes,) if isinstance(modes, str) else modes)
         with self._lock:
             if modes is None or self._active_capture_mode in modes:
                 self._capture_revision += 1
+                if self._ocr_capture_future is not None:
+                    self._ocr_capture_future.cancel()
             if modes is None or self._latest and self._latest.get("mode") in modes:
                 self._latest = self._image = None
 
     def _expire_capture(self, mode, revision):
-        """Release an overdue capture's reservation and publish an error only while it still owns the request."""
+        """Terminate an overdue isolated reader and release only its still-owned capture reservation."""
         with self._lock:
             if self._capture_owner != revision:
                 return
+            if self._ocr_capture_revision == revision and self._ocr_capture_future is not None:
+                self._ocr_capture_future.cancel()
             self._finish_capture({"mode": mode, "result": None,
                                   "error": "Screen scan timed out after 90 seconds. Scan again."},
                                  None, revision, expired=True)
@@ -794,6 +830,7 @@ class HotkeyManager:
                 self._capture_revision += 1
             self._capture_owner = None
             self._active_capture_mode = None
+            self._capture_deadline = None
             if self._capture_watchdog is not None:
                 self._capture_watchdog.cancel()
                 self._capture_watchdog = None

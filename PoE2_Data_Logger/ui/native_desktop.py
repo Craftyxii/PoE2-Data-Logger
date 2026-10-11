@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 from PoE2_Data_Logger.core import logger_store as logger
 from PoE2_Data_Logger.core import reference_pack
 from PoE2_Data_Logger.core import review_learning
-from PoE2_Data_Logger.core import ocr_runtime, ocr_sensitivity
+from PoE2_Data_Logger.core import ocr_runtime, ocr_sensitivity, ocr_workers
 from PoE2_Data_Logger.ocr.affix_capture import new_affix_names, affix_unit, modifier_value
 from PoE2_Data_Logger.ocr import item_ocr
 from PoE2_Data_Logger.core import service
@@ -48,7 +48,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.12 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.13 Beta"
 SCAN_TIMEOUT_MS = 90000
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
@@ -176,10 +176,10 @@ def set_message(widget, content, role="message"):
 
 
 def clear_waystone_read(result):
-    """Require complete waystone fields and the captured OCR strictness evidence floor."""
+    """Require complete fields, unambiguous observed properties and the captured OCR evidence floor."""
     fields = result.get("fields") or {}
     mods = result.get("mods") or []
-    if (fields.get("tier") not in (15, 16) or fields.get("waystone") is None or
+    if (result.get("uncertain") or fields.get("tier") not in (15, 16) or fields.get("waystone") is None or
             fields.get("map_mods") is None or fields["map_mods"] != len(mods) or
             not 1 <= len(mods) <= 10):
         return False
@@ -377,6 +377,7 @@ class LoggerWindow(QMainWindow):
         self.resolved = None
         self._pending_tasks = {}
         self._scan_task_timers = {}
+        self._scan_task_futures = {}
         self._chain_save_pending = None
         self._task_id = 0
         self._latest_hotkey = 0
@@ -468,7 +469,7 @@ class LoggerWindow(QMainWindow):
         QApplication.instance().installEventFilter(self)
 
     def _submit(self, label, function, done=None):
-        """Dispatch generation-bound work, handling failed admission and bounding scan review waits."""
+        """Dispatch generation-bound work with killable OCR isolated from export and save workers."""
         if self._closed:
             return
         self._task_id += 1
@@ -484,13 +485,15 @@ class LoggerWindow(QMainWindow):
         self._pending_tasks[key] = (done, generation)
         self.statusBar().showMessage(label)
         try:
-            future = self.pool.submit(function)
+            future = (ocr_workers.submit(function) if isinstance(function, ocr_workers.Request)
+                      else self.pool.submit(function))
         except Exception as error:
             # Enqueue failure has no future callback; retire its busy marker and
             # matching scan draft exactly as a worker failure would.
             self._task_done(key, None, error)
             return
         if getattr(done, "_scan_failure", None):
+            self._scan_task_futures[key] = future
             timer = QTimer(self)
             timer.setSingleShot(True)
             timer.timeout.connect(lambda: self._expire_scan_task(key, future))
@@ -509,20 +512,40 @@ class LoggerWindow(QMainWindow):
         future.add_done_callback(finished)
 
     def _expire_scan_task(self, key, future):
-        """Retire overdue recognition without accepting a late result or cancelling unrelated saves."""
+        """Retire overdue recognition and terminate its isolated reader without cancelling unrelated saves."""
         if key not in self._pending_tasks:
             return
         self._task_done(key, None, TimeoutError("OCR timed out after 90 seconds"))
-        # Cancel queued work; a running native reader may finish later, but its
-        # retired task ID can no longer modify review or saved logger data.
+        # Isolated OCR futures wake their supervisor to terminate and reap a
+        # stalled native reader. Retired IDs still reject a racing late result.
         future.cancel()
 
     def _clear_scan_watchdogs(self):
-        """Release timeout callbacks and retained scan results when reset or close retires all tasks."""
+        """Cancel retired scan work and release its deadlines while unrelated save/export tasks keep their workers."""
+        futures = list(self._scan_task_futures.values())
+        self._scan_task_futures.clear()
         for timer in self._scan_task_timers.values():
             timer.stop()
             timer.deleteLater()
         self._scan_task_timers.clear()
+        for future in futures:
+            future.cancel()
+
+    def _retire_obsolete_scan_tasks(self):
+        """Retire callbacks and cancel only scan futures whose captured review identity has been replaced or cleared."""
+        for key, (callback, _) in list(self._pending_tasks.items()):
+            field = getattr(callback, "_scan_field", None)
+            if field is None or getattr(self, field) is callback._scan_capture:
+                continue
+            self._pending_tasks.pop(key, None)
+            timer = self._scan_task_timers.pop(key, None)
+            if timer is not None:
+                timer.stop()
+                timer.deleteLater()
+            future = self._scan_task_futures.pop(key, None)
+            if future is not None:
+                # Retire the callback before cancellation can emit a Qt completion.
+                future.cancel()
 
     def _task_done(self, key, result, error):
         """Handle a worker's Qt completion on the GUI thread, ignoring retired sessions and
@@ -531,6 +554,7 @@ class LoggerWindow(QMainWindow):
         if self._closed:
             return
         pending = self._pending_tasks.pop(key, None)
+        self._scan_task_futures.pop(key, None)
         timer = self._scan_task_timers.pop(key, None)
         if timer is not None:
             timer.stop()
@@ -572,6 +596,8 @@ class LoggerWindow(QMainWindow):
                 self._scan_failed(kind, capture, error, reading_finished=active)
                 raise
         completed._scan_failure = lambda error: self._scan_failed(kind, capture, error)
+        completed._scan_field = field
+        completed._scan_capture = capture
         self._submit(label, function, completed)
 
     def _scan_failed(self, kind, capture, error, reading_finished=False):
@@ -1084,7 +1110,7 @@ class LoggerWindow(QMainWindow):
         self.tabs.addTab(page, "Disclaimer")
 
     def _review_pending(self, kind, summary, can_commit=True, rows=None, *, preserve_chain_draft=False):
-        """Show controls for this scan, optionally retaining accepted chain drafts."""
+        """Show controls for this scan and retire obsolete readers while optionally retaining accepted chain drafts."""
         if kind not in ("remnant", "seed"):
             self._require_remnant_review_finished()
         self._failed_review = False
@@ -1106,6 +1132,7 @@ class LoggerWindow(QMainWindow):
         if kind != "ritual":
             self._ritual_reading = None
             self._pending_ritual_map = None
+        self._retire_obsolete_scan_tasks()
         self.pending_review_kind = kind
         self._held_remnant_review = None
         if kind != "propagation" and not preserve_chain_draft:
@@ -1231,7 +1258,7 @@ class LoggerWindow(QMainWindow):
 
     def reject_review(self):
         """Cancel and clear the active non-remnant review, restoring saved form state without
-        committing it.
+        committing it or retaining its isolated recognition worker.
         """
         self._failed_review = False
         kind = self.pending_review_kind
@@ -1251,6 +1278,7 @@ class LoggerWindow(QMainWindow):
         self._pending_currency_map = self._pending_ritual_map = self._pending_tablet_slot = None
         self._pending_currency_phase = None
         self._inventory_reading = self._ritual_reading = None
+        self._retire_obsolete_scan_tasks()
         self._propagation_reading = None
         if kind == "propagation":
             self._clear_manual_propagation()
@@ -2963,7 +2991,7 @@ class LoggerWindow(QMainWindow):
                   + (" Previous map totals saved." if previous else ""), True)
 
     def _clear_map_review(self):
-        """Discard map-specific review drafts when the map context changes."""
+        """Discard map-specific drafts and cancel their stale recognition work when the map context changes."""
         self._waystone_form_baseline = self._counts_form_baseline = None
         self._tablet_form_baseline = self._active_master_baseline = self._perk_form_baseline = None
         self._perk_drafts.clear()
@@ -2977,6 +3005,7 @@ class LoggerWindow(QMainWindow):
         self._pending_currency_map = self._pending_ritual_map = self._pending_tablet_slot = None
         self._pending_currency_phase = None
         self._inventory_reading = self._ritual_reading = None
+        self._retire_obsolete_scan_tasks()
         self._inventory_capture = self._inventory_capture_context = None
         self._ritual_hash = self._ritual_capture_context = None
         self.inventory_table.setRowCount(0)
@@ -4575,8 +4604,8 @@ class LoggerWindow(QMainWindow):
             self.show_result(actual, result, self.images[actual])
 
     def scan_file(self):
-        """Validate an image file and submit a context-bound remnant scan with deferred ID
-        assignment.
+        """Prepare file/context data before replacing review, then recover preview or admission
+        failures through the capture-bound scan error path with deferred ID assignment.
         """
         filename, _ = QFileDialog.getOpenFileName(self, "Test an image", str(Path.home()),
                                                   "Images (*.png *.jpg *.jpeg)")
@@ -4590,30 +4619,35 @@ class LoggerWindow(QMainWindow):
         mode = self.mode
         context = logger.scan_context()
         sensitivity = ocr_sensitivity.saved_values()
-        service.HOTKEY.cancel_capture(modes=("seed", "opened", "both"))
-        capture = object()
-        self._remnant_reading = capture
-        self._review_pending("seed" if mode == "seed" else "remnant", "Reading remnant image…", False)
-        self.current_file[mode] = Path(filename).name
-        self.images[mode] = raw
-        if mode == "seed":
-            self.saved_scan = self._saved_scan_capture = None
-        self._show_image(raw)
-        set_message(self.scan_status, "Reading image…")
-        self.scan_status.show()
         with logger._connect() as db:
             number = logger._meta(db, "current_map_number", 0)
             if not number or logger._meta(db, "pending_new_map", False):
                 number += 1
             map_id = logger._map_id(number)
-        self._submit_scan("Reading image…",
-                     lambda: service.dispatch(f"/api/scan?mode={mode}",
-                                              {"image": encoded, "map_id": map_id,
-                                               "scan_generation": context["_scan_generation"],
-                                               "scan_context": context, "defer_ocr_id": True,
-                                               "ocr_strictness": sensitivity}),
-                     lambda result: self._scan_done(mode, result, raw, capture),
-                     "seed" if mode == "seed" else "remnant", capture)
+        service.HOTKEY.cancel_capture(modes=("seed", "opened", "both"))
+        capture = object()
+        self._remnant_reading = capture
+        kind = "seed" if mode == "seed" else "remnant"
+        try:
+            self._review_pending(kind, "Reading remnant image…", False)
+            self.current_file[mode] = Path(filename).name
+            self.images[mode] = raw
+            if mode == "seed":
+                self.saved_scan = self._saved_scan_capture = None
+            self._show_image(raw)
+            set_message(self.scan_status, "Reading image…")
+            self.scan_status.show()
+            self._submit_scan("Reading image…",
+                         ocr_workers.request(service.dispatch, f"/api/scan?mode={mode}",
+                                             {"image": encoded, "map_id": map_id,
+                                              "scan_generation": context["_scan_generation"],
+                                              "scan_context": context, "defer_ocr_id": True,
+                                              "ocr_strictness": sensitivity}),
+                         lambda result: self._scan_done(mode, result, raw, capture),
+                         kind, capture)
+        except Exception as error:
+            self._scan_failed(kind, capture, error)
+            raise
 
     def _scan_done(self, mode, result, raw, capture=None):
         """Ignore superseded capture completions, show the returned remnant view and consider
@@ -5057,9 +5091,10 @@ class LoggerWindow(QMainWindow):
 
     def reject_remnant_scan(self):
         """Reject a waiting seed or opened reading and release its pending OCR ID when review
-        is exhausted.
+        is exhausted, cancelling its obsolete reader without changing recognition or saved logs.
         """
         self._remnant_reading = None
+        self._retire_obsolete_scan_tasks()
         service.HOTKEY.cancel_capture(modes=("seed", "opened", "both"))
         if self.pending_review_kind == "seed":
             if not self._seed_readings:
@@ -5808,11 +5843,10 @@ class LoggerWindow(QMainWindow):
         self.refresh_currency_summary()
 
     def _inventory_captured(self, image, live=True, expected_map_id=None, expected_phase=None, expected_strictness=None):
-        """Bind an inventory capture to its map, phase, and session context before queueing
-        icon matching and opening the held review. Freeze currency strictness for this work.
+        """Prepare frozen inventory references before replacing review, then recover preview
+        or worker admission failures against this map/phase-bound capture.
         """
         self._require_remnant_review_finished()
-        service.HOTKEY.cancel_capture()
         phase = expected_phase or value(self.inventory_phase)
         map_id = logger.currency_target_map(phase)
         if expected_map_id is not None and expected_map_id != map_id:
@@ -5821,22 +5855,27 @@ class LoggerWindow(QMainWindow):
         capture = {"map_id": map_id, "phase": phase, "image": image, "context": logger.scan_context(),
                    "strictness": ocr_sensitivity.validate(expected_strictness) if expected_strictness is not None
                    else ocr_sensitivity.saved_values()["currency"]}
+        references = logger.inventory_icons()
+        service.HOTKEY.cancel_capture()
         self._inventory_capture = image
         self._inventory_capture_context = self._inventory_reading = capture
         self._pending_currency_map = map_id
         self._pending_currency_phase = phase
-        with QSignalBlocker(self.inventory_phase):
-            select(self.inventory_phase, phase)
-        self._show_review_capture(image)
-        self.inventory_table.setRowCount(0)
-        self.inventory_table.hide()
-        self._show_inventory_preview(image)
-        self._review_pending("currency", f"Reading {phase} inventory…", False)
-        references = logger.inventory_icons()
-        self._submit_scan("Matching inventory icons…",
-                     lambda: item_ocr.scan_inventory_grid(image, references, strictness=capture["strictness"])
-                     if capture is self._inventory_reading else None,
-                     lambda result: self._inventory_read(result, live, map_id, capture), "currency", capture)
+        try:
+            with QSignalBlocker(self.inventory_phase):
+                select(self.inventory_phase, phase)
+            self.inventory_table.setRowCount(0)
+            self.inventory_table.hide()
+            self._review_pending("currency", f"Reading {phase} inventory…", False)
+            self._show_review_capture(image)
+            self._show_inventory_preview(image)
+            self._submit_scan("Matching inventory icons…",
+                         ocr_workers.request(item_ocr.scan_inventory_grid, image, references,
+                                             strictness=capture["strictness"]),
+                         lambda result: self._inventory_read(result, live, map_id, capture), "currency", capture)
+        except Exception as error:
+            self._scan_failed("currency", capture, error)
+            raise
 
     def _show_inventory_preview(self, image):
         """Render the inventory capture with its 12-by-5 grid and numbered slots for row
@@ -6281,11 +6320,10 @@ class LoggerWindow(QMainWindow):
             + (" · net: " + ", ".join(parts[:8]) if parts else ""))
 
     def _ritual_captured(self, image, live=True, expected_map_id=None, expected_strictness=None):
-        """Bind a Ritual capture and image hash to the current map and session context before
-        queueing reward recognition with frozen Ritual strictness and opening the held review.
+        """Prepare frozen Ritual references before replacing review, then recover preview
+        or worker admission failures against this map/session-bound capture and image hash.
         """
         self._require_remnant_review_finished()
-        service.HOTKEY.cancel_capture()
         map_id = logger.get_state()["current_map_id"]
         if expected_map_id is not None and expected_map_id != map_id:
             raise ValueError(f"The Ritual scan belongs to {expected_map_id}. Scan {map_id} again.")
@@ -6296,21 +6334,26 @@ class LoggerWindow(QMainWindow):
                    "scan_hash": hashlib.sha256(image.tobytes()).hexdigest(),
                    "strictness": ocr_sensitivity.validate(expected_strictness) if expected_strictness is not None
                    else ocr_sensitivity.saved_values()["ritual"]}
+        names = logger.ritual_names()
+        references = logger.ritual_icons()
+        service.HOTKEY.cancel_capture()
         self._ritual_reading = capture
         self._ritual_capture_context = capture
         self._pending_ritual_map = map_id
         self._ritual_hash = None
-        self._show_review_capture(image)
-        self.ritual_table.setRowCount(0)
-        self.ritual_table.hide()
-        self.ritual_raw.clear()
-        self._review_pending("ritual", "Reading Ritual rewards…", False)
-        names = logger.ritual_names()
-        references = logger.ritual_icons()
-        self._submit_scan("Reading Ritual rewards…",
-                     lambda: item_ocr.scan_ritual_page(image, names, references, strictness=capture["strictness"])
-                     if capture is self._ritual_reading else None,
-                     lambda result: self._ritual_read(result, live, map_id, capture), "ritual", capture)
+        try:
+            self.ritual_table.setRowCount(0)
+            self.ritual_table.hide()
+            self.ritual_raw.clear()
+            self._review_pending("ritual", "Reading Ritual rewards…", False)
+            self._show_review_capture(image)
+            self._submit_scan("Reading Ritual rewards…",
+                         ocr_workers.request(item_ocr.scan_ritual_page, image, names, references,
+                                             strictness=capture["strictness"]),
+                         lambda result: self._ritual_read(result, live, map_id, capture), "ritual", capture)
+        except Exception as error:
+            self._scan_failed("ritual", capture, error)
+            raise
 
     def _ritual_read(self, result, live=True, expected_map_id=None, capture=None):
         """Ignore superseded captures and validate map ownership before filling Ritual reward
@@ -6833,9 +6876,10 @@ class LoggerWindow(QMainWindow):
         self.note("Saved screenshot loaded for review.")
 
     def closeEvent(self, event):
-        """Stop timers and hotkey listening, detach global callbacks, and cancel queued workers
-        as the window closes. Invalidate captures before releasing their HUD preparation
-        callback so cancelled workers cannot resume capture or clipboard work after shutdown.
+        """Stop callbacks and queue cleanup while isolated OCR supervisors reap native readers off the GUI thread.
+
+        Invalidate captures before releasing HUD preparation so cancelled workers cannot
+        resume capture or clipboard work after shutdown.
         """
         self._closed = True
         service.HOTKEY.cancel_capture()
@@ -6856,6 +6900,7 @@ class LoggerWindow(QMainWindow):
         service.HOTKEY._unregister()
         self._pending_tasks.clear()
         self._clear_scan_watchdogs()
+        ocr_workers.shutdown(wait=False)
         self.pool.shutdown(wait=False, cancel_futures=True)
         QApplication.instance().removeEventFilter(self)
         super().closeEvent(event)
@@ -6881,6 +6926,7 @@ def instance_lock():
         user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
         user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
         window = (user32.FindWindowW(None, WINDOW_TITLE)
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.12 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.11 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.10 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.9 Beta")
@@ -6908,9 +6954,25 @@ def instance_lock():
     return None
 
 
+def _bundled_ocr_smoke():
+    """Load bundled recognizers and read real pixels in the same child path used by installed scans."""
+    import numpy as np
+    from PIL import ImageDraw, ImageFont
+    from PoE2_Data_Logger.ocr import runehelper_ocr, scan
+    scan._assets()
+    runehelper_ocr._read_row(np.full((32, 160), 180, dtype=np.uint8))
+    item_ocr.currency_ocr.get_reader()
+    image = Image.new("RGB", (600, 150), "white")
+    ImageDraw.Draw(image).text((20, 40), "Chaos Orb", fill="black",
+                               font=ImageFont.truetype(str(HERE / "fonts" / "DejaVuSans.ttf"), 36))
+    if not any("Chaos Orb" in row["text"] for row in item_ocr.ocr_lines(image)):
+        raise RuntimeError("Bundled text recognition failed.")
+    return os.getpid()
+
+
 def main(smoke_test=False):
     """Initialize and run the single-instance desktop application, optionally checking bundled
-    OCR in a short smoke run. Wait for workers before releasing the instance lock on exit.
+    OCR in a short smoke run. Reap isolated readers and finish save workers before releasing the instance lock.
     """
     application = QApplication(sys.argv)
     application.setWindowIcon(QIcon(str(HERE / "power_rune.ico")))
@@ -6921,20 +6983,15 @@ def main(smoke_test=False):
         logger.initialize()
         ocr_runtime.active_threads()
         if smoke_test:
-            import numpy as np
-            from PIL import ImageDraw, ImageFont
-            from PoE2_Data_Logger.ocr import runehelper_ocr, scan
-            scan._assets()
-            runehelper_ocr._read_row(np.full((32, 160), 180, dtype=np.uint8))
-            item_ocr.currency_ocr.get_reader()
-            image = Image.new("RGB", (600, 150), "white")
-            ImageDraw.Draw(image).text((20, 40), "Chaos Orb", fill="black",
-                                       font=ImageFont.truetype(str(HERE / "fonts" / "DejaVuSans.ttf"), 36))
-            if not any("Chaos Orb" in row["text"] for row in item_ocr.ocr_lines(image)):
-                raise RuntimeError("Bundled text recognition failed.")
+            # The installer allows 60 seconds for its entire smoke subprocess.
+            # Leave room for startup and reaping before that outer guard expires.
+            smoke = ocr_workers.Request(_bundled_ocr_smoke, deadline=time.monotonic() + 45)
+            if ocr_workers.submit(smoke).result() == os.getpid():
+                raise RuntimeError("Bundled recognition did not run in an isolated worker.")
         service.HOTKEY.start()
         window = LoggerWindow()
     except Exception as error:
+        ocr_workers.shutdown(wait=True)
         if "lock" in locals() and lock:
             lock.unlock()
         if smoke_test:
@@ -6948,6 +7005,7 @@ def main(smoke_test=False):
             QTimer.singleShot(300, window.close)
         return application.exec()
     finally:
+        ocr_workers.shutdown(wait=True)
         window.pool.shutdown(wait=True, cancel_futures=True)
         lock.unlock()
 

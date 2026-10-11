@@ -1,6 +1,7 @@
 """Launch the desktop app or an isolated frozen-build smoke check with startup error reporting."""
 
 import os
+import multiprocessing
 from pathlib import Path
 import sys
 import tempfile
@@ -8,9 +9,9 @@ import traceback
 
 
 def run():
-    """Start the desktop normally, or isolate smoke-test data and report startup exceptions
-    before returning a failure code.
+    """Handle frozen recognition children before Qt startup, or launch the normal desktop/smoke check.
     """
+    multiprocessing.freeze_support()
     if "--smoke-test" in sys.argv:
         with tempfile.TemporaryDirectory(prefix="poe2-build-check-") as directory:
             os.environ["RUNESHAPE_SCAN_DATA_DIR"] = directory
