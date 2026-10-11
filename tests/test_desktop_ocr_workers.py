@@ -4,6 +4,7 @@ from concurrent.futures import Future
 import multiprocessing
 import os
 from pathlib import Path
+import sqlite3
 import tempfile
 import time
 import unittest
@@ -187,6 +188,37 @@ class DesktopOCRWorkerTests(unittest.TestCase):
                         self.assertIsNone(self.window.pending_review_kind)
                         self.assertIsNone(self.window._remnant_reading)
                         self.assertIsNone(logger.get_state()["ocr_pending"])
+
+    def test_failed_discard_preserves_live_reader_and_watchdog_until_retry(self):
+        """A database lock preserves the owned Reading task; retry cancels and reaps it after storage succeeds."""
+        for mode in ("opened", "seed", "both"):
+            with self.subTest(mode=mode):
+                future, pid = self.blocked_capture(mode)
+                capture = self.window._remnant_reading
+                key = next(iter(self.window._scan_task_futures))
+                timer = self.window._scan_task_timers[key]
+                summary = self.window.review_summary.text()
+                kind = self.window.pending_review_kind
+                with patch.object(logger, "discard_ocr_id", side_effect=sqlite3.OperationalError("database is locked")), \
+                        patch.object(service.HOTKEY, "cancel_capture") as cancel:
+                    with self.assertRaisesRegex(sqlite3.OperationalError, "database is locked"):
+                        self.window.discard_scan()
+                cancel.assert_not_called()
+                self.assertFalse(future.done())
+                self.assertIs(self.window._remnant_reading, capture)
+                self.assertIs(self.window._scan_task_futures[key], future)
+                self.assertIn(key, self.window._pending_tasks)
+                self.assertIs(self.window._scan_task_timers[key], timer)
+                self.assertTrue(timer.isActive())
+                self.assertEqual(self.window.review_summary.text(), summary)
+                self.assertEqual(self.window.pending_review_kind, kind)
+                self.assertFalse(self.window._failed_review)
+                self.assertIn(pid, {child.pid for child in multiprocessing.active_children()})
+                self.window.discard_scan()
+                self.assert_retired(future, pid)
+                self.assertEqual(self.window._pending_tasks, {})
+                self.assertIsNone(self.window.pending_review_kind)
+                self.assertIsNone(self.window._remnant_reading)
 
 
 if __name__ == "__main__":

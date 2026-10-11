@@ -5285,10 +5285,10 @@ class LoggerWindow(QMainWindow):
         """Cancel remnant capture, release its pending logger ID and clear both remnant-view
         drafts.
         """
+        logger.discard_ocr_id()
         service.HOTKEY.cancel_capture(modes=("seed", "opened", "both"))
         self._remnant_reading = None
         self._retire_obsolete_scan_tasks()
-        logger.discard_ocr_id()
         self._clear_seed_queue()
         self.results = {"seed": None, "opened": None}
         self.images = {"seed": None, "opened": None}
