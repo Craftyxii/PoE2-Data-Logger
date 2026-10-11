@@ -190,28 +190,43 @@ class PropagationOCRTests(unittest.TestCase):
         result = self.scan(image, rows)
         self.assertTrue(all(not choice["can_use"] for choice in result["choices"]), result)
 
-    def test_group_recovery_retains_target_text_and_socket_bar_guards(self):
-        """Weak target text or a missing first tile remains held despite a verified source crown."""
-        for failure in ("text", "origin"):
-            with self.subTest(failure=failure):
-                image, rows = self.family_panel({0: [2]})
-                if failure == "text":
-                    rows[4]["score"] = .7
-                else:
-                    top = 86 + 4 * 81 - 18
-                    ImageDraw.Draw(image).rectangle((50, top, 90, top + 37), fill=(176, 161, 130))
-                result = self.scan(image, rows)
-                self.assertFalse(result["can_use"], result)
-                self.assertTrue(result["choices"][1]["can_use"], result)
+    def test_group_recovery_retains_target_text_guard(self):
+        """Weak target text remains held despite another row's verified source crown."""
+        image, rows = self.family_panel({0: [2]})
+        rows[4]["score"] = .7
+        result = self.scan(image, rows)
+        self.assertFalse(result["can_use"], result)
+        self.assertTrue(result["choices"][1]["can_use"], result)
 
-    def test_group_socket_must_exist_in_every_recipe_database_entry(self):
-        """A socket beyond a shorter recipe's stored combination holds the whole group."""
+    def test_group_recovers_unmarked_receiver_with_missing_first_tile_contour(self):
+        """Verified sibling origins supply the known socket despite a damaged recipient contour."""
+        image, rows = self.family_panel({0: [2]})
+        top = 86 + 4 * 81 - 18
+        ImageDraw.Draw(image).rectangle((50, top, 90, top + 37), fill=(176, 161, 130))
+        self.assert_group_slots(self.scan(image, rows), [2])
+
+    def test_shorter_recipe_does_not_erase_a_verified_long_recipe_socket(self):
+        """A high socket remains valid on its source while shorter rows stay unresolved."""
         recipes = ["Vorana's Carnage", "Thane Girt's Rune of Wildness",
                    "Thane Grannell's Rune of Mastery", "Thane Leld's Rune of Spring"]
         image, rows = self.panel(recipes, selected=1, marks={0: [8]})
         result = self.scan(image, rows)
         self.assertEqual(result["candidates"], [17])
-        self.assertTrue(all(not choice["can_use"] for choice in result["choices"]), result)
+        self.assertTrue(result["choices"][0]["can_use"], result)
+        self.assertEqual(result["choices"][0]["positions"], [8])
+        self.assertTrue(all(not choice["can_use"] for choice in result["choices"][1:]), result)
+
+    def test_mixed_length_family_receives_only_existing_shared_sockets(self):
+        """A six-socket recipe gets its pair and two-socket siblings get only the common crown."""
+        recipes = ["Chilling Flux", "Lesser Adept Rune", "Lesser Glacial Rune", "Armourer's Scrap x2"]
+        image, rows = self.panel(recipes, selected=1, marks={0: [1, 5]})
+        result = self.scan(image, rows)
+        self.assertEqual(result["candidates"], [30])
+        self.assertEqual([choice["positions"] for choice in result["choices"]],
+                         [[1, 5], [1], [1], [1]])
+        self.assertTrue(all(choice["can_use"] for choice in result["choices"]), result)
+        self.assertEqual(result["choices"][0]["runes"], ["Cold", "Tidal"])
+        self.assertTrue(all(choice["runes"] == ["Cold"] for choice in result["choices"][1:]))
 
     def fragment(self, image, row, socket, offsets=(0,)):
         """Draw an isolated incomplete crown above a framed tile at a known socket."""
@@ -644,16 +659,15 @@ class PropagationOCRTests(unittest.TestCase):
         self.assertEqual(result["runes"], ["Tidal"])
         self.assertEqual([choice["positions"] for choice in result["choices"]], [[3], [3], [3]])
 
-    def test_real_crown_with_unproven_first_tile_holds_instead_of_saving_the_second_rune(self):
-        """Verify uncertain first-tile geometry holds a captured crown without inventing a rune index."""
+    def test_real_interrupted_frame_keeps_the_verified_third_rune(self):
+        """Visible tile bodies prove the actual third socket despite interrupted frame contours."""
         for scale, brightness in ((.74, .9), (.74, 1.1)):
             with self.subTest(scale=scale, brightness=brightness):
                 result = propagation_scan.scan_propagation(self.scaled_content(scale, brightness))
                 self.assertEqual(result["selected_recipe"], "Regal Orb x3", result)
-                self.assertFalse(result["can_use"], result)
-                self.assertEqual(result["positions"], [])
-                self.assertEqual(result["runes"], [])
-                self.assertIn("first rune position", result["status"])
+                self.assertTrue(result["can_use"], result)
+                self.assertEqual(result["positions"], [3])
+                self.assertEqual(result["runes"], ["Tidal"])
 
     def test_agreeing_captured_rows_recover_the_third_rune_at_reduced_scale(self):
         """Recover the independently known slot-three crown from agreeing visible row origins."""

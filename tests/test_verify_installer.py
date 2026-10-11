@@ -207,6 +207,7 @@ class ReleasePackagingTests(unittest.TestCase):
             "PoE2 Data Logger 1.3.2.10 Beta",
             "PoE2 Data Logger 1.3.2.11 Beta",
             "PoE2 Data Logger 1.3.2.12 Beta",
+            "PoE2 Data Logger 1.3.2.13 Beta",
             "PoE2 Data Logger 1.3.1.2 Beta",
         ))
         self.assertEqual(running_client_titles("1.3.2", False)[-1], "PoE2 Data Logger 1.3.2")
@@ -215,7 +216,7 @@ class ReleasePackagingTests(unittest.TestCase):
         current = running_client_titles("1.3.1.3", True)
         self.assertIn("PoE2 Data Logger 1.3.1.2 Beta", current)
         self.assertEqual(current[-1], "PoE2 Data Logger 1.3.1.3 Beta")
-        current_beta = running_client_titles("1.3.2.13", True)
+        current_beta = running_client_titles("1.3.2.14", True)
         self.assertIn("PoE2 Data Logger 1.3.2.4 Beta", current_beta)
         self.assertIn("PoE2 Data Logger 1.3.2.5 Beta", current_beta)
         self.assertIn("PoE2 Data Logger 1.3.2.6 Beta", current_beta)
@@ -225,7 +226,8 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertIn("PoE2 Data Logger 1.3.2.10 Beta", current_beta)
         self.assertIn("PoE2 Data Logger 1.3.2.11 Beta", current_beta)
         self.assertIn("PoE2 Data Logger 1.3.2.12 Beta", current_beta)
-        self.assertEqual(current_beta[-1], "PoE2 Data Logger 1.3.2.13 Beta")
+        self.assertIn("PoE2 Data Logger 1.3.2.13 Beta", current_beta)
+        self.assertEqual(current_beta[-1], "PoE2 Data Logger 1.3.2.14 Beta")
 
     def test_beta_publication_uses_versioned_notes_without_replacing_stable_latest(self):
         """Require the new beta's reviewable release notes and preserve the stable latest release."""
@@ -233,8 +235,8 @@ class ReleasePackagingTests(unittest.TestCase):
         beta = next(line for line in workflow.splitlines() if "if ($env:PRERELEASE -eq 'True')" in line)
         self.assertIn("'--prerelease'", beta)
         self.assertIn("'--latest=false'", beta)
-        self.assertIn("'--notes-file', 'docs/RELEASE_1.3.2.13.md'", beta)
-        self.assertTrue((self.root / "docs/RELEASE_1.3.2.13.md").is_file())
+        self.assertIn("'--notes-file', 'docs/RELEASE_1.3.2.14.md'", beta)
+        self.assertTrue((self.root / "docs/RELEASE_1.3.2.14.md").is_file())
 
 
 class RunningClientGuardTests(unittest.TestCase):

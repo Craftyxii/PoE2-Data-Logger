@@ -1,0 +1,4657 @@
+{
+  "measure": "Full production OCR and family-inferred slot suggestions for manual review",
+  "limitation": "Supplied calibration captures; no natural partial crowns. Ordered readable rows are scored; clipped/unnamed rows are excluded.",
+  "propagation_scan_sha256": "8cc4ec205594c36922023c0a5a13e508190655df233506a85b4d3a0d87fd7e40",
+  "manifest_sha256": "834dbc941eb0a4a7439402f5c15f93f83d33928c233030c4f95b3541b5ea9fdf",
+  "counts": {
+    "panels": 61,
+    "exact_panels": 59,
+    "rows": 238,
+    "suggested_rows": 207,
+    "tp": 249,
+    "fp": 0,
+    "fn": 6,
+    "exact_rows": 234,
+    "excluded_rows": 13,
+    "excluded_marks": 8,
+    "slot_coverage": 0.9764705882352941,
+    "suggestion_precision": 1.0
+  },
+  "captures": [
+    {
+      "filename": "Pair01_6socket_ChillingFlux_opened.png",
+      "sha256": "6e9555b1af551f32e9f0375f1f2734080a8f2aa06ed7ae76102b39f947474a7b",
+      "seconds": 4.229,
+      "family_candidates": [
+        30
+      ],
+      "counts": {
+        "rows": 4,
+        "suggested_rows": 4,
+        "tp": 5,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 4
+      },
+      "rows": [
+        {
+          "annotation": "Chilling Flux",
+          "recipe": "Chilling Flux",
+          "expected": [
+            1,
+            5
+          ],
+          "positions": [
+            1,
+            5
+          ],
+          "runes": [
+            "Cold",
+            "Tidal"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Lesser Adept Rune",
+          "recipe": "Lesser Adept Rune",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Cold"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Lesser Glacial Rune",
+          "recipe": "Lesser Glacial Rune",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Cold"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Armourer\u2019s Scrap",
+          "recipe": "Armourer's Scrap x2",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Cold"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair03_6socket_CountessSeske_opened.png",
+      "sha256": "b43b4845112a3cd26f721fb2eeb72166aa74e96e2bb72003b1441ff620fff468",
+      "seconds": 3.462,
+      "family_candidates": [
+        33
+      ],
+      "counts": {
+        "rows": 4,
+        "suggested_rows": 4,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 4
+      },
+      "rows": [
+        {
+          "annotation": "Countess Seske\u2019s Rune of Archery",
+          "recipe": "Countess Seske's Rune of Archery",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Wisdom"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Perfect Orb of Transmutation",
+          "recipe": "Perfect Orb of Transmutation",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Oath"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Perfect Orb of Augmentation",
+          "recipe": "Perfect Orb of Augmentation",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Tidal"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Masterwork Rune",
+          "recipe": "Masterwork Rune",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Arcane"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair04_5socket_Craiceann_opened.png",
+      "sha256": "013dee490a284059dc17032793e997fdca6bc69985f5240522977911b67b4de4",
+      "seconds": 2.397,
+      "family_candidates": [
+        46
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 2,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 2
+      },
+      "rows": [
+        {
+          "annotation": "Craiceann\u2019s Rune of Recovery",
+          "recipe": "Craiceann's Rune of Recovery",
+          "expected": [
+            5
+          ],
+          "positions": [
+            5
+          ],
+          "runes": [
+            "Rage"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Craiceann\u2019s Rune of Warding",
+          "recipe": "Craiceann's Rune of Warding",
+          "expected": [
+            5
+          ],
+          "positions": [
+            5
+          ],
+          "runes": [
+            "Ward"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair05_6socket_Divine_opened.png",
+      "sha256": "82123e21691aeaf651ec2a97cbc7cd552db758116ea2f36024fd63321d9fe2ed",
+      "seconds": 2.562,
+      "family_candidates": [
+        1
+      ],
+      "counts": {
+        "rows": 3,
+        "suggested_rows": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 3
+      },
+      "rows": [
+        {
+          "annotation": "Divine Orb (3x)",
+          "recipe": "Divine Orb x3",
+          "expected": [
+            6
+          ],
+          "positions": [
+            6
+          ],
+          "runes": [
+            "Celestial"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Divine Orb (2x)",
+          "recipe": "Divine Orb x2",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        },
+        {
+          "annotation": "Divine Orb (1x)",
+          "recipe": "Divine Orb",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        }
+      ]
+    },
+    {
+      "filename": "Pair06_8socket_Runefather_PerfectTransmutation_opened.png",
+      "sha256": "90ebfe7dac3158f9b4018025aa0ebca77a98652071fcf6e1cf4b11f007fcc581",
+      "seconds": 2.176,
+      "family_candidates": [
+        14
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 0,
+        "tp": 0,
+        "fp": 0,
+        "fn": 4,
+        "exact_rows": 0
+      },
+      "rows": [
+        {
+          "annotation": "Perfect Orb of Transmutation",
+          "recipe": "Perfect Orb of Transmutation x3",
+          "expected": [
+            5,
+            7
+          ],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "Crown sockets conflict across this recipe group \u2014 review its marked runes."
+        },
+        {
+          "annotation": "The Runefather Alloy",
+          "recipe": "The Runefather's Alloy",
+          "expected": [
+            5,
+            7
+          ],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "The first rune position was not clear \u2014 enter the propagated runes manually."
+        }
+      ]
+    },
+    {
+      "filename": "Pair09_6socket_Family41_Uhtred_opened.png",
+      "sha256": "f15163654640955165f8227b1d5f00ec0dfd5891688c97c7f7527a7936566991",
+      "seconds": 2.668,
+      "family_candidates": [
+        41
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 2,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 2
+      },
+      "rows": [
+        {
+          "annotation": "Uhtred\u2019s Saga",
+          "recipe": "Uhtred's Saga",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Arcane"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Greater Chaos Orb",
+          "recipe": "Greater Chaos Orb x3",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Volcanic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair10_9socket_Annulment_opened.png",
+      "sha256": "90f5bb0bc5af165dcde47f4a9bc80af7feef3311122957f6c502ee7eacdede7f",
+      "seconds": 4.533,
+      "family_candidates": [
+        2
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 6,
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Orb of Annulment (3x)",
+          "recipe": "Orb of Annulment x3",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Vision"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Orb of Annulment (2x)",
+          "recipe": "Orb of Annulment x2",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Vision"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Orb of Annulment (1x)",
+          "recipe": "Orb of Annulment",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Conductive Runes",
+          "recipe": "Conductive Runes (Level 20)",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Vision"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Repulsion",
+          "recipe": "Repulsion (Level 20)",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Protective"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Frostflame Nova",
+          "recipe": "Frostflame Nova (Level 20)",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Fire"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair11_7socket_Family24_BreathOfAldur_opened.png",
+      "sha256": "79b706db340011adcbd7aa55b4c7c714df0400bd3df76eb91e6d65203888cfaf",
+      "seconds": 3.654,
+      "family_candidates": [
+        24
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 3,
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Breath of Aldur",
+          "recipe": "Breath of Aldur",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Cyclonic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Courtesan Mannan\u2019s Rune of Cruelty",
+          "recipe": "Courtesan Mannan's Rune of Cruelty",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Toxic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Lady Hestra\u2019s Rune of Winter",
+          "recipe": "Lady Hestra's Rune of Winter",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Cyclonic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Lesser Stone Rune",
+          "recipe": "Lesser Stone Rune",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        },
+        {
+          "annotation": "Lesser Inspiration Rune",
+          "recipe": "Lesser Inspiration Rune",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        },
+        {
+          "annotation": "Orb of Transmutation",
+          "recipe": "Orb of Transmutation",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        }
+      ]
+    },
+    {
+      "filename": "Pair12_3socket_Family70_Warding_opened.png",
+      "sha256": "61316faf07a1241dd8a1213ce07746baa678065b2b1848dc2a46f179994560d2",
+      "seconds": 3.539,
+      "family_candidates": [
+        70
+      ],
+      "counts": {
+        "rows": 5,
+        "suggested_rows": 5,
+        "tp": 10,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 5
+      },
+      "rows": [
+        {
+          "annotation": "Thaumaturgic Flux (Level 18)",
+          "recipe": "Thaumaturgic Flux (Level 18)",
+          "expected": [
+            1,
+            3
+          ],
+          "positions": [
+            1,
+            3
+          ],
+          "runes": [
+            "Earth",
+            "Stone"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Warding Rune of Courage",
+          "recipe": "Warding Rune of Courage",
+          "expected": [
+            1,
+            3
+          ],
+          "positions": [
+            1,
+            3
+          ],
+          "runes": [
+            "Cold",
+            "Electrocuting"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Warding Rune of Reinforcement",
+          "recipe": "Warding Rune of Reinforcement",
+          "expected": [
+            1,
+            3
+          ],
+          "positions": [
+            1,
+            3
+          ],
+          "runes": [
+            "Lightning",
+            "Electrocuting"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Greater Charging Rune",
+          "recipe": "Greater Charging Rune",
+          "expected": [
+            1,
+            3
+          ],
+          "positions": [
+            1,
+            3
+          ],
+          "runes": [
+            "Protective",
+            "Fire"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Greater Ward Rune",
+          "recipe": "Greater Ward Rune",
+          "expected": [
+            1,
+            3
+          ],
+          "positions": [
+            1,
+            3
+          ],
+          "runes": [
+            "Protective",
+            "Lightning"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair13_6socket_Family36_GreaterCurrency_opened.png",
+      "sha256": "66f9e4ab164905a951623805d7382cf0a8d7c2e3e2eedf255ccc57043c4f1d59",
+      "seconds": 4.232,
+      "family_candidates": [
+        36
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 3,
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Greater Regal Orb (3x)",
+          "recipe": "Greater Regal Orb x3",
+          "expected": [
+            5
+          ],
+          "positions": [
+            5
+          ],
+          "runes": [
+            "Opulent"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Greater Chaos Orb (3x)",
+          "recipe": "Greater Chaos Orb x3",
+          "expected": [
+            5
+          ],
+          "positions": [
+            5
+          ],
+          "runes": [
+            "Opulent"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Greater Exalted Orb (3x)",
+          "recipe": "Greater Exalted Orb x3",
+          "expected": [
+            5
+          ],
+          "positions": [
+            5
+          ],
+          "runes": [
+            "Opulent"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Greater Chaos Orb (1x)",
+          "recipe": "Greater Chaos Orb",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        },
+        {
+          "annotation": "Greater Exalted Orb (1x)",
+          "recipe": "Greater Exalted Orb",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        },
+        {
+          "annotation": "Greater Regal Orb (1x)",
+          "recipe": "Greater Regal Orb",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        }
+      ]
+    },
+    {
+      "filename": "Pair18_8socket_Family8_Katla_opened.png",
+      "sha256": "5790cb3139271f41abf8444eb50c63bc6f54e2b438bdeb13d3dae74c2f95773e",
+      "seconds": 2.524,
+      "family_candidates": [
+        8
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 2,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 2
+      },
+      "rows": [
+        {
+          "annotation": "Perfect Orb of Augmentation",
+          "recipe": "Perfect Orb of Augmentation x3",
+          "expected": [
+            1,
+            4
+          ],
+          "positions": [
+            1,
+            4
+          ],
+          "runes": [
+            "Adaptive",
+            "Fire"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Katla\u2019s Gloom",
+          "recipe": "Katla's Gloom",
+          "expected": [
+            1,
+            4
+          ],
+          "positions": [
+            1,
+            4
+          ],
+          "runes": [
+            "Toxic",
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair19_4socket_Family52_Jeweller_Gemcutter_opened.png",
+      "sha256": "d37784227471d36374efbfd50de5d91dff27289e24212a8e31ef9d6d7cc73406",
+      "seconds": 5.628,
+      "family_candidates": [
+        52
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 6,
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Greater Jeweller\u2019s Orb",
+          "recipe": "Greater Jeweller's Orb",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Adaptive"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Gemcutter\u2019s Prism (3x)",
+          "recipe": "Gemcutter's Prism x3",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Vision"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Glassblower\u2019s Bauble (3x)",
+          "recipe": "Glassblower's Bauble x3",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Tidal"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Gemcutter\u2019s Prism (2x)",
+          "recipe": "Gemcutter's Prism x2",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Bond"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Glassblower\u2019s Bauble (2x)",
+          "recipe": "Glassblower's Bauble x2",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Tidal"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Lesser Jeweller\u2019s Orb",
+          "recipe": "Lesser Jeweller's Orb",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Cyclonic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair22_4socket_Family66_VitalFlame_opened.png",
+      "sha256": "34148853e0912221d7bda91a1d586102013ba15a754eeb7d28b5910fb0d31e27",
+      "seconds": 3.779,
+      "family_candidates": [
+        66
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 6,
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Rune of Vital Flame",
+          "recipe": "Rune of Vital Flame",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Volcanic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Ancient Rune of Dueling",
+          "recipe": "Ancient Rune of Dueling",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Volcanic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Ancient Rune of Retaliation",
+          "recipe": "Ancient Rune of Retaliation",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Volcanic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Ancient Rune of Animosity",
+          "recipe": "Ancient Rune of Animosity",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Volcanic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Ancient Rune of the Horde",
+          "recipe": "Ancient Rune of the Horde",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Volcanic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Artificer\u2019s Orb",
+          "recipe": "Artificer's Orb x2",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Volcanic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair24_3socket_Family51_Blacksmith_Etcher_Armourer_opened.jpg",
+      "sha256": "ce064d14b107a9c36b6fb77d0ecf1108ae676936715e7b0084b15efb47803461",
+      "seconds": 4.326,
+      "family_candidates": [
+        51
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 6,
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Blacksmith\u2019s Whetstone (6x)",
+          "recipe": "Blacksmith's Whetstone x6",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Rage"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Arcanist\u2019s Etcher (6x)",
+          "recipe": "Arcanist's Etcher x6",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Tidal"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Armourer\u2019s Scrap (6x)",
+          "recipe": "Armourer's Scrap x6",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Moon"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Blacksmith\u2019s Whetstone (4x)",
+          "recipe": "Blacksmith's Whetstone x4",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Rage"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Arcanist\u2019s Etcher (4x)",
+          "recipe": "Arcanist's Etcher x4",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Tidal"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Armourer\u2019s Scrap (4x)",
+          "recipe": "Armourer's Scrap x4",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Moon"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair25_9socket_Family4_PerfectChaos_Olroth_opened.jpg",
+      "sha256": "a73c6d669357e554fbba4083c229d09a94b48225cb3a378f3abbe55c15153248",
+      "seconds": 4.004,
+      "family_candidates": [
+        4
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 2,
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 2
+      },
+      "rows": [
+        {
+          "annotation": "Perfect Chaos Orb",
+          "recipe": "Perfect Chaos Orb x3",
+          "expected": [
+            5,
+            9
+          ],
+          "positions": [
+            5,
+            9
+          ],
+          "runes": [
+            "Earth",
+            "Volcanic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Olroth\u2019s Saga",
+          "recipe": "Olroth's Saga",
+          "expected": [
+            5
+          ],
+          "positions": [
+            5
+          ],
+          "runes": [
+            "Wisdom"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair26_6socket_Family38_Sky_GemChain_opened.jpg",
+      "sha256": "54f41b4b7570d594f653e16fe3b6aaebdff75845a55f21a1f3f8244679b64633",
+      "seconds": 7.181,
+      "family_candidates": [
+        38
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 6,
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Skill Level 20: Rain of Blades",
+          "recipe": "Rain of Blades (Level 20)",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Ward"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Wardbound Minions",
+          "recipe": "Wardbound Minions (Level 20)",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Toxic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Voltaic Barrier",
+          "recipe": "Voltaic Barrier (Level 20)",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Earth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Hollow Shell",
+          "recipe": "Hollow Shell (Level 20)",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Bloodletting"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Explosive Transmutation",
+          "recipe": "Explosive Transmutation (Level 20)",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Fire"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Animus Splinters",
+          "recipe": "Animus Splinters (Level 20)",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Adaptive"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair27_6socket_Family31_FluxChain_opened.jpg",
+      "sha256": "0abf176ba720b1c3cf123fca134242a412319a4c46e46640b53288bb4a06e887",
+      "seconds": 4.871,
+      "family_candidates": [
+        31
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 6,
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Crackling Flux",
+          "recipe": "Crackling Flux",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Celestial"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Blazing Flux",
+          "recipe": "Blazing Flux",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Earth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Chilling Flux",
+          "recipe": "Chilling Flux",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Cyclonic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Orb of Alchemy",
+          "recipe": "Orb of Alchemy",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Runic Alloy",
+          "recipe": "Runic Alloy x2",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Artificer\u2019s Orb",
+          "recipe": "Artificer's Orb x3",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Vision"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair28_6socket_Family16_Medved_GreaterRegal_opened.jpg",
+      "sha256": "3d99b22f559dc1ff95294b8d00b44322818a00abd7954ff0e1072ff475766d09",
+      "seconds": 3.613,
+      "family_candidates": [
+        16
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 2,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 2
+      },
+      "rows": [
+        {
+          "annotation": "Medved\u2019s Saga",
+          "recipe": "Medved's Saga",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Rage"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Greater Regal Orb",
+          "recipe": "Greater Regal Orb x3",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Oath"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair30_5socket_Family53_Mystic_Masterwork_opened.jpg",
+      "sha256": "8707d4964f5252fa25c6068cff7f7f161bad1f62f31af00151bcecf5c507c005",
+      "seconds": 3.524,
+      "family_candidates": [
+        53
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 2,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 2
+      },
+      "rows": [
+        {
+          "annotation": "Mystic Alloy",
+          "recipe": "Mystic Alloy",
+          "expected": [
+            5
+          ],
+          "positions": [
+            5
+          ],
+          "runes": [
+            "Electrocuting"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Masterwork Rune",
+          "recipe": "Masterwork Rune",
+          "expected": [
+            5
+          ],
+          "positions": [
+            5
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair32_6socket_Family73_Thaumaturgic_Gems_opened.jpg",
+      "sha256": "61059c80e2eef29977773ff7557ba4156dfd99ef35e22cb7d6e99380f6c68ee5",
+      "seconds": 5.186,
+      "family_candidates": [
+        73
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 3,
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Thaumaturgic Flux (Level 20)",
+          "recipe": "Thaumaturgic Flux (Level 20)",
+          "expected": [
+            4,
+            6
+          ],
+          "positions": [
+            4,
+            6
+          ],
+          "runes": [
+            "Stone",
+            "Oath"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Uncut Skill Gem (Level 20)",
+          "recipe": "Uncut Skill Gem (Level 20)",
+          "expected": [
+            4,
+            6
+          ],
+          "positions": [
+            4,
+            6
+          ],
+          "runes": [
+            "Wisdom",
+            "Soul"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Uncut Spirit Gem (Level 20)",
+          "recipe": "Uncut Spirit Gem (Level 20)",
+          "expected": [
+            4,
+            6
+          ],
+          "positions": [
+            4,
+            6
+          ],
+          "runes": [
+            "Wisdom",
+            "Oath"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Greater Orb of Transmutation",
+          "recipe": "Greater Orb of Transmutation",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        },
+        {
+          "annotation": "Greater Orb of Augmentation",
+          "recipe": "Greater Orb of Augmentation",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        },
+        {
+          "annotation": "Uncut Support Gem",
+          "recipe": "Uncut Support Gem",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        }
+      ]
+    },
+    {
+      "filename": "Pair33_5socket_Family56_RandomCurrency_SpiritGem_opened.jpg",
+      "sha256": "f2ab5da7c0e431f5d34958fe2501677d53b64a9ecd2091b3fa173ba466039922",
+      "seconds": 3.479,
+      "family_candidates": [
+        56
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 2,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 2
+      },
+      "rows": [
+        {
+          "annotation": "Random Currency",
+          "recipe": "Random Currency x5",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Adaptive"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Uncut Spirit Gem (Level 19)",
+          "recipe": "Uncut Spirit Gem (Level 19)",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Momentum"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair34_6socket_Family38_Sky_GemChain_opened.jpg",
+      "sha256": "fc447c1249345d233551f2afb779859c1bf3a126b706f77d764d69bbece70aa4",
+      "seconds": 6.193,
+      "family_candidates": [
+        38
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 6,
+        "tp": 12,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Skill Level 20: Rain of Blades",
+          "recipe": "Rain of Blades (Level 20)",
+          "expected": [
+            1,
+            6
+          ],
+          "positions": [
+            1,
+            6
+          ],
+          "runes": [
+            "Tempest",
+            "Ward"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Wardbound Minions",
+          "recipe": "Wardbound Minions (Level 20)",
+          "expected": [
+            1,
+            6
+          ],
+          "positions": [
+            1,
+            6
+          ],
+          "runes": [
+            "Rebirth",
+            "Ward"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Voltaic Barrier",
+          "recipe": "Voltaic Barrier (Level 20)",
+          "expected": [
+            1,
+            6
+          ],
+          "positions": [
+            1,
+            6
+          ],
+          "runes": [
+            "Protective",
+            "Ward"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Hollow Shell",
+          "recipe": "Hollow Shell (Level 20)",
+          "expected": [
+            1,
+            6
+          ],
+          "positions": [
+            1,
+            6
+          ],
+          "runes": [
+            "Arcane",
+            "Ward"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Explosive Transmutation",
+          "recipe": "Explosive Transmutation (Level 20)",
+          "expected": [
+            1,
+            6
+          ],
+          "positions": [
+            1,
+            6
+          ],
+          "runes": [
+            "Volcanic",
+            "Ward"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Animus Splinters",
+          "recipe": "Animus Splinters (Level 20)",
+          "expected": [
+            1,
+            6
+          ],
+          "positions": [
+            1,
+            6
+          ],
+          "runes": [
+            "Bloodletting",
+            "Ward"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair37_7socket_Family_25_opened.jpg",
+      "sha256": "1e621f79bf63645b87e5ec8d799ab12378b57b50025366d4b63659e07682476f",
+      "seconds": 2.67,
+      "family_candidates": [
+        23,
+        25
+      ],
+      "counts": {
+        "rows": 1,
+        "suggested_rows": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 1
+      },
+      "rows": [
+        {
+          "annotation": "Ire of Aldur",
+          "recipe": "Ire of Aldur",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Electrocuting"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair38_7socket_Family_27_opened.jpg",
+      "sha256": "1618472958ac411b6d264317756ff68f4988561bf45263234f482178d126800e",
+      "seconds": 5.128,
+      "family_candidates": [
+        27
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 6,
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Transcendent Alloy",
+          "recipe": "Transcendent Alloy",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Momentum"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Celestial Alloy",
+          "recipe": "Celestial Alloy",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Celestial"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Sovereign Alloy",
+          "recipe": "Sovereign Alloy",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Moon"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Mystic Alloy",
+          "recipe": "Mystic Alloy",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Time"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Prismatic Alloy",
+          "recipe": "Prismatic Alloy",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Adaptive"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Swift Alloy",
+          "recipe": "Swift Alloy",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Soul"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair39_8socket_Family_10_opened.jpg",
+      "sha256": "f019acd3ec554b5a3ab384e6a8c1d45523bd4f27a6b119c0440944dd583a1c5b",
+      "seconds": 3.934,
+      "family_candidates": [
+        10
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 2,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 2
+      },
+      "rows": [
+        {
+          "annotation": "Perfect Orb of Augmentation",
+          "recipe": "Perfect Orb of Augmentation x3",
+          "expected": [
+            8
+          ],
+          "positions": [
+            8
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Thrud\u2019s Might",
+          "recipe": "Thrud's Might",
+          "expected": [
+            8
+          ],
+          "positions": [
+            8
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair40_6socket_Family_33_opened.jpg",
+      "sha256": "2fd5192d71c117e87068ce45b60b86a0a111372db88609d9f19d287abb1e1268",
+      "seconds": 4.749,
+      "family_candidates": [
+        33
+      ],
+      "counts": {
+        "rows": 4,
+        "suggested_rows": 4,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 4
+      },
+      "rows": [
+        {
+          "annotation": "Countess Seske\u2019s Rune of Archery",
+          "recipe": "Countess Seske's Rune of Archery",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Sky"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Perfect Orb of Transmutation",
+          "recipe": "Perfect Orb of Transmutation",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Sky"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Perfect Orb of Augmentation",
+          "recipe": "Perfect Orb of Augmentation",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Sky"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Masterwork Rune",
+          "recipe": "Masterwork Rune",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Sky"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair43_6socket_family_29_opened.jpg",
+      "sha256": "574ea15a69575dcaba556547880a853ee584237f2ba44a71eb9e88b7f23857ae",
+      "seconds": 4.496,
+      "family_candidates": [
+        29
+      ],
+      "counts": {
+        "rows": 4,
+        "suggested_rows": 4,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 4
+      },
+      "rows": [
+        {
+          "annotation": "Crackling Flux",
+          "recipe": "Crackling Flux",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Celestial"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Lesser Storm Rune",
+          "recipe": "Lesser Storm Rune",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Momentum"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Lesser Resolve Rune",
+          "recipe": "Lesser Resolve Rune",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Tempest"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Arcanist\u2019s Etcher",
+          "recipe": "Arcanist's Etcher x2",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Arcane"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair44_6socket_Family_43_opened.jpg",
+      "sha256": "88ed6e581a5c803a9b161e9212de148ce24bb00142236b512940267ba092e827",
+      "seconds": 3.849,
+      "family_candidates": [
+        43
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 2,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 2
+      },
+      "rows": [
+        {
+          "annotation": "Vorana\u2019s Saga",
+          "recipe": "Vorana's Saga",
+          "expected": [
+            2,
+            3
+          ],
+          "positions": [
+            2,
+            3
+          ],
+          "runes": [
+            "Vision",
+            "Bond"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Greater Exalted Orb",
+          "recipe": "Greater Exalted Orb x3",
+          "expected": [
+            2,
+            3
+          ],
+          "positions": [
+            2,
+            3
+          ],
+          "runes": [
+            "Arcane",
+            "Bond"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair45_8socket_Family_10_opened.jpg",
+      "sha256": "e59e5d7d3af2cd9f4c90249dfdfe8d2f56f526d28aecd688a6587a046bfbaa89",
+      "seconds": 2.716,
+      "family_candidates": [
+        10
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 2,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 2
+      },
+      "rows": [
+        {
+          "annotation": "Perfect Orb of Augmentation",
+          "recipe": "Perfect Orb of Augmentation x3",
+          "expected": [
+            1,
+            4
+          ],
+          "positions": [
+            1,
+            4
+          ],
+          "runes": [
+            "Adaptive",
+            "Fire"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Thrud\u2019s Might",
+          "recipe": "Thrud's Might",
+          "expected": [
+            1,
+            4
+          ],
+          "positions": [
+            1,
+            4
+          ],
+          "runes": [
+            "Tempest",
+            "Death"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair47_9socket_Family_1_opened.jpg",
+      "sha256": "e7658ccf434af7fd586e2c82cc88d88a36e4e6ddd4a97b59c11ea2a56cd13b9b",
+      "seconds": 3.682,
+      "family_candidates": [
+        1
+      ],
+      "counts": {
+        "rows": 4,
+        "suggested_rows": 3,
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 4
+      },
+      "rows": [
+        {
+          "annotation": "Divine Orb",
+          "recipe": "Divine Orb x10",
+          "expected": [
+            5
+          ],
+          "positions": [
+            5
+          ],
+          "runes": [
+            "Vision"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Divine Orb",
+          "recipe": "Divine Orb x3",
+          "expected": [
+            5
+          ],
+          "positions": [
+            5
+          ],
+          "runes": [
+            "Vision"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Divine Orb",
+          "recipe": "Divine Orb x2",
+          "expected": [
+            5
+          ],
+          "positions": [
+            5
+          ],
+          "runes": [
+            "Vision"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Divine Orb",
+          "recipe": "Divine Orb",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        }
+      ]
+    },
+    {
+      "filename": "Pair48_7socket_Family_26_opened.jpg",
+      "sha256": "578c241ef0b6b37fe59959288a3bb9aa5ec9b16df42eb3a21e7760f037a40c24",
+      "seconds": 4.302,
+      "family_candidates": [
+        26
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 3,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Passion of Aldur",
+          "recipe": "Passion of Aldur",
+          "expected": [
+            4,
+            6
+          ],
+          "positions": [
+            4,
+            6
+          ],
+          "runes": [
+            "Life",
+            "Wisdom"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Greater Orb of Transmutation",
+          "recipe": "Greater Orb of Transmutation x3",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Adaptive"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Uncut Skill Gem (Level 19)",
+          "recipe": "Uncut Skill Gem (Level 19)",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Cold"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Ward Rune",
+          "recipe": "Ward Rune",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        },
+        {
+          "annotation": "Mind Rune",
+          "recipe": "Mind Rune",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        },
+        {
+          "annotation": "Uncut Skill Gem",
+          "recipe": "Uncut Skill Gem",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        }
+      ]
+    },
+    {
+      "filename": "Pair50_8socket_Family_17_opened.jpg",
+      "sha256": "6265949c0443ea349fc5acc8ab7cd7676f7df9e0ca19f4d81f0cde10234eb739",
+      "seconds": 5.19,
+      "family_candidates": [
+        17
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 6,
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Uhtred\u2019s Sidereus",
+          "recipe": "Uhtred's Sidereus",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Cyclonic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Medved\u2019s Tending",
+          "recipe": "Medved's Tending",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Prismatic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Kolr\u2019s Hunt",
+          "recipe": "Kolr's Hunt",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Tempest"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Thrud\u2019s Might",
+          "recipe": "Thrud's Might",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Death"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Katla\u2019s Gloom",
+          "recipe": "Katla's Gloom",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Vorana\u2019s Carnage",
+          "recipe": "Vorana's Carnage",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Fire"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair51_7socket_Family25_Ire_opened_alt.jpg",
+      "sha256": "7d05d5f55bd37552d7c1ba2d9a1648f3a4be84c1bd76a7504e019f100f781230",
+      "seconds": 3.375,
+      "family_candidates": [
+        23,
+        25
+      ],
+      "counts": {
+        "rows": 1,
+        "suggested_rows": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 1
+      },
+      "rows": [
+        {
+          "annotation": "Ire of Aldur",
+          "recipe": "Ire of Aldur",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Electrocuting"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair52_7socket_Family_28_opened.jpg",
+      "sha256": "14e194d8636e6cf82941e321f46b31052fe41aea6f6f112dbc54d5bb8867b793",
+      "seconds": 4.319,
+      "family_candidates": [
+        27,
+        28
+      ],
+      "counts": {
+        "rows": 1,
+        "suggested_rows": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 1
+      },
+      "rows": [
+        {
+          "annotation": "Transcendent Alloy",
+          "recipe": "Transcendent Alloy",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair53_7socket_Family_21_opened.jpg",
+      "sha256": "f15a1b57d163e6274a3d81bacc2ef6b1a127a5f92713808d5308020307c3ca46",
+      "seconds": 4.617,
+      "family_candidates": [
+        21
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 2,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 2
+      },
+      "rows": [
+        {
+          "annotation": "Cadigan\u2019s Epiphany",
+          "recipe": "Cadigan's Epiphany",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Oath"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Celestial Alloy",
+          "recipe": "Celestial Alloy",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Celestial"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair58_4socket_MISSING_DB_ROW_GreaterJeweller_Chaos2_opened.jpg",
+      "sha256": "9f8124e7447f194bfdac4c26a83831efdf4a2b127b20d7d75a8012c52d5fb288",
+      "seconds": 5.794,
+      "family_candidates": [
+        54
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 2,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 2
+      },
+      "rows": [
+        {
+          "annotation": "Greater Jeweller\u2019s Orb",
+          "recipe": "Greater Jeweller's Orb",
+          "expected": [
+            3,
+            4
+          ],
+          "positions": [
+            3,
+            4
+          ],
+          "runes": [
+            "Adaptive",
+            "Cyclonic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Chaos Orb",
+          "recipe": "Chaos Orb x2",
+          "expected": [
+            3,
+            4
+          ],
+          "positions": [
+            3,
+            4
+          ],
+          "runes": [
+            "Fire",
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair59_8socket_Family_11_VoranaCarnage_PerfectAug_opened.jpg",
+      "sha256": "b6573d9ebaced140c05d97225337a07afddb41a24b56c0b932dd06fc2254f601",
+      "seconds": 8.234,
+      "family_candidates": [
+        11
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 2,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 2
+      },
+      "rows": [
+        {
+          "annotation": "Perfect Orb of Augmentation",
+          "recipe": "Perfect Orb of Augmentation x3",
+          "expected": [
+            1,
+            3
+          ],
+          "positions": [
+            1,
+            3
+          ],
+          "runes": [
+            "Adaptive",
+            "Opulent"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Vorana\u2019s Carnage",
+          "recipe": "Vorana's Carnage",
+          "expected": [
+            1,
+            3
+          ],
+          "positions": [
+            1,
+            3
+          ],
+          "runes": [
+            "Rage",
+            "Cold"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair61_5socket_Family_57_Thaumaturgic_Verisuim_chain_opened.jpg",
+      "sha256": "8083c88fdde92c5e47ddb40db72716d2a1456c1647bde7de947dd92e30091a1e",
+      "seconds": 9.821,
+      "family_candidates": [
+        57
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 6,
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Thaumaturgic Flux (Level 19)",
+          "recipe": "Thaumaturgic Flux (Level 19)",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Bloodletting"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Verisium Manifestations",
+          "recipe": "Verisium Manifestations (Level 20)",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Cold"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Powered by Verisium",
+          "recipe": "Powered by Verisium (Level 20)",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Vision"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Remnants of Kalguur",
+          "recipe": "Remnants of Kalguur (Level 20)",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Lightning"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Grim Pillars",
+          "recipe": "Grim Pillars (Level 20)",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Momentum"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Skill Level 20: Bitter Dead",
+          "recipe": "Bitter Dead (Level 20)",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Toxic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair62_3socket_Family_3_Currency_Alloy_opened.jpg",
+      "sha256": "54eeed1a874e2288d703883ceb6f29f2b11c17f71a26165b6cd0aaca80185ccc",
+      "seconds": 7.303,
+      "family_candidates": [
+        3
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 6,
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Orb of Alchemy",
+          "recipe": "Orb of Alchemy",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Chaos Orb",
+          "recipe": "Chaos Orb",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Tidal"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Exalted Orb",
+          "recipe": "Exalted Orb x2",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Arcane"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Runic Alloy",
+          "recipe": "Runic Alloy",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Regal Orb",
+          "recipe": "Regal Orb",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Moon"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Exalted Orb",
+          "recipe": "Exalted Orb",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Protective"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair63_4socket_Family_64_AncientWitchcraft_opened.jpg",
+      "sha256": "0f14a942fb74e5fbaaed38c18e4451cc35e3ed4f7e0e5dd72e34148ad42436f1",
+      "seconds": 9.189,
+      "family_candidates": [
+        64
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 4,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Ancient Rune of Witchcraft",
+          "recipe": "Ancient Rune of Witchcraft",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Opulent"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Rune of Reach",
+          "recipe": "Rune of Reach",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Vision"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Rune of Foundations",
+          "recipe": "Rune of Foundations",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Protective"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Rune of Renown",
+          "recipe": "Rune of Renown",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Life"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Lesser Ward Rune",
+          "recipe": "Lesser Ward Rune",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        },
+        {
+          "annotation": "Lesser Mind Rune",
+          "recipe": "Lesser Mind Rune",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        }
+      ]
+    },
+    {
+      "filename": "Pair64_3socket_Family_3_Currency_Alloy_opened.jpg",
+      "sha256": "f0707e8780a62e3791c1e5cd970f8eed438a448cc2bbd3ccf1bb17e50debe90b",
+      "seconds": 8.078,
+      "family_candidates": [
+        3
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 3,
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Orb of Alchemy",
+          "recipe": "Orb of Alchemy",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Prismatic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Chaos Orb",
+          "recipe": "Chaos Orb",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Bloodletting"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Exalted Orb",
+          "recipe": "Exalted Orb x2",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Tidal"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Runic Alloy",
+          "recipe": "Runic Alloy",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        },
+        {
+          "annotation": "Regal Orb",
+          "recipe": "Regal Orb",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        },
+        {
+          "annotation": "Exalted Orb",
+          "recipe": "Exalted Orb",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        }
+      ]
+    },
+    {
+      "filename": "Pair65_5socket_Family_37_RareUnique_Chance_UniqueArmor_opened.jpg",
+      "sha256": "b3576c719b27b915d69d37cdf501db25600c53abc22ea5ac7635e17f61466d64",
+      "seconds": 8.236,
+      "family_candidates": [
+        37
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 6,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "Rare Unique Item",
+          "recipe": "Rare Unique Item",
+          "expected": [
+            2,
+            4
+          ],
+          "positions": [
+            2,
+            4
+          ],
+          "runes": [
+            "Wisdom",
+            "Rage"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Orb of Chance",
+          "recipe": "Orb of Chance",
+          "expected": [
+            2,
+            4
+          ],
+          "positions": [
+            2,
+            4
+          ],
+          "runes": [
+            "Time",
+            "Bloodletting"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Unique Helmet",
+          "recipe": "Unique Helmet",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Tempest"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Unique Gloves",
+          "recipe": "Unique Gloves",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Lightning"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Unique Boots",
+          "recipe": "Unique Boots",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Lightning"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Unique Body Armour",
+          "recipe": "Unique Body Armour",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Prismatic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair67_7socket_Family_28_TranscendentAlloy_opened.jpg",
+      "sha256": "99846078fbab6cdf7a1800327ca14751e34d3d51bb322f5f7410cf38ca18f512",
+      "seconds": 4.256,
+      "family_candidates": [
+        27,
+        28
+      ],
+      "counts": {
+        "rows": 1,
+        "suggested_rows": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 1
+      },
+      "rows": [
+        {
+          "annotation": "1x Transcendent Alloy",
+          "recipe": "Transcendent Alloy",
+          "expected": [
+            7
+          ],
+          "positions": [
+            7
+          ],
+          "runes": [
+            "Death"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair69_6socket_Family_31_FluxChain_opened.jpg",
+      "sha256": "5bb0296af8e5bb762e1521e00613eba2764ec948886962075a745f08d527357e",
+      "seconds": 12.232,
+      "family_candidates": [
+        31
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 6,
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "1x Crackling Flux",
+          "recipe": "Crackling Flux",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Celestial"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Blazing Flux",
+          "recipe": "Blazing Flux",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Earth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Chilling Flux",
+          "recipe": "Chilling Flux",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Cyclonic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Orb of Alchemy",
+          "recipe": "Orb of Alchemy",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "2x Runic Alloy",
+          "recipe": "Runic Alloy x2",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "3x Artificer\u2019s Orb",
+          "recipe": "Artificer's Orb x3",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Vision"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair72_3socket_Family_65_Expansive_Glassblower_Regal_Exalted_opened.jpg",
+      "sha256": "a9356f84b1b3ca2a5149e1af6a249fe41cab30e778dd341937020bf286ffc523",
+      "seconds": 7.141,
+      "family_candidates": [
+        65
+      ],
+      "counts": {
+        "rows": 4,
+        "suggested_rows": 4,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 4
+      },
+      "rows": [
+        {
+          "annotation": "1x Expansive Alloy",
+          "recipe": "Expansive Alloy",
+          "expected": [
+            1,
+            3
+          ],
+          "positions": [
+            1,
+            3
+          ],
+          "runes": [
+            "Volcanic",
+            "Tidal"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "2x Glassblower\u2019s Bauble",
+          "recipe": "Glassblower's Bauble x2",
+          "expected": [
+            1,
+            3
+          ],
+          "positions": [
+            1,
+            3
+          ],
+          "runes": [
+            "Prismatic",
+            "Tidal"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "3x Regal Orb",
+          "recipe": "Regal Orb x3",
+          "expected": [
+            1,
+            3
+          ],
+          "positions": [
+            1,
+            3
+          ],
+          "runes": [
+            "Earth",
+            "Tidal"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "2x Exalted Orb",
+          "recipe": "Exalted Orb x2",
+          "expected": [
+            1,
+            3
+          ],
+          "positions": [
+            1,
+            3
+          ],
+          "runes": [
+            "Adaptive",
+            "Tidal"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair73_5socket_Family_17_ThaneRunes_opened.jpg",
+      "sha256": "0fb27d4f04d3be1adfbcf944bdfddc30edc2fbd41621abfd1d6a700344b78deb",
+      "seconds": 5.356,
+      "family_candidates": [
+        17
+      ],
+      "counts": {
+        "rows": 4,
+        "suggested_rows": 4,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 4
+      },
+      "rows": [
+        {
+          "annotation": "1x Thane Girt\u2019s Rune of Wildness",
+          "recipe": "Thane Girt's Rune of Wildness",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Time"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Thane Grannell\u2019s Rune of Mastery",
+          "recipe": "Thane Grannell's Rune of Mastery",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Time"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Thane Leld\u2019s Rune of Spring",
+          "recipe": "Thane Leld's Rune of Spring",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Time"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Thane Myrk\u2019s Rune of Summer",
+          "recipe": "Thane Myrk's Rune of Summer",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Time"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair74_6socket_Family30_ChillingFlux_opened.jpg",
+      "sha256": "d5f2e0f2edec709740e7c731c79e30bc34eb3b85f8d5750ad0ff206110e35294",
+      "seconds": 6.092,
+      "family_candidates": [
+        30
+      ],
+      "counts": {
+        "rows": 4,
+        "suggested_rows": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 4
+      },
+      "rows": [
+        {
+          "annotation": "1x Chilling Flux",
+          "recipe": "Chilling Flux",
+          "expected": [
+            6
+          ],
+          "positions": [
+            6
+          ],
+          "runes": [
+            "Moon"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Lesser Adept Rune",
+          "recipe": "Lesser Adept Rune",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        },
+        {
+          "annotation": "1x Lesser Glacial Rune",
+          "recipe": "Lesser Glacial Rune",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        },
+        {
+          "annotation": "2x Armourer\u2019s Scrap",
+          "recipe": "Armourer's Scrap x2",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        }
+      ]
+    },
+    {
+      "filename": "Pair77_8socket_MISSING_DB_ROW_PerfectRegal_x3_single_opened.jpg",
+      "sha256": "dd2797b45168c9cea96f9a544e5c9bd7ab4a91c231037251677c0fcc26ce9b14",
+      "seconds": 6.772,
+      "family_candidates": [
+        16,
+        50
+      ],
+      "counts": {
+        "rows": 1,
+        "suggested_rows": 1,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 1
+      },
+      "rows": [
+        {
+          "annotation": "3x Perfect Regal Orb",
+          "recipe": "Perfect Regal Orb x3",
+          "expected": [
+            4,
+            5
+          ],
+          "positions": [
+            4,
+            5
+          ],
+          "runes": [
+            "Moon",
+            "Adaptive"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair78_5socket_Family55_Prismatic_RareUnique_GreaterCurrency_opened.jpg",
+      "sha256": "8307c59590ff259844970e2e3264189553a1831b60e3a10615509ff729808463",
+      "seconds": 4.494,
+      "family_candidates": [
+        55
+      ],
+      "counts": {
+        "rows": 4,
+        "suggested_rows": 4,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 4
+      },
+      "rows": [
+        {
+          "annotation": "1x Prismatic Alloy",
+          "recipe": "Prismatic Alloy",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Opulent"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "Rare Unique Item",
+          "recipe": "Rare Unique Item",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Rage"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "3x Greater Orb of Transmutation",
+          "recipe": "Greater Orb of Transmutation x3",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Adaptive"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "3x Greater Orb of Augmentation",
+          "recipe": "Greater Orb of Augmentation x3",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Adaptive"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair79_5socket_Family33_PerfectTrans_PerfectAug_Masterwork_opened.jpg",
+      "sha256": "ea64f9d9cc6715e08b68c3022e6f5b3921815ad963c4bec96ec4a48f1632f98f",
+      "seconds": 4.491,
+      "family_candidates": [
+        33
+      ],
+      "counts": {
+        "rows": 3,
+        "suggested_rows": 3,
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 3
+      },
+      "rows": [
+        {
+          "annotation": "1x Perfect Orb of Transmutation",
+          "recipe": "Perfect Orb of Transmutation",
+          "expected": [
+            5
+          ],
+          "positions": [
+            5
+          ],
+          "runes": [
+            "Celestial"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Perfect Orb of Augmentation",
+          "recipe": "Perfect Orb of Augmentation",
+          "expected": [
+            5
+          ],
+          "positions": [
+            5
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Masterwork Rune",
+          "recipe": "Masterwork Rune",
+          "expected": [
+            5
+          ],
+          "positions": [
+            5
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair80_8socket_Family9_Runebinder_PerfectAug_opened.jpg",
+      "sha256": "5b7f0088a278b41288d6a71c70551595dd969e5b01bcebbde310fbdc13dfa2f6",
+      "seconds": 4.838,
+      "family_candidates": [
+        9
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 0,
+        "tp": 0,
+        "fp": 0,
+        "fn": 2,
+        "exact_rows": 0
+      },
+      "rows": [
+        {
+          "annotation": "3x Perfect Orb of Augmentation",
+          "recipe": "Perfect Orb of Augmentation x3",
+          "expected": [
+            4
+          ],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "Crown sockets conflict across this recipe group \u2014 review its marked runes."
+        },
+        {
+          "annotation": "1x The Runebinder\u2019s Alloy",
+          "recipe": "The Runebinder's Alloy",
+          "expected": [
+            4
+          ],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "Crown sockets conflict across this recipe group \u2014 review its marked runes."
+        }
+      ]
+    },
+    {
+      "filename": "Pair82_4socket_MISSING_DB_ROW_GreaterJeweller_Chaos2_opened.jpg",
+      "sha256": "4aef5ed776f210b8ff445a86544f82b509ea86fa3c445bfbd2960028224d7bbe",
+      "seconds": 4.332,
+      "family_candidates": [
+        54
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 2,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 2
+      },
+      "rows": [
+        {
+          "annotation": "1x Greater Jeweller\u2019s Orb",
+          "recipe": "Greater Jeweller's Orb",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Adaptive"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "2x Chaos Orb",
+          "recipe": "Chaos Orb x2",
+          "expected": [
+            3
+          ],
+          "positions": [
+            3
+          ],
+          "runes": [
+            "Fire"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair84_4socket_Family61_AncientControl_chain_opened.jpg",
+      "sha256": "57c134515cbd782e79d0c127e3f7d410a9a6dd51ccc54013715d4065bbd7f12c",
+      "seconds": 11.381,
+      "family_candidates": [
+        61
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 6,
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "1x Ancient Rune of Control",
+          "recipe": "Ancient Rune of Control",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Adaptive"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Rune of Accumulation",
+          "recipe": "Rune of Accumulation",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Cyclonic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Rune of Acrobatics",
+          "recipe": "Rune of Acrobatics",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Cyclonic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Rune of the Hunt",
+          "recipe": "Rune of the Hunt",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Electrocuting"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Thaumaturgic Flux (Level 18)",
+          "recipe": "Thaumaturgic Flux (Level 18)",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Ward"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Adaptive Alloy",
+          "recipe": "Adaptive Alloy",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair85_4socket_Family36_GreaterChaos_Exalted_Regal_opened.jpg",
+      "sha256": "2211b7f2b03d79bfd4bd6d9b1c6c5cefdc36b99004f6b05f0d659461193091d9",
+      "seconds": 5.367,
+      "family_candidates": [
+        36
+      ],
+      "counts": {
+        "rows": 3,
+        "suggested_rows": 3,
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 3
+      },
+      "rows": [
+        {
+          "annotation": "1x Greater Chaos Orb",
+          "recipe": "Greater Chaos Orb",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Electrocuting"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Greater Exalted Orb",
+          "recipe": "Greater Exalted Orb",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Arcane"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Greater Regal Orb",
+          "recipe": "Greater Regal Orb",
+          "expected": [
+            2
+          ],
+          "positions": [
+            2
+          ],
+          "runes": [
+            "Cyclonic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair87_7socket_Family27_Alloy_chain_opened.jpg",
+      "sha256": "6f8687d08118abfe3937a52bf78bbc0f98694a5195c2b7b69ad1c680af4d6b61",
+      "seconds": 9.281,
+      "family_candidates": [
+        27
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 5,
+        "tp": 5,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "1x Sovereign Alloy",
+          "recipe": "Sovereign Alloy",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Toxic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Mystic Alloy",
+          "recipe": "Mystic Alloy",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Arcane"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Prismatic Alloy",
+          "recipe": "Prismatic Alloy",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Opulent"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Swift Alloy",
+          "recipe": "Swift Alloy",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Cyclonic Alloy",
+          "recipe": "Cyclonic Alloy",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Cyclonic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Orb of Alchemy",
+          "recipe": "Orb of Alchemy",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        }
+      ]
+    },
+    {
+      "filename": "Pair90_6socket_Family3_PerfectCurrency_Alloy_opened.jpg",
+      "sha256": "b45353dac13f768984c6a2dea1035bdd3867b40710821a5d2336301e6c5723f7",
+      "seconds": 8.286,
+      "family_candidates": [
+        3
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 6,
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "1x Perfect Orb of Transmutation",
+          "recipe": "Perfect Orb of Transmutation",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Oath"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Perfect Orb of Augmentation",
+          "recipe": "Perfect Orb of Augmentation",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Tidal"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "3x Chaos Orb",
+          "recipe": "Chaos Orb x3",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Mystic Alloy",
+          "recipe": "Mystic Alloy",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Arcane"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "5x Random Currency",
+          "recipe": "Random Currency x5",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Tempest"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Swift Alloy",
+          "recipe": "Swift Alloy",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair92_3socket_Family70_Warding_Thaumaturgic18_opened.jpg",
+      "sha256": "422177e09d0921927542e6142d8d41ae1e52b85fcd1172a07ca496a1a8a64f26",
+      "seconds": 6.232,
+      "family_candidates": [
+        70
+      ],
+      "counts": {
+        "rows": 5,
+        "suggested_rows": 5,
+        "tp": 5,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 5
+      },
+      "rows": [
+        {
+          "annotation": "1x Thaumaturgic Flux (Level 18)",
+          "recipe": "Thaumaturgic Flux (Level 18)",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Earth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Warding Rune of Courage",
+          "recipe": "Warding Rune of Courage",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Cold"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Warding Rune of Reinforcement",
+          "recipe": "Warding Rune of Reinforcement",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Lightning"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Greater Charging Rune",
+          "recipe": "Greater Charging Rune",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Protective"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Greater Ward Rune",
+          "recipe": "Greater Ward Rune",
+          "expected": [
+            1
+          ],
+          "positions": [
+            1
+          ],
+          "runes": [
+            "Protective"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair94_5socket_Family56_RandomCurrency_SpiritGem19_opened.jpg",
+      "sha256": "ab7262de6c3d6335eea5daa90689d12417db90e973e717f65c353dd03f628b5c",
+      "seconds": 4.068,
+      "family_candidates": [
+        56
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 2,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 2
+      },
+      "rows": [
+        {
+          "annotation": "5x Random Currency",
+          "recipe": "Random Currency x5",
+          "expected": [
+            1,
+            3
+          ],
+          "positions": [
+            1,
+            3
+          ],
+          "runes": [
+            "Adaptive",
+            "Death"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Uncut Spirit Gem (Level 19)",
+          "recipe": "Uncut Spirit Gem (Level 19)",
+          "expected": [
+            1,
+            3
+          ],
+          "positions": [
+            1,
+            3
+          ],
+          "runes": [
+            "Momentum",
+            "Prismatic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair95_6socket_Family36_GreaterRegal_Chaos_Exalted_opened.jpg",
+      "sha256": "c4be9c099338e88bd9d2ec589ef13f522fcae9dda6d308ec0f4b03270365471a",
+      "seconds": 5.259,
+      "family_candidates": [
+        36
+      ],
+      "counts": {
+        "rows": 6,
+        "suggested_rows": 6,
+        "tp": 12,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 6
+      },
+      "rows": [
+        {
+          "annotation": "3x Greater Regal Orb",
+          "recipe": "Greater Regal Orb x3",
+          "expected": [
+            2,
+            4
+          ],
+          "positions": [
+            2,
+            4
+          ],
+          "runes": [
+            "Cyclonic",
+            "Moon"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "3x Greater Chaos Orb",
+          "recipe": "Greater Chaos Orb x3",
+          "expected": [
+            2,
+            4
+          ],
+          "positions": [
+            2,
+            4
+          ],
+          "runes": [
+            "Ward",
+            "Volcanic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "3x Greater Exalted Orb",
+          "recipe": "Greater Exalted Orb x3",
+          "expected": [
+            2,
+            4
+          ],
+          "positions": [
+            2,
+            4
+          ],
+          "runes": [
+            "Arcane",
+            "Electrocuting"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Greater Chaos Orb",
+          "recipe": "Greater Chaos Orb",
+          "expected": [
+            2,
+            4
+          ],
+          "positions": [
+            2,
+            4
+          ],
+          "runes": [
+            "Electrocuting",
+            "Volcanic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Greater Exalted Orb",
+          "recipe": "Greater Exalted Orb",
+          "expected": [
+            2,
+            4
+          ],
+          "positions": [
+            2,
+            4
+          ],
+          "runes": [
+            "Arcane",
+            "Prismatic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Greater Regal Orb",
+          "recipe": "Greater Regal Orb",
+          "expected": [
+            2,
+            4
+          ],
+          "positions": [
+            2,
+            4
+          ],
+          "runes": [
+            "Cyclonic",
+            "Moon"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair96_8socket_Family15_UhtredSidereus_PerfectTrans_opened.jpg",
+      "sha256": "4c7e2445985d166a7adb92b800cc62175ff66c2478ff0e3e8344cddefba7bbc5",
+      "seconds": 4.051,
+      "family_candidates": [
+        15
+      ],
+      "counts": {
+        "rows": 2,
+        "suggested_rows": 2,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 2
+      },
+      "rows": [
+        {
+          "annotation": "3x Perfect Orb of Transmutation",
+          "recipe": "Perfect Orb of Transmutation x3",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Tempest"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Uhtred\u2019s Sidereus",
+          "recipe": "Uhtred's Sidereus",
+          "expected": [
+            4
+          ],
+          "positions": [
+            4
+          ],
+          "runes": [
+            "Cyclonic"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        }
+      ]
+    },
+    {
+      "filename": "Pair97_6socket_family5_BlazingFlux_opened.jpg",
+      "sha256": "334573a95d72d03d111f4d226d6affd31f6d79bd9c107cac6cab123dbf0a2cec",
+      "seconds": 5.208,
+      "family_candidates": [
+        7
+      ],
+      "counts": {
+        "rows": 4,
+        "suggested_rows": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "exact_rows": 4
+      },
+      "rows": [
+        {
+          "annotation": "1x Blazing Flux",
+          "recipe": "Blazing Flux",
+          "expected": [
+            6
+          ],
+          "positions": [
+            6
+          ],
+          "runes": [
+            "Rebirth"
+          ],
+          "can_use": true,
+          "status": "Propagation runes detected \u2014 approve this recipe to add them to the chain."
+        },
+        {
+          "annotation": "1x Lesser Robust Rune",
+          "recipe": "Lesser Robust Rune",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        },
+        {
+          "annotation": "1x Lesser Desert Rune",
+          "recipe": "Lesser Desert Rune",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        },
+        {
+          "annotation": "2x Blacksmith\u2019s Whetstone",
+          "recipe": "2x blacksmiths whetstone",
+          "expected": [],
+          "positions": [],
+          "runes": [],
+          "can_use": false,
+          "status": "One or two crown-marked rune positions were not clear \u2014 enter them manually."
+        }
+      ]
+    }
+  ],
+  "baseline": {
+    "source_commit": "abbe3c184a4d9f0d03778be5ddb82a7cb43f0eae",
+    "panels": 61,
+    "rows": 238,
+    "suggested_rows": 45,
+    "tp": 57,
+    "fp": 0,
+    "fn": 198,
+    "exact_rows": 72,
+    "exact_panels": 16,
+    "slot_coverage": 0.2235294117647059
+  }
+}

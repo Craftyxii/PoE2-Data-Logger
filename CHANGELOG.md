@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.2.14 Beta
+
+- Fill the existing propagation rune dropdowns from verified shared family sockets instead of clearing the entire family because of duplicate anchors or gold glyph glints.
+- Recover interrupted tile-frame contours from validated visible tile bodies and a verified sibling lattice; retain quantity, text, origin and conflicting-mark guards.
+- Apply each shared socket only to recipes containing that socket, preserving valid selections on longer recipes without inventing sockets on shorter ones.
+- Keep the manual review HUD, screenshot preview, dropdown options and explicit approval unchanged. Other scan modes, remnant logging and Analysis Context are unchanged.
+
+See [release notes](docs/RELEASE_1.3.2.14.md) for original-capture accuracy, regression coverage and installer gates.
+
 ## 1.3.2.13 Beta
 
 - Recover from cancelled, timed-out or crashed native OCR through bounded reusable child processes, preserving the existing deadline and stale-result guards.

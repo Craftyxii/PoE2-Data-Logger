@@ -1,0 +1,1 @@
+Original opened-recipe captures supplied by the user for propagation OCR regression testing. These four files are byte-for-byte copies: no marks, text, row positions or tile coordinates were added. Tests run the production reader without supplying annotation geometry. Pre-opened visible-seed images are excluded.

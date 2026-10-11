@@ -1,0 +1,22 @@
+[
+  {
+    "fixture": "family57-opened.jpg",
+    "source": "Pair61_5socket_Family_57_Thaumaturgic_Verisuim_chain_opened.jpg",
+    "sha256": "8083c88fdde92c5e47ddb40db72716d2a1456c1647bde7de947dd92e30091a1e"
+  },
+  {
+    "fixture": "family52-opened.png",
+    "source": "Pair19_4socket_Family52_Jeweller_Gemcutter_opened.png",
+    "sha256": "d37784227471d36374efbfd50de5d91dff27289e24212a8e31ef9d6d7cc73406"
+  },
+  {
+    "fixture": "family30-opened.png",
+    "source": "Pair01_6socket_ChillingFlux_opened.png",
+    "sha256": "6e9555b1af551f32e9f0375f1f2734080a8f2aa06ed7ae76102b39f947474a7b"
+  },
+  {
+    "fixture": "family14-catalog-mismatch.png",
+    "source": "Pair06_8socket_Runefather_PerfectTransmutation_opened.png",
+    "sha256": "90ebfe7dac3158f9b4018025aa0ebca77a98652071fcf6e1cf4b11f007fcc581"
+  }
+]
