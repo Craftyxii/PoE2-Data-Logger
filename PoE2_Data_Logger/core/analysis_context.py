@@ -8,7 +8,7 @@ import csv
 import io
 
 
-CONTEXT_VERSION = "1"
+CONTEXT_VERSION = "2"
 HEADERS = ("Section", "Topic", "Guidance", "Context Version")
 ENTRIES = (
     ("purpose", "Overview", "How to use this export",
@@ -108,7 +108,8 @@ ENTRIES = (
      "after undo or in another session/export; do not join unrelated databases by these values alone."),
     ("recipe_ids", "Identifiers", "Propagation Recipe ID",
      "Propagation Recipe ID is an RCP- text identifier for the canonical recipe name. It is separate from the "
-     "numeric Family ID and from rune strings. The registry keeps IDs across recipe combo edits and reference resets; "
+     "numeric Family ID, a recipe's position in its family list and rune strings. Propagation Recipe gives the "
+     "recipe name. The registry keeps IDs across recipe combo edits and reference resets; "
      "IDs are derived from the trimmed, case-insensitive canonical name. Approved chain provenance stores the ID. "
      "An unknown manual origin stays blank rather than receiving a later-added catalog recipe's ID. "
      "A shared recipe can belong to several families."),
@@ -125,6 +126,23 @@ ENTRIES = (
      "Manual chain entry is also supported. Propagation Rune 1/2 describe the recorded part, not the full recipe "
      "combo; never fill missing rune slots from Recipe ID. Corrections retain step identity and original provenance, "
      "with Previous Rune 1/2 in correction history. Backend crown-slot recovery can use verified marks across a recognized family group, or tentative matching fragments on two distinct recipe rows. A single visible recipe can receive a fragment-based suggestion. These are suggestions requiring manual approval, not certainty measurements. OCR and manual review can still contain errors."),
+    ("rune_chain_analysis", "Propagation", "Prior propagated runes plus the current recipe",
+     "For a chain step, analyze the previously propagated runes plus the full rune combo on that step's recipe. "
+     "Prior propagated runes are Propagation Rune 1/2 from earlier surviving steps in the same Expedition ID, "
+     "ordered by Chain Step #. Resolve the current recipe through Propagation Recipe ID and its recorded "
+     "Propagation Family ID; in SQLite join chain_step_provenance.recipe_id to recipe_ids.recipe_id, then "
+     "recipe_ids.recipe_name to recipes.name for recipes.combo. Family membership is in families.recipes_json. "
+     "A workbook analysis needs the matching recipe/family reference database or reference pack. "
+     "Effective rune list at step N = prior propagated runes + current recipe combo. Do not add step N's "
+     "marked runes again: they are already part of its recipe combo. Carry only the approved marked rune(s) "
+     "from step N into later steps, not its entire recipe combo. For example, after propagating Fire, "
+     "a recipe containing Cold + Life is analyzed as Fire + Cold + Life. Retain repeated rune occurrences "
+     "rather than assuming they cancel or share an effect; these notes do not define effect stacking or caps. "
+     "Start a new accumulated list for each Expedition ID. Exclude discarded or undone parts and avoid "
+     "double-counting repeated approval, completion or correction history rows. Unknown recipe/family "
+     "attribution remains unresolved; never infer a full recipe combo from the marked runes alone. "
+     "Catalog combos are editable and are not frozen at approval, so later reference edits can change "
+     "the reconstructed full combo even though the logged recipe/family IDs remain fixed."),
     ("timestamps", "Interpretation", "UTC and event order",
      "Stored recorded_at and Recorded UTC timestamps use UTC ISO 8601 with second precision and +00:00. "
      "Several events can have the same timestamp; use commits.number / Scan Commit # for their session order. "
@@ -166,7 +184,8 @@ ENTRIES = (
      "recipes is keyed by canonical name and contains sockets, combo and descriptive catalog fields. "
      "recipe_ids maps recipe_name to unique recipe_id, retaining retired identities. families is keyed by numeric "
      "id with top_socket, valid and recipes_json (recipe-name list). Catalogs are editable references, "
-     "not counts of logged drops; join frozen provenance to the registry by recipe_id when identifying recorded recipes."),
+     "not counts of logged drops; join frozen provenance to the registry by recipe_id when identifying recorded recipes. "
+     "Recipe ID identifies the recipe, not its ordinal position within families.recipes_json."),
     ("sql_inventory", "SQLite schema", "currency_snapshots / ritual_pages",
      "currency_snapshots is keyed by (map_id,phase), with phase start/end, items_json (name-to-quantity map), "
      "recorded_at and snapshot_json. ritual_pages has id and unique (map_id,page_number), items_json (offer list), "
