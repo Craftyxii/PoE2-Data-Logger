@@ -5287,6 +5287,7 @@ class LoggerWindow(QMainWindow):
         """
         service.HOTKEY.cancel_capture(modes=("seed", "opened", "both"))
         self._remnant_reading = None
+        self._retire_obsolete_scan_tasks()
         logger.discard_ocr_id()
         self._clear_seed_queue()
         self.results = {"seed": None, "opened": None}

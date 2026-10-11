@@ -172,6 +172,22 @@ class DesktopOCRWorkerTests(unittest.TestCase):
         self.assertIsNone(self.window.pending_review_kind)
         self.assertEqual(logger.get_state()["current_map_id"], "M0001")
 
+    def test_discard_reaps_every_remnant_reader_and_allows_same_mode_retry(self):
+        """Discarding a remnant releases its actual reader and admission so a retry can start immediately."""
+        for mode in ("opened", "seed", "both"):
+            with self.subTest(mode=mode):
+                for attempt in range(2):
+                    with self.subTest(attempt=attempt):
+                        future, pid = self.blocked_capture(mode)
+                        self.assertFalse(future.done())
+                        self.assertEqual(list(self.window._scan_task_futures.values()), [future])
+                        self.window.discard_scan()
+                        self.assert_retired(future, pid)
+                        self.assertEqual(self.window._pending_tasks, {})
+                        self.assertIsNone(self.window.pending_review_kind)
+                        self.assertIsNone(self.window._remnant_reading)
+                        self.assertIsNone(logger.get_state()["ocr_pending"])
+
 
 if __name__ == "__main__":
     unittest.main()
