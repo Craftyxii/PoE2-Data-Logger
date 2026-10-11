@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.2.13 Beta — draft
+
+- Recover from cancelled, timed-out or crashed native OCR through bounded reusable child processes, preserving the existing deadline and stale-result guards.
+- Clear failed scan admissions without leaving Reading or cancelling an unrelated capture.
+- Hold malformed waystone property percentages for review and retain validated Ritual equipment under mild image compression.
+- Recover propagation crown tips below overlapping recipe borders with corroborating evidence; preserve manual recipe/rune approval.
+- Expand Analysis Context to version 3 with field definitions, units, catalog lookups and comparison guidance in workbook and SQLite exports.
+- Retain all reviewed 1.3.2.12 fixes, screenshot previews, remnant logging and OCR strictness defaults.
+
+Validation is pending; [draft release notes](docs/RELEASE_1.3.2.13.md) identify the required benchmark and release checks.
+
 ## 1.3.2.12 Beta
 
 - Preserve visible currency stack digits instead of accepting a truncated count. Uncertain quantities still require confirmation.
