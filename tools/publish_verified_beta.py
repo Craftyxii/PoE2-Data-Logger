@@ -84,7 +84,12 @@ def validate_installer(directory, tag):
 
 def gh(*args):
     """Use the injected Actions token without login or retry loops."""
-    return subprocess.run(["gh", *map(str, args)], check=True, text=True, capture_output=True).stdout
+    try:
+        return subprocess.run(["gh", *map(str, args)], check=True, text=True, capture_output=True).stdout
+    except subprocess.CalledProcessError as error:
+        # Retain the API's reason so permission failures can be diagnosed once.
+        detail = (error.stderr or "GitHub CLI returned no error detail.").strip()
+        raise RuntimeError(f"GitHub CLI failed ({error.returncode}): {detail}") from error
 
 
 def api(endpoint, *args):

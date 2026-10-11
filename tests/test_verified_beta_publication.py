@@ -3,8 +3,10 @@
 import copy
 import hashlib
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tools import publish_verified_beta as publisher
 
@@ -34,6 +36,14 @@ class VerifiedBetaPublicationTests(unittest.TestCase):
         """Artifact downloads retain the identities whose metadata was verified."""
         self.assertEqual(set(self.check()), publisher.ARTIFACTS)
         self.assertEqual(set(self.check().values()), {100, 101, 102})
+
+    def test_cli_permission_failure_retains_reason_without_retry(self):
+        """A failed API call exposes its cause and is never retried or followed by login."""
+        error = subprocess.CalledProcessError(1, ["gh", "api"], stderr="HTTP 403: Resource not accessible by integration\n")
+        with patch.object(publisher.subprocess, "run", side_effect=error) as run:
+            with self.assertRaisesRegex(RuntimeError, "HTTP 403: Resource not accessible by integration"):
+                publisher.gh("api", "repos/owner/repo/git/refs")
+            run.assert_called_once()
 
     def test_source_event_attempt_and_gate_drift_are_rejected(self):
         """Success alone cannot certify another source, rerun or skipped native gate."""
