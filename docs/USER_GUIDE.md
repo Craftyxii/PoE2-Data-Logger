@@ -46,7 +46,7 @@ Save Atlas / Character Settings edits before exporting. Map ID and Atlas Setup I
 
 ## References and licenses
 
-**Database Import/Export** shares OCR reference packs and supports additional item-icon examples. Duplicate examples are ignored; training an icon does not record loot.
+**Database Import/Export** shares OCR reference packs and supports additional item-icon examples. Packs also preserve names you explicitly re-added from the retired Currency/Omen catalogs, even without an icon. Older packs remain supported; obsolete default names stay retired unless explicitly re-added or backed by a learned icon. Duplicate examples are ignored; training an icon does not record loot.
 
 **Reset OCR references to defaults** restores bundled reference data and removes learned or user-added reference entries after confirmation. It retains logs, IDs, settings and scan history. Reference packs exclude those personal records; use the raw SQLite backup to save the full database.
 

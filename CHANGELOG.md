@@ -1,3 +1,12 @@
+# PoE2 Data Logger 1.3.2.10 Beta
+
+- Preserve currency digit evidence and distinguish count-only confirmation from name review.
+- Keep validated Ritual equipment together and join supported wrapped waystone modifiers.
+- Preserve seed review corrections, family drafts and catalog result editor types across refreshes.
+- Make reference reset/removal/import and implicit affix rediscovery compatible with Universal Undo.
+- Preserve restored retired names in reference packs and correct Unicode recipe identity/provenance conflicts.
+- Retain manual propagation review and existing remnant logging; update installer and prior-client guards.
+
 # PoE2 Data Logger 1.3.2.6 Beta
 
 - Require manual recipe/rune approval for every propagation scan; strictness adjusts recognition without enabling automatic chain saves.

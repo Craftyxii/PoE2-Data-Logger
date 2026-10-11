@@ -63,6 +63,52 @@ class InventoryCountClippingTests(unittest.TestCase):
         grid.info["poe2_inventory_aligned"] = True
         return grid
 
+    def captured_grid_without_top_border(self):
+        """Keep the captured fourteen fully visible while excluding six pixels of its grid margin."""
+        capture = Path(__file__).resolve().parents[1] / "PoE2_Data_Logger/region_examples/ritual.jpg"
+        with Image.open(capture) as source:
+            image = source.convert("RGB").crop((1153, 663, 1804, 937))
+        return image.resize((round(image.width * 1.25), round(image.height * 1.25)),
+                            Image.Resampling.LANCZOS)
+
+    def test_real_count_presence_survives_icon_fragments_in_a_near_top_capture(self):
+        """Hold the fully visible captured fourteen when nearby artwork prevents a complete digit crop."""
+        image = self.captured_grid_without_top_border()
+        labels = item_ocr._inventory_labels(item_ocr.inventory_grid(image))
+        self.assertTrue(labels[1]["count_present"], labels[1])
+        result = item_ocr.scan_inventory_grid(image)
+        stack = next(row for row in result["items"] if row["slot"] == 1)
+        self.assertEqual(stack["name"], "Simulacrum Splinter")
+        self.assertEqual(stack["quantity"], 14)
+        self.assertTrue(stack["count_needs_review"])
+        self.assertFalse(clear_currency_read(result))
+
+    def test_real_near_top_count_requires_row_approval_and_is_excluded_when_unapproved(self):
+        """Keep the captured stack pending in Qt and omit it from a final snapshot unless approved."""
+        result = item_ocr.scan_inventory_grid(self.captured_grid_without_top_border())
+        logger.save_settings({"ocr_auto_commit": True})
+        window = LoggerWindow()
+        window._poll.stop()
+        try:
+            window._inventory_read(result, live=True)
+            table = window.inventory_table
+            row = next(index for index in range(table.rowCount())
+                       if table.item(index, 1).text() == "Simulacrum Splinter")
+            self.assertEqual(table.item(row, 2).text(), "14")
+            self.assertEqual(table.cellWidget(row, 3).property("reviewStatus"), "pending")
+            with logger._connect() as db:
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM currency_snapshots").fetchone()[0], 0)
+            window.save_inventory()
+            self.assertEqual(table.cellWidget(row, 3).property("reviewStatus"), "rejected")
+            with logger._connect() as db:
+                saved = db.execute("SELECT items_json FROM currency_snapshots").fetchone()
+            self.assertIsNotNone(saved)
+            self.assertNotIn("Simulacrum Splinter", json.loads(saved[0]))
+        finally:
+            window.close()
+            window.pool.shutdown(wait=True, cancel_futures=True)
+            self.app.processEvents()
+
     def test_real_glyph_count_30_stays_complete_at_large_cell_sizes(self):
         """Verify all digits of the captured count 30 remain readable at enlarged cell sizes."""
         for scale in (1, 2, 2.5):

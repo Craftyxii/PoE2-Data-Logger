@@ -542,17 +542,113 @@ def _recipe_identifier(name):
     return "RCP-" + uuid.uuid5(uuid.NAMESPACE_URL, "poe2-data-logger:recipe:" + name.strip().casefold()).hex
 
 
-def _ensure_recipe_id(db, name):
-    """Register a known recipe identity in the caller's transaction without changing its catalog data."""
-    identifier = _recipe_identifier(name)
-    db.execute("INSERT OR IGNORE INTO recipe_ids(recipe_name,recipe_id) VALUES(?,?)", (name, identifier))
+def _recipe_collision_identifier(name):
+    """Give an already distinct legacy case variant a deterministic exact-spelling identity."""
+    return "RCP-" + uuid.uuid5(uuid.NAMESPACE_URL, "poe2-data-logger:recipe-case-collision:" + name.strip()).hex
+
+
+class _RecipeNameAmbiguity(ValueError):
+    """Prevent ambiguous legacy name variants from becoming unidentified manual propagation origins."""
+
+
+def _recipe_catalog_name(db, name, *, include_retired=False):
+    """Resolve exact active/retired identities or one Unicode match without merging distinct legacy rows."""
+    names = {row[0] for row in db.execute("SELECT name FROM recipes")}
+    if include_retired:
+        names.update(row[0] for row in db.execute("SELECT recipe_name FROM recipe_ids"))
+    if name in names:
+        return name
+    matches = [candidate for candidate in names if candidate.casefold() == name.casefold()]
+    if len(matches) > 1:
+        raise _RecipeNameAmbiguity(f"Recipe name is ambiguous: {name}. Choose an exact saved recipe name.")
+    return matches[0] if matches else None
+
+
+def _ensure_recipe_id(db, name, *, preferred_id=None):
+    """Return the actual registered ID, allocating a legacy collision ID instead of silently reusing another name's."""
+    existing = db.execute("SELECT recipe_id FROM recipe_ids WHERE recipe_name=?", (name,)).fetchone()
+    if existing:
+        if preferred_id is not None and existing[0] != preferred_id:
+            raise ValueError("Recipe ID conflicts with its existing identity.")
+        return existing[0]
+    identifier = preferred_id or _recipe_identifier(name)
+    owner = db.execute("SELECT recipe_name FROM recipe_ids WHERE recipe_id=?", (identifier,)).fetchone()
+    if owner:
+        if preferred_id is not None or identifier != _recipe_identifier(name) or owner[0].casefold() != name.casefold():
+            raise ValueError("Recipe ID is already assigned to a different recipe name.")
+        identifier = _recipe_collision_identifier(name)
+    db.execute("INSERT INTO recipe_ids(recipe_name,recipe_id) VALUES(?,?)", (name, identifier))
     return identifier
 
 
+def _repair_recipe_collision_origins(db, value):
+    """Correct only proven wrong case-collision IDs in origin dictionaries and nested discard snapshots."""
+    changed = False
+    if isinstance(value, dict):
+        name, identifier = value.get("recipe"), value.get("recipe_id")
+        if isinstance(name, str) and isinstance(identifier, str) and identifier == _recipe_identifier(name):
+            owner = db.execute("SELECT recipe_name FROM recipe_ids WHERE recipe_id=?", (identifier,)).fetchone()
+            if owner and owner[0] != name and owner[0].casefold() == name.casefold():
+                value["recipe_id"] = _ensure_recipe_id(db, name)
+                changed = value["recipe_id"] != identifier
+        for key, child in value.items():
+            if key in ("details_json", "result_json") and isinstance(child, str):
+                decoded = _load(child)
+                if _repair_recipe_collision_origins(db, decoded):
+                    value[key] = _dump(decoded)
+                    changed = True
+            elif _repair_recipe_collision_origins(db, child):
+                changed = True
+    elif isinstance(value, list):
+        for child in value:
+            if _repair_recipe_collision_origins(db, child):
+                changed = True
+    return changed
+
+
+def _repair_logged_recipe_collisions(db):
+    """Repair exact attributed collisions across current origins, history, receipts and Undo row images together."""
+    repaired = False
+    for row in db.execute("SELECT expedition_id,chain_step,recipe,recipe_id FROM chain_step_provenance").fetchall():
+        origin = {"recipe": row["recipe"], "recipe_id": row["recipe_id"]}
+        if _repair_recipe_collision_origins(db, origin):
+            db.execute("UPDATE chain_step_provenance SET recipe_id=? WHERE expedition_id=? AND chain_step=?",
+                       (origin["recipe_id"], row["expedition_id"], row["chain_step"]))
+            repaired = True
+    for table, key, column in (("commits", "number", "details_json"),
+                               ("chain_append_receipts", "request_id", "result_json")):
+        for row in db.execute(f"SELECT {key},{column} FROM {table}").fetchall():
+            value = _load(row[column])
+            if _repair_recipe_collision_origins(db, value):
+                db.execute(f"UPDATE {table} SET {column}=? WHERE {key}=?", (_dump(value), row[key]))
+                repaired = True
+    if not repaired:
+        return
+    # Migration must update the same before/after images as live rows, otherwise
+    # the next Undo would refuse a correctly repaired origin as an intervening edit.
+    schemas = {table: [row["name"] for row in db.execute(f"PRAGMA table_info({table})")]
+               for table in ("chain_step_provenance", "commits", "chain_append_receipts")}
+    for action in db.execute("SELECT id,changes FROM undo_actions").fetchall():
+        entries = undo_store._unpack(action["changes"])
+        changed = False
+        for table, old, new in entries:
+            columns = schemas.get(table, [])
+            for image in (old, new):
+                if image is None or not columns or len(image) != len(columns):
+                    continue
+                record = dict(zip(columns, image))
+                if _repair_recipe_collision_origins(db, record):
+                    image[:] = [record[column] for column in columns]
+                    changed = True
+        if changed:
+            db.execute("UPDATE undo_actions SET changes=? WHERE id=?", (undo_store._pack(entries), action["id"]))
+
+
 def _sync_recipe_ids(db):
-    """Register missing catalog identities while retaining IDs already referenced by logged chains."""
-    db.executemany("INSERT OR IGNORE INTO recipe_ids(recipe_name,recipe_id) VALUES(?,?)",
-                   ((row[0], _recipe_identifier(row[0])) for row in db.execute("SELECT name FROM recipes")))
+    """Register every exact legacy row and repair demonstrable collisions without merging combos or unrelated IDs."""
+    for row in db.execute("SELECT name FROM recipes ORDER BY name").fetchall():
+        _ensure_recipe_id(db, row[0])
+    _repair_logged_recipe_collisions(db)
 
 
 def _seed_reference_snapshot(db, snapshot):
@@ -649,12 +745,12 @@ def _initialize_references(db):
 
 
 @contextmanager
-def _connect(*, undo_label=None):
-    """Open shared storage and optionally journal saved row changes in its existing transaction."""
+def _connect(*, undo_label=None, undo_append_latest=False):
+    """Journal explicit saves or attach implicit discovery to the latest saved action atomically."""
     initialize()
     with store._connect() as db:
         if undo_label:
-            with undo_store.capture(db, undo_label):
+            with undo_store.capture(db, undo_label, append_to_latest=undo_append_latest):
                 yield db
         else:
             yield db
@@ -902,19 +998,24 @@ def save_atlas_settings(data):
 
 
 def add_affix(name):
-    """Register a nonempty affix name if absent and return refreshed logger state."""
+    """Register an absent affix as an undoable reference change and return refreshed state."""
     name = str(name or "").strip()
     if not name or len(name) > 120:
         raise ValueError("Enter an affix name under 120 characters.")
-    with _connect() as db:
+    with _connect(undo_label="Affix reference") as db:
         db.execute("INSERT OR IGNORE INTO affixes VALUES(?)", (name,))
     return get_state()
 
 
-def add_affixes(names):
-    """Register valid reviewed affix names, skipping invalid or existing entries; return additions."""
+def add_affixes(names, *, record_undo=True):
+    """Append valid missing affixes, journaling deliberate reference edits together.
+
+    Automatic scan discovery attaches its inverse to the latest user action
+    instead of adding a standalone command. Reinserting a reset reference then
+    remains reversible, and Undo still targets the user's last saved action.
+    """
     added = []
-    with _connect() as db:
+    with _connect(undo_label="Affix references", undo_append_latest=not record_undo) as db:
         for name in names:
             name = str(name or "").strip()
             if not name or len(name) > 120 or "%" in name:
@@ -943,7 +1044,7 @@ def _check_seed_references(db, family_ids=(), recipe_names=()):
 
 
 def save_recipe(data):
-    """Upsert a canonical recipe with a stable ID, rolling back edits that break family or seed constraints."""
+    """Save an undoable Unicode-canonical recipe edit, preserving IDs and family/seed constraints."""
     name = str(data.get("name") or "").strip()
     if not name or len(name) > 200:
         raise ValueError("Recipe name is required and must be under 200 characters.")
@@ -952,10 +1053,8 @@ def save_recipe(data):
     runes = [part.strip() for part in combo.split("+")]
     if len(runes) != sockets or any(not part for part in runes):
         raise ValueError("Exact Rune Combo must contain one rune per socket, separated by +.")
-    with _connect() as db:
-        existing = db.execute("SELECT name FROM recipes WHERE name=? COLLATE NOCASE", (name,)).fetchone()
-        if existing:
-            name = existing[0]
+    with _connect(undo_label="Recipe reference") as db:
+        name = _recipe_catalog_name(db, name, include_retired=True) or name
         for family in db.execute("SELECT id,top_socket,recipes_json FROM families"):
             if name in _load(family["recipes_json"]) and sockets > family["top_socket"]:
                 raise ValueError(f"Family {family['id']} has a lower Top Socket; edit that family first.")
@@ -970,7 +1069,7 @@ def save_recipe(data):
 
 
 def save_family(data):
-    """Upsert an ordered family after resolving recipe names and checking socket and seed constraints."""
+    """Save an undoable family after Unicode recipe resolution and socket/seed validation."""
     family_id = _integer(data.get("family"), "Family ID", 1, 9999)
     top = _integer(data.get("top_socket"), "Top Socket", 3, 10)
     supplied = data.get("recipes", [])
@@ -981,10 +1080,11 @@ def save_family(data):
     names = [str(name).strip() for name in supplied if str(name).strip()]
     if not names or len(names) > 100 or len(set(names)) != len(names):
         raise ValueError("Enter 1–100 distinct recipes in family order.")
-    with _connect() as db:
+    with _connect(undo_label="Family reference") as db:
         resolved = []
         for name in names:
-            recipe = db.execute("SELECT name,sockets FROM recipes WHERE name=? COLLATE NOCASE", (name,)).fetchone()
+            canonical = _recipe_catalog_name(db, name)
+            recipe = db.execute("SELECT name,sockets FROM recipes WHERE name=?", (canonical,)).fetchone()
             if recipe is None:
                 raise ValueError(f"Add {name} to Recipe DB before saving this family.")
             if recipe["sockets"] > top:
@@ -1004,7 +1104,7 @@ def save_family(data):
 
 
 def save_seed_state(data):
-    """Upsert a locally verified visible rune and reward mapping for a family socket stage."""
+    """Save an undoable locally verified visible rune/reward mapping for a family socket stage."""
     family_id = _integer(data.get("family"), "Family ID", 1, 9999)
     sockets = _integer(data.get("sockets"), "Seed sockets", 3, 10)
     slot = str(data.get("seed_slot") or "").strip().upper()
@@ -1019,7 +1119,7 @@ def save_seed_state(data):
     if not isinstance(supplied, list):
         raise ValueError("Enter stage rewards one per line.")
     rewards = [str(item).strip() for item in supplied if str(item).strip()]
-    with _connect() as db:
+    with _connect(undo_label="Seed reference") as db:
         family = db.execute("SELECT top_socket,recipes_json FROM families WHERE id=?", (family_id,)).fetchone()
         if family is None or sockets > family[0]:
             raise ValueError("Choose an existing family and a socket stage at or below its Top Socket.")
@@ -1098,13 +1198,13 @@ def save_scanned_tablet(matches, raw_mods):
 
 
 def _canonical(db, input_value):
-    """Resolve a recipe by full name or normalized alias, rejecting ambiguous shortcuts."""
+    """Resolve an exact/Unicode-canonical full recipe or an unambiguous normalized shortcut."""
     raw = str(input_value or "").strip()
     if not raw:
         raise ValueError("Enter First Recipe.")
-    exact = db.execute("SELECT name FROM recipes WHERE name=? COLLATE NOCASE", (raw,)).fetchone()
+    exact = _recipe_catalog_name(db, raw)
     if exact:
-        return exact[0]
+        return exact
     key = re.sub(r"[^a-z0-9]", "", raw.lower())
     if db.execute("SELECT 1 FROM alias_conflicts WHERE key=?", (key,)).fetchone():
         raise ValueError(f"Recipe shortcut is ambiguous: {raw}. Choose the full recipe name.")
@@ -2197,9 +2297,11 @@ def _clean_propagation_family(family, family_candidates):
 
 
 def _resolve_propagation_origin(db, recipe, family, candidates):
-    """Resolve the catalog recipe ID beside existing family evidence without duplicating its rune combo."""
+    """Resolve Unicode recipe identity and family evidence, rejecting ambiguous legacy names before logging."""
     try:
         canonical = _canonical(db, recipe)
+    except _RecipeNameAmbiguity:
+        raise
     except ValueError:
         if family is not None or candidates:
             raise ValueError("Choose a known propagation recipe before assigning its family.")
@@ -2541,10 +2643,10 @@ def currency_names():
 
 
 def add_currency_item(name):
-    """Register or reuse a validated currency name, reject Item conflicts and retain retired local names."""
+    """Journal new currency names or retirement overrides, rejecting Item conflicts."""
     from PoE2_Data_Logger.core.review_learning import validate_name
     name = validate_name(str(name or ""), "Currency")
-    with _connect() as db:
+    with _connect(undo_label="Currency reference name") as db:
         existing = _catalog_name(db, "currency_items", name)
         if existing:
             _retain_local_catalog_name(db, existing)
@@ -2557,12 +2659,12 @@ def add_currency_item(name):
 
 
 def save_currency_icon(name, image):
-    """Store a registered currency's resized RGB PNG, reusing an identical example ID."""
+    """Journal a registered currency's resized PNG, reusing an identical example ID without a new action."""
     from PIL import Image
 
     if not isinstance(image, Image.Image) or image.width < 20 or image.height < 20:
         raise ValueError("Select a full currency inventory cell from the captured grid.")
-    with _connect() as db:
+    with _connect(undo_label="Save reference example") as db:
         canonical = db.execute("SELECT name FROM currency_items WHERE name=? COLLATE NOCASE",
                                (str(name or "").strip(),)).fetchone()
         if canonical is None:
@@ -2588,8 +2690,8 @@ def currency_icons():
 
 
 def delete_currency_icon(icon_id):
-    """Delete the currency reference with a validated positive icon ID."""
-    with _connect() as db:
+    """Delete a validated currency reference as an undoable saved reference action."""
+    with _connect(undo_label="Remove reference example") as db:
         db.execute("DELETE FROM currency_icons WHERE id=?", (_integer(icon_id, "Icon ID", 1),))
 
 
@@ -2600,10 +2702,10 @@ def item_names():
 
 
 def add_item_name(name):
-    """Register or reuse a validated Item name while rejecting Currency catalog conflicts."""
+    """Journal a validated new Item name while rejecting Currency catalog conflicts."""
     from PoE2_Data_Logger.core.review_learning import validate_name
     name = validate_name(str(name or ""), "Item")
-    with _connect() as db:
+    with _connect(undo_label="Item reference name") as db:
         existing = _catalog_name(db, "item_names", name)
         if existing:
             return existing
@@ -2614,12 +2716,12 @@ def add_item_name(name):
 
 
 def save_item_icon(name, image):
-    """Store a registered item's resized RGB PNG, reusing an identical example ID."""
+    """Journal a registered item's resized PNG, reusing an identical example ID without a new action."""
     from PIL import Image
 
     if not isinstance(image, Image.Image) or min(image.size) < 20 or max(image.size) > 512:
         raise ValueError("Crop one item's inventory icon from the screenshot.")
-    with _connect() as db:
+    with _connect(undo_label="Save reference example") as db:
         canonical = db.execute("SELECT name FROM item_names WHERE name=? COLLATE NOCASE",
                                (str(name or "").strip(),)).fetchone()
         if canonical is None:
@@ -2645,8 +2747,8 @@ def item_icons():
 
 
 def delete_item_icon(icon_id):
-    """Delete the item reference with a validated positive icon ID."""
-    with _connect() as db:
+    """Delete a validated item reference as an undoable saved reference action."""
+    with _connect(undo_label="Remove reference example") as db:
         db.execute("DELETE FROM item_icons WHERE id=?", (_integer(icon_id, "Icon ID", 1),))
 
 
@@ -2740,8 +2842,8 @@ def review_icons():
 
 
 def delete_review_icon(icon_id):
-    """Delete the reviewed example with a validated positive icon ID."""
-    with _connect() as db:
+    """Delete a validated learned example without blocking Undo of its original approval."""
+    with _connect(undo_label="Remove reference example") as db:
         db.execute("DELETE FROM review_icon_examples WHERE id=?", (_integer(icon_id, "Icon ID", 1),))
 
 
@@ -2753,12 +2855,12 @@ def ritual_icons():
 
 
 def save_omen_icon(name, image):
-    """Store a registered Omen's RGB PNG crop at its original size, reusing an identical example ID."""
+    """Journal a registered Omen's PNG crop, reusing an identical example ID without a new action."""
     from PIL import Image
 
     if not isinstance(image, Image.Image) or min(image.size) < 20 or max(image.size) > 512:
         raise ValueError("Crop one Omen icon from the screenshot.")
-    with _connect() as db:
+    with _connect(undo_label="Save reference example") as db:
         canonical = db.execute("SELECT name FROM ritual_names WHERE name=? COLLATE NOCASE",
                                (str(name or "").strip(),)).fetchone()
         if canonical is None:
@@ -2784,8 +2886,8 @@ def omen_icons():
 
 
 def delete_omen_icon(icon_id):
-    """Delete the Omen reference with a validated positive icon ID."""
-    with _connect() as db:
+    """Delete a validated Omen reference as an undoable saved reference action."""
+    with _connect(undo_label="Remove reference example") as db:
         db.execute("DELETE FROM omen_icons WHERE id=?", (_integer(icon_id, "Icon ID", 1),))
 
 
@@ -2996,10 +3098,10 @@ def ritual_names():
 
 
 def add_ritual_name(name):
-    """Register or resolve an Omen label in both Ritual and Currency catalogs."""
+    """Journal a newly registered Omen label in both Ritual and Currency catalogs."""
     from PoE2_Data_Logger.core.review_learning import validate_name
     name = validate_name(str(name or ""), "Omen")
-    with _connect() as db:
+    with _connect(undo_label="Omen reference name") as db:
         return _canonical_registered_name(db, name, "Omen")[0]
 
 

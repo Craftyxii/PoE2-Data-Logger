@@ -48,7 +48,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.9 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.10 Beta"
 SCAN_TIMEOUT_MS = 90000
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
@@ -443,6 +443,7 @@ class LoggerWindow(QMainWindow):
         self._tablet_form_baseline = self._active_master_baseline = self._perk_form_baseline = None
         self._perk_drafts = {}
         self._export_folder_baseline = None
+        self._family_form_baseline = None
         for font in ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf"):
             QFontDatabase.addApplicationFont(str(HERE / "fonts" / font))
         self.setWindowTitle(WINDOW_TITLE)
@@ -2418,6 +2419,11 @@ class LoggerWindow(QMainWindow):
 
     def refresh(self):
         """Refresh saved state while retaining edits within their original map context."""
+        family_values = self._family_form()
+        family_draft = family_values if (self._family_form_baseline is not None and
+                                         family_values != self._family_form_baseline) else None
+        current_family = self.family_pick.currentData()
+        current_seed_family = self.edit_seed_family.currentData()
         folder_text = self.export_folder.text()
         folder_draft = folder_text if (self._export_folder_baseline is not None and
                                        folder_text != self._export_folder_baseline) else None
@@ -2570,7 +2576,6 @@ class LoggerWindow(QMainWindow):
             self.recent.addItem(f"{item['remnant_id']}  ·  {item['map_id']}  ·  "
                                 f"{item['first_recipe']}  ·  {item['sockets']} sockets")
         self.recent_group.setVisible(bool(state["recent"]))
-        current_family = self.family_pick.currentData()
         with QSignalBlocker(self.family_pick):
             self.family_pick.clear()
             self.family_pick.addItem("New family", "")
@@ -2581,6 +2586,7 @@ class LoggerWindow(QMainWindow):
             self.edit_seed_family.clear()
             for family in state["families"]:
                 self.edit_seed_family.addItem(f"Family {family['id']}", family["id"])
+            select(self.edit_seed_family, current_seed_family)
         with QSignalBlocker(self.recipe_family):
             selected = self.recipe_family.currentData()
             self.recipe_family.clear()
@@ -2590,6 +2596,12 @@ class LoggerWindow(QMainWindow):
                     self.recipe_family.addItem(f"Family {family['id']}", family["id"])
         select(self.recipe_family, selected or "")
         self.load_family()
+        if family_draft is not None and self.family_pick.currentData() == current_family:
+            family_id, top_socket, active, recipes = family_draft
+            self.family_id.setText(family_id)
+            self.family_top.setText(top_socket)
+            self.family_active.setChecked(active)
+            self.family_recipes.setPlainText(recipes)
         self.scans_list.clear()
         for scan in store.list_scans()[:20]:
             from PySide6.QtWidgets import QListWidgetItem
@@ -4250,7 +4262,7 @@ class LoggerWindow(QMainWindow):
 
     def add_reference_screenshot(self):
         """Crop a bounded screenshot into a labeled local reference and refresh the relevant
-        catalogs.
+        catalogs. Keep its newly registered name and image in one Undo action.
         """
         kind = value(self.reference_kind)
         name = self.reference_name.currentText().strip()
@@ -4283,15 +4295,16 @@ class LoggerWindow(QMainWindow):
             crop = canvas.crop(image)
         finally:
             dialog.deleteLater()
-        if kind == "omen":
-            logger.add_ritual_name(name)
-            number = logger.save_omen_icon(name, crop)
-        elif kind == "item":
-            logger.add_item_name(name)
-            number = logger.save_item_icon(name, crop)
-        else:
-            logger.add_currency_item(name)
-            number = logger.save_currency_icon(name, crop)
+        with logger.undo_group("Save reference example"):
+            if kind == "omen":
+                logger.add_ritual_name(name)
+                number = logger.save_omen_icon(name, crop)
+            elif kind == "item":
+                logger.add_item_name(name)
+                number = logger.save_item_icon(name, crop)
+            else:
+                logger.add_currency_item(name)
+                number = logger.save_currency_icon(name, crop)
         self.refresh_reference_names()
         self.refresh_reference_examples()
         self.refresh_currency_references()
@@ -4712,6 +4725,10 @@ class LoggerWindow(QMainWindow):
             for item in self._seed_readings:
                 if not item.get("family") and len(item.get("candidates") or []) == 1:
                     item["family"] = f"Family {item['candidates'][0]}"
+            # The retained capture owns its edited queue. Changing only the
+            # displayed mode must not rebuild original OCR guesses and revive
+            # rejected rows or erase corrections before the first approval.
+            result["remnants"] = self._seed_readings
             self._populate_seed_table()
             if self.mode == "both":
                 self._both_seed_context = {key: result.get(key) for key in
@@ -4879,7 +4896,7 @@ class LoggerWindow(QMainWindow):
 
     def commit_seed_review(self, automatic=False, indices=None):
         """Commit checked seed selections as a batch, retain unsaved rows and learn manually
-        approved references.
+        approved references within the same Undo action as their remnant logs.
         """
         result = self.results["seed"]
         if not result:
@@ -4896,16 +4913,17 @@ class LoggerWindow(QMainWindow):
             selections.append({"index": index, "family": family,
                                **{key: reading.get(key) for key in ("sockets", "seed_slot", "seed_rune")}})
         payload = {**result, "remnants": self._seed_readings}
-        saved = logger.commit_seed_batch(payload, selections, automatic=automatic)
         training_errors = []
-        for entry in saved["saved"]:
-            reading = self._seed_readings[entry["index"]]
-            reading["saved"] = entry
-            if not automatic:
-                try:
-                    self._learn_approved_seed(reading, entry["remnant_id"])
-                except (ValueError, OSError) as error:
-                    training_errors.append(str(error))
+        with logger.undo_group("Seed approval"):
+            saved = logger.commit_seed_batch(payload, selections, automatic=automatic)
+            for entry in saved["saved"]:
+                reading = self._seed_readings[entry["index"]]
+                reading["saved"] = entry
+                if not automatic:
+                    try:
+                        self._learn_approved_seed(reading, entry["remnant_id"])
+                    except (ValueError, OSError) as error:
+                        training_errors.append(str(error))
         remaining = any(not reading.get("saved") and not reading.get("rejected") for reading in self._seed_readings)
         result["remnants"] = self._seed_readings
         if remaining:
@@ -4925,7 +4943,7 @@ class LoggerWindow(QMainWindow):
 
     def _learn_approved_seed(self, reading, remnant_id):
         """Save a crop of an approved seed as a local reference and link it to the committed
-        Remnant ID.
+        Remnant ID, joining the caller's approval Undo action.
         """
         raw, bounds = self.images.get("seed"), reading.get("bar_bounds")
         if not raw or not bounds:
@@ -4939,7 +4957,7 @@ class LoggerWindow(QMainWindow):
         reference = store.save_scan(image.getvalue(), "reviewed-seed.png", reading["sockets"],
                                     reading["seed_slot"], reading["seed_rune"],
                                     str(reading["family"]).replace("Family ", ""))
-        with logger._connect() as db:
+        with logger._connect(undo_label="Seed screenshot review") as db:
             db.execute("INSERT OR REPLACE INTO scan_links VALUES(?,?)", (remnant_id, reference["id"]))
 
     @staticmethod
@@ -5070,6 +5088,7 @@ class LoggerWindow(QMainWindow):
             self._seed_commit_enabled()
             if not any(not item.get("saved") and not item.get("rejected") for item in self._seed_readings):
                 logger.discard_ocr_id()
+                self.results["seed"] = None
                 self.pending_review_kind = None
                 self._review_controls(None)
                 self.approve_scan_button.setEnabled(False)
@@ -5457,7 +5476,7 @@ class LoggerWindow(QMainWindow):
                     self.run(self.maybe_auto_commit_seeds)
 
     def _hover_item_read(self, result, raw=None):
-        """Route item readings to review or auto-save with honest map-snapshot feedback."""
+        """Route readings to review or auto-save; additive affix discovery must not consume Undo."""
         logger.validate_scan_context(result)
         self._require_remnant_review_finished()
         self.tabs.setCurrentIndex(2)
@@ -5475,7 +5494,7 @@ class LoggerWindow(QMainWindow):
         learned = new_affix_names(result.get("mods", []), self.state["affixes"],
                                   result.get("ocr_rows", []) if result.get("source") == "screen OCR" else None)
         if learned:
-            added = logger.add_affixes(learned)
+            added = logger.add_affixes(learned, record_undo=False)
             self.state["affixes"].extend(added)
             for widget in self.tablet_affixes:
                 for name in added:
@@ -5647,7 +5666,8 @@ class LoggerWindow(QMainWindow):
     def _tablet_read(self, number, result):
         """Validate scan context, register candidate affixes, and stage the next tablet slot
         for review, including empty readings that can be corrected manually. Automatically
-        commit only ready reads whose matched affixes meet the confidence threshold.
+        commit only ready reads whose matched affixes meet the confidence threshold;
+        additive discovery does not create its own Undo command.
         """
         logger.validate_scan_context(result)
         self._require_remnant_review_finished()
@@ -5678,7 +5698,9 @@ class LoggerWindow(QMainWindow):
         proposed = new_affix_names(unknown, self.state["affixes"],
                                    ocr_rows if ocr_rows is not None
                                    else [] if result.get("source") == "screen OCR" else None)
-        added = logger.add_affixes(proposed)
+        # Automatic additive learning is not a separate user command; Undo
+        # must still target the last saved scan, chain or map action.
+        added = logger.add_affixes(proposed, record_undo=False)
         if added:
             self.state["affixes"].extend(added)
             for widget in self.tablet_affixes:
@@ -5961,6 +5983,9 @@ class LoggerWindow(QMainWindow):
         layout.addLayout(actions)
         controls.setProperty("requiresApproval", bool(item.get("count_needs_review") or item.get("name_needs_review")
                                                        or not item.get("name")))
+        controls.setProperty("reviewNameRequired", bool(item.get("name_needs_review") or not item.get("name")))
+        controls.setProperty("reviewCountRequired", bool(item.get("count_needs_review")
+                                                        or not str(item.get("quantity", "")).strip()))
         controls.setProperty("confidenceGroup", currency_review_rank(item))
         self.inventory_table.setCellWidget(row, 3, controls)
         self.inventory_table.setRowHeight(row, 62)
@@ -6012,14 +6037,19 @@ class LoggerWindow(QMainWindow):
                 cell.setText(text)
 
     def _set_currency_review(self, controls, state, *, unnamed=False):
-        """Display candidate certainty and review state without changing a row's captured evidence."""
+        """Describe the unresolved name/count fields without altering recognition or approval gates."""
         controls.setProperty("reviewStatus", state)
         controls.setProperty("unnamedRejected", bool(unnamed and state == "rejected"))
         status = controls.findChild(QLabel, "currencyReviewStatus")
-        pending = {0: "Confirm name / count", 1: "Likely match · Confirm name / count",
-                   2: "Unknown item · Confirm name / count"}.get(controls.property("confidenceGroup"),
-                                                                "Confirm name / count")
+        fields = [label for label, required in (("name", controls.property("reviewNameRequired")),
+                                               ("count", controls.property("reviewCountRequired"))) if required]
+        confirmation = "Confirm " + " / ".join(fields) if fields else "Confirm row"
+        prefix = {1: "Likely match · ", 2: "Unknown item · "}.get(controls.property("confidenceGroup"), "")
+        pending = prefix + confirmation
         status.setText({"pending": pending, "approved": "Approved", "rejected": "Rejected"}[state])
+        if state == "approved":
+            controls.setProperty("reviewNameRequired", False)
+            controls.setProperty("reviewCountRequired", False)
         status.setStyleSheet("color:#F5C364;" if state != "rejected" else "color:#BCB7AE;")
         controls.findChild(QPushButton, "approveCurrency").setEnabled(state != "approved")
         controls.findChild(QPushButton, "rejectCurrency").setEnabled(state != "rejected")
@@ -6036,6 +6066,7 @@ class LoggerWindow(QMainWindow):
         controls = self.inventory_table.cellWidget(item.row(), 3)
         if controls:
             controls.setProperty("requiresApproval", True)
+            controls.setProperty("reviewNameRequired" if item.column() == 1 else "reviewCountRequired", True)
             self._set_currency_review(controls, "pending")
 
     def review_currency_row(self, controls, approve):
@@ -6677,6 +6708,7 @@ class LoggerWindow(QMainWindow):
         self.catalog_table.setHorizontalHeaderLabels([name.replace("_", " ").title() for name in columns])
         self.catalog_table.setRowCount(len(rows))
         self._catalog_rows = rows
+        self._catalog_result_kind = kind
         for row, data in enumerate(rows):
             for col, name in enumerate(columns):
                 item = data.get(name, "")
@@ -6686,11 +6718,11 @@ class LoggerWindow(QMainWindow):
         self.note(f"{len(rows)} {kind} entries shown.")
 
     def load_catalog_row(self, row):
-        """Load a selected family, recipe, or seed-state search result into its editor."""
+        """Load a displayed result into its searched catalog's editor even if the next search selection changed."""
         if row < 0 or row >= len(getattr(self, "_catalog_rows", [])):
             return
         item = self._catalog_rows[row]
-        kind = value(self.catalog_kind)
+        kind = self._catalog_result_kind
         if kind == "families":
             select(self.family_pick, item["family"])
             self.load_family()
@@ -6701,6 +6733,11 @@ class LoggerWindow(QMainWindow):
             select(self.edit_seed_family, item["family"])
             self.edit_seed_sockets.setText(str(item["sockets"]))
             self.load_seed()
+
+    def _family_form(self):
+        """Read catalog-family fields so unrelated refreshes can retain unsaved edits."""
+        return (self.family_id.text(), self.family_top.text(), self.family_active.isChecked(),
+                self.family_recipes.toPlainText())
 
     def load_family(self):
         """Fill the family editor from the selection, or prepare defaults and the next
@@ -6713,6 +6750,7 @@ class LoggerWindow(QMainWindow):
         self.family_top.setText(str(found["top_socket"] if found else 6))
         self.family_active.setChecked(found["valid"] if found else True)
         self.family_recipes.setPlainText("\n".join(found["recipes"]) if found else "")
+        self._family_form_baseline = self._family_form()
 
     def save_family(self):
         """Save the family form to the database, refresh catalog state, and reload the saved
@@ -6721,6 +6759,7 @@ class LoggerWindow(QMainWindow):
         saved = logger.save_family({"family": value(self.family_id), "top_socket": value(self.family_top),
                                     "valid": self.family_active.isChecked(),
                                     "recipes": self.family_recipes.toPlainText()})
+        self._family_form_baseline = None
         self.refresh()
         select(self.family_pick, saved["family"])
         self.load_family()
@@ -6824,7 +6863,7 @@ class LoggerWindow(QMainWindow):
 
 def instance_lock():
     """Acquire the data-directory instance lock, or focus an existing Windows logger and return
-    None when another instance owns it, including the previous 1.3.2.7 beta and stable clients.
+    None when another instance owns it, including the previous beta and stable clients.
     """
     store.DATA_DIR.mkdir(parents=True, exist_ok=True)
     lock = QLockFile(str(store.DATA_DIR / "logger.lock"))
@@ -6842,6 +6881,8 @@ def instance_lock():
         user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
         user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
         window = (user32.FindWindowW(None, WINDOW_TITLE)
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.9 Beta")
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.8 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.7 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.6 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.5 Beta")

@@ -83,6 +83,22 @@ class RitualGridGeometryTests(unittest.TestCase):
                                          Image.Resampling.LANCZOS)
                 self.assert_rewards(image)
 
+    def test_desaturated_staff_keeps_its_dark_interior_cell_inside_the_verified_frame(self):
+        """Keep one captured eight-cell staff as one reward when modest desaturation dims its backing."""
+        from PIL import ImageEnhance
+
+        fixtures = Path(__file__).resolve().parent / "fixtures/ritual_rewards"
+        expected = next(case for case in json.loads((fixtures / "expected.json").read_text())
+                        if case["file"] == "05.png")
+        with Image.open(fixtures / "05.png") as source:
+            original = source.convert("RGB")
+        for colour in (1, .85):
+            with self.subTest(colour=colour):
+                grid = detect_reward_grid(ImageEnhance.Color(original).enhance(colour))
+                self.assertIsNotNone(grid)
+                self.assertEqual([reward["slots"] for reward in grid["rewards"]], expected["footprints"])
+                self.assertEqual(len(grid["rewards"]), 8)
+
     def test_grid_only_and_border_crops_preserve_all_rewards(self):
         """Verify grid only and border crops preserve all rewards."""
         for box in ((30, 190, 670, 725), (0, 170, 726, 760), (35, 193, 666, 720)):

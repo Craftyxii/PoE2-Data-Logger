@@ -60,6 +60,22 @@ def _default_reference_rows(db):
                 for table in _DEFAULT_TABLES}
 
 
+def _restore_reference_table(db, table, rows):
+    """Replace a changed catalog while preserving its original row order when undone.
+
+    Identical catalogs require no writes or Undo entry. Deleting changed rows
+    in reverse order lets the row journal reinsert their before-images in the
+    original order, including catalogs whose primary key is a name.
+    """
+    existing = list(db.execute(f"SELECT rowid,* FROM {table} ORDER BY rowid"))
+    if [tuple(row)[1:] for row in existing] == rows:
+        return
+    db.executemany(f"DELETE FROM {table} WHERE rowid=?", ((row[0],) for row in reversed(existing)))
+    if rows:
+        placeholders = ",".join("?" for _ in rows[0])
+        db.executemany(f"INSERT INTO {table} VALUES({placeholders})", rows)
+
+
 def reset_to_defaults():
     """Atomically restore shipped OCR references and discard all local learning.
 
@@ -68,19 +84,18 @@ def reset_to_defaults():
     inventories, Ritual pages, scan IDs/screenshots, settings and ID sequences.
     Recognition reloads local rows for each scan; its cached assets are shipped
     files and require no invalidation. Repeated resets leave the same baseline.
-    Return the restored row count and the number of discarded image examples.
+    Journal reference changes so Undo first restores local learning, then can
+    reverse earlier approvals without mismatched catalog rows. Return the
+    restored row count and the number of discarded image examples.
     """
-    with logger._connect() as db:
+    with logger._connect(undo_label="Reset OCR references") as db:
         defaults = _default_reference_rows(db)
         db.execute("BEGIN IMMEDIATE")
         removed = 0
         for table in _EXAMPLE_TABLES:
             removed += db.execute(f"DELETE FROM {table}").rowcount
         for table, rows in defaults.items():
-            db.execute(f"DELETE FROM {table}")
-            if rows:
-                placeholders = ",".join("?" for _ in rows[0])
-                db.executemany(f"INSERT INTO {table} VALUES({placeholders})", rows)
+            _restore_reference_table(db, table, rows)
         # Explicitly revived retired names are learned catalog state, not a
         # profile preference. Leave every other metadata key untouched.
         db.execute("DELETE FROM meta WHERE key='active_retired_currency_names'")
@@ -96,6 +111,29 @@ def _name(raw, limit=200):
             ord(char) < 32 for char in raw):
         raise ValueError("Reference pack contains an invalid name.")
     return raw.strip()
+
+
+def _retired_name_revivals(data):
+    """Validate explicit retirement overrides without activating unmarked legacy catalog rows.
+
+    Optional metadata in version-3 packs distinguishes deliberately re-added
+    names from obsolete default rows retained by older profiles. Every override
+    must name a retired label present in the pack's Currency or Omen catalog.
+    """
+    raw = data.get("active_retired_currency_names", [])
+    if not isinstance(raw, list) or len(raw) > len(logger._RETIRED_CURRENCY_DEFAULTS):
+        raise ValueError("Reference pack has invalid retired-name revival metadata.")
+    registered = {row["name"].strip().replace("’", "'").casefold()
+                  for table in ("currency_names", "omen_names") for row in data.get(table, [])
+                  if isinstance(row, dict) and isinstance(row.get("name"), str)}
+    normalized = set()
+    for name in raw:
+        name = _name(name, 160)
+        key = name.replace("’", "'").casefold()
+        if not logger._retired_currency_default(name) or key not in registered or key in normalized:
+            raise ValueError("Reference pack has invalid retired-name revival metadata.")
+        normalized.add(key)
+    return sorted(normalized)
 
 
 def _image(raw, limit=MAX_IMAGE, kind=None):
@@ -139,11 +177,30 @@ def _image(raw, limit=MAX_IMAGE, kind=None):
 
 
 def _existing_recipe(db, name):
-    """Find a case-insensitive canonical recipe spelling and reject ambiguous case duplicates."""
-    matches = db.execute("SELECT name FROM recipes WHERE name=? COLLATE NOCASE", (name,)).fetchall()
-    if len(matches) > 1:
-        raise ValueError("Recipe database contains conflicting case spellings.")
-    return matches[0][0] if matches else None
+    """Resolve exact legacy spellings or one Unicode-canonical recipe without merging ambiguous rows."""
+    return logger._recipe_catalog_name(db, name)
+
+
+def _distinct_recipe_spellings(rows):
+    """Preserve explicitly identified legacy case collisions while rejecting ambiguous old pack duplicates."""
+    groups = {}
+    for row in rows:
+        name = _name(row["name"])
+        groups.setdefault(name.casefold(), {})[name] = row.get("recipe_id")
+    preserved = set()
+    for spellings in groups.values():
+        if len(spellings) < 2:
+            continue
+        primary = 0
+        for name, identifier in spellings.items():
+            if identifier == logger._recipe_identifier(name):
+                primary += 1
+            elif identifier != logger._recipe_collision_identifier(name):
+                raise ValueError("Reference pack contains conflicting records: ambiguous case spellings without distinct recipe IDs.")
+        if primary > 1:
+            raise ValueError("Reference pack assigns the same recipe ID to distinct case spellings.")
+        preserved.update(spellings)
+    return preserved
 
 
 def _recipe_name(db, raw):
@@ -212,7 +269,7 @@ def save_export_file(folder):
 
 
 def export_pack():
-    """Package references with stable recipe IDs, examples and seed screenshots from one read transaction.
+    """Package references, recipe IDs, explicit name revivals and images from one read transaction.
 
     Verify stored image hashes and retain learned PNG bytes, then enforce the
     manifest, image-count and size limits used by the importer.
@@ -238,6 +295,8 @@ def export_pack():
         recipe_ids = dict(db.execute("SELECT recipe_name,recipe_id FROM recipe_ids"))
         for recipe in tables["recipes"]:
             recipe["recipe_id"] = recipe_ids.get(recipe["name"]) or logger._recipe_identifier(recipe["name"])
+        tables["active_retired_currency_names"] = logger._meta(db, "active_retired_currency_names", [])
+        tables["active_retired_currency_names"] = _retired_name_revivals(tables)
         tables["glyphs"] = [{"sha256": row[0], "rune": row[1],
                               "vector": base64.b64encode(row[2]).decode("ascii")}
                              for row in db.execute("SELECT image_sha256,seed_rune,vector FROM reviewed_glyphs")]
@@ -299,8 +358,8 @@ def export_pack():
 def _inspect(path):
     """Read a bounded supported pack and require exactly its declared, hash-verified assets.
 
-    Reject duplicate/encrypted entries, conflicting learned labels and invalid
-    image formats or footprints without extracting archive paths to disk.
+    Reject duplicate/encrypted entries, conflicting learned labels, invalid
+    explicit retirement overrides and malformed images without extracting paths.
     """
     path = Path(path)
     if not path.is_file() or path.stat().st_size > MAX_PACK:
@@ -330,6 +389,8 @@ def _inspect(path):
                     "review_icon_examples")
         if any(not isinstance(data.get(key), list) or len(data[key]) > 10000 for key in required):
             raise ValueError("Reference pack has invalid database records.")
+        # Existing packs omit this optional section and retain the previous retirement behavior.
+        data["active_retired_currency_names"] = _retired_name_revivals(data)
         expected = {"manifest.json"}
         icon_files = set()
         for icon in data["icons"]:
@@ -376,8 +437,10 @@ def import_pack(path, replace_existing=False):
     """Import references and verify supplied recipe IDs atomically, accepting older packs without IDs.
 
     Optional replacement updates supported reference records; recipe/seed links,
-    labels and glyph vectors are checked. Remove newly created screenshot files
-    if import fails, while returning per-record counts after a successful commit.
+    labels, explicit retired-name revivals and glyph vectors are checked. Apply
+    revivals in the same transaction, removing new screenshots if import fails.
+    Journal changed reference rows so an import can be undone before earlier
+    approvals that taught the same artwork or catalog identities.
     """
     data, assets = _inspect(path)
     counts = {key: 0 for key in ("recipes", "families", "aliases", "seed_states", "affixes",
@@ -385,17 +448,29 @@ def import_pack(path, replace_existing=False):
                                   "currency_icons", "omen_icons", "item_icons", "review_icon_examples", "scans")}
     created = []
     try:
-        with logger._connect() as db:
+        with logger._connect(undo_label="Import OCR references") as db:
             db.execute("BEGIN IMMEDIATE")
             changed_recipes, changed_families = set(), set()
             incoming_recipes = {}
+            distinct_spellings = _distinct_recipe_spellings(data["recipes"])
             for row in data["recipes"]:
                 name = _name(row["name"])
-                name = _existing_recipe(db, name) or name
+                supplied_id = row.get("recipe_id")
+                legacy_spelling = (name in distinct_spellings or
+                                   supplied_id == logger._recipe_collision_identifier(name))
+                if not legacy_spelling:
+                    name = logger._recipe_catalog_name(db, name, include_retired=True) or name
                 # Older packs omit IDs; current packs must carry the stable
-                # identity for this canonical name, never a conflicting link.
-                if row.get("recipe_id") is not None and row["recipe_id"] != logger._recipe_identifier(name):
+                # identity for this canonical name. Explicit migrated case
+                # collisions keep their exact spelling and distinct identity.
+                allowed_ids = {logger._recipe_identifier(name)}
+                if legacy_spelling:
+                    allowed_ids.add(logger._recipe_collision_identifier(name))
+                if supplied_id is not None and supplied_id not in allowed_ids:
                     raise ValueError("Reference recipe ID does not match its canonical name.")
+                registered = db.execute("SELECT recipe_id FROM recipe_ids WHERE recipe_name=?", (name,)).fetchone()
+                if registered and supplied_id is not None and registered[0] != supplied_id:
+                    raise ValueError("Reference recipe ID conflicts with its existing identity.")
                 sockets = logger._integer(row["sockets"], "Recipe sockets", 2, 10)
                 combo = _name(row["combo"], 500)
                 runes = [part.strip() for part in combo.split("+")]
@@ -415,7 +490,7 @@ def import_pack(path, replace_existing=False):
                 counts["recipes"] += result.rowcount
                 if result.rowcount:
                     changed_recipes.add(name)
-                logger._ensure_recipe_id(db, name)
+                logger._ensure_recipe_id(db, name, preferred_id=supplied_id)
             for row in data["families"]:
                 number = logger._integer(row["id"], "Family", 1, 9999)
                 top = logger._integer(row["top_socket"], "Top socket", 3, 10)
@@ -454,6 +529,8 @@ def import_pack(path, replace_existing=False):
                     result = db.execute(f"INSERT OR IGNORE INTO {table}(name) VALUES(?)",
                                         (name,))
                     counts[kind] += result.rowcount
+            for name in data["active_retired_currency_names"]:
+                logger._retain_local_catalog_name(db, name)
             for row in data["master_perks"]:
                 master = _name(row["master"], 50)
                 if master not in ("Jado", "Doryani", "Hilda"):

@@ -265,6 +265,19 @@ def _occupied(pixels, box, pitch):
                 (float(bright.std()) >= 6 or float(bright.mean()) >= 25))
 
 
+def _equipment_backing(pixels, box, pitch):
+    """Verify a dark cell's substantial blue item backing for use inside a paired ornate frame."""
+    left, top, right, bottom = box
+    inset = max(2, round(pitch * .15))
+    cell = pixels[top + inset:bottom - inset, left + inset:right - inset]
+    if not cell.size:
+        return False
+    red, green, blue = cell.astype(np.float32).transpose(2, 0, 1)
+    backing = ((red < 20) & (green < 20) & (blue >= 16) & (blue <= 35) &
+               (blue > red * 1.5) & (blue > green * 1.5))
+    return bool(backing.mean() >= .5)
+
+
 @lru_cache(maxsize=2)
 def _corner_template(bottom_right):
     """Cache the bundled upper-left or lower-right ornate item-frame sample."""
@@ -392,13 +405,18 @@ def _rewards_at_scale(pixels, geometry):
     boxes = {row * COLUMNS + column + 1: _cell_box(origin, pitch, column, row)
              for row in range(ROWS) for column in range(COLUMNS)}
     occupied = {slot for slot, box in boxes.items() if _occupied(pixels, box, pitch)}
-    top_corners = {slot: _corner_strength(pixels, boxes[slot], pitch) for slot in occupied}
+    # Desaturation can dim an almost empty interior gear cell below the
+    # ordinary occupied threshold. Its blue backing may complete a rectangle
+    # only when the existing paired ornate corners independently prove it.
+    frame_cells = occupied | {slot for slot, box in boxes.items()
+                              if _equipment_backing(pixels, box, pitch)}
+    top_corners = {slot: _corner_strength(pixels, boxes[slot], pitch) for slot in frame_cells}
     bottom_corners = {slot: _corner_strength(pixels, boxes[slot], pitch, True)
-                      for slot in occupied}
+                      for slot in frame_cells}
     groups, used = [], set()
     # The game keeps faint cell dividers beneath large unique gear artwork.
     # Its paired ornate corners establish the outer item rectangle instead.
-    for slot in sorted(occupied):
+    for slot in sorted(frame_cells):
         if slot in used or top_corners[slot] < .35:
             continue
         row, column = divmod(slot - 1, COLUMNS)
@@ -408,7 +426,7 @@ def _rewards_at_scale(pixels, geometry):
                 cells = {slot + dy * COLUMNS + dx
                          for dy in range(height) for dx in range(width)}
                 last = slot + (height - 1) * COLUMNS + width - 1
-                if not cells <= occupied or cells & used or bottom_corners[last] < .35:
+                if not cells <= frame_cells or cells & used or bottom_corners.get(last, 0) < .35:
                     continue
                 if any(top_corners[part] >= .35 for part in cells - {slot}):
                     continue

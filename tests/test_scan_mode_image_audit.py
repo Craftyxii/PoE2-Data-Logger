@@ -9,11 +9,12 @@ import json
 from pathlib import Path
 import unittest
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 from PoE2_Data_Logger.core.ritual_catalog import OMEN_NAMES
 from PoE2_Data_Logger.ocr import item_ocr, item_text
 from PoE2_Data_Logger.ocr.affix_capture import affix_catalog
+from PoE2_Data_Logger.ui.native_desktop import clear_waystone_read
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +75,18 @@ class TooltipImageAuditTests(unittest.TestCase):
                     ("increased Rarity of Items found in Map", 25, "%")])
                 self.assertEqual(result["uncertain"], [])
 
+    def test_wrapped_waystone_pixels_do_not_invent_an_extra_modifier(self):
+        """Read a four-word continuation through the actual engine and preserve two semantic modifiers."""
+        lines = ["Wasteland", "Waystone (Tier 15)", "Revives Available: 6",
+                 "Item Rarity: +125%", "Monster Pack Size: +35%",
+                 "Waystone Drop Chance: +215%", "Monsters have 20% increased Attack Speed",
+                 "Players have 15% less Recovery Rate of", "Life and Energy Shield",
+                 "Can be used in a Map Device"]
+        result = item_text.read_screen_tooltip(self.tooltip(lines, 1), self.affixes)
+        self.assertEqual(result["mods"], [lines[6], " ".join(lines[7:9])])
+        self.assertEqual(result["fields"]["map_mods"], 2)
+        self.assertTrue(clear_waystone_read(result))
+
     def test_title_free_pixels_cannot_route_or_invent_an_item(self):
         """Keep blank and isolated modifier text from becoming a waystone or tablet proposal."""
         for image in (Image.new("RGB", (1000, 400), (15, 15, 20)),
@@ -108,6 +121,21 @@ class RitualCaptureImageAuditTests(unittest.TestCase):
                             self.assertEqual((row["category"], row["quantity"]), ("Item", 1))
                         if not row.get("name"):
                             self.assertTrue(row["name_needs_review"])
+
+    def test_modest_desaturation_keeps_one_staff_as_one_reviewable_reward(self):
+        """Scan actual staff pixels without duplicating its dim interior cells into separate rewards."""
+        folder = ROOT / "tests/fixtures/ritual_rewards"
+        case = next(case for case in json.loads((folder / "expected.json").read_text(encoding="utf-8"))
+                    if case["file"] == "05.png")
+        with Image.open(folder / "05.png") as source:
+            image = ImageEnhance.Color(source.convert("RGB")).enhance(.85)
+        result = item_ocr.scan_ritual_page(image, OMEN_NAMES)
+        self.assertTrue(result["grid_detected"])
+        self.assertEqual([row["grid_slots"] for row in result["items"]], case["footprints"])
+        self.assertEqual(result["reward_count"], 8)
+        staff = next(row for row in result["items"] if row["grid_slots"][0] == 73)
+        self.assertEqual((staff["quantity"], staff["category"]), (1, "Item"))
+        self.assertTrue(staff["name_needs_review"])
 
 
 if __name__ == "__main__":

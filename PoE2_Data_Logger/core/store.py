@@ -100,7 +100,8 @@ def save_scan(raw: bytes, file_name: str, sockets, slot: str, rune: str, family=
     """Upsert reviewed seed metadata by screenshot hash and optionally store glyph evidence.
 
     Keep the selected stage rewards and status on the scan row, and reuse a
-    hash-named image file when the same screenshot is reviewed again.
+    hash-named image file when the same screenshot is reviewed again. Journal
+    metadata and glyph learning together; Undo retains the raw capture bytes.
     """
     depth, selected = validate(sockets, slot, rune, family)
     suffix = ".png" if raw.startswith(b"\x89PNG\r\n\x1a\n") else ".jpg"
@@ -125,7 +126,8 @@ def save_scan(raw: bytes, file_name: str, sockets, slot: str, rune: str, family=
     status = selected["status"] if selected else "unresolved"
     family_text = f"Family {selected['family']}" if selected else ""
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    with _connect() as db:
+    from PoE2_Data_Logger.core import logger_store
+    with logger_store._connect(undo_label="Seed screenshot review") as db:
         db.execute("""INSERT INTO scans (recorded_at,file_name,image_name,image_sha256,
                      sockets,seed_slot,seed_rune,family,rewards_json,mapping_status)
                      VALUES (?,?,?,?,?,?,?,?,?,?)

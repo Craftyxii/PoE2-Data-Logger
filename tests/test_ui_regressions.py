@@ -472,6 +472,20 @@ class UIRegressionTests(unittest.TestCase):
         with logger._connect() as db:
             self.assertEqual([tuple(row) for row in db.execute("SELECT * FROM commits ORDER BY number")], history)
 
+    def test_pending_tablet_affix_discovery_keeps_undo_on_previous_new_map(self):
+        """Reading a new tablet affix keeps learning while Undo reopens the previous saved map."""
+        self.window.auto_tablet_checkbox.setChecked(False)
+        self.window.finish_map()
+        result = native_desktop.item_ocr.parse_tablet(
+            ["12% increased Local Audit Rewards in Map"], self.window.state["affixes"])
+        result.update(logger.scan_context())
+        self.window._tablet_read(1, result)
+        self.assertTrue(any("Local Audit" in name for name in logger.get_state()["affixes"]))
+        self.assertEqual(logger.undo_action(), "New map")
+        self.window.undo_map()
+        self.assertEqual(self.window.state["current_map_id"], "M0001")
+        self.assertIsNone(self.window.pending_review_kind)
+
     def test_failed_undo_preserves_pending_draft(self):
         """Preserve a held waystone correction when the saved action cannot be undone."""
         logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 7}])

@@ -91,7 +91,7 @@ def verify_blocked_launch(executable, arguments, protected_files, check_saved):
 
 
 def running_client_titles(version, beta):
-    """Probe prior beta/stable clients, including 1.3.2.7, before the current title."""
+    """Probe prior beta/stable clients before the current title, without duplicates."""
     current = f"PoE2 Data Logger {version}{' Beta' if beta else ''}"
     prior = (
         "PoE2 Data Logger", "PoE2 Data Logger 1.2 Beta", "PoE2 Data Logger 1.2.1 Beta",
@@ -102,6 +102,8 @@ def running_client_titles(version, beta):
         "PoE2 Data Logger 1.3.2.5 Beta",
         "PoE2 Data Logger 1.3.2.6 Beta",
         "PoE2 Data Logger 1.3.2.7 Beta",
+        "PoE2 Data Logger 1.3.2.8 Beta",
+        "PoE2 Data Logger 1.3.2.9 Beta",
     )
     return tuple(dict.fromkeys(title for title in prior if title != current)) + (current,)
 

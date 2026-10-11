@@ -12,6 +12,8 @@ TABLES = (
     "chain_completions", "chain_step_provenance", "scan_links", "commits",
     "currency_snapshots", "ritual_pages", "currency_items", "item_names", "ritual_names",
     "currency_icons", "item_icons", "omen_icons", "review_icon_examples", "affixes",
+    "recipes", "families", "aliases", "alias_keys", "alias_conflicts", "seed_states",
+    "master_perks", "reviewed_glyphs", "scans",
 )
 META_KEYS = frozenset((
     "settings", "current_map_number", "next_remnant_number", "pending_new_map",
@@ -68,14 +70,18 @@ def group(label):
 
 
 @contextmanager
-def capture(db, label):
+def capture(db, label, *, append_to_latest=False):
     """Capture changed rows on this connection and save their inverses in the same transaction.
 
     Connection-local triggers avoid whole-database snapshots. Failed transactions
-    and identical writes never add an undo entry; reads and OCR reservations are
-    excluded. Grouped UI saves retain one chronological stack entry.
+    and transactions with unchanged final row images never add an undo entry;
+    reads and OCR reservations are excluded. REPLACE deletions are captured
+    along with their insertions. Grouped UI saves retain one chronological entry.
+    Implicit discovery can append its inverses to the latest saved user action
+    without replacing its label; with no prior action, discovery has no Undo.
     """
     entries = []
+    row_images = {}
 
     def remember(table, operation, *values):
         """Collect native SQLite row values before and after each actual row mutation."""
@@ -84,9 +90,16 @@ def capture(db, label):
         new = list(values[width:]) if operation == "update" else list(values) if operation == "insert" else None
         if table != "meta" or (new or old)[0] in META_KEYS:
             entries.append([table, old, new])
+            columns, keys = schemas[table]
+            identity = (table, tuple((new or old)[columns.index(key)] for key in keys))
+            if identity not in row_images:
+                row_images[identity] = [old, new]
+            else:
+                row_images[identity][1] = new
         return 0
 
     schemas = {table: _schema(db, table) for table in TABLES}
+    db.execute("PRAGMA recursive_triggers=ON")
     db.create_function("undo_remember", -1, remember)
     for table, (columns, _) in schemas.items():
         old = ",".join("OLD." + _quote(column) for column in columns)
@@ -98,7 +111,16 @@ def capture(db, label):
                        f"AFTER {operation.upper()} ON main.{_quote(table)}{condition} "
                        f"BEGIN SELECT undo_remember('{table}','{operation}',{values}); END")
     yield
-    if not entries:
+    if not entries or all(old == new for old, new in row_images.values()):
+        return
+    if append_to_latest:
+        # The caller's write transaction serializes discovery with other writers.
+        # Recording even reinsertion prevents an earlier deletion inverse from
+        # finding an unexpected row when the user undoes a reference reset.
+        prior = db.execute("SELECT id,changes FROM undo_actions ORDER BY id DESC LIMIT 1").fetchone()
+        if prior:
+            entries = _unpack(prior["changes"]) + entries
+            db.execute("UPDATE undo_actions SET changes=? WHERE id=?", (_pack(entries), prior["id"]))
         return
     token, shown_label = getattr(_LOCAL, "group", None) or (uuid.uuid4().hex, label)
     prior = db.execute("SELECT id,changes FROM undo_actions WHERE token=?", (token,)).fetchone()

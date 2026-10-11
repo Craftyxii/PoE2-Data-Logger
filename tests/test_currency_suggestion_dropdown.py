@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QSignalSpy, QTest
-from PySide6.QtWidgets import QApplication, QComboBox, QPushButton
+from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QPushButton
 
 from PoE2_Data_Logger.core import logger_store as logger, store
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
@@ -114,6 +114,54 @@ class CurrencySuggestionDropdownTests(unittest.TestCase):
                 self.inventory(placeholder)
                 self.assertIsNone(self.window.inventory_table.cellWidget(0, 1))
                 self.assertEqual(self.window.inventory_table.item(0, 1).text(), "")
+
+    def test_resolved_name_with_uncertain_count_needs_no_name_reentry(self):
+        """Keep a saved match visible and request only its uncertain count before a real row approval."""
+        self.capture()({"items": [{"slot": 14, "name": "Regal Orb", "quantity": 14,
+                                  "count_needs_review": True}], "unknown": []})
+        table = self.window.inventory_table
+        status = self.controls().findChild(QLabel, "currencyReviewStatus")
+        self.assertEqual(table.item(0, 1).text(), "Regal Orb")
+        self.assertEqual(status.text(), "Likely match · Confirm count")
+        self.controls().findChild(QPushButton, "approveCurrency").click()
+        self.assertEqual(self.controls().property("reviewStatus"), "approved")
+        table.item(0, 2).setText("15")
+        self.assertEqual(status.text(), "Likely match · Confirm count")
+        self.controls().findChild(QPushButton, "approveCurrency").click()
+        self.window.approve_scan_button.click()
+        self.assertEqual(logger.currency_for_map("M0001")["start"], {"Regal Orb": 15})
+
+    def test_strictness_name_hold_is_distinct_from_count_uncertainty(self):
+        """Explicit name review retains the recognized label without inventing count uncertainty."""
+        self.capture()({"items": [{"slot": 14, "name": "Regal Orb", "quantity": 14,
+                                  "name_needs_review": True}], "unknown": []})
+        self.assertEqual(self.window.inventory_table.item(0, 1).text(), "Regal Orb")
+        self.assertEqual(self.controls().findChild(QLabel, "currencyReviewStatus").text(),
+                         "Likely match · Confirm name")
+        self.window.approve_scan_button.click()
+        self.assertEqual(self.controls().property("reviewStatus"), "rejected")
+        self.assertEqual(logger.currency_for_map("M0001")["start"], {})
+
+    def test_saved_reference_rescan_can_be_confirmed_without_retyping(self):
+        """Carry a real learned icon match through Qt approval with its saved label intact."""
+        name = "Saved Ember Audit"
+        cell = Image.fromarray(np.random.default_rng(73).integers(35, 220, (50, 50, 3), dtype=np.uint8))
+        logger.save_currency_snapshot("end", [{"name": name, "quantity": 1}], register_names=True,
+                                      icon_examples=[{"name": name, "category": "Currency", "image": cell}])
+        self.grid = Image.new("RGB", (600, 250), (8, 8, 8))
+        self.grid.paste(cell, (350, 50))
+        self.grid.info["poe2_inventory_aligned"] = True
+        callback = self.capture()
+        callback(self.jobs[-1][0]())
+        table = self.window.inventory_table
+        self.assertEqual(table.rowCount(), 1)
+        self.assertEqual(table.item(0, 1).text(), name)
+        self.assertNotIn("Confirm name", self.controls().findChild(QLabel, "currencyReviewStatus").text())
+        approve = self.controls().findChild(QPushButton, "approveCurrency")
+        if approve.isEnabled():
+            approve.click()
+        self.window.approve_scan_button.click()
+        self.assertEqual(logger.currency_for_map("M0001")["start"], {name: 1})
 
     def test_manual_name_and_canonical_cell_edits_synchronize_without_signal_recursion(self):
         """Support free typing and the table-item API used by saving and existing callers."""

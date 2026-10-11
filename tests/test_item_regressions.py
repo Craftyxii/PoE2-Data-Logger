@@ -9,7 +9,7 @@ from PIL import Image
 
 from PoE2_Data_Logger.ocr import currency_ocr, item_ocr, item_text
 from PoE2_Data_Logger.ocr.affix_capture import affix_catalog, looks_like_modifier
-from PoE2_Data_Logger.ui.native_desktop import clear_currency_read, clear_ritual_read
+from PoE2_Data_Logger.ui.native_desktop import clear_currency_read, clear_ritual_read, clear_waystone_read
 
 
 class ItemRegressionTests(unittest.TestCase):
@@ -24,6 +24,42 @@ class ItemRegressionTests(unittest.TestCase):
         """Construct a high-confidence OCR row with configurable text bounds."""
         return {"text": text, "score": .99, "x": x, "y": y,
                 "right": x + 220 if right is None else right, "bottom": y + 20}
+
+    def waystone_rows(self, mods):
+        """Build a bounded tooltip body around independently supplied modifier rows."""
+        return [self.row(text, y=index * 30) for index, text in enumerate([
+            "Waystone (Tier 15)", "Monster Pack Size: +35%", "Waystone Drop Chance: +215%",
+            *mods, "Can be used in a Map Device"])]
+
+    def test_waystone_recovery_wrap_preserves_one_modifier_and_distinct_following_modifier(self):
+        """Join Life and Energy Shield to its incomplete recovery phrase without merging the next modifier."""
+        result = item_text.read_screen_tooltip(Image.new("RGB", (800, 500)), self.affixes, ocr_rows=self.waystone_rows([
+            "Players have 15% less Recovery Rate of", "Life and Energy Shield",
+            "Monsters deal 25% increased Damage"]))
+        self.assertEqual(result["mods"], [
+            "Players have 15% less Recovery Rate of Life and Energy Shield",
+            "Monsters deal 25% increased Damage"])
+        self.assertEqual(result["fields"]["map_mods"], 2)
+        self.assertTrue(clear_waystone_read(result))
+
+    def test_waystone_independent_non_numeric_modifier_retains_its_own_row(self):
+        """Keep complete numeric modifiers and separate non-numeric monster properties as distinct modifiers."""
+        mods = ["Players have 15% less Recovery Rate of Life and Energy Shield",
+                "Monsters are Hexproof", "Monsters Poison on Hit"]
+        result = item_text.read_screen_tooltip(Image.new("RGB", (800, 500)), self.affixes,
+                                             ocr_rows=self.waystone_rows(mods))
+        self.assertEqual(result["mods"], mods)
+        self.assertEqual(result["fields"]["map_mods"], 3)
+        self.assertTrue(clear_waystone_read(result))
+
+    def test_waystone_unproven_continuation_requires_confirmation_of_modifier_count(self):
+        """Retain uncertain continuation text while blocking automatic acceptance of an invented extra modifier."""
+        mods = ["Players have 15% less Recovery Rate", "of Life and Energy Shield",
+                "Monsters are Hexproof"]
+        result = item_text.parse_screen_tooltip(self.waystone_rows(mods), self.affixes)
+        self.assertEqual(result["mods"], mods)
+        self.assertIsNone(result["fields"]["map_mods"])
+        self.assertFalse(clear_waystone_read(result))
 
     def test_every_tablet_flag_survives_copy_and_screen_parsing(self):
         """Verify all tablet flags parse identically from copied text and screen OCR."""

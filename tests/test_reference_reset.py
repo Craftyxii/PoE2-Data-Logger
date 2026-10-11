@@ -138,9 +138,14 @@ class ReferenceResetTests(unittest.TestCase):
         reference_pack.reset_to_defaults()
         after = self.rows()
         preserved = set(before) - set(reference_pack._DEFAULT_TABLES) - set(reference_pack._EXAMPLE_TABLES)
+        preserved -= {"undo_actions", "sqlite_sequence"}
         before["meta"] = [row for row in before["meta"] if row[0] != "active_retired_currency_names"]
         self.assertEqual({table: before[table] for table in preserved},
                          {table: after[table] for table in preserved})
+        self.assertEqual(after["undo_actions"][:-1], before["undo_actions"])
+        self.assertEqual(after["undo_actions"][-1][2], "Reset OCR references")
+        self.assertEqual([row for row in before["sqlite_sequence"] if row[0] != "undo_actions"],
+                         [row for row in after["sqlite_sequence"] if row[0] != "undo_actions"])
         self.assertEqual([export() for export in stable_exports], exports)
         self.assertEqual(logger.session_currency_totals(), totals)
         current = self.worksheet_records()
@@ -178,6 +183,54 @@ class ReferenceResetTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "broken bundle"):
                 reference_pack.reset_to_defaults()
         self.assertEqual(self.rows(), before)
+
+    def test_reset_undo_restores_local_catalogs_glyphs_icons_and_raw_captures(self):
+        """Restore every reference before-image without changing stored scan IDs or screenshot bytes."""
+        self.custom_references()
+        tables = (*reference_pack._DEFAULT_TABLES, *reference_pack._EXAMPLE_TABLES, "scans")
+        before = self.rows(tables)
+        images = {path.name: path.read_bytes() for path in (store.DATA_DIR / "images").iterdir()}
+        with logger._connect() as db:
+            retired = logger._meta(db, "active_retired_currency_names")
+        reference_pack.reset_to_defaults()
+        self.assertEqual(logger.undo_action(), "Reset OCR references")
+        logger._READY = False
+        logger.initialize()
+        self.assertEqual(logger.undo_last_action()["action"], "Reset OCR references")
+        self.assertEqual(self.rows(tables), before)
+        self.assertEqual(len(store.reviewed_glyphs()), 1)
+        self.assertEqual(len(logger.review_icons()), 1)
+        self.assertIn("Aldur's Saga", logger.currency_names())
+        with logger._connect() as db:
+            self.assertEqual(logger._meta(db, "active_retired_currency_names"), retired)
+        self.assertEqual({path.name: path.read_bytes() for path in (store.DATA_DIR / "images").iterdir()}, images)
+
+    def test_reset_undo_then_approval_undo_remains_available_for_new_learned_name(self):
+        """Undo the reset before reversing the approval that learned its removed currency label."""
+        logger.clear_export_and_reset_ids()
+        logger.start_map()
+        logger.save_currency_snapshot("end", [{"name": "Reset Undo currency", "quantity": 7}],
+                                      register_names=True)
+        recorded = logger.export_currency_csv()
+        reference_pack.reset_to_defaults()
+        self.assertNotIn("Reset Undo currency", logger.currency_names())
+        self.assertEqual(logger.undo_last_action()["action"], "Reset OCR references")
+        self.assertIn("Reset Undo currency", logger.currency_names())
+        self.assertEqual(logger.export_currency_csv(), recorded)
+        self.assertEqual(logger.undo_action(), "Currency approval")
+        self.assertEqual(logger.undo_last_action()["action"], "Currency approval")
+        self.assertEqual(logger.currency_for_map("M0001")["end"], {})
+        self.assertNotIn("Reset Undo currency", logger.currency_names())
+        self.assertEqual(logger.undo_action(), "New map")
+
+    def test_unchanged_reset_keeps_latest_saved_action_without_an_undo_entry(self):
+        """Keep a reset of already shipped references outside the saved-action chronology."""
+        logger.clear_export_and_reset_ids()
+        logger.start_map()
+        before = self.rows()
+        reference_pack.reset_to_defaults()
+        self.assertEqual(self.rows(), before)
+        self.assertEqual(logger.undo_action(), "New map")
 
 
 if __name__ == "__main__":

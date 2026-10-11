@@ -20,6 +20,10 @@ _FOOTER = re.compile(r"^(?:Can be used|Waystones can|Right click|Shift click|Pre
                      r"Corrupted$|Mirrored$|Unidentified$|Note:)", re.I)
 _PERCENT = re.compile(r"([+-]?\d+(?:[.,]\d+)?)\s*%")
 _TABLET_TITLE = re.compile(r"^(?:[A-Za-z' -]+\s+)?Tab[li1]ets?(?:\s+\d+)?$", re.I)
+_WAYSTONE_SUBJECT = re.compile(
+    r"^(?:Players?|Monsters?|Map|Area|Rare|Magic|Unique|Boss|All|Your|"
+    r"Breaches?|Rituals?|Chests?|Strongboxes?)\b", re.I)
+_WRAP_END = re.compile(r"\b(?:an?|in|of|to|from|with|and|for)$", re.I)
 
 
 def _number(line):
@@ -82,6 +86,22 @@ def _is_footer(line):
     """Recognize usage, inspection and terminal item-status text that ends modifiers."""
     key = re.sub(r"[^a-z0-9]", "", line.lower())
     return bool(_FOOTER.match(line) or key.startswith(("canbeused", "inspect", "togglechat")))
+
+
+def _waystone_modifiers(lines):
+    """Join syntactically supported wraps and hold uncertain row boundaries instead of counting extra mods."""
+    merged, uncertain = [], False
+    for line in lines:
+        independent = bool(_PERCENT.search(line) or _WAYSTONE_SUBJECT.match(line))
+        if merged and _WRAP_END.search(merged[-1]) and not independent:
+            merged[-1] += " " + line
+        else:
+            if not independent or merged and _WRAP_END.search(merged[-1]):
+                uncertain = True
+            merged.append(line)
+    if merged and _WRAP_END.search(merged[-1]):
+        uncertain = True
+    return merged, uncertain
 
 
 def parse_item_text(text, affixes=()):
@@ -150,17 +170,14 @@ def parse_screen_tooltip(ocr_rows, affixes=()):
             mods.pop(0)
         if mods and mods[-1].lower() == "corrupted":
             mods.pop()
-        merged = []
-        for line in mods:
-            if merged and len(line.split()) <= 2 and not _PERCENT.search(line) and len(merged[-1]) > 40:
-                merged[-1] += " " + line
-            else:
-                merged.append(line)
+        merged, uncertain_boundaries = _waystone_modifiers(mods)
         name = lines[index - 1] if index else ""
         tier = re.search(r"Waystone\s*\(Tier\s*(\d+)\)", body[0], re.I)
         props = ["Item Class: Waystones", name, body[0],
                  f"Waystone Tier: {tier.group(1)}", *body[1:first_mod], "Item Level: 0", *merged]
         parsed = parse_item_text("\n".join(props), affixes)
+        if parsed and uncertain_boundaries:
+            parsed["fields"]["map_mods"] = None
     else:
         start = next((i + 1 for i, line in enumerate(body)
                       if re.search(r"uses?\s*remaining\b", line, re.I)), None)
