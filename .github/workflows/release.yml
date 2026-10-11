@@ -1,4 +1,4 @@
-# Build and verify a Windows installer; release publication runs only for tags.
+# Build and verify a Windows installer, or publish artifacts from a verified run.
 name: Windows installer
 
 on:
@@ -6,12 +6,30 @@ on:
     tags:
       - 'v[0-9]*'
   workflow_dispatch:
+    inputs:
+      verified_run_id:
+        description: 'Publish artifacts from this successful installer run; empty builds normally'
+        type: string
+        default: ''
+      verified_sha:
+        description: 'Exact 40-character source SHA of the verified installer run'
+        type: string
+        default: ''
+      beta_tag:
+        description: 'Beta tag for verified publication'
+        type: string
+        default: ''
+      release_notes:
+        description: 'Source-bound release notes including the verified run URL'
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 jobs:
   build:
+    if: ${{ !inputs.verified_run_id }}
     runs-on: windows-latest
     permissions:
       contents: write
@@ -142,3 +160,23 @@ jobs:
           else { $releaseArgs += @('--latest=true', '--notes-file', 'docs/RELEASE_1.3.2.md') }
           gh @releaseArgs
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
+
+  publish_verified_beta:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.verified_run_id != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERIFIED_RUN_ID: ${{ inputs.verified_run_id }}
+      VERIFIED_SHA: ${{ inputs.verified_sha }}
+      BETA_TAG: ${{ inputs.beta_tag }}
+      BETA_RELEASE_NOTES: ${{ inputs.release_notes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Publish the verified beta installer
+        run: python tools/publish_verified_beta.py
