@@ -6,6 +6,8 @@ This beta improves scan recovery, propagation crown detection and the analysis g
 
 - Run native OCR in reusable child processes with bounded admission. A cancelled, timed-out or crashed native reader can be stopped and replaced so subsequent scans can run; its late result cannot replace a newer review or save data. Recognition keeps the existing 90-second deadline, including queued work.
 - Recover cleanly from failures while admitting a scan, without leaving the HUD on Reading or cancelling an unrelated capture.
+- Cancel and reap a remnant reader when its pending scan is discarded. On desktop restart, clear a leftover reservation whose screenshot and review were lost with the previous process, allowing later scans to proceed without consuming remnant IDs or changing saved logs.
+- Keep the reader, watchdog and review intact if the database cannot release a reservation during Discard or Reject. A partial seed rejection keeps the reservation until the remaining rows are reviewed; failed final rejection leaves the row available for retry.
 - Reject malformed or multiple waystone property percentages instead of accepting a valid-looking suffix. Observed ambiguous properties stay available for manual review.
 - Retain independently verified multi-cell Ritual equipment when mild image compression blurs an ornate corner. Color support and the matching opposite corner remain required.
 - Recover propagation crowns and tentative fragments below overlapping recipe borders. Preserve isolated native peaks, sample pale tips between the original exposures, and reject gold rune artwork below the socket baseline. Recovered evidence needs corroboration; plain frames and conflicting sockets remain unresolved.

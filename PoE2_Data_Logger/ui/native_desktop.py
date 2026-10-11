@@ -354,9 +354,15 @@ class WorkspaceTabs(QTabWidget):
 class LoggerWindow(QMainWindow):
     """Coordinate map-scoped UI drafts, scan review and persistence through the logger service."""
     def __init__(self):
-        """Create controls and map-scoped review drafts, then wire capture and GUI handoffs."""
+        """Retire reservations whose in-memory review died at restart, then wire desktop capture and drafts."""
         super().__init__()
         self.state = logger.get_state()
+        unfinished_remnant = bool(self.state["ocr_pending"])
+        if unfinished_remnant:
+            # Screenshots and correction drafts are not persisted. A token
+            # surviving a previous process cannot protect a recoverable review.
+            # Keep this desktop-only: OCR children initialize the same profile.
+            self.state = logger.discard_ocr_id()
         if not self.state["current_map_id"]:
             self.state = logger.start_map()
         self._ocr_active_threads = ocr_runtime.active_threads()
@@ -467,6 +473,8 @@ class LoggerWindow(QMainWindow):
         self._scan_ready_callback = self.tasks.scan_ready.emit
         service.HOTKEY.on_event = self._scan_ready_callback
         QApplication.instance().installEventFilter(self)
+        if unfinished_remnant:
+            set_message(self.review_summary, "Previous unfinished remnant scan discarded. Scan it again.")
 
     def _submit(self, label, function, done=None):
         """Dispatch generation-bound work with killable OCR isolated from export and save workers."""
@@ -1260,7 +1268,6 @@ class LoggerWindow(QMainWindow):
         """Cancel and clear the active non-remnant review, restoring saved form state without
         committing it or retaining its isolated recognition worker.
         """
-        self._failed_review = False
         kind = self.pending_review_kind
         if kind == "propagation":
             self._cancel_pending_chain_save()
@@ -1269,6 +1276,7 @@ class LoggerWindow(QMainWindow):
         if kind is None:
             return
         service.HOTKEY.cancel_capture(modes=("propagation",) if kind == "propagation" else None)
+        self._failed_review = False
         self._remnant_reading = None
         if kind == "waystone":
             self._waystone_form_baseline = None
@@ -5093,12 +5101,30 @@ class LoggerWindow(QMainWindow):
         """Reject a waiting seed or opened reading and release its pending OCR ID when review
         is exhausted, cancelling its obsolete reader without changing recognition or saved logs.
         """
+        kind = self.pending_review_kind
+        if kind == "seed":
+            exhausted = not self._seed_readings
+            if self._seed_readings:
+                row = self.seed_table.currentRow()
+                if not 0 <= row < len(self._seed_readings):
+                    raise ValueError("Select a visible remnant first.")
+                reading = self._seed_readings[row]
+                if reading.get("saved"):
+                    raise ValueError("A saved remnant cannot be rejected here.")
+                exhausted = not any(index != row and not item.get("saved") and not item.get("rejected")
+                                    for index, item in enumerate(self._seed_readings))
+        elif kind == "remnant":
+            exhausted = True
+        else:
+            raise ValueError("There is no remnant reading to reject.")
+        if exhausted:
+            logger.discard_ocr_id()
         self._remnant_reading = None
         self._retire_obsolete_scan_tasks()
         service.HOTKEY.cancel_capture(modes=("seed", "opened", "both"))
-        if self.pending_review_kind == "seed":
+        self._failed_review = False
+        if kind == "seed":
             if not self._seed_readings:
-                logger.discard_ocr_id()
                 self.results["seed"] = None
                 self.pending_review_kind = None
                 self.approve_scan_button.setEnabled(False)
@@ -5107,12 +5133,6 @@ class LoggerWindow(QMainWindow):
                 if self._overlay_auto_review:
                     self.hide_overlay()
                 return
-            row = self.seed_table.currentRow()
-            if not 0 <= row < len(self._seed_readings):
-                raise ValueError("Select a visible remnant first.")
-            reading = self._seed_readings[row]
-            if reading.get("saved"):
-                raise ValueError("A saved remnant cannot be rejected here.")
             reading["rejected"] = True
             if self._saved_scan_capture and self._saved_scan_capture["reading"] is reading:
                 self.saved_scan = self._saved_scan_capture = None
@@ -5121,8 +5141,7 @@ class LoggerWindow(QMainWindow):
             use.setFlags(Qt.ItemFlag.NoItemFlags)
             self._update_seed_row(row)
             self._seed_commit_enabled()
-            if not any(not item.get("saved") and not item.get("rejected") for item in self._seed_readings):
-                logger.discard_ocr_id()
+            if exhausted:
                 self.results["seed"] = None
                 self.pending_review_kind = None
                 self._review_controls(None)
@@ -5131,8 +5150,7 @@ class LoggerWindow(QMainWindow):
                 if self._overlay_auto_review:
                     self.hide_overlay()
             return
-        if self.pending_review_kind == "remnant":
-            logger.discard_ocr_id()
+        if kind == "remnant":
             self._both_link = None
             self._both_approved = False
             self.results["opened"] = None
@@ -5145,7 +5163,6 @@ class LoggerWindow(QMainWindow):
             if self._overlay_auto_review:
                 self.hide_overlay()
             return
-        raise ValueError("There is no remnant reading to reject.")
 
     def _clear_seed_queue(self):
         """Clear visible-seed rows and all transient both-view match and duplicate-tracking

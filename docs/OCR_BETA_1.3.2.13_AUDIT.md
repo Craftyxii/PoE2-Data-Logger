@@ -18,6 +18,12 @@ Only propagation receives new screenshot training. Opened-remnant and visible-se
 
 7. Frozen child launch and smoke coverage: `multiprocessing.freeze_support()` runs before desktop/Qt imports. The installer smoke now sends the same real bundled-model/resource/pixel checks through an isolated worker and requires a distinct PID. Its admission deadline is 45 seconds so the installer verifier's outer 60-second guard leaves time for bounded worker cleanup. Startup failure closes both Pipe endpoints. The frozen-module validator requires `core.ocr_workers`. Native Windows frozen/install validation is still required; Linux source smoke is not a substitute.
 
+8. Discarded remnant background work: `discard_scan` cleared `_remnant_reading`, reservation and drafts but omitted `_retire_obsolete_scan_tasks`. Actual-child reproduction left one uncancelled living reader, task, Future and timer despite an empty review. Discard now retires that exact task and its native child. Repeated discard/retry in opened, seed and both modes proves capacity is released without saved commits.
+
+9. Invisible reservation after restart: `ocr_pending` persisted in SQLite while screenshot/results and `pending_review_kind` existed only in memory. Closing and reopening produced an empty review with hidden Approve/Reject, yet `_require_remnant_review_finished` rejected later activity scans. New desktop construction retires this unrecoverable reservation and explains that the unfinished remnant should be scanned again. Core `initialize` remains nondestructive because live OCR children initialize the same profile. Restart tests cover opened/seed reservations, subsequent inventory admission, unchanged saved logs/IDs/Undo, clean startup and protection of a still-live review during core reinitialization.
+
+10. Failed Discard/Reject ordering: both paths cancelled and removed the reader/watchdog before releasing `ocr_pending`. A database exception then left Reading visible without a live task or deadline. Reject also cleared `_failed_review` before storage succeeded. Reservation release now precedes cancellation when the review is exhausted; failed storage preserves the owned reader, timer, UI and failure guard. Seed selection/exhaustion is validated first, partial rejection retains the reservation, and failed final rejection leaves the selected row unchanged. Actual blocked children and timeout/retry tests cover opened, seed and both modes.
+
 ## Propagation crown corrections
 
 The supplied opened recipe panels are independently labeled in `tests/fixtures/propagation_crowns/manifest.json`: 61 panels, 251 visible socket rows and 263 complete crowns. The 66 pre-opening images are excluded. No naturally partial crowns were present, so synthetic damage results must be labeled separately.
@@ -44,7 +50,7 @@ All 61 original complete panels were also processed end to end without recogniti
 - Real process broker lifecycle: nine tests passed, including cancellation waiter notification and both startup-failure pipe endpoints.
 - UI preparation failures: three tests passed with both executor admission assertions.
 - Real hotkey transport integration: three tests passed.
-- Real desktop child ownership integration: four tests passed, including remnant supersession of inventory/Ritual readers and preservation of reservation, preview and draft after late success/error callbacks.
+- Desktop lifecycle, startup recovery, pending-review conflicts and seed mode checks: all 28 tests passed, covering actual child rejection/discard/retry, remnant supersession of inventory/Ritual readers, database failures, partial seed queues and preservation of reservation, preview and draft after late success/error callbacks.
 - Existing hotkey watchdog/listener/resolution/propagation routing/CPU preference: 49 tests passed.
 - Source `python -m PoE2_Data_Logger --smoke-test`: passed with real child/bundled OCR.
 - Production child/direct opened-remnant and visible-seed results: exact parity.

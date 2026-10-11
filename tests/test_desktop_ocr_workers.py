@@ -220,6 +220,86 @@ class DesktopOCRWorkerTests(unittest.TestCase):
                 self.assertIsNone(self.window.pending_review_kind)
                 self.assertIsNone(self.window._remnant_reading)
 
+    def test_failed_reject_preserves_live_reader_and_watchdog_until_retry(self):
+        """A failed reservation release keeps every remnant reader owned and protected until Reject succeeds."""
+        for mode in ("opened", "seed", "both"):
+            with self.subTest(mode=mode):
+                future, pid = self.blocked_capture(mode)
+                capture = self.window._remnant_reading
+                key = next(iter(self.window._scan_task_futures))
+                timer = self.window._scan_task_timers[key]
+                summary = self.window.review_summary.text()
+                kind = self.window.pending_review_kind
+                with patch.object(logger, "discard_ocr_id", side_effect=sqlite3.OperationalError("database is locked")), \
+                        patch.object(service.HOTKEY, "cancel_capture") as cancel:
+                    with self.assertRaisesRegex(sqlite3.OperationalError, "database is locked"):
+                        self.window.reject_review()
+                cancel.assert_not_called()
+                self.assertFalse(future.done())
+                self.assertIs(self.window._remnant_reading, capture)
+                self.assertIs(self.window._scan_task_futures[key], future)
+                self.assertIn(key, self.window._pending_tasks)
+                self.assertIs(self.window._scan_task_timers[key], timer)
+                self.assertTrue(timer.isActive())
+                self.assertEqual(self.window.review_summary.text(), summary)
+                self.assertEqual(self.window.pending_review_kind, kind)
+                self.assertFalse(self.window._failed_review)
+                self.assertIn(pid, {child.pid for child in multiprocessing.active_children()})
+                self.window.reject_review()
+                self.assert_retired(future, pid)
+                self.assertEqual(self.window._pending_tasks, {})
+                self.assertIsNone(self.window.pending_review_kind)
+                self.assertIsNone(self.window._remnant_reading)
+
+    def test_failed_reject_keeps_timed_out_scan_unapprovable_until_retry(self):
+        """Failed Reject cannot erase the failure guard protecting a real timed-out remnant reader."""
+        for mode in ("opened", "seed", "both"):
+            with self.subTest(mode=mode):
+                future, pid = self.blocked_capture(mode)
+                self.window._expire_scan_task(next(iter(self.window._scan_task_futures)), future)
+                self.assert_retired(future, pid)
+                summary = self.window.review_summary.text()
+                kind = self.window.pending_review_kind
+                with patch.object(logger, "discard_ocr_id", side_effect=sqlite3.OperationalError("database is locked")):
+                    with self.assertRaisesRegex(sqlite3.OperationalError, "database is locked"):
+                        self.window.reject_review()
+                self.assertTrue(self.window._failed_review)
+                self.assertFalse(self.window.approve_scan_button.isEnabled())
+                self.assertEqual(self.window.pending_review_kind, kind)
+                self.assertEqual(self.window.review_summary.text(), summary)
+                with self.assertRaisesRegex(ValueError, "This scan failed"):
+                    self.window.commit_review()
+                self.window.reject_review()
+                self.assertFalse(self.window._failed_review)
+                self.assertIsNone(self.window.pending_review_kind)
+
+    def test_partial_seed_reject_retains_reservation_and_failed_final_reject_keeps_row(self):
+        """Only the last waiting seed releases the reservation, and a failed release leaves that row reviewable."""
+        with logger._connect() as db:
+            stages = db.execute("SELECT * FROM seed_states WHERE family=3 ORDER BY sockets LIMIT 2").fetchall()
+        result = {"mode": "seed", "status": "Review these visible remnants.",
+                  "remnants": [{"sockets": stage["sockets"], "seed_slot": stage["seed_slot"],
+                                "seed_rune": stage["seed_rune"], "candidates": [3], "can_commit": False}
+                               for stage in stages], **logger.scan_context()}
+        self.window.show_result("seed", result, self.path.read_bytes())
+        held = logger.get_state()["ocr_pending"]
+        self.window.seed_table.setCurrentCell(0, 2)
+        with patch.object(logger, "discard_ocr_id", side_effect=sqlite3.OperationalError("database is locked")) as discard:
+            self.window.reject_review()
+            discard.assert_not_called()
+            self.window.seed_table.setCurrentCell(1, 2)
+            summary = self.window.review_summary.text()
+            with self.assertRaisesRegex(sqlite3.OperationalError, "database is locked"):
+                self.window.reject_review()
+        self.assertTrue(self.window._seed_readings[0]["rejected"])
+        self.assertFalse(self.window._seed_readings[1].get("rejected", False))
+        self.assertEqual(logger.get_state()["ocr_pending"], held)
+        self.assertEqual(self.window.pending_review_kind, "seed")
+        self.assertEqual(self.window.review_summary.text(), summary)
+        self.window.reject_review()
+        self.assertIsNone(logger.get_state()["ocr_pending"])
+        self.assertIsNone(self.window.pending_review_kind)
+
 
 if __name__ == "__main__":
     unittest.main()
