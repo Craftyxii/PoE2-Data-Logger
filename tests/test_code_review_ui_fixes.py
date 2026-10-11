@@ -24,6 +24,7 @@ class CodeReviewUIFixTests(unittest.TestCase):
 
     def setUp(self):
         """Create a fresh profile without changing the user's saved logs."""
+        self.writers = []
         self.temp = tempfile.TemporaryDirectory()
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.temp.name)
@@ -33,7 +34,12 @@ class CodeReviewUIFixTests(unittest.TestCase):
         self.window._poll.stop()
 
     def tearDown(self):
-        """Retire Qt/worker resources and restore the storage root."""
+        """Close fixture handles before retiring workers and removing the Windows database folder."""
+        # unittest addCleanup callbacks run after tearDown, when Windows must
+        # already be able to remove the SQLite files. Rollback alone does not
+        # close a connection or release its file handles.
+        for db in self.writers:
+            db.close()
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
@@ -42,10 +48,10 @@ class CodeReviewUIFixTests(unittest.TestCase):
         self.temp.cleanup()
 
     def writer(self):
-        """Acquire a genuine competing SQLite writer to exercise the user save path."""
+        """Track a real competing writer for explicit closure before profile teardown."""
         db = sqlite3.connect(store.DATA_DIR / 'scans.sqlite3')
+        self.writers.append(db)
         db.execute('BEGIN IMMEDIATE')
-        self.addCleanup(db.close)
         return db
 
     def test_reference_add_refreshes_exhausted_undo_and_duplicate_is_noop(self):

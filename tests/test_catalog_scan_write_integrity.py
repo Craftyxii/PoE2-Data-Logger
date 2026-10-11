@@ -1,7 +1,7 @@
 """Keep concurrent catalog imports and failed screenshot saves consistent and reversible."""
 
 import base64
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 import io
 import json
 from pathlib import Path
@@ -172,7 +172,7 @@ class CatalogScanWriteIntegrityTests(unittest.TestCase):
     def test_locked_screenshot_save_creates_no_untracked_capture(self):
         """Fail before image creation when another writer owns the database."""
         before = logger.undo_action()
-        with sqlite3.connect(store.DATA_DIR / "scans.sqlite3") as writer:
+        with closing(sqlite3.connect(store.DATA_DIR / "scans.sqlite3")) as writer, writer:
             writer.execute("BEGIN IMMEDIATE")
             with patch.object(store, "_reviewed_vector", return_value=None), store.database_timeout(0):
                 with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
@@ -306,6 +306,22 @@ class CatalogScanWriteIntegrityTests(unittest.TestCase):
         with store._connect() as db:
             return db.execute("PRAGMA busy_timeout").fetchone()[0]
 
+    def test_store_connections_close_retained_handles_after_success_and_rollback(self):
+        """Release SQLite handles deterministically even while callers retain them after a failed write."""
+        with store._connect() as committed:
+            committed.execute("INSERT INTO meta(key,value) VALUES('closure-review','committed')")
+        with self.assertRaisesRegex(sqlite3.ProgrammingError, "closed"):
+            committed.execute("SELECT 1")
+        with self.assertRaisesRegex(RuntimeError, "rollback closure"):
+            with store._connect() as rolled_back:
+                rolled_back.execute("UPDATE meta SET value='discarded' WHERE key='closure-review'")
+                raise RuntimeError("rollback closure")
+        with self.assertRaisesRegex(sqlite3.ProgrammingError, "closed"):
+            rolled_back.execute("SELECT 1")
+        with store._connect() as reopened:
+            self.assertEqual(reopened.execute("SELECT value FROM meta WHERE key='closure-review'").fetchone()[0],
+                             "committed")
+
     def test_database_timeout_nested_scopes_restore_after_exception(self):
         """Retain ten-second defaults while nested fail-fast overrides unwind safely."""
         self.assertEqual(self.connection_timeout(), 10000)
@@ -339,7 +355,7 @@ class CatalogScanWriteIntegrityTests(unittest.TestCase):
 
     def test_database_timeout_zero_rejects_real_writer_without_waiting_ten_seconds(self):
         """Fail quickly against genuine SQLite contention and restore the normal timeout afterward."""
-        with sqlite3.connect(store.DATA_DIR / "scans.sqlite3") as writer:
+        with closing(sqlite3.connect(store.DATA_DIR / "scans.sqlite3")) as writer, writer:
             writer.execute("BEGIN IMMEDIATE")
             started = time.monotonic()
             with store.database_timeout(0):
