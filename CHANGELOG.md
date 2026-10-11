@@ -1,3 +1,8 @@
+# PoE2 Data Logger 1.3.2.12 Beta
+
+- Keep the export regression's 10-second deadline while yielding to the Python worker during Qt event polling.
+- Publish the reviewed OCR/Undo fixes with aligned beta metadata; application behavior and screenshot previews are unchanged from 1.3.2.11.
+
 # PoE2 Data Logger 1.3.2.11 Beta
 
 - Publish the 1.3.2.10 fixes after updating the native Windows reset test to require the intended Undo entry while preserving logged data, settings and earlier inverses.

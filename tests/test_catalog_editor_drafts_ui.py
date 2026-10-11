@@ -115,14 +115,17 @@ class CatalogEditorDraftTests(unittest.TestCase):
                 self.assertFalse(any(icon["name"] == name for icon in icons()))
                 self.assertEqual(logger.undo_action(), original_action)
     def test_existing_family_draft_survives_real_export_completion(self):
-        """Let a CSV export's actual worker callback refresh saved state without losing current edits."""
+        """Pump completion events while yielding to the real CSV worker, then verify retained family edits."""
         self.window.family_pick.setCurrentIndex(self.window.family_pick.findData(26))
         draft = self.enter_family_draft()
         self.window.export_folder.setText(self.tmp.name)
         self.window.write_export("csv")
         deadline = time.monotonic() + 10
         while self.window._pending_tasks and time.monotonic() < deadline:
-            QTest.qWait(20)
+            # Drain queued UI completion and release the GIL for the Python
+            # export worker; repeated native qWait calls can starve that worker.
+            self.app.processEvents()
+            time.sleep(.01)
         self.assertFalse(self.window._pending_tasks, "The actual export must complete during this test.")
         self.assertIn("Export saved:", self.window.statusBar().currentMessage())
         self.assertTrue(list(Path(self.tmp.name).glob("*.csv")))

@@ -1,6 +1,6 @@
 # Deep bug audit
 
-Audit baseline: `b1deccd4c36e1ea0ce6ccf38b2179cfc2f9c3be8` (`1.3.2.9 Beta`). Fixes below were prepared in `1.3.2.10 Beta` and published as `1.3.2.11 Beta` after correcting an outdated native test assertion.
+Audit baseline: `b1deccd4c36e1ea0ce6ccf38b2179cfc2f9c3be8` (`1.3.2.9 Beta`). Fixes below were prepared in `1.3.2.10 Beta` and published as `1.3.2.12 Beta` after correcting two test-harness failures.
 
 ## Confirmed defects
 
@@ -36,3 +36,7 @@ The final release review additionally reproduced reset → automatic affix redis
 Local HUD tests use Qt offscreen on Linux. Publication is blocked until the new commit passes the separate native Windows HUD, full regression, 100-map logging/export and installer/update gates. Native interaction tests and OCR fixtures cannot exhaust every user action sequence or establish perfect live-game recognition.
 
 The first native release run stopped at the reference-reset preservation assertion: it included `undo_actions` and `sqlite_sequence`, both intentionally changed by the new reset inverse. The corrected assertion checks exactly one reset action, unchanged earlier inverses and unchanged unrelated sequences, while retaining all logging/settings preservation checks. No 1.3.2.10 installer was published.
+
+The 1.3.2.11 Windows run passed native HUD interaction (902 Win32 input events), reference reset preservation, raw SQL export and the 100-map logging/export session. The full suite ran 1,220 checks with one failure: the family-draft export test's repeated `QTest.qWait` polling left its Python worker pending. A scheduler diagnostic with the real export reproduced starvation; event processing plus a brief Python sleep completed all three CSV files and retained the draft in 0.13 seconds. The test now yields to its worker while retaining the same 10-second deadline. No application export logic changed, and no 1.3.2.11 installer was published.
+
+A captured-image HUD probe also verified that screenshot previews remain visible. The earlier native Currency/Ritual correction fixtures injected recognition results without attaching images; their screenshots were not evidence that the application's preview had been removed.

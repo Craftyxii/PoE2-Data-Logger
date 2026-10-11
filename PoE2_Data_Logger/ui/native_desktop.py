@@ -48,7 +48,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.11 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.12 Beta"
 SCAN_TIMEOUT_MS = 90000
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
@@ -6881,6 +6881,7 @@ def instance_lock():
         user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
         user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
         window = (user32.FindWindowW(None, WINDOW_TITLE)
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.11 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.10 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.9 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.8 Beta")
