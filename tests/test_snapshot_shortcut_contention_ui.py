@@ -1,6 +1,6 @@
 """Real SQLite writer contention through Snapshot signals and shortcut key events.
 
-The only platform adapter replaced is the Windows listener. Logger validation,
+The Windows listener and foreground adapters are injected. Logger validation,
 preference writes, capture ownership and inventory approval use production code.
 """
 
@@ -13,6 +13,7 @@ import tempfile
 import threading
 import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import QApplication, QGridLayout
 
 from PoE2_Data_Logger.core import logger_store as logger, service, store
 from PoE2_Data_Logger.platform.hotkey import HotkeyManager
+from PoE2_Data_Logger.platform import hotkey as native_hotkeys, live_watch
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, select
 
 
@@ -38,11 +40,15 @@ class SnapshotShortcutContentionUITests(unittest.TestCase):
     def setUp(self):
         """Create isolated data, saved shortcuts and a real logger window."""
         self.temporary = tempfile.TemporaryDirectory(prefix="poe2-snapshot-shortcut-busy-")
+        self.addCleanup(self.temporary.cleanup)
         self.previous_data, self.previous_ready = store.DATA_DIR, logger._READY
+        self.addCleanup(self.restore_profile)
+        self.writer = None
         store.DATA_DIR = Path(self.temporary.name)
         logger._READY = False
         logger.initialize()
-        self.manager = HotkeyManager(supported=True)
+        # This fixture owns synthetic key registrations, not a game window.
+        self.manager = HotkeyManager(supported=True, focused=lambda: False)
         self.registrations = []
 
         def listen(shortcuts, ready, outcome, stop):
@@ -55,24 +61,29 @@ class SnapshotShortcutContentionUITests(unittest.TestCase):
         self.manager._message_loop = listen
         self.native_patch = patch("ctypes.WinDLL", create=True, return_value=Mock())
         self.manager_patch = patch.object(service, "HOTKEY", self.manager)
-        self.native_patch.start()
+        self.native_loader = self.native_patch.start()
+        self.addCleanup(self.native_patch.stop)
         self.manager_patch.start()
+        self.addCleanup(self.manager_patch.stop)
+        # Register before any configure/constructor failure; cleanup order
+        # keeps its Windows adapter and profile alive until the listener stops.
+        self.addCleanup(self.manager._unregister)
         self.manager.configure("F8")
         self.manager.configure_for("currency", "F9")
         self.window = LoggerWindow()
+        self.addCleanup(self.close_window)
         self.window._poll.stop()
-        self.writer = None
+        self.addCleanup(self.release_writer)
 
-    def tearDown(self):
-        """Close real writers/listeners before restoring the original profile."""
-        self.release_writer()
+    def close_window(self):
+        """Close only a fully constructed window before restoring its profile/adapters."""
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
         self.app.processEvents()
-        self.manager_patch.stop()
-        self.native_patch.stop()
+
+    def restore_profile(self):
+        """Restore global profile state even if fixture setup did not finish."""
         store.DATA_DIR, logger._READY = self.previous_data, self.previous_ready
-        self.temporary.cleanup()
 
     def hold_writer(self):
         """Acquire a second connection's SQLite write reservation without mocking failure."""
@@ -264,6 +275,53 @@ class SnapshotShortcutContentionUITests(unittest.TestCase):
                     self.manager.configure("F8")
                     self.manager.configure_for("currency", "F9")
                     self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+
+
+class SnapshotFixtureIsolationTests(unittest.TestCase):
+    """Reject setup contamination without depending on a Windows desktop."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Provide the event loop used by the nested real-window fixture."""
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_windows_setup_uses_its_owned_focus_adapter(self):
+        """Simulate the Windows focus branch without changing Qt/PIL's shared platform module."""
+        case = SnapshotShortcutContentionUITests()
+        case.app = self.app
+        windows = SimpleNamespace(platform="win32")
+        try:
+            with patch.object(native_hotkeys, "sys", windows), patch.object(live_watch, "sys", windows):
+                case.setUp()
+                self.assertFalse(case.manager.focused())
+                case.native_loader.return_value.GetForegroundWindow.assert_not_called()
+                case.doCleanups()
+        finally:
+            case.doCleanups()
+
+    def test_constructor_failure_restores_adapters_profile_and_listener(self):
+        """A failed window setup must not leave mocked WinDLL, HOTKEY, threads or profile behind."""
+        import ctypes
+        absent = object()
+        original_native = getattr(ctypes, "WinDLL", absent)
+        original_manager = service.HOTKEY
+        original_data, original_ready = store.DATA_DIR, logger._READY
+        case = SnapshotShortcutContentionUITests()
+        case.app = self.app
+        try:
+            with patch(__name__ + ".LoggerWindow", side_effect=RuntimeError("fixture constructor failed")):
+                with self.assertRaisesRegex(RuntimeError, "fixture constructor failed"):
+                    case.setUp()
+            case.doCleanups()
+            self.assertIs(service.HOTKEY, original_manager)
+            self.assertIs(getattr(ctypes, "WinDLL", absent), original_native)
+            self.assertEqual((store.DATA_DIR, logger._READY), (original_data, original_ready))
+            self.assertFalse(case.manager.focused())
+            for _, stop, thread in case.registrations:
+                self.assertTrue(stop.is_set())
+                self.assertFalse(thread.is_alive())
+        finally:
+            case.doCleanups()
 
 
 if __name__ == "__main__":
