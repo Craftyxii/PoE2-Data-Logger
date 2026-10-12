@@ -8,7 +8,7 @@ import csv
 import io
 
 
-CONTEXT_VERSION = "3"
+CONTEXT_VERSION = "5"
 HEADERS = ("Section", "Topic", "Guidance", "Context Version")
 ENTRIES = (
     ("purpose", "Overview", "How to use this export",
@@ -39,14 +39,16 @@ ENTRIES = (
      "Join Atlas Setup ID to the data sheets; Map IDs can list several maps and do not make separate setups. "
      "Atlas Node columns are compact: nodes allocated in every referenced setup can be omitted. "
      "Yes/No describes allocation; Atlas Choice numbers follow the saved catalog's option order, with 0 for no choice. "
-     "A remembered choice can coexist with an unallocated node. Blank means unavailable in that saved catalog."),
+     "A remembered choice can coexist with an unallocated node. Blank means unavailable in that saved catalog. "
+     "Analysis Context includes full frozen node/choice definitions, allocated nodes including omitted "
+     "columns, selected option identities and source-scoped totals for each referenced setup."),
     ("history_sheet", "Workbook", "Scan History: event expansion",
      "Scan History expands saved commits and preserves surviving earlier approvals and corrections, "
      "with their recorded settings/details. One commit can produce many rows: recipes, inventory labels, "
      "Ritual offers or chain steps. Imported rows without a commit can also appear. "
      "Use Scan Commit # to group an event; do not treat each history row as another scan or acquired item."),
     ("snapshot", "Workbook", "Snapshot and current projections",
-     "All four worksheets use one SQLite read snapshot. Saved event details and settings remain frozen "
+     "All eight worksheets use one SQLite read snapshot. Saved event details and settings remain frozen "
      "through later rescans or edits, while Current Inventory Snapshot, Session Found Quantity and "
      "ordinary Chain Status are projected from the current state at export time. Discard audit rows explicitly "
      "have Chain Status Discarded. History is not a purely historical-state table."),
@@ -171,7 +173,10 @@ ENTRIES = (
      "ordered by Chain Step #. Resolve the current recipe through Propagation Recipe ID and its recorded "
      "Propagation Family ID; in SQLite join chain_step_provenance.recipe_id to recipe_ids.recipe_id, then "
      "recipe_ids.recipe_name to recipes.name for recipes.combo. Family membership is in families.recipes_json. "
-     "A workbook analysis needs the matching recipe/family reference database or reference pack. "
+     "In Excel, join Propagation Recipe ID to Recipe Database.Recipe ID to obtain Exact Rune Combo, "
+     "then use Family Database rows with that Recipe ID and Propagation Family ID to verify membership "
+     "and see Recipe # In Family. All required recipe/family references are included in this workbook; "
+     "no separate reference pack is needed for these joins. "
      "Effective rune list at step N = prior propagated runes + current recipe combo. Do not add step N's "
      "marked runes again: the intended model includes them in its recipe combo. Manual entries/corrections "
      "can differ from the attributed combo, and membership is not enforced; flag such inconsistencies "
@@ -200,11 +205,13 @@ ENTRIES = (
      "text; use json_extract/json_each or parse JSON in your analysis tool. PNG/vector BLOBs support recognition "
      "and are not item-count records. A raw database backup includes current tables, catalogs, settings, history, "
      "undo state and this analysis_context table."),
-    ("sql_context", "SQLite schema", "analysis_context",
+    ("sql_context", "SQLite schema", "analysis_context / analysis_context_complete",
      "analysis_context has key (primary key), position (reading order), section, topic, guidance and context_version. "
-     "Read SELECT section,topic,guidance,context_version FROM analysis_context ORDER BY position; "
-     "these are exactly the Analysis Context worksheet's rows. Notes are application-owned metadata refreshed "
-     "during initialization, independent of session counters and undo actions."),
+     "analysis_context retains the static guide. Read SELECT section,topic,guidance,context_version "
+     "FROM analysis_context_complete ORDER BY position,key for exactly the Analysis Context worksheet's "
+     "static and data-specific rows. Context views calculate facts from the same saved SQLite snapshot "
+     "without writes or user-defined SQL functions; they also work in a standalone database backup. "
+     "Notes and translation rules are application-owned metadata, independent of session counters and Undo."),
     ("sql_maps", "SQLite schema", "maps / map_unique_kills / expeditions",
      "maps is keyed by map_id and stores snapshot_json (saved configuration), kills_json (Normal, Magic, Rare) "
      "and recorded_at. map_unique_kills stores optional Unique kills by map_id. expeditions is keyed by "
@@ -255,6 +262,125 @@ ENTRIES = (
      "and catalog_json. Saved snapshot_json fields refer to atlas_setup_id. meta stores JSON values by key, "
      "including current settings, session counters and workflow state. Current meta settings do not replace "
      "the configuration frozen in an earlier map or commit snapshot."),
+    ("context_records", "Context records", "How to read the data-specific context",
+     "After the Field guide, Guidance cells in Atlas setup/node/choice/allocation/stat-total, Atlas master perk, "
+     "Map settings, Tablet stat total and Session stat total sections contain JSON objects. Parse their named "
+     "properties; do not treat Topic strings as measured values. SQL NULL becomes JSON null, retaining "
+     "missingness; zero remains numeric zero. Each row explains one definition, setup, contribution or "
+     "scoped total. Definitions for all available options are not allocations. Archived unused setups are "
+     "excluded; a current unused setup can have referenced_map_count 0. Atlas map reference rows link each "
+     "setup to saved map/event references; a map with several historical references is still one map."),
+    ("atlas_decode", "Atlas interpretation", "Decode an Atlas Setup ID without external files",
+     "For an Export or Scan History Atlas Setup ID, find its Atlas setup Context row to get catalog_id, "
+     "catalog_version and recorded gear_item_rarity. Atlas allocation rows enumerate ALL allocated nodes, "
+     "including nodes omitted from the compact Atlas worksheet. Match catalog_id + node_id to Atlas node "
+     "definition rows for the frozen name/activity/effects/stats. Match catalog_id + node_id + choice_number "
+     "to Atlas choice definition rows to translate a worksheet ordinal into choice_id/name/effects/stats. "
+     "Atlas choice rows show remembered selections; only active=true contributes to totals. Ordinal 0 "
+     "means no choice and a blank means unavailable. Never apply an option merely because its definition "
+     "appears here. Use stable node IDs and the setup's frozen catalog instead of a possibly newer worksheet "
+     "header label. The A-prefixed setup ID hashes catalog version/identity, allocation, choices and gear "
+     "rarity; it does NOT identify the active Atlas Master, master perks, Waystone or tablets. Those settings "
+     "belong to the relevant saved map/event, even when the Atlas Setup ID is unchanged."),
+    ("atlas_stat_totals", "Atlas interpretation", "Atlas contribution totals and displayed units",
+     "For each setup and exact stat_id, raw_total sums the numeric constants from allocated nodes plus "
+     "active selected choices, once per source. Dummy display-only stats are omitted. display_total and "
+     "effect are supplied only when the frozen source hashes match a verified single-stat linear display "
+     "rule; unit is then the catalog's displayed unit. This handles native scale differences: a permyriad "
+     "raw value 2000 can display 20%, and raw 100 for a per-room chance can display 1%. Unsupported, coupled, "
+     "constant/flag and offset rules retain raw_total with display_total/effect null; consult their node/choice "
+     "effects instead of assuming raw 1 means 1%. These are configuration contributions, not final applied "
+     "bonuses. Keep distinct stat IDs, targets, conditions, increased/more/reduced wording and caps separate. "
+     "A percentage per closed Pit/tablet/monster modifier is a coefficient, not an already evaluated bonus. "
+     "Preserved cap text does not mean a cap or conditional trigger was calculated. Do not add repeated "
+     "setup totals once for every recipe/history row or add them to displayed map percentages automatically."),
+    ("master_perk_effects", "Atlas interpretation", "Every Atlas Master perk and its function",
+     "Atlas master perk Context rows provide each configured reference's master, name, tier and full effect "
+     "text. Join the saved Atlas Master and selected Perk 1..4, or Map settings master/perks, to this dictionary "
+     "using BOTH master and name. Only the active master's selected perks apply to that observation; named "
+     "Configured Perk columns for inactive masters are remembered settings. A definition row or perk tier "
+     "does not mean allocated, active, a multiplier or an extra event. Effects include their actual scope "
+     "and conditions; do not apply every listed perk to every map. The dictionary is the editable master_perks "
+     "reference at export, not a frozen record of historical effect edits. If a recorded name has no definition "
+     "or the references were changed, keep its historical effect unresolved instead of substituting another perk. "
+     "The logger specifically calculates Master +Mods=1 for active Jado with Unexpected Missions, else 0; "
+     "the other effect text is explanatory metadata rather than an implemented game simulation."),
+    ("source_subtotals", "Stat interpretation", "Map, tablet, Atlas and gear contributions",
+     "Map settings Context rows reproduce each created map's saved numeric settings and derived counts, "
+     "not current live settings. Item rarity concerns loot rarity, monster rarity concerns monster rarity "
+     "categories, pack size concerns monsters per pack, and effectiveness is the saved Effectiveness "
+     "property. These modifiers are distinct from observed quantities and category kills. The export "
+     "does not establish the game's probability, stacking or reward-scaling formulas. Tablet stat total "
+     "sums active slots only, grouped by Map ID + exact affix + unit; inactive capacity slots, raw text and "
+     "legacy percent duplicates are not counted. Percent/count/seconds stay separate, and flag totals "
+     "count occurrences rather than multiplying an effect. The established modifier-count formulas are "
+     "Map Mods=Base Map Mods+Master +Mods; Tablet Mods=sum(active additional-random-modifier counts); "
+     "Total Mods=Map Mods+Tablet Mods. Keep other tablet subtotals, Atlas totals, gear rarity and observed "
+     "map percentages as separate source groups. A displayed map property can already reflect game "
+     "modifiers; adding its sources again could double-count. There is no asserted final combined rarity, "
+     "effectiveness or pack-size formula here."),
+    ("session_stat_totals", "Stat interpretation", "Session sums, coverage and averages",
+     "Session stat total rows summarize one frozen setting/current count per CREATED Map ID, not every "
+     "recipe, remnant, inventory approval or history row. total/mean/minimum/maximum exclude missing "
+     "numeric values; known_maps and missing_maps show coverage, and an entirely missing metric has "
+     "total null rather than a fabricated zero. Percentage totals sum percentage-point observations "
+     "ACROSS maps for bookkeeping; they are not a map bonus. Use per-map values or means for statistical "
+     "comparisons. known_kills_total includes only known categories and can be partial; check Map settings "
+     "kill_categories_complete and each category's coverage. Detonation counts use each current expedition "
+     "once, retaining real totals after a chain discard. These summaries do not create acquired-item totals: "
+     "those remain the once-per-map positive inventory gains in Export and the Inventory rules. Queued "
+     "inventory-only IDs before map creation do not increase the created-map denominator. Legacy empty "
+     "map snapshots are explicitly marked unavailable; use their Export fields where recoverable rather "
+     "than assigning present-day settings."),
+    ("atlas_city_biome", "Atlas", "City biome classification and automatic selection",
+     "Allocated Atlas city keystones can classify cities as an additional biome. These effects say "
+     "'also considered' and do not claim to physically transform a map's terrain. The logger fills "
+     "its existing Biome selection when a saved City Type or Atlas change has one matching active "
+     "effect: Faridun can count as Desert or Mountain, Ezomyte as Grass or Swamp, and Vaal as Forest "
+     "or Water. Resolve exact map_city_<city>_also_count_as_<biome> flags in the setup's frozen "
+     "catalog; the node must be allocated and its saved choice active. Chance/weight bonuses, "
+     "unallocated nodes, unanswered choices, missing definitions and conflicting classifications "
+     "do not choose a biome. With no single applicable effect the manual value stays in place. "
+     "Saving a manual Biome with an unchanged City Type remains supported. An active map's frozen "
+     "Atlas, including one bound by a pre-map Start inventory, governs that map; new Atlas settings "
+     "apply to the next map when its setup is already frozen. Historical snapshots are not rewritten. "
+     "Biome is the saved analysis category, not proof of physical terrain, acquired loot or numerical "
+     "bonus strength. The field alone does not identify whether the value was typed or automatically filled."),
+    ("reference_sheets", "Workbook", "Included family and recipe databases",
+     "Family Database, Recipe Database, Seed Database and Reference Aliases copy the current editable "
+     "references on the same read snapshot as the logged data and Context. They are reference tables, "
+     "not additional scans, maps, detections or acquired rewards. Family Database has one row per family "
+     "membership in its recorded list order; an empty family gets one explicit Empty family row. A recipe "
+     "shared by several families has several membership rows but one Recipe Database identity. Recipe "
+     "Database contains the complete current catalog plus retained recipe-ID registry entries. A retired "
+     "entry preserves its ID/name with blank combo/socket fields and Retired recipe ID status; do not "
+     "invent its missing combo or attribute an unknown logged origin to a newly added reference. "
+     "These are catalog definitions at export, not frozen copies of every historical combo revision. "
+     "Logged recipe/family IDs stay frozen, while editable reference meanings can change. Raw SQLite "
+     "exports already include recipes, recipe_ids, families, seed_states and aliases as actual tables."),
+    ("reference_joins", "Propagation", "Workbook-only chain reconstruction",
+     "Select current surviving chain rows from Export, not repeated Propagation/Chain append/completion/"
+     "correction rows in Scan History. Group by Expedition ID and order by Chain Step #; gaps are valid. "
+     "For step N, resolve its nonblank Propagation Recipe ID in Recipe Database, and check the matching "
+     "Family Database membership using Propagation Family ID when its status is known. Recipe # In Family "
+     "is the current one-based catalog position, not Recipe ID, Chain Step # or a logged occurrence count. "
+     "Split Exact Rune Combo on '+' and trim each token, retaining order and repeated runes. Effective rune list at N "
+     "is approved marked runes from EARLIER surviving steps plus this step's full recipe combo. Append only "
+     "this step's marked Propagation Rune 1/2 for the next step; do not carry its whole recipe combo or add "
+     "the current marked runes twice. Reset accumulation for each Expedition ID. Missing/retired combo, "
+     "unknown origin or inconsistent known family membership stays explicitly unresolved. Keep known "
+     "prior runes without pretending the entire effective list is known. This reconstructs rune occurrences, "
+     "not numerical rune-effect strengths, stacking, caps or independently attributed loot drops."),
+    ("reference_seed_aliases", "Propagation", "Seed stages and aliases",
+     "Seed Database is one row per (Family ID, Socket Count) with reviewed reference Visible Seed Slot/Rune, "
+     "Rewards (JSON) and Mapping Status. Parse Rewards as an ordered JSON array of labels, not quantities "
+     "of acquired loot; use its exact canonical recipe name in Recipe Database where available. These rows "
+     "describe possible catalog stages, not actual logged seed occurrences. Reference Aliases preserves "
+     "each raw alias position, Alias, Matched Recipe target and registry ID if present. It describes label "
+     "resolution, not family attribution or an acquired item. Duplicate/conflicting aliases are not a "
+     "license to select the first target, and a logged matched recipe/ID takes precedence over trying to "
+     "redo recognition from Recipe Input. Reference Status distinguishes unavailable catalog definitions "
+     "instead of silently supplying an unrelated current recipe."),
 )
 
 # Column patterns keep field guidance auditable against current and dynamic export headers.
@@ -290,6 +416,24 @@ COLUMN_GUIDANCE = (
      "the resolved recipe row. A remnant may have several recipe rows: group by Remnant ID for remnant counts. "
      "Compare recipe/family frequencies as observed options; names do not prove acquired drops. "
      "Propagation Recipe is the distinct source-attribution field for an approved chain part."),
+    ("field_reference_ids", r"Recipe ID|Recipe # In Family|Alias Position", "Reference identity and list positions",
+     "Recipe ID in the reference sheets is the same stable RCP- identity used by Propagation Recipe ID "
+     "in the log. Recipe # In Family is one-based membership order in the current Family Database copy; "
+     "it can change after catalog edits and is not a stable recipe identity or game count. Alias Position "
+     "is the saved alias-table position, not a recipe ordinal or recognition-confidence score. Never sum "
+     "these IDs/positions as activity or strength."),
+    ("field_reference_meta", r"Top Socket Count|Family Valid|Level Band|Category|Reference Source|Reference Status", "Reference catalog attributes",
+     "Top Socket Count is the family's recorded maximum reference stage, not the current remnant's socket "
+     "count. Family Valid is the catalog's Yes/No flag, not recognition confidence or proof a drop occurred. "
+     "Level Band, Category and Reference Source describe the recipe reference. Reference Status distinguishes "
+     "current definitions, empty families, missing registry IDs and retired/missing recipe definitions. "
+     "These are descriptive reference rows, not measured gameplay outcomes; unresolved definitions remain "
+     "blank rather than receiving inferred rune combos."),
+    ("field_reference_seed", r"Rewards \(JSON\)|Mapping Status|Alias", "Reference seed rewards and input aliases",
+     "Rewards (JSON) is the seed-stage reference's ordered reward-label array, not an inventory or drop "
+     "count. Mapping Status is the seed reference's recorded status. Alias is a raw recognition/input "
+     "mapping to Matched Recipe in Reference Aliases; preserve conflicting mappings and use logged "
+     "canonical IDs rather than treating aliases as new observed recipes or families."),
     ("field_family", r"Family ID", "Remnant family",
      "Family ID identifies the resolved reference recipe group, not an outcome amount or ordered strength. "
      "Compare frequencies by distinct recorded remnants, not repeated recipe rows. For chain parts use "
@@ -370,7 +514,10 @@ COLUMN_GUIDANCE = (
     ("field_categories", r"Biome|City Type", "Map categories",
      "Biome and City Type are selected categorical map descriptors. Compare group counts and outcomes "
      "between otherwise similar maps without assigning a numeric order or treating None as measured "
-     "absence of every related mechanic. Keep selected None separate from missing imported data."),
+     "absence of every related mechanic. Keep selected None separate from missing imported data. "
+     "Biome can be automatically filled from one applicable allocated Atlas city-classification effect; "
+     "see City biome classification and automatic selection. Its saved value does not establish physical "
+     "terrain conversion or independently establish every conditional Atlas bonus."),
     ("field_options", r"Irradiated|Ocean Map|Deli|Wisp", "Selected map options",
      "These Yes/No flags record enabled map options. They are not encounter counts or measured bonuses. "
      "Compare each option or well-supported combinations with similar tier, area, Atlas and other "
@@ -423,12 +570,14 @@ COLUMN_GUIDANCE = (
      "Dynamic Atlas Node headers include activity, node label and stable node ID. Yes/No means allocated/"
      "unallocated; blank means unavailable in the frozen catalog. Nodes allocated in every referenced "
      "setup can have no column, so an omitted column is not an unallocated node. Compare allocations "
-     "within compatible catalogs and use saved node effects/stats for game-effect meaning. A workbook "
-     "needs the matching catalog/SQL for omitted allocations and effect definitions."),
+     "within compatible catalogs and use saved node effects/stats for game-effect meaning. The Context's "
+     "Atlas allocation and Atlas node definition rows explain omitted allocations and frozen effects."),
     ("field_atlas_choices", r"Atlas Choice: .+", "Atlas choice selection",
      "An Atlas Choice number is the one-based option order in that node's frozen catalog, with 0 for "
      "no selection and blank for unavailable/not applicable. SQL stores option IDs rather than these "
-     "display ordinals. A remembered choice can belong to an unallocated node and is then not active. "
+     "display ordinals. Atlas choice definition Context rows give the corresponding option ID, name, "
+     "effect and stats for each ordinal in each frozen catalog. A remembered choice can belong to an "
+     "unallocated node and is then not active. "
      "Compare named active options after joining allocation and catalog effects/stats; do not average "
      "choice numbers as strengths or compare ordinals across different nodes/catalogs."),
     ("field_labels", r"Currency|Item Name|Item Source", "Inventory item labels and source",
@@ -510,6 +659,8 @@ def initialize(db):
     # This table contains only bundled metadata; remove notes retired by a later application version.
     db.execute("DELETE FROM analysis_context WHERE key NOT IN (" + ",".join("?" for _ in ENTRIES) + ")",
                [entry[0] for entry in ENTRIES])
+    from PoE2_Data_Logger.core import analysis_context_data
+    analysis_context_data.initialize(db, CONTEXT_VERSION)
 
 
 def export_csv(db):
@@ -517,6 +668,6 @@ def export_csv(db):
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     writer.writerow(HEADERS)
-    writer.writerows(db.execute("SELECT section,topic,guidance,context_version FROM analysis_context "
+    writer.writerows(db.execute("SELECT section,topic,guidance,context_version FROM analysis_context_complete "
                                "ORDER BY position,key"))
     return output.getvalue().encode("utf-8-sig")

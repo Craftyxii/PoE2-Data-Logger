@@ -24,7 +24,7 @@ New maps clear waystone settings. Tablets, Atlas Master settings and map tags—
 
 On **Review**, correct anything held for review, then **Approve** to save it. **Reject** skips it. Waystones and tablets update their settings; other scans save to the log.
 
-**Chains:** the dedicated **Propagation scan** key reads the selected recipe and its marked runes from left to right. The general key cannot activate it. Each accepted scan adds one remnant detonation, even with two runes. Every propagation scan requires manual review, regardless of confidence, strictness or auto-commit settings. Check the recipe and its rune dropdowns; **Approve** beside its row saves the part directly. Normal propagation review keeps its recipe rows, Approve and Complete controls together. Use **Enter propagation manually** to open the recipe-only rune dropdowns when needed; they show rune icons and names in socket order. **Complete chain**, on Review or Expedition, finishes the saved chain and advances this map's expedition number. Saved parts remain editable on Expedition until completion.
+**Chains:** the dedicated **Propagation scan** key reads the selected recipe and its marked runes from left to right. The general key cannot activate it. Each accepted scan adds one remnant detonation, even with two runes. Every propagation scan requires manual review, regardless of confidence, strictness or auto-commit settings. Check the recipe and its rune dropdowns; **Approve** beside its row saves the part directly. Normal propagation review keeps its recipe rows, Approve and Complete controls together. Use **Enter propagation manually** to open the recipe-only rune dropdowns when needed; they show rune icons and names in socket order. **Complete chain**, on Review or Expedition, finishes the saved chain and advances this map's expedition number. Saved parts and selected completed chains can be corrected on Expedition. **Discard last chain step** and **Discard chain** remove saved parts while retaining remnant logs and actual detonation counts.
 
 The three peaks above each propagated rune identify its mark. Include the gold arrow beside the selected recipe in the capture. Remnant review and propagation remain separate: a pending remnant can be reviewed later and still saves to the expedition it was captured for.
 
@@ -34,13 +34,15 @@ The three peaks above each propagated rune identify its mark. Include the gold a
 
 **Currency** shows tracked item types in groups as icon, name and count cards, including zero totals. Found items move ahead of zero-count items while keeping their groups. Every approved end scan updates the positive end-minus-start gains across maps. If no start scan was taken, the map starts with an assumed empty inventory. Rescans replace that map's contribution. Use the search to find a type. Resetting IDs clears the totals. Manual inventory icon-reference tools are under **Data export → Developer Mode**.
 
-Currency review lists confident items first, possible matches next, then unknown items. Confident rows are approved automatically. Double-click a name or count to correct it; editing requires a fresh row **Approve**. The bottom **Approve** saves approved rows and rejects all remaining pending rows. Possible matches stay suggestions until you enter and confirm their name and count.
+Currency review lists confident items first, possible matches next, then unknown items. Confident rows are approved automatically. Possible matches have editable suggestion dropdowns: select a name or type a correction and confirm the count. Editing requires a fresh row **Approve**. Row approval and rejection preserve your scroll position. The bottom **Approve** saves approved rows and rejects all remaining pending rows.
 
 Double-click an item name in Currency or Ritual review to correct it. Committing an accepted name correction saves its captured artwork as a local recognition example for later scans and adds its item-count column to exports. Rows left unnamed are rejected. Confirm other critical fields before approval. Local recognition examples can be exported in an OCR reference pack.
 
 **Ritual:** deferred rewards are marked **Deferred** and contribute zero new finds. Available tribute and remaining rerolls are saved with the scan.
 
 Finish pending reviews and chains before clicking **+ New map**.
+
+**Undo** reverses the last saved action, including scans, chains, settings and New map. The latest 100 actions survive app restarts. Undoing New map reopens the previous map for edits.
 
 ## Atlas / Character Settings
 
@@ -50,11 +52,15 @@ The separate **Atlas / Character Settings** page shows the PoE2 atlas. Click a n
 
 The page shows which Map ID will receive your saved settings. Once a map has recorded activity, atlas and gear rarity changes apply to the next map. Earlier maps keep their saved setup.
 
+An allocated, active city-biome choice can fill the existing Biome selector: Faridun → Desert/Mountain, Ezomyte → Grass/Swamp, or Vaal → Forest/Water. This is an additional Atlas classification, not a physical terrain change. Manual Biome editing remains available; changing City, applicable Atlas settings or starting a map can apply the rule again.
+
 ## Export and Reset
 
 Choose an export folder in **Data export**. Saved entries keep their original settings.
 
-Excel exports contain **Export**, **Atlas Character Settings** and **Scan History** sheets. The main sheet includes map totals and activity rows tied to Map ID; each tracked item has a numeric count column. The shared **Atlas Setup ID** links each Map ID to its saved setup and gear item rarity. The compact Atlas sheet uses separate columns for unchecked nodes and numbered choices. Click a setup ID in the main sheet to open its Atlas row. **Scan History** retains the audit records for scans, corrections and commits. CSV export saves a companion Atlas CSV alongside the main CSV. Folder exports receive unique filenames so earlier exports remain available.
+Excel exports contain eight sheets: **Export**, **Atlas Character Settings**, **Scan History**, **Analysis Context**, **Family Database**, **Recipe Database**, **Seed Database** and **Reference Aliases**. The main sheet includes map totals and activity rows tied to Map ID; each tracked item has a numeric count column. **Atlas Setup ID** links a map to its saved setup and gear item rarity. Click a setup ID to open its Atlas row. **Scan History** retains scan, correction and commit audit records. **Analysis Context** explains fields, units, joins, counting rules, saved Atlas effects, scoped totals and analysis limits. Reference sheets explain recipe/family IDs and rune combinations; their rows are not acquired rewards. CSV export saves three related data files. Folder exports receive unique filenames so earlier exports remain available.
+
+The raw SQLite backup includes logs, reference databases and SQL-readable Context notes/views. External image files need a separate copy. Missing data and historical reference edits can limit analysis; inventory gains do not identify which individual remnant or chain step produced loot.
 
 **Start fresh session / reset IDs** clears logs and restarts IDs. Settings and databases are kept. Export first to keep your recorded data.
 

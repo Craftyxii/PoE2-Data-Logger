@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 from zipfile import ZipFile
 
 from PoE2_Data_Logger.core import analysis_context, logger_store as logger, store, workbook_export
+from PoE2_Data_Logger.core import workbook_references
 
 
 class AnalysisContextExportTests(unittest.TestCase):
@@ -33,10 +34,11 @@ class AnalysisContextExportTests(unittest.TestCase):
         logger._READY = False
         self.temporary.cleanup()
 
-    def context_rows(self, db):
+    def context_rows(self, db, *, include_data=False):
         """Read worksheet-equivalent context directly through SQL, without application projection."""
+        table = "analysis_context_complete" if include_data else "analysis_context"
         return [tuple(row) for row in db.execute(
-            "SELECT section,topic,guidance,context_version FROM analysis_context ORDER BY position,key")]
+            f"SELECT section,topic,guidance,context_version FROM {table} ORDER BY position,key")]
 
     def worksheet_rows(self, archive, number):
         """Decode four-column inline-string notes in worksheet reading order."""
@@ -54,9 +56,12 @@ class AnalysisContextExportTests(unittest.TestCase):
                      logger.export_currency_csv, logger.export_maps_csv, logger.export_ritual_csv,
                      logger.export_map_summary_csv, logger.export_commits_csv, logger.export_csv,
                      logger.export_all_csv)
-        for producer in producers:
-            with self.subTest(export=producer.__name__):
-                headers = next(csv.reader(io.StringIO(producer().decode("utf-8-sig"))))
+        datasets = [(producer.__name__, producer()) for producer in producers]
+        with logger._connect() as db:
+            datasets.extend(workbook_references.export_sheets(db))
+        for name, data in datasets:
+            with self.subTest(export=name):
+                headers = next(csv.reader(io.StringIO(data.decode("utf-8-sig"))))
                 unexplained = []
                 for header in headers:
                     if header in item_headers:
@@ -78,7 +83,7 @@ class AnalysisContextExportTests(unittest.TestCase):
         export_folder.mkdir()
         logger.save_export_folder(str(export_folder))
         with logger._connect() as db:
-            expected = self.context_rows(db)
+            expected = self.context_rows(db, include_data=True)
             keys = {row[0] for row in db.execute("SELECT key FROM analysis_context")}
             self.assertTrue({"export_sheet", "history_sheet", "map_metrics", "analysis_method", "effectiveness_analysis", "inventory_gains",
                              "inventory_baseline", "ritual_offers", "missing_values", "recipe_ids",
@@ -91,7 +96,7 @@ class AnalysisContextExportTests(unittest.TestCase):
         result = logger.save_export_file("sqlite3")
         with closing(sqlite3.connect(result["path"])) as exported:
             self.assertEqual(exported.execute("PRAGMA integrity_check").fetchone()[0], "ok")
-            self.assertEqual(self.context_rows(exported), expected)
+            self.assertEqual(self.context_rows(exported, include_data=True), expected)
             self.assertEqual(exported.execute("SELECT items_json FROM currency_snapshots WHERE phase='end'")
                              .fetchone()[0], '{"Chaos Orb":7}')
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
@@ -100,7 +105,9 @@ class AnalysisContextExportTests(unittest.TestCase):
             self.assertEqual([(sheet.get("name"), sheet.get("sheetId")) for sheet in
                               manifest.findall(f"{{{workbook_export.NS}}}sheets/{{{workbook_export.NS}}}sheet")],
                              [("Export", "1"), ("Atlas Character Settings", "2"),
-                              ("Scan History", "3"), ("Analysis Context", "4")])
+                              ("Scan History", "3"), ("Analysis Context", "4"),
+                              ("Family Database", "5"), ("Recipe Database", "6"),
+                              ("Seed Database", "7"), ("Reference Aliases", "8")])
             _, rows = self.worksheet_rows(archive, 4)
             self.assertEqual(rows[0], list(analysis_context.HEADERS))
             self.assertEqual([tuple(row) for row in rows[1:]], expected)
@@ -153,7 +160,7 @@ class AnalysisContextExportTests(unittest.TestCase):
         """A writer between data and note reads cannot mix a newer note revision into the workbook."""
         logger.start_map()
         with logger._connect() as db:
-            expected = self.context_rows(db)
+            expected = self.context_rows(db, include_data=True)
         original = logger.export_primary_csv
 
         def export_then_change_notes(*, _db):

@@ -19,6 +19,9 @@ ATLAS_HEADERS = ["Atlas Setup ID", "Map IDs", "Atlas Data Version", "Gear Item R
                  "Atlas Node: Main Atlas | Ordinary Node [0007]",
                  "Atlas Node: Expedition | Choice Node [0008]",
                  "Atlas Choice: Expedition | Choice Node [0008]"]
+REFERENCE_SHEET_NAMES = ("Family Database", "Recipe Database", "Seed Database", "Reference Aliases")
+WORKBOOK_SHEET_NAMES = ["Export", "Atlas Character Settings", "Scan History", "Analysis Context",
+                        *REFERENCE_SHEET_NAMES]
 
 
 def csv_bytes(headers, rows):
@@ -42,8 +45,14 @@ def memory_database():
 
 class AtlasWorkbookTests(unittest.TestCase):
     """Check workbook sheet links, typed values and shared export snapshots."""
+    def reference_fixture(self, db, *, query="SELECT 25"):
+        """Read four generic reference datasets from the caller's active export snapshot."""
+        self.assertTrue(db.in_transaction)
+        return [(name, csv_bytes(["Fixture"], [[db.execute(query).fetchone()[0]]]))
+                for name in REFERENCE_SHEET_NAMES]
+
     def sample_workbook(self):
-        """Build a four-sheet fixture workbook using one transactional connection."""
+        """Build an eight-sheet fixture workbook using one transactional connection."""
         main_data = csv_bytes(["Map ID", "Atlas Setup ID", "Gear Item Rarity %", "Chaos Orb"],
                               [["M0001", "ATLAS-1", 0, 7], ["M0002", "ATLAS-2", 175.5, 0],
                                ["M0000", "", "", ""]])
@@ -88,14 +97,20 @@ class AtlasWorkbookTests(unittest.TestCase):
             return csv_bytes(["Section", "Topic", "Guidance", "Context Version"],
                              [["Overview", "Purpose", "Interpret saved observations.", "1"]])
 
+        def reference_export(db):
+            """Read all four reference fixtures through the same connection as the existing sheets."""
+            connections.append(db)
+            return self.reference_fixture(db)
+
         with patch.object(logger, "_connect", memory_database), \
                 patch.object(logger, "export_primary_csv", side_effect=main_export), \
                 patch.object(logger, "export_atlas_csv", side_effect=atlas_export), \
                 patch.object(logger, "export_all_csv", side_effect=history_export), \
                 patch.object(logger, "export_analysis_context_csv", side_effect=context_export), \
+                patch.object(workbook_export.references, "export_sheets", side_effect=reference_export), \
                 patch.object(logger, "map_summary_item_headers", side_effect=numeric_item_headers):
             workbook = workbook_export.export_xlsx()
-        self.assertEqual(len(connections), 5)
+        self.assertEqual(len(connections), 6)
         self.assertTrue(all(connection is connections[0] for connection in connections))
         return workbook
 
@@ -108,7 +123,7 @@ class AtlasWorkbookTests(unittest.TestCase):
             workbook = ET.fromstring(archive.read("xl/workbook.xml"))
             sheets = workbook.findall("s:sheets/s:sheet", ns)
             self.assertEqual([sheet.get("name") for sheet in sheets],
-                             ["Export", "Atlas Character Settings", "Scan History", "Analysis Context"])
+                             WORKBOOK_SHEET_NAMES)
             relationships = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
             targets = {row.get("Id"): row.get("Target") for row in relationships}
             for number, sheet in enumerate(sheets, 1):
@@ -116,8 +131,15 @@ class AtlasWorkbookTests(unittest.TestCase):
                                  f"worksheets/sheet{number}.xml")
             types = ET.fromstring(archive.read("[Content_Types].xml"))
             overrides = {row.get("PartName"): row.get("ContentType") for row in types}
-            for number in (1, 2, 3, 4):
+            for number in range(1, 9):
                 self.assertTrue(overrides[f"/xl/worksheets/sheet{number}.xml"].endswith("worksheet+xml"))
+
+            for number in range(5, 9):
+                reference = ET.fromstring(archive.read(f"xl/worksheets/sheet{number}.xml"))
+                rows = reference.findall("s:sheetData/s:row", ns)
+                self.assertEqual(len(rows), 2)
+                self.assertEqual(["".join(cell.itertext()) for cell in rows[0]], ["Fixture"])
+                self.assertEqual("".join(rows[1][0].itertext()), "25")
 
             main = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
             links = {link.get("ref"): link.get("location")
@@ -349,6 +371,7 @@ class AtlasWorkbookTests(unittest.TestCase):
                     ["Section", "Topic", "Guidance", "Context Version"], [])), \
                 patch.object(logger, "export_atlas_csv",
                              return_value=csv_bytes(ATLAS_HEADERS, [["too", "short"]])), \
+                patch.object(workbook_export.references, "export_sheets", side_effect=self.reference_fixture), \
                 patch.object(logger, "map_summary_item_headers", return_value=[]):
             with self.assertRaisesRegex(ValueError, "invalid width"):
                 workbook_export.export_xlsx()
@@ -391,11 +414,16 @@ class AtlasWorkbookTests(unittest.TestCase):
                     return csv_bytes(["Section", "Topic", "Guidance", "Context Version"],
                                      [["Fixture", "Rarity", rarity, "1"]])
 
+                def reference_export(db):
+                    """Read each reference fixture after the writer changes its separate connection."""
+                    return self.reference_fixture(db, query="SELECT rarity FROM setup")
+
                 with patch.object(logger, "_connect", reader_database), \
                         patch.object(logger, "export_primary_csv", side_effect=main_export), \
                         patch.object(logger, "export_atlas_csv", side_effect=atlas_export), \
                         patch.object(logger, "export_all_csv", side_effect=atlas_export), \
                         patch.object(logger, "export_analysis_context_csv", side_effect=context_export), \
+                        patch.object(workbook_export.references, "export_sheets", side_effect=reference_export), \
                         patch.object(logger, "map_summary_item_headers", return_value=[]):
                     data = workbook_export.export_xlsx()
                 self.assertEqual(writer.execute("SELECT rarity FROM setup").fetchone()[0], 75)
@@ -406,6 +434,10 @@ class AtlasWorkbookTests(unittest.TestCase):
                         self.assertEqual(cell.findtext(f"{{{workbook_export.NS}}}v"), "25")
                     context = ET.fromstring(archive.read("xl/worksheets/sheet4.xml"))
                     self.assertEqual("".join(context.find(f".//{{{workbook_export.NS}}}c[@r='C2']").itertext()), "25")
+                    for number in range(5, 9):
+                        reference = ET.fromstring(archive.read(f"xl/worksheets/sheet{number}.xml"))
+                        cell = reference.find(f".//{{{workbook_export.NS}}}c[@r='A2']")
+                        self.assertEqual("".join(cell.itertext()), "25")
             finally:
                 writer.close()
 
@@ -416,7 +448,10 @@ class AtlasWorkbookTests(unittest.TestCase):
         workbook = load_workbook(io.BytesIO(self.sample_workbook()), data_only=True)
         try:
             self.assertEqual(workbook.sheetnames,
-                             ["Export", "Atlas Character Settings", "Scan History", "Analysis Context"])
+                             WORKBOOK_SHEET_NAMES)
+            for name in REFERENCE_SHEET_NAMES:
+                self.assertEqual(workbook[name]["A1"].value, "Fixture")
+                self.assertEqual(workbook[name]["A2"].value, "25")
             self.assertEqual(workbook["Export"]["C2"].value, 0)
             self.assertEqual(workbook["Export"]["B2"].hyperlink.location,
                              "'Atlas Character Settings'!A2")

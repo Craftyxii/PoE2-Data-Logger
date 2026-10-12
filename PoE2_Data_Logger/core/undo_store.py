@@ -17,7 +17,7 @@ TABLES = (
 )
 META_KEYS = frozenset((
     "settings", "current_map_number", "next_remnant_number", "pending_new_map",
-    "previous_expedition", "previous_waystone_settings", "prepared_waystone_setup",
+    "previous_expedition", "previous_waystone_settings", "previous_biome", "prepared_waystone_setup",
     "scan_commit_count", "tablet_auto_next", "active_retired_currency_names",
 ))
 HISTORY_LIMIT = 100

@@ -6,6 +6,8 @@ new modules must be listed here so packaging cannot silently omit them.
 
 CORE_SOURCES = (
     "core/analysis_context.py",
+    "core/analysis_context_data.py",
+    "core/analysis_context_rules.py",
     "core/undo_store.py",
     "core/logger_store.py",
     "core/store.py",
@@ -14,6 +16,7 @@ CORE_SOURCES = (
     "core/reference_pack.py",
     "core/ritual_catalog.py",
     "core/workbook_export.py",
+    "core/workbook_references.py",
     "core/atlas_catalog.py",
     "core/export_files.py",
     "core/catalog_repairs.py",

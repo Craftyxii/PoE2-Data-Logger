@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.2.15 Beta
+
+- Deliver scan completions without waiting on a competing database writer. Retain recognized Currency/Ritual rows for approval retry, and briefly retry unpresented remnant reservation work without rerunning OCR or replaying a saved result.
+- Preserve capture ownership during delayed failure cleanup and retain independent propagation reviews. Roll back failed Snapshot and shortcut changes to their saved state.
+- Serialize Currency, Item and Omen name registration with reference imports so category checks and writes are atomic.
+- Autofill the existing Biome selector from an allocated, active Atlas city-biome choice. Preserve frozen map settings, manual edits and Undo; restore the prior Biome when the older empty-map cancellation path reverses map creation.
+- Expand Excel Analysis Context and equivalent SQLite views with field meanings, Atlas node/choice and master-perk definitions, source-scoped totals and analysis limits. Append Family Database, Recipe Database, Seed Database and Reference Aliases worksheets after the original four.
+- Refresh project, user and developer documentation and index historical release evidence separately.
+
+OCR recognition rules and the HUD layout remain unchanged. Publication requires the exact-source Windows release gates described in [the release notes](docs/RELEASE_1.3.2.15.md).
+
 ## 1.3.2.14 Beta
 
 - Fill the existing propagation rune dropdowns from verified shared family sockets instead of clearing the entire family because of duplicate anchors or gold glyph glints.

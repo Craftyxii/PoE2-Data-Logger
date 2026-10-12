@@ -49,8 +49,10 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.14 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.15 Beta"
 SCAN_TIMEOUT_MS = 90000
+SCAN_PRESENTATION_RETRY_MS = 100
+SCAN_PRESENTATION_WAIT_SECONDS = 10
 DISCORD_INVITE = "https://discord.gg/bE758BqSQj"
 DEFAULT_REFERENCE_FOLDER = (Path(sys.executable).resolve().parent / "Databases"
                             if getattr(sys, "frozen", False) else
@@ -385,6 +387,7 @@ class LoggerWindow(QMainWindow):
         self._pending_tasks = {}
         self._scan_task_timers = {}
         self._scan_task_futures = {}
+        self._scan_presentation_retries = {}
         self._chain_save_pending = None
         self._task_id = 0
         self._latest_hotkey = 0
@@ -539,6 +542,10 @@ class LoggerWindow(QMainWindow):
         self._scan_task_timers.clear()
         for future in futures:
             future.cancel()
+        for entry in self._scan_presentation_retries.values():
+            entry["timer"].stop()
+            entry["timer"].deleteLater()
+        self._scan_presentation_retries.clear()
 
     def _retire_obsolete_scan_tasks(self):
         """Retire callbacks and cancel only scan futures whose captured review identity has been replaced or cleared."""
@@ -555,8 +562,15 @@ class LoggerWindow(QMainWindow):
             if future is not None:
                 # Retire the callback before cancellation can emit a Qt completion.
                 future.cancel()
+        for field, entry in list(self._scan_presentation_retries.items()):
+            if getattr(self, field) is not entry["capture"]:
+                self._stop_scan_presentation_retry(field)
 
     def _task_done(self, key, result, error):
+        """Deliver queued completions and cleanup without waiting for a competing SQLite writer."""
+        self.run(lambda: self._deliver_task_result(key, result, error))
+
+    def _deliver_task_result(self, key, result, error):
         """Handle a worker's Qt completion on the GUI thread, ignoring retired sessions and
         reporting failures.
         """
@@ -583,12 +597,19 @@ class LoggerWindow(QMainWindow):
             failed = getattr(callback, "_scan_failure", None)
             if failed and not failed(error):
                 return
-            self.error(str(error))
+            self._completion_error(error)
         elif callback:
             try:
                 callback(result)
             except Exception as problem:
-                self.error(str(problem))
+                self._completion_error(problem)
+
+    def _completion_error(self, error):
+        """Report an older remnant error without revealing its widgets over a newer propagation review."""
+        if self._held_remnant_review and self.review_kind.property("scanKind") == "propagation":
+            self.statusBar().showMessage(str(error), 15000)
+        else:
+            self.error(str(error))
 
     def _submit_scan(self, label, function, done, kind, capture):
         """Wrap an asynchronous scan with capture-specific failure handling before submitting
@@ -596,20 +617,95 @@ class LoggerWindow(QMainWindow):
         """
         field = {"currency": "_inventory_reading", "ritual": "_ritual_reading",
                  "remnant": "_remnant_reading", "seed": "_remnant_reading"}[kind]
+        context = logger.scan_context()
+        with logger._connect() as db:
+            reservation = logger._meta(db, "ocr_pending")
         def completed(result):
             """Deliver a scan result and preserve capture identity when its UI callback fails."""
             active = getattr(self, field) is capture
             try:
                 done(result)
             except Exception as error:
-                self._scan_failed(kind, capture, error, reading_finished=active)
+                if (kind in ("remnant", "seed") and getattr(self, field) is capture and
+                        self._database_busy(error)):
+                    # Only reservation admission is replayable. Presentation and
+                    # automatic saves run once, even if their later refresh fails.
+                    self._queue_scan_presentation(done, result, kind, capture, context)
+                    return
+                owned = ({key: result[key] for key in ("remnant_id", "map_id", "expedition_id")}
+                         if isinstance(result, dict) and all(result.get(key) for key in
+                             ("remnant_id", "map_id", "expedition_id")) else reservation)
+                self._scan_failed(kind, capture, error, reading_finished=active,
+                                  expected_context=context, expected_pending=owned)
                 raise
-        completed._scan_failure = lambda error: self._scan_failed(kind, capture, error)
+        completed._scan_failure = lambda error: self._scan_failed(
+            kind, capture, error, expected_context=context, expected_pending=reservation)
         completed._scan_field = field
         completed._scan_capture = capture
         self._submit(label, function, completed)
 
-    def _scan_failed(self, kind, capture, error, reading_finished=False):
+    @staticmethod
+    def _database_busy(error):
+        """Recognize only SQLite writer contention, preserving other failures as errors."""
+        return (isinstance(error, sqlite3.OperationalError) and
+                (getattr(error, "sqlite_errorcode", 0) & 255) in
+                (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED))
+
+    def _stop_scan_presentation_retry(self, field):
+        """Retire retained recognition and its timer when its capture is resolved or replaced."""
+        entry = self._scan_presentation_retries.pop(field, None)
+        if entry is not None:
+            entry["timer"].stop()
+            entry["timer"].deleteLater()
+
+    def _queue_scan_presentation(self, callback, result, kind, capture, context):
+        """Keep recognized remnant data while briefly retrying its reservation, without rerunning OCR."""
+        field = "_remnant_reading"
+        self._stop_scan_presentation_retry(field)
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        self._scan_presentation_retries[field] = {
+            "timer": timer, "callback": callback, "result": result, "kind": kind,
+            "capture": capture, "context": context,
+            "deadline": time.monotonic() + SCAN_PRESENTATION_WAIT_SECONDS,
+        }
+        timer.timeout.connect(lambda: self.run(lambda: self._retry_scan_presentation(field)))
+        text = "Recognition finished; the database is busy. Preparing the review when it becomes available."
+        if not (self._held_remnant_review and self.review_kind.property("scanKind") == "propagation"):
+            set_message(self.review_summary, text)
+        set_message(self.scan_status, text)
+        self.statusBar().showMessage(text)
+        timer.start(SCAN_PRESENTATION_RETRY_MS)
+
+    def _retry_scan_presentation(self, field):
+        """Retry only unpresented reservation work while the captured map, generation and owner still match."""
+        entry = self._scan_presentation_retries.get(field)
+        if entry is None:
+            return
+        if self._closed or getattr(self, field) is not entry["capture"]:
+            self._stop_scan_presentation_retry(field)
+            return
+        try:
+            logger.validate_remnant_context(entry["context"])
+            entry["callback"](entry["result"])
+        except Exception as error:
+            if (self._database_busy(error) and getattr(self, field) is entry["capture"] and
+                    time.monotonic() < entry["deadline"]):
+                entry["timer"].start(SCAN_PRESENTATION_RETRY_MS)
+                return
+            self._stop_scan_presentation_retry(field)
+            result = entry["result"]
+            owned = ({key: result[key] for key in ("remnant_id", "map_id", "expedition_id")}
+                     if all(result.get(key) for key in ("remnant_id", "map_id", "expedition_id")) else None)
+            self._scan_failed(entry["kind"], entry["capture"], error,
+                              reading_finished=getattr(self, field) is None,
+                              expected_context=entry["context"], expected_pending=owned)
+            self._completion_error(error)
+        else:
+            self._stop_scan_presentation_retry(field)
+
+    def _scan_failed(self, kind, capture, error, reading_finished=False, expected_context=None,
+                     expected_pending=logger._UNSET):
         """Retire the matching failed scan and hold an error review that cannot be committed."""
         field = {"currency": "_inventory_reading", "ritual": "_ritual_reading",
                  "remnant": "_remnant_reading", "seed": "_remnant_reading"}[kind]
@@ -626,7 +722,7 @@ class LoggerWindow(QMainWindow):
             self._pending_ritual_map = None
         else:
             try:
-                logger.discard_ocr_id()
+                logger.discard_ocr_id(expected_context=expected_context, expected_pending=expected_pending)
             except Exception as cleanup_error:
                 # A storage cleanup failure must be visible, but must not stop
                 # the GUI from leaving Reading and disabling unsafe approval.
@@ -640,6 +736,12 @@ class LoggerWindow(QMainWindow):
             if kind == "seed":
                 self._clear_seed_queue()
         summary = f"Scan failed: {error}. Scan again or reject this reading."
+        if self._held_remnant_review and self.review_kind.property("scanKind") == "propagation":
+            # A storage timeout in the older held remnant must not abandon
+            # the user's newer propagation selectors or their visible status.
+            self._held_remnant_review = (self._held_remnant_review[0], summary, False, True)
+            set_message(self.scan_status, summary, "error")
+            return True
         self._review_pending(kind, summary, False)
         self._failed_review = True
         set_message(self.review_summary, summary, "error")
@@ -2054,7 +2156,7 @@ class LoggerWindow(QMainWindow):
         self.inventory_phase = combo([("start", "Start of map"), ("end", "End of map")])
         with logger._connect() as db:
             select(self.inventory_phase, logger._meta(db, "inventory_scan_phase", "start"))
-        self.inventory_phase.currentIndexChanged.connect(self._inventory_phase_changed)
+        self.inventory_phase.currentIndexChanged.connect(lambda: self.run(self._inventory_phase_changed))
         phase = QHBoxLayout()
         phase.addWidget(QLabel("Snapshot"))
         phase.addWidget(self.inventory_phase)
@@ -4084,19 +4186,21 @@ class LoggerWindow(QMainWindow):
         action = "show / hide HUD" if target == "overlay" else f"{target} scan"
         self.note(f"Press a key or combination for {action}. Click Set key again to cancel.")
 
+    def _restore_saved_hotkeys(self):
+        """Retire attempted registrations before restoring the persisted shortcut definitions."""
+        service.HOTKEY._unregister()
+        service.HOTKEY.start()
+
     def clear_hotkey(self, target="default"):
-        """Clear a target shortcut and restore registration state if an active key-selection
-        update fails.
-        """
-        capturing = self._end_hotkey_capture()
+        """Clear one shortcut, restoring its saved listener if preference persistence fails."""
+        self._end_hotkey_capture()
         try:
             if target == "default":
                 service.HOTKEY.configure("")
             else:
                 service.HOTKEY.configure_for(target, "")
         except Exception:
-            if capturing:
-                self.run(service.HOTKEY.start)
+            self.run(self._restore_saved_hotkeys)
             self.refresh_hotkey()
             raise
         self.refresh_hotkey()
@@ -4590,15 +4694,14 @@ class LoggerWindow(QMainWindow):
                                                  (Qt.KeyboardModifier.MetaModifier, "Win"))
                       if modifiers & flag]
             shortcut = "+".join(prefix + [name])
-            try:
-                if target == "default":
-                    service.HOTKEY.configure(shortcut)
-                else:
-                    service.HOTKEY.configure_for(target, shortcut)
-            except Exception as error:
-                self.run(service.HOTKEY.start)
+            configured = self.run(lambda: service.HOTKEY.configure(shortcut) if target == "default" else
+                                  service.HOTKEY.configure_for(target, shortcut))
+            if configured is None:
+                # Registration happens before preference persistence. A failed
+                # write may have installed the attempted key; retire that
+                # listener before reloading and registering the saved keys.
+                self.run(self._restore_saved_hotkeys)
                 self.refresh_hotkey()
-                self.error(str(error))
                 return True
             self.refresh_hotkey()
             assigned = (service.HOTKEY.status()["combo"] if target == "default" else
@@ -4684,13 +4787,16 @@ class LoggerWindow(QMainWindow):
         """
         if capture is not None and capture is not self._remnant_reading:
             return
-        self._remnant_reading = None
         mode = result.get("mode", mode)
+        # Reserve before consuming the capture or changing review widgets. A
+        # busy writer can then retry this admission without replaying a save.
+        self._prepare_remnant_result(mode, result)
+        self._remnant_reading = None
         self.show_result(mode, result, raw)
         if mode == "opened":
-            self.maybe_auto_commit(result)
+            self.run(lambda: self.maybe_auto_commit(result))
         elif mode == "seed":
-            self.maybe_auto_commit_seeds()
+            self.run(self.maybe_auto_commit_seeds)
 
     def _show_image(self, raw):
         """Display a scaled scan preview or hide it when bytes are absent or invalid."""
@@ -4728,11 +4834,18 @@ class LoggerWindow(QMainWindow):
         picture.save(output, format="PNG")
         self._show_image(output.getvalue())
 
+    def _prepare_remnant_result(self, mode, result):
+        """Validate and reserve a recognized remnant before populating any editable review widgets."""
+        logger.validate_remnant_context(result)
+        if not result.get("remnant_id") and (mode == "opened" or result.get("remnants") or result.get("sockets")):
+            result.update(logger.assign_ocr_id(mode, result.get("_target_map_id"),
+                                              result.get("_scan_generation"), result.get("_capture_expedition")))
+
     def show_result(self, mode, result, raw=None):
         """Validate remnant ownership, obtain a logger ID when needed and populate the
         corresponding review draft.
         """
-        logger.validate_remnant_context(result)
+        self._prepare_remnant_result(mode, result)
         # A delayed remnant worker may finish while the user is correcting an
         # independent propagation recipe. Update the held remnant without
         # discarding the newer selectors, their values or the displayed scan.
@@ -4740,9 +4853,6 @@ class LoggerWindow(QMainWindow):
                        self.review_kind.property("scanKind") == "propagation")
         propagation_summary = self.review_summary.text() if independent else None
         propagation_image = self.preview.pixmap() if independent and self.preview.isVisible() else None
-        if not result.get("remnant_id") and (mode == "opened" or result.get("remnants") or result.get("sockets")):
-            result.update(logger.assign_ocr_id(mode, result.get("_target_map_id"),
-                                              result.get("_scan_generation"), result.get("_capture_expedition")))
         self._wheel_field = None
         self._clear_commit_badge()
         self.review_group.show()
@@ -4763,7 +4873,7 @@ class LoggerWindow(QMainWindow):
         if mode != self.mode and self.mode != "both":
             select(self.mode_select, mode)
             self.mode = mode
-            service.HOTKEY.set_mode(mode)
+            self.run(lambda: service.HOTKEY.set_mode(mode))
         self._show_image(self.images[mode])
         self.opened_lines.clear()
         if mode == "opened":
@@ -5850,11 +5960,13 @@ class LoggerWindow(QMainWindow):
 
     def _inventory_phase_changed(self):
         """Keep a held inventory reading on its captured map when changing start/end phase,
-        then persist the selection and refresh totals.
+        committing the preference before changing its review draft. Roll back a
+        failed selection without discarding rows or reassigning their capture.
         """
         phase = value(self.inventory_phase)
-        if self.pending_review_kind == "currency" and self._pending_currency_phase:
-            previous = self._pending_currency_phase
+        reviewing = self.pending_review_kind == "currency" and self._pending_currency_phase
+        previous = self._pending_currency_phase if reviewing else None
+        if reviewing:
             if self._inventory_reading is not None:
                 with QSignalBlocker(self.inventory_phase):
                     select(self.inventory_phase, previous)
@@ -5870,6 +5982,17 @@ class LoggerWindow(QMainWindow):
                     select(self.inventory_phase, previous)
                 self.error(str(error))
                 return
+        try:
+            with logger._connect() as db:
+                if previous is None:
+                    previous = logger._meta(db, "inventory_scan_phase", "start")
+                logger._set_meta(db, "inventory_scan_phase", phase)
+        except Exception:
+            if previous is not None:
+                with QSignalBlocker(self.inventory_phase):
+                    select(self.inventory_phase, previous)
+            raise
+        if reviewing:
             self._pending_currency_phase = phase
             if self._inventory_capture_context is not None:
                 self._inventory_capture_context["phase"] = phase
@@ -5877,8 +6000,6 @@ class LoggerWindow(QMainWindow):
             if summary:
                 set_message(self.review_summary, f"{phase.title()} inventory · {summary}")
             self.approve_scan_button.setToolTip(f"Save {phase} inventory to {self._pending_currency_map}.")
-        with logger._connect() as db:
-            logger._set_meta(db, "inventory_scan_phase", phase)
         self.refresh_currency_summary()
 
     def _inventory_captured(self, image, live=True, expected_map_id=None, expected_phase=None, expected_strictness=None):
@@ -5989,10 +6110,14 @@ class LoggerWindow(QMainWindow):
         self.approve_scan_button.setToolTip(f"Save {phase} inventory to {map_id}.")
         if live and self.state["settings"].get("ocr_auto_commit"):
             if clear_currency_read(result):
-                self.save_inventory()
-                set_message(self.inventory_status,
-                            f"✓ Inventory snapshot saved as Scan Commit #{self.state['scan_commit_count']}.",
-                            "success")
+                saved = self.run(self.save_inventory)
+                if saved is not None:
+                    set_message(self.inventory_status,
+                                f"✓ Inventory snapshot saved as Scan Commit #{self.state['scan_commit_count']}.",
+                                "success")
+                elif self.pending_review_kind == "currency":
+                    set_message(self.inventory_status,
+                                "Automatic save could not finish. The recognized rows are retained; try Approve again.")
             else:
                 set_message(self.inventory_status,
                             "Auto-commit held: review the uncertain rows, then use the bottom Approve to save the snapshot.")
@@ -6430,10 +6555,14 @@ class LoggerWindow(QMainWindow):
         self._review_pending("ritual", summary)
         if live and self.state["settings"].get("ocr_auto_commit"):
             if clear_ritual_read(result, logger.ritual_names()):
-                self.save_ritual()
-                set_message(self.ritual_status,
-                            f"✓ Ritual page saved as Scan Commit #{self.state['scan_commit_count']}.",
-                            "success")
+                saved = self.run(self.save_ritual)
+                if saved is not None:
+                    set_message(self.ritual_status,
+                                f"✓ Ritual page saved as Scan Commit #{self.state['scan_commit_count']}.",
+                                "success")
+                elif self.pending_review_kind == "ritual":
+                    set_message(self.ritual_status,
+                                "Automatic save could not finish. The recognized rows are retained; try Approve again.")
             else:
                 set_message(self.ritual_status,
                             "Auto-commit held: check the reward names, quantities and Tribute, then Approve.")
@@ -6970,6 +7099,7 @@ def instance_lock():
         user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
         user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
         window = (user32.FindWindowW(None, WINDOW_TITLE)
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.14 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.13 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.12 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.11 Beta")

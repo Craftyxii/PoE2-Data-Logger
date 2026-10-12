@@ -209,6 +209,54 @@ def _register_atlas_snapshot(db, context):
                (setup_id, catalog_id, _dump(settings)))
 
 
+def _atlas_city_biome(db, config):
+    """Return one explicit allocated city-biome effect, or keep the manual biome.
+
+    The city's keystone must be allocated and its saved choice must be active.
+    Exact catalog flags describe an additional biome classification, rather
+    than a chance to generate that biome. Frozen setups use their own catalog;
+    absent or conflicting evidence never guesses a replacement.
+    """
+    atlas = config.get("atlas_settings") or {}
+    city = str(config.get("city_type") or "None").lower()
+    prefix = f"map_city_{city}_also_count_as_"
+    if city not in {"faridun", "ezomyte", "vaal"}:
+        return config["biome"]
+    catalog_id = atlas.get("catalog_id")
+    if catalog_id == _atlas_catalog_identity()[0]:
+        nodes = _atlas_catalog_data()["nodes"]
+    else:
+        saved = db.execute("SELECT catalog_json FROM atlas_catalogs WHERE catalog_id=?",
+                           (catalog_id,)).fetchone()
+        nodes = _load(saved[0]).get("nodes", {}) if saved else {}
+    targets = set()
+    choices = atlas.get("choices", {})
+    biomes = {biome.lower(): biome for biome in BIOMES if biome != "None"}
+    for node_id in atlas.get("allocated", []):
+        node = nodes.get(node_id, {})
+        effects = [node, *(choice for choice in node.get("choices", [])
+                           if choice.get("id") == choices.get(node_id))]
+        for effect in effects:
+            for stat, amount in effect.get("stats", {}).items():
+                biome = biomes.get(stat[len(prefix):]) if stat.startswith(prefix) else None
+                if biome and amount == 1 and not isinstance(amount, bool):
+                    targets.add(biome)
+    return next(iter(targets)) if len(targets) == 1 else config["biome"]
+
+
+def _sync_city_biome(db, config, map_id):
+    """Autofill editable map tags using the Atlas applicable to this map only.
+
+    An existing activity freezes the map's Atlas even when the editor has
+    already saved an allocation for the following map. This reads its bound
+    context without changing historical rows or the editable Atlas setup.
+    """
+    effective = config
+    if _map_has_activity(db, map_id):
+        effective = _bind_atlas_context(db, map_id, _snapshot(config))
+    config["biome"] = _atlas_city_biome(db, effective)
+
+
 def _bind_atlas_context(db, map_id, context):
     """Bind only Atlas fields; leave the existing waystone/tablet behavior untouched."""
     saved = db.execute("SELECT snapshot_json FROM maps WHERE map_id=?", (map_id,)).fetchone()
@@ -937,6 +985,13 @@ def _save_settings(db, data, *, confirmed_affixes=()):
     source = _meta(db, "settings")
     current = _meta(db, "current_map_number", 0)
     next_map = bool(_meta(db, "pending_new_map"))
+    target = _map_id(current + 1 if not current or next_map else current)
+    city_changed = "city_type" in data and c["city_type"] != source.get("city_type")
+    atlas_changed = "atlas_settings" in data and c["atlas_settings"] != source.get("atlas_settings")
+    if city_changed or atlas_changed and _map_id(_atlas_settings_target(db)) == target:
+        # A future Atlas edit cannot reapply the old rule over the active
+        # map's explicit manual Biome. Its own queued context is derived below.
+        _sync_city_biome(db, c, target)
     waystone_fields = WAYSTONE_DEFAULTS.keys() & data.keys()
     if waystone_fields and (not current or next_map):
         target = _map_id(current + 1)
@@ -986,14 +1041,18 @@ def save_atlas_settings(data):
     with _connect(undo_label='Atlas settings') as db:
         db.execute("BEGIN IMMEDIATE")
         settings = _validate_atlas_settings(data)
+        changed = settings != _meta(db, "settings").get("atlas_settings")
         _save_settings(db, {"atlas_settings": settings})
         current = _meta(db, "current_map_number", 0)
         target = _atlas_settings_target(db)
         mid = _map_id(target)
         config = _meta(db, "settings")
         expedition = 1 if target != current else config["expedition"]
+        context = _snapshot(_map_context_settings(db, config, mid))
+        if changed and target != current:
+            context["biome"] = _atlas_city_biome(db, context)
         _record_commit(db, "Atlas settings", mid, _exp_id(mid, expedition),
-                       context=_snapshot(_map_context_settings(db, config, mid)))
+                       context=context)
     return get_state()
 
 
@@ -1542,11 +1601,20 @@ def assign_ocr_id(mode, expected_map_id=None, expected_generation=None, expected
         return pending
 
 
-def discard_ocr_id():
-    """Clear the pending remnant reservation and mode without advancing the remnant counter."""
+def discard_ocr_id(*, expected_context=None, expected_pending=_UNSET):
+    """Clear an owned reservation atomically without advancing its counter.
+
+    Ordinary rejection clears the current reservation. Delayed failure cleanup
+    supplies the captured context and exact reservation so it cannot clear a
+    newer remnant or expedition that reused the same map.
+    """
     with _connect() as db:
-        _set_meta(db, "ocr_pending", None)
-        _set_meta(db, "ocr_pending_mode", None)
+        db.execute("BEGIN IMMEDIATE")
+        if expected_context is not None:
+            _validate_remnant_context(db, expected_context)
+        if expected_pending is _UNSET or _meta(db, "ocr_pending") == expected_pending:
+            _set_meta(db, "ocr_pending", None)
+            _set_meta(db, "ocr_pending_mode", None)
     return get_state()
 
 
@@ -1619,6 +1687,8 @@ def _commit_remnant(db, first, next_recipe=None, family=None, scan_id=None, visi
     occurrence = str(uuid.uuid4())
     context = _bind_atlas_context(db, mid, _snapshot({**config, "expedition": expedition}))
     if new_map:
+        context["biome"] = _atlas_city_biome(db, context)
+        config["biome"] = context["biome"]
         fields = set(prepared["fields"]) if prepared else set()
         context["waystone_setup_fields"] = sorted(fields)
         context["waystone_setup_saved"] = WAYSTONE_SETUP_FIELDS <= fields
@@ -2524,6 +2594,8 @@ def start_map():
         config = _meta(db, "settings")
         prepared = _prepared_waystone(db, mid)
         _set_meta(db, "previous_expedition", config["expedition"])
+        # Empty-map cancellation also reverses the classification applied below.
+        _set_meta(db, "previous_biome", config.get("biome", "None"))
         _set_meta(db, "previous_waystone_settings", _waystone_settings(
             prepared["previous_settings"] if prepared and current else config))
         if prepared:
@@ -2532,6 +2604,8 @@ def start_map():
             config.update(_waystone_settings({}))
         config["expedition"] = 1
         context = _bind_atlas_context(db, mid, _snapshot(config))
+        context["biome"] = _atlas_city_biome(db, context)
+        config["biome"] = context["biome"]
         fields = set(prepared["fields"]) if prepared else set()
         context["waystone_setup_fields"] = sorted(fields)
         context["waystone_setup_saved"] = WAYSTONE_SETUP_FIELDS <= fields
@@ -2577,6 +2651,9 @@ def undo_empty_map():
             previous = _meta(db, "previous_waystone_settings")
             if number > 1 and previous:
                 config.update(_waystone_settings(previous))
+            previous_biome = _meta(db, "previous_biome")
+            if previous_biome in BIOMES:
+                config["biome"] = previous_biome
             _set_meta(db, "settings", config)
     return get_state()
 
@@ -2604,6 +2681,7 @@ def clear_export_and_reset_ids():
         _set_meta(db, "ocr_pending_mode", None)
         _set_meta(db, "previous_expedition", 1)
         _set_meta(db, "previous_waystone_settings", None)
+        _set_meta(db, "previous_biome", None)
         _set_meta(db, "prepared_waystone_setup", None)
         _set_meta(db, "scan_commit_count", 0)
         config = _meta(db, "settings")
@@ -2648,10 +2726,11 @@ def currency_names():
 
 
 def add_currency_item(name):
-    """Journal new currency names or retirement overrides, rejecting Item conflicts."""
+    """Reserve the writer before resolving names; journal additions and reject Item conflicts atomically."""
     from PoE2_Data_Logger.core.review_learning import validate_name
     name = validate_name(str(name or ""), "Currency")
     with _connect(undo_label="Currency reference name") as db:
+        db.execute("BEGIN IMMEDIATE")
         existing = _catalog_name(db, "currency_items", name)
         if existing:
             _retain_local_catalog_name(db, existing)
@@ -2707,10 +2786,11 @@ def item_names():
 
 
 def add_item_name(name):
-    """Journal a validated new Item name while rejecting Currency catalog conflicts."""
+    """Reserve the writer before resolving names; journal additions and reject Currency conflicts atomically."""
     from PoE2_Data_Logger.core.review_learning import validate_name
     name = validate_name(str(name or ""), "Item")
     with _connect(undo_label="Item reference name") as db:
+        db.execute("BEGIN IMMEDIATE")
         existing = _catalog_name(db, "item_names", name)
         if existing:
             return existing
@@ -2954,6 +3034,13 @@ def save_currency_snapshot(phase, items, expected_map_id=None, *, register_names
         context = (_load(previous[0]) if map_id == current and _meta(db, "pending_new_map") and previous
                    else _snapshot(_map_context_settings(db, settings, map_id)))
         context = _bind_atlas_context(db, map_id, context)
+        if phase == "start" and map_id != current and not _map_has_activity(db, map_id):
+            # Start inventory can freeze the next map before New Map is clicked.
+            # Apply that map's city effect now, alongside the snapshot's Undo.
+            context["biome"] = _atlas_city_biome(db, context)
+            if context["biome"] != settings.get("biome", "None"):
+                settings["biome"] = context["biome"]
+                _set_meta(db, "settings", settings)
         db.execute("INSERT INTO currency_snapshots(map_id,phase,items_json,recorded_at,snapshot_json) "
                    "VALUES(?,?,?,?,?) ON CONFLICT(map_id,phase) DO UPDATE SET "
                    "items_json=excluded.items_json,recorded_at=excluded.recorded_at,"
@@ -3103,10 +3190,11 @@ def ritual_names():
 
 
 def add_ritual_name(name):
-    """Journal a newly registered Omen label in both Ritual and Currency catalogs."""
+    """Resolve and journal an Omen in both catalogs under one writer reservation, rejecting Item conflicts."""
     from PoE2_Data_Logger.core.review_learning import validate_name
     name = validate_name(str(name or ""), "Omen")
     with _connect(undo_label="Omen reference name") as db:
+        db.execute("BEGIN IMMEDIATE")
         return _canonical_registered_name(db, name, "Omen")[0]
 
 

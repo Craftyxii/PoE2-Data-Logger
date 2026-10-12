@@ -1,4 +1,4 @@
-"""Build a four-sheet XLSX directly from logger CSV exports and SQL-resident analysis notes.
+"""Build a self-contained XLSX from logged data, Context and its reference databases.
 
 Export, Atlas Character Settings, Scan History and Analysis Context use one SQLite read snapshot.
 Saved Atlas setup IDs link the summary/history rows to their exported settings;
@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 from zipfile import ZipFile, ZIP_DEFLATED
 
 from PoE2_Data_Logger.core import logger_store as logger
+from PoE2_Data_Logger.core import workbook_references as references
 
 
 NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -120,6 +121,7 @@ def _numeric_column(name):
         "New Find Quantity", "Session Found Quantity", "Ritual Tribute Available", "Ritual Rerolls Remaining", "Visible Seed Sockets",
         "Page", "Currency Commit #", "Ritual Commit #", "Start Scan Commit #", "End Scan Commit #",
         "Gear Item Rarity %", "Points"}
+        or name in {"Top Socket Count", "Recipe # In Family", "Alias Position"}
         or re.fullmatch(r"Tablet \d Mod \d (?:%|Value)", name)
         or re.fullmatch(r"Tablet \d Random Modifiers", name)
         or re.fullmatch(r"Expedition \d+ Detonated", name)
@@ -222,11 +224,12 @@ def _analysis_context_sheet(data):
 
 
 def export_xlsx():
-    """Serialize current data, saved Atlas settings, scan history and analysis notes into one XLSX.
+    """Serialize logged data, analysis notes and reference databases on one SQLite snapshot.
 
     Append the context sheet after the established data sheets to preserve their
     indices. Read all sources and item headers in one transaction, then add setup
-    hyperlinks and worksheet styles to the ZIP package.
+    hyperlinks and worksheet styles to the ZIP package. Append reference sheets
+    after the existing four so their indices, fields and event accounting stay intact.
     """
     with logger._connect() as db:
         db.execute("BEGIN")
@@ -234,6 +237,7 @@ def export_xlsx():
                        ("Atlas Character Settings", logger.export_atlas_csv(_db=db)),
                        ("Scan History", logger.export_all_csv(_db=db)),
                        ("Analysis Context", logger.export_analysis_context_csv(_db=db))]
+        data_sheets.extend(references.export_sheets(db))
         item_headers = logger.map_summary_item_headers(_db=db)
     setup_links = {number: _atlas_setup_hyperlinks(data, data_sheets[1][1], data_sheets[1][0])
                    for number, (_, data) in enumerate(data_sheets, 1) if number in (1, 3)}

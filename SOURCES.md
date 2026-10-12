@@ -9,6 +9,7 @@
 | File | Purpose |
 | --- | --- |
 | [logger_store.py](PoE2_Data_Logger/core/logger_store.py) | Map settings, remnant records, inventory snapshots, Ritual records and review state |
+| [undo_store.py](PoE2_Data_Logger/core/undo_store.py) | Persistent transaction journals and atomic Universal Undo |
 | [store.py](PoE2_Data_Logger/core/store.py) | Scanner records, seed candidates and reviewed glyphs |
 | [service.py](PoE2_Data_Logger/core/service.py) | Application actions and scan routing |
 | [auto_commit.py](PoE2_Data_Logger/core/auto_commit.py) | Accepting clear remnant readings |
@@ -16,9 +17,15 @@
 | [ritual_catalog.py](PoE2_Data_Logger/core/ritual_catalog.py) | Ritual reward catalog helpers |
 | [catalog_repairs.py](PoE2_Data_Logger/core/catalog_repairs.py) | Guarded repairs for known legacy remnant family data |
 | [ocr_runtime.py](PoE2_Data_Logger/core/ocr_runtime.py) | OCR CPU thread preference and runtime configuration |
+| [ocr_workers.py](PoE2_Data_Logger/core/ocr_workers.py) | Bounded child recognition workers, cancellation, deadlines and recovery |
+| [ocr_sensitivity.py](PoE2_Data_Logger/core/ocr_sensitivity.py) | Per-scan strictness preferences and acceptance thresholds |
 | [review_learning.py](PoE2_Data_Logger/core/review_learning.py) | Validated local icon examples learned from accepted review corrections |
 | [currency_display.py](PoE2_Data_Logger/core/currency_display.py) | Currency counter artwork from bundled and local references |
 | [workbook_export.py](PoE2_Data_Logger/core/workbook_export.py) | Excel workbook export |
+| [workbook_references.py](PoE2_Data_Logger/core/workbook_references.py) | Family, recipe, seed and alias worksheet exports on the log's read snapshot |
+| [analysis_context.py](PoE2_Data_Logger/core/analysis_context.py) | Field definitions, joins, counting rules and analysis guidance |
+| [analysis_context_data.py](PoE2_Data_Logger/core/analysis_context_data.py) | Ordinary SQLite views for frozen Atlas definitions and scoped observation totals |
+| [analysis_context_rules.py](PoE2_Data_Logger/core/analysis_context_rules.py) | Verified source-to-display unit translations for Atlas stats |
 | [atlas_catalog.py](PoE2_Data_Logger/core/atlas_catalog.py) | Offline, versioned PoE2 atlas nodes, effects and choice options |
 | [export_files.py](PoE2_Data_Logger/core/export_files.py) | Writes paired exports and restores earlier files if a write fails |
 
@@ -77,5 +84,13 @@
 - [packaging/installer.nsi](packaging/installer.nsi) defines the Windows installer.
 - [tools/verify_build.py](tools/verify_build.py) checks the packaged Windows runtime.
 - [tools/build_atlas_catalog.py](tools/build_atlas_catalog.py) rebuilds the bundled atlas from its versioned source data.
+- [tools/run_tests.py](tools/run_tests.py) runs targeted tests or full discovery in isolated batches.
+- [tools/audit_propagation_crowns.py](tools/audit_propagation_crowns.py) and [tools/audit_propagation_prefill.py](tools/audit_propagation_prefill.py) measure captured-image mark recognition and family filling.
+- [tools/native_hud_input.py](tools/native_hud_input.py) exercises native Windows input for HUD validation.
+- [tools/verify_installer.py](tools/verify_installer.py) checks installation, updates and saved-file retention.
+- [tools/publish_verified_beta.py](tools/publish_verified_beta.py) validates exact-source release artifacts before publication.
+- [.github/workflows/release.yml](.github/workflows/release.yml) defines the required Windows release gates.
+
+Regression tests are in [tests/](tests/). See [CONTRIBUTING.md](CONTRIBUTING.md) for execution and environment limits and [docs/README.md](docs/README.md) for documentation navigation.
 
 The library list is in [DEPENDENCIES.md](DEPENDENCIES.md).

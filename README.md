@@ -1,70 +1,76 @@
 # PoE2 Data Logger
 
-PoE2 Data Logger is a Windows desktop app for recording Expedition remnant recipe groups and rune propagation chains, map and tablet modifiers, monster kill counts, inventory currency and items, and Ritual rewards. It uses local OCR for supported scans, alongside manual controls for map settings, kill counts and chain runes.
+A Windows desktop logger for Path of Exile 2. Record Expedition remnants and rune propagation, map and tablet settings, monster kills, inventory changes, and Ritual offers. Review captured screenshots and OCR suggestions, correct them, and export the saved data for analysis.
 
-It combines your selected tablets, Atlas Master, waystone affixes, area level, biome and city type with your logged Ritual rewards, currency found and other results. Every map receives a unique **Map ID**, and all its records stay linked to that ID. Export the log to an **Excel or CSV spreadsheet** for analysis.
+## Download and source status
 
-Every remnant receives its own unique **Remnant ID**. On City maps, each expedition and its rune propagation chain are linked to the map through a unique **Expedition ID**. Chain steps retain their order, and each saved chain has a unique **Scan Commit number**.
+This source targets [1.3.2.15 Beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.15-beta). Its [installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.15-beta/PoE2-Data-Logger-Setup-v1.3.2.15-beta.exe) becomes available after the required release checks pass. See the [release notes](docs/RELEASE_1.3.2.15.md). The [previous beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.14-beta) and [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2) remain available.
 
-Currency tracking keeps one current starting inventory and one current ending inventory per map. Repeated scans replace the corresponding totals instead of adding them again. Exports include **before and after counts and net changes**.
+Changes from the previous beta include safer scan completion during database contention, Snapshot and shortcut rollback, atomic reference-name registration, Atlas city-to-biome autofill, and expanded analysis/reference exports. See the [changelog](CHANGELOG.md#13215-beta). Installer, executable and window version labels identify 1.3.2.15 Beta.
 
-**Currency** shows grouped item icons, names and session totals, with found items first. Approved End scans update the positive gains from each map's Start/End pair; missing Start scans mean an empty inventory, and repeated scans replace that map's contribution. Resetting IDs clears the counter. The shared header holds kill counts, which save and clear on **New map**. Local inventory-reference tools are available in **Data export → Developer Mode**.
+## What you can record
 
-Scans and records are processed and stored locally. **The app does not upload your data**; you choose whether to export and share it.
+- **Maps:** Biome, City Type, area level, map options, waystone and tablet modifiers, Atlas Master/perks, Atlas allocations, gear item rarity, and Normal/Magic/Rare/Unique kills. Map IDs connect records to saved settings.
+- **Remnants:** visible seed bars, opened reward panels, or both stages linked through one Remnant ID.
+- **Propagation:** recipe/family identity and marked runes in socket order. Every propagation scan requires manual approval. Existing rune dropdowns remain available for corrections. Shared family sockets can recover missing crowns from a complete mark or corroborating fragments.
+- **Inventory:** one approved Start and End snapshot per map. Rescans replace that phase rather than adding it again. Session totals sum positive End-minus-Start gains; a missing Start is treated as empty. Inventory gains do not prove individual ground drops.
+- **Ritual:** offered rewards, quantities, deferred state, tribute and rerolls. Offers do not add to acquired inventory totals.
 
-## Download
+Screenshot previews remain part of scan review. Possible Currency matches offer editable suggestions; approving or rejecting rows preserves the scroll position. Accepted corrections can teach local icon references. OCR Strictness is set separately for each scan type; it never enables automatic propagation approval.
 
-Download the [**1.3.2.14 Beta installer**](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.14-beta/PoE2-Data-Logger-Setup-v1.3.2.14-beta.exe) for the changes in the [beta release notes](docs/RELEASE_1.3.2.14.md). The [1.3.2 stable release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2) remains available. Both installers include the libraries and resources needed to run the app.
+**Undo** reverses the latest saved action, including scans, chain edits, settings, counts and New map. The last 100 undoable actions survive restarts. Expedition also provides saved-rune corrections, **Discard last chain step**, and **Discard chain**, without deleting remnant logs or actual detonation totals. Current-map log discard is available through the local service dispatcher; it supports Undo and has no additional desktop button. See [the correction notes](docs/CHAIN_DISCARD.md).
 
-The separate **Atlas / Character Settings** tab provides a clickable PoE2 atlas with numbered effect dropdowns, immediate hover descriptions, Autofill and gear item rarity. Excel exports include a companion atlas worksheet linked to each map through its saved Atlas Setup ID.
+The Atlas editor saves allocations and numbered choices to a frozen Atlas Setup ID. In the working source, an allocated city-biome choice can fill the existing Biome selector, such as Faridun → Desert. This represents the Atlas effect's additional classification. Recorded maps retain their saved Atlas; later Atlas edits apply to the next map. Manual Biome editing remains available.
 
-Kills are recorded separately for Normal, Magic, Rare and Unique monsters. The live HUD shows centered **Map #** and **Remnant #** indicators at 54 px in wide layouts and 41 px in compact layouts. Each accepted propagation scan adds one remnant detonation to its expedition. Every propagation scan requires manual review, regardless of OCR confidence, strictness or auto-commit settings; **Approve** beside a propagation recipe directly saves that part without changing the Expedition ID and refreshes the editable saved-rune dropdowns on Expedition. Accepted scan parts save while preserving any separate manual draft. Correct saved runes through the Expedition dropdowns, then use **Complete chain** in the header, Review or Expedition to finish the saved chain and advance to the next Expedition ID. Completion waits for an unrelated pending scan to resolve so its captured context stays intact. Propagation review keeps the recipe rows, Approve and Complete controls together. Expedition hides empty manual-draft controls until explicit manual entry is requested, and chain status remains visible when optional guidance is off.
+See the [user guide](docs/USER_GUIDE.md) for the full scan, review, chain and map workflow.
 
-Approved name corrections in Currency and Ritual review save captured artwork as local recognition examples and create dedicated item-count export columns. Currency possible matches offer editable suggestion dropdowns; row approvals retain your scroll position. Unnamed or unapproved uncertain rows are rejected. Every propagation scan requires manual review, and approved parts retain their source recipe and family for analysis. Remnant review stays tied to its captured expedition while propagation continues. The **OCR Sensitivity** tab has a separate **OCR Strictness** slider for each scan type: **0** accepts more tentative matches, **50** retains the previous behavior, and **100** requires manual confirmation before OCR results save. Quantity, level, family, marked-position and capture-context checks remain enforced. **Scan settings** offers 1, 2, 4 or 6 CPU OCR threads, applied after restarting the app.
+## Exports and analysis
 
-See the [user guide](docs/USER_GUIDE.md) for map setup, hotkeys, scans, reviews and exporting your data.
+The working-source Excel export contains eight worksheets:
 
-## Source and libraries
-
-| Location | Contents |
+| Worksheet | Contents |
 | --- | --- |
-| [PoE2_Data_Logger/core/](PoE2_Data_Logger/core/) | Logging, records, reference databases and exports |
-| [PoE2_Data_Logger/ocr/](PoE2_Data_Logger/ocr/) | OCR adapters, item readers and rune scanning |
-| [PoE2_Data_Logger/ui/](PoE2_Data_Logger/ui/) | Desktop interface, review overlay and region editor |
-| [PoE2_Data_Logger/platform/](PoE2_Data_Logger/platform/) | Hotkeys, clipboard capture and game-window checks |
-| [PoE2_Data_Logger/third_party/](PoE2_Data_Logger/third_party/) | Bundled library code, models, reference data and licenses |
-| [packaging/sources.py](packaging/sources.py) | Source and resource groups used by the build |
-| [SOURCES.md](SOURCES.md) | Code index, grouped by what each file does |
-| [DEPENDENCIES.md](DEPENDENCIES.md) | Runtime libraries, build tools and bundled third-party components |
-| [requirements.txt](requirements.txt) | Runtime dependency declarations |
-| [requirements-build.txt](requirements-build.txt) | Build dependency declarations |
-| [packaging/](packaging/) | PyInstaller and NSIS packaging |
-| [tools/](tools/) | Build verification |
-| [docs/](docs/) | User guide |
+| Export | Map totals, activity/recipe rows and acquired item columns |
+| Atlas Character Settings | Saved Atlas setups, gear rarity and linked Map IDs |
+| Scan History | Scan approvals, corrections, offers and audit records |
+| Analysis Context | Field definitions, units, counting rules, joins, saved Atlas effects, scoped totals and analysis limits |
+| Family Database | Current family membership, recipe IDs, family order and rune combinations |
+| Recipe Database | Current recipe definitions and retained identities for retired recipes |
+| Seed Database | Reference seed sockets, rune labels and reward mappings |
+| Reference Aliases | Reference aliases and their recipe targets |
+
+The first four sheet positions remain unchanged. All eight read one database snapshot. Reference rows explain the data; they are not logged loot. The Context explains how earlier propagated marks combine with a current recipe's full rune combination, as well as missing values, percentage units and limits on attributing loot to individual chain steps. Editable recipe catalogs cannot reconstruct deleted historical combinations or unrecorded outcomes.
+
+CSV folder exports contain the three data files: Export, Atlas Character Settings and Scan History. A raw SQLite backup includes logs, reference tables, stored image bytes, and the SQL-readable Context table and views. Images stored as external files need a separate copy. Export filenames are timestamped to preserve earlier exports.
+
+## Local data and game interaction
+
+Processing and storage are local; the app does not upload your logs. The default profile is `~/Runeshape Scan`, including `scans.sqlite3` and external images. `RUNESHAPE_SCAN_DATA_DIR` selects a different profile. Back up your records before resetting a session or OCR references.
+
+Live hotkey scans read screen captures while the game is in the foreground; saved images can also be reviewed offline. The optional tooltip-copy path sends an ordinary Ctrl+C and reads clipboard text. The app does not inject code, read game process memory, or modify game files. The optional Discord link opens your browser when clicked.
 
 ## Run from source
 
-Install Python 3.12. From the repository folder:
+Use Python 3.12. On Windows, from the checkout root:
 
-```text
-py -3.12 -m pip install -r requirements.txt
-Start.bat
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m PoE2_Data_Logger
 ```
 
-To run without the batch file:
+Alternatively, install the runtime requirements for the Python selected by `py -3.12`, then use [Start.bat](Start.bat). The installer already bundles its runtime and resources.
 
-```text
-py -3.12 -m PoE2_Data_Logger
-```
+## Development and Windows builds
 
-## Build on Windows
+[CONTRIBUTING.md](CONTRIBUTING.md) describes the source layout, isolated test profiles, regression commands and release checks. [SOURCES.md](SOURCES.md) indexes the application modules; [DEPENDENCIES.md](DEPENDENCIES.md) lists libraries and notices.
 
-Install Python 3.12 and NSIS, add `makensis` to PATH, then run **Build.bat** from the repository folder. It installs the build dependencies, packages the app, checks the bundled runtime and OCR models, and creates **PoE2-Data-Logger-Setup-v1.3.2.14-beta.exe**.
+For a Windows installer, install Python 3.12 and NSIS with `makensis` on PATH, then run [Build.bat](Build.bat). It installs build dependencies, packages the app, verifies bundled runtime/model assets, and creates the installer named by [installer.nsi](packaging/installer.nsi). Building alone does not complete the native HUD, full-suite, 100-map or installer/update release gates in [the release workflow](.github/workflows/release.yml).
 
-The source groups in [packaging/sources.py](packaging/sources.py) feed the PyInstaller specification. Add a new app module or resource there when changing the build.
+## Documentation and licenses
 
-## Credits and licenses
+The [documentation index](docs/README.md) separates current guides from historical release and audit evidence. Published release notes describe their specific source revisions; unreleased changes are listed separately.
 
-The app incorporates RuneHelper OCR material, currency-overlay / Exiled Exchange 2 material, DejaVu fonts, and game-derived atlas data and artwork. Their original notices and provenance are included beside those files. See [DEPENDENCIES.md](DEPENDENCIES.md) and [the branding notice](PoE2_Data_Logger/CRAFTYXII_ASSETS_LICENSE.txt).
+Bundled components include RuneHelper, currency-overlay / Exiled Exchange 2, DejaVu fonts, and game-derived Atlas data/artwork. Their notices remain alongside the files. See [DEPENDENCIES.md](DEPENDENCIES.md) and the [branding notice](PoE2_Data_Logger/CRAFTYXII_ASSETS_LICENSE.txt).
 
 PoE2 Data Logger is an independent tool and is not affiliated with or endorsed by Grinding Gear Games.

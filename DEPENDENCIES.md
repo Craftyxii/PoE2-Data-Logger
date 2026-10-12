@@ -27,6 +27,7 @@ The application also uses Python 3.12's standard library, including SQLite, CSV,
 | --- | --- | --- |
 | Python | `3.12` | Source execution and the Windows build |
 | PyInstaller | `>=6.15,<7` | Packaging the Python runtime, application and libraries |
+| openpyxl | `3.1.5` | Independently reopening and checking exported workbooks in tests; not used by the runtime exporter |
 | NSIS | `makensis` on PATH | Building the Windows installer |
 
 ## Bundled third-party files
