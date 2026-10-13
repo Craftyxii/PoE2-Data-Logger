@@ -20,6 +20,7 @@ MODULES = (
     'PoE2_Data_Logger.core.analysis_context',
     'PoE2_Data_Logger.core.analysis_context_data',
     'PoE2_Data_Logger.core.analysis_context_rules',
+    'PoE2_Data_Logger.core.atlas_effect_snapshot',
     'PoE2_Data_Logger.core.workbook_references',
     'PoE2_Data_Logger.core.undo_store',
     'PoE2_Data_Logger.core.service',

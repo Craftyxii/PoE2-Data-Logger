@@ -246,6 +246,12 @@ class NativeWindowsHUDTests(unittest.TestCase):
     def check_propagation_and_counters(self):
         """Approve real PNG OCR, inspect saved Expedition runes and complete through the live header."""
         self.tab(0)
+        self.assertEqual(self.window.header_map_scanned.text(), "Map scanned: No")
+        self.native.choose(self.window.header_activity, "Grand Expedition")
+        self.assertEqual(logger.get_state()["settings"]["activity_type"], "Grand Expedition")
+        self.native.choose(self.window.header_activity, "None")
+        self.assertEqual(logger.get_state()["settings"]["activity_type"], "None")
+        self.phase("02a-map-activity-and-unsaved-setup")
         with Image.open(io.BytesIO(self.raw)) as opened:
             source = runehelper_ocr.default_frame(opened.convert("RGB"))
         image = Image.new("RGB", source.size, (176,161,130))
@@ -389,6 +395,7 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"],before+1)
         self.assertEqual(logger.get_state()["settings"]["tier"],16)
         self.assertEqual(logger.get_state()["settings"]["waystone"],93.5)
+        self.assertEqual(self.window.header_map_scanned.text(), "Map scanned: Yes")
         self.phase("07-waystone-manual-review")
 
     def check_currency_and_ritual(self):

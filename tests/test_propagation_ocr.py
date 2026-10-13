@@ -190,13 +190,68 @@ class PropagationOCRTests(unittest.TestCase):
         result = self.scan(image, rows)
         self.assertTrue(all(not choice["can_use"] for choice in result["choices"]), result)
 
-    def test_group_recovery_retains_target_text_guard(self):
-        """Weak target text remains held despite another row's verified source crown."""
+    def test_group_recovery_uses_family_for_weak_target_text(self):
+        """A resolved recipient uses the family's verified socket despite weak local text."""
         image, rows = self.family_panel({0: [2]})
         rows[4]["score"] = .7
         result = self.scan(image, rows)
-        self.assertFalse(result["can_use"], result)
-        self.assertTrue(result["choices"][1]["can_use"], result)
+        self.assert_group_slots(result, [2])
+        self.assertEqual(result["observed_positions"], [])
+        self.assertEqual(result["recovered_positions"], [2])
+
+    def test_family_socket_prefills_weak_unmarked_receivers(self):
+        """Socket one on rows one, three and four fills both weak unmarked recipients."""
+        image, rows = self.family_panel({0: [1], 2: [1], 3: [1]})
+        for index in (1, 4):
+            rows[index]["score"] = .84
+        result = self.scan(image, rows)
+        self.assert_group_slots(result, [1])
+        self.assertEqual([choice["observed_positions"] for choice in result["choices"]],
+                         [[1], [], [1], [1], []])
+        self.assertEqual([choice["recovered_positions"] for choice in result["choices"]],
+                         [[], [1], [], [], [1]])
+
+    def test_family_sockets_prefill_receivers_without_tile_bars(self):
+        """Verified family sockets fill recipients with no local geometry, including a pair."""
+        for sockets in ([1], [1, 5]):
+            with self.subTest(sockets=sockets):
+                image, rows = self.family_panel({0: sockets, 2: sockets, 3: sockets})
+                for index in (1, 4):
+                    y = 86 + index * 81
+                    ImageDraw.Draw(image).rectangle((50, y - 18, 460, y + 19),
+                                                   fill=(176, 161, 130))
+                with logger._connect() as db:
+                    before = list(db.iterdump())
+                result = self.scan(image, rows)
+                self.assert_group_slots(result, sockets)
+                for index in (1, 4):
+                    self.assertEqual(result["choices"][index]["observed_positions"], [])
+                    self.assertEqual(result["choices"][index]["recovered_positions"], sockets)
+                with logger._connect() as db:
+                    self.assertEqual(before, list(db.iterdump()))
+
+    def test_unmarked_receiver_extra_socket_stays_held(self):
+        """An extra visible socket holds only that unmarked recipient, including a short recipe."""
+        for family, recipient, reward in ((17, 4, "Katla's Gloom"), (30, 1, "Lesser Adept Rune")):
+            with self.subTest(family=family):
+                if family == 17:
+                    image, rows = self.family_panel({0: [1]})
+                else:
+                    image, rows = self.panel(["Chilling Flux", "Lesser Adept Rune", "Lesser Glacial Rune",
+                                              "Armourer's Scrap x2"], selected=recipient, marks={0: [1]})
+                with logger._connect() as db:
+                    sockets = db.execute("SELECT sockets FROM recipes WHERE name=?", (reward,)).fetchone()[0]
+                cx, y = 71 + 41 * sockets, 86 + recipient * 81
+                ImageDraw.Draw(image).rectangle((cx - 19, y - 18, cx + 18, y + 18),
+                                               fill=(194, 178, 146), outline=(92, 63, 43), width=2)
+                image.paste(self.glyph, (cx - 14, y - 14))
+                result = self.scan(image, rows)
+                self.assertEqual(result["candidates"], [family], result)
+                self.assertFalse(result["choices"][recipient]["can_use"], result)
+                self.assertEqual(result["choices"][recipient]["positions"], [])
+                self.assertTrue(all(choice["can_use"] and choice["positions"] == [1]
+                                    for index, choice in enumerate(result["choices"])
+                                    if index != recipient), result)
 
     def test_group_recovers_unmarked_receiver_with_missing_first_tile_contour(self):
         """Verified sibling origins supply the known socket despite a damaged recipient contour."""
@@ -248,6 +303,31 @@ class PropagationOCRTests(unittest.TestCase):
         self.assertEqual(result["position_source"], "fragment_consensus")
         self.assertEqual(result["fragment_votes"], {"2": 2})
         self.assertIn("suggestion", result["status"])
+
+    def test_fragment_consensus_prefills_weak_receivers_without_tile_bars(self):
+        """Two valid fragment sources fill recipients without local confidence or tile geometry."""
+        image, rows = self.family_panel({})
+        for index in (0, 2):
+            self.fragment(image, index, 1)
+        for index in (1, 4):
+            rows[index]["score"] = .84
+            y = 86 + index * 81
+            ImageDraw.Draw(image).rectangle((50, y - 18, 460, y + 19), fill=(176, 161, 130))
+        result = self.scan(image, rows)
+        self.assert_group_slots(result, [1])
+        self.assertTrue(all(choice["position_source"] == "fragment_consensus"
+                            and choice["fragment_votes"] == {"1": 2}
+                            for choice in result["choices"]), result)
+
+    def test_weak_fragment_source_cannot_supply_family_consensus(self):
+        """A weak fragment source cannot turn one verified row into two independent votes."""
+        image, rows = self.family_panel({})
+        for index in (0, 2):
+            self.fragment(image, index, 1)
+        rows[2]["score"] = .7
+        result = self.scan(image, rows)
+        self.assertEqual(result["candidates"], [17], result)
+        self.assertTrue(all(not choice["can_use"] for choice in result["choices"]), result)
 
     def test_one_fragment_in_a_multi_recipe_group_is_insufficient(self):
         """Exposure retries of one fragment cast one vote and cannot populate the group."""

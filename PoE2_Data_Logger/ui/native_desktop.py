@@ -49,7 +49,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.16 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.17 Beta"
 SCAN_TIMEOUT_MS = 90000
 SCAN_PRESENTATION_RETRY_MS = 100
 SCAN_PRESENTATION_WAIT_SECONDS = 10
@@ -909,6 +909,31 @@ class LoggerWindow(QMainWindow):
         self.page_subtitle.setProperty("role", "subheading")
         self.page_subtitle.setWordWrap(True)
         heading.addWidget(self.page_title)
+        # Keep the two map context fields inside the existing heading area;
+        # the counters, kill controls and review panels keep their layout.
+        self.header_map_context = QWidget()
+        map_context = QGridLayout(self.header_map_context)
+        map_context.setContentsMargins(0, 0, 0, 0)
+        map_context.setHorizontalSpacing(8)
+        map_context.setVerticalSpacing(3)
+        activity_caption = QLabel("ACTIVITY")
+        activity_caption.setProperty("role", "eyebrow")
+        self.header_activity = combo(logger.ACTIVITY_TYPES)
+        self.header_activity.setAccessibleName("Map activity")
+        self.header_activity.setMinimumWidth(0)
+        self.header_activity.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.header_activity.setToolTip("Choose the one activity type for this map.")
+        activity_caption.setBuddy(self.header_activity)
+        self.header_map_scanned = QLabel("Map scanned: No")
+        self.header_map_scanned.setAccessibleName("Map scanned status")
+        self.header_map_scanned.setToolTip(
+            "Yes when the current map's waystone setup has been applied from a scan or saved manually.")
+        self.header_map_scanned.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.header_map_scanned.setStyleSheet("font-size:11px;font-weight:600;color:#BCB7AE;")
+        map_context.addWidget(activity_caption, 0, 0)
+        map_context.addWidget(self.header_map_scanned, 0, 1)
+        map_context.addWidget(self.header_activity, 1, 0, 1, 2)
+        heading.addWidget(self.header_map_context)
         heading.addWidget(self.page_subtitle)
         self._header_heading = heading
         self._build_kill_controls(top, compact=True)
@@ -2835,7 +2860,8 @@ class LoggerWindow(QMainWindow):
 
     def _map_tag_controls(self):
         """Map each immediately saved map tag to its header and settings controls."""
-        return {"biome": (self.header_biome, self.biome),
+        return {"activity_type": (self.header_activity,),
+                "biome": (self.header_biome, self.biome),
                 "city_type": (self.header_city_type, self.city_type),
                 "ocean": (self.header_ocean, self.ocean),
                 "irradiated": (self.header_irradiated, self.irradiated),
@@ -2845,6 +2871,11 @@ class LoggerWindow(QMainWindow):
     def _sync_header_ids(self, state):
         """Display live IDs and undo availability, then sync expedition choices without saving them."""
         self._sync_undo_control(state)
+        ready = bool(state.get("current_map_setup_saved"))
+        self.header_map_scanned.setText("Map scanned: " + ("Yes" if ready else "No"))
+        self.header_map_scanned.setStyleSheet(
+            "font-size:11px;font-weight:600;color:#D5B36C;" if ready else
+            "font-size:11px;font-weight:600;color:#BCB7AE;")
         mid = state["current_map_id"]
         self.header_map_id.setText(header_counter(mid))
         self.header_map_id.setToolTip(mid or "No active map")
@@ -6029,6 +6060,11 @@ class LoggerWindow(QMainWindow):
             self._review_pending("currency", f"Reading {phase} inventory…", False)
             self._show_review_capture(image)
             self._show_inventory_preview(image)
+            # Keep this capture's rendered evidence for its result callback. Qt
+            # shares the pixels until modified; unrelated previews can replace
+            # either label without changing these retained copies.
+            capture["_preview_pixmaps"] = (image, QPixmap(self.preview.pixmap()),
+                                          QPixmap(self.inventory_preview.pixmap()))
             self._submit_scan("Matching inventory icons…",
                          ocr_workers.request(item_ocr.scan_inventory_grid, image, references,
                                              strictness=capture["strictness"]),
@@ -6082,8 +6118,15 @@ class LoggerWindow(QMainWindow):
             select(self.inventory_phase, phase)
         if capture is not None:
             self._inventory_capture = capture["image"]
-            self._show_review_capture(capture["image"])
-            self._show_inventory_preview(capture["image"])
+            previews = capture.get("_preview_pixmaps")
+            if previews is not None and previews[0] is capture["image"]:
+                self.preview.setPixmap(previews[1])
+                self.preview.show()
+                self.inventory_preview.setPixmap(previews[2])
+                self.inventory_preview.setFixedSize(previews[2].size())
+            else:
+                self._show_review_capture(capture["image"])
+                self._show_inventory_preview(capture["image"])
         self.inventory_table.setRowCount(0)
         unknown = result["unknown"]
         uncertain = len(unknown) + sum(bool(item.get("count_needs_review") or item.get("name_needs_review"))

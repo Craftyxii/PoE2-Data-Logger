@@ -204,7 +204,7 @@ def _icon_count(image, reward_y, expected=None):
         if right < window.width:
             # Socket geometry belongs to the panel, not the full game window.
             # Normalize its width before sampling the icon row.
-            panel = window.crop((left, top, right, bottom))
+            panel = window.crop((0, top, right, bottom))
             scale = 575 / panel.width
             panel = panel.resize((575, round(panel.height * scale)), Image.Resampling.LANCZOS)
             return _icon_count(panel, (reward_y - top) * scale, expected)
@@ -228,6 +228,7 @@ def _icon_count(image, reward_y, expected=None):
     # reward text that enters the padded band.
     top = max(0, round(reward_y - tile * 1.8))
     boxes = []
+    frame_centres = []
     for edge_y in (reward_y - 2, reward_y + tile * .25):
         bottom = min(image.height, round(edge_y))
         if bottom <= top:
@@ -238,13 +239,23 @@ def _icon_count(image, reward_y, expected=None):
             x, y, w, h = cv2.boundingRect(contour)
             if (tile * .65 <= w <= tile * 1.4 and tile * .55 <= h <= tile * 1.4 and .65 <= w / h <= 1.5
                     and tile * .25 <= reward_y - (top + y + h / 2) <= tile * 1.05):
+                # The selected-row diamond also fits a socket's bounding box.
+                # A row anchor must have the rectangular support of a frame;
+                # keep open contours farther along the row as frame evidence.
+                rectangular = cv2.contourArea(cv2.convexHull(contour)) >= w * h * .70
+                if x + w / 2 < tile * 2 and not rectangular:
+                    continue
                 boxes.append((left + x + w / 2, top + y + h / 2, w * h))
+                if rectangular:
+                    frame_centres.append((left + x + w / 2, top + y + h / 2))
     centres = []
     for x, y, area in sorted(boxes, key=lambda box: -box[2]):
         if not any(abs(x - a) < tile * .65 and abs(y - b) < tile * .65 for a, b in centres):
             centres.append((x, y))
     for x, y in sorted(centres):
-        if not left <= x <= left + tile * 2:
+        # A detected parchment edge must not move the first-socket anchor
+        # into column two when the actual first frame has a broken border.
+        if not left <= x <= image.width * .07 * 2:
             continue
         candidates = sorted(a for a, b in centres if abs(b - y) < tile * .25 and a >= x - tile * .2)
         row = []
@@ -259,6 +270,40 @@ def _icon_count(image, reward_y, expected=None):
             continue
         gaps = np.diff(row)
         if np.all((gaps >= tile * .80) & (gaps <= tile * 1.65)) and gaps.max() - gaps.min() < tile * .30:
+            # Broken borders can omit an interior contour. A short prefix is
+            # not the complete row when later frames still fit its spacing.
+            # Corroborate every intervening socket at the established frame
+            # centres, using the reference sampler's independent ink check.
+            pitch = float(np.median(gaps))
+            later = [centre for centre in candidates if centre > row[-1] + tile * 1.65
+                     and len(row) <= round((centre - x) / pitch) < 10
+                     and abs(centre - (x + pitch * round((centre - x) / pitch))) < tile * .30
+                     # A distant text outline can land on the socket grid.
+                     # Unlike a nearby broken border, it needs independent
+                     # rectangular frame support to prove row continuation.
+                     and (centre - row[-1] <= tile * 1.65 * 2
+                          or any(abs(centre - a) < tile * .65 and abs(y - b) < tile * .65
+                                 for a, b in frame_centres))]
+            if later:
+                strengths = []
+                for index in range(len(row), 10):
+                    centre = x + pitch * index
+                    if centre + 13 > image.width or y - 13 < 0 or y + 13 > image.height:
+                        break
+                    strengths.append(float(np.asarray(image.crop((round(centre - 13), round(y - 13),
+                                                                   round(centre + 13), round(y + 13)))).std()))
+                count = len(row)
+                for strength in strengths:
+                    if strength <= 32:
+                        break
+                    count += 1
+                # A genuinely empty socket position followed by a frame or
+                # strong ink is incomplete geometry, not a shorter remnant.
+                if (any(round((centre - x) / pitch) >= count for centre in later)
+                        or count != round((later[-1] - x) / pitch) + 1
+                        or any(strength > 38 for strength in strengths[count - len(row) + 1:])):
+                    return None
+                return count
             return len(row)
     return reference
 
@@ -284,12 +329,92 @@ def _engine():
                                for kind, filename in models.items()}})
 
 
+def _panel_text(image, top, right, bottom):
+    """Read a bounded panel strip at its captured size and restore absolute row coordinates."""
+    strip = image.crop((0, top, right, bottom))
+    canvas = Image.new("RGB", (strip.width, max(strip.width, strip.height)), (190, 190, 190))
+    canvas.paste(strip, (0, 0))
+    with OCR_LOCK:
+        found = _engine()(canvas)
+    rows = []
+    if found.boxes is not None:
+        for box, text, confidence in zip(found.boxes, found.txts, found.scores):
+            xs, ys = [float(p[0]) for p in box], [float(p[1]) + top for p in box]
+            rows.append({"text": text.strip(), "score": float(confidence),
+                         "x1": min(xs), "x2": max(xs), "y1": min(ys), "y2": max(ys)})
+    return rows
+
+
+def _recover_top_reward(image, detections, lines, title, header_rows, right,
+                        db, names, reward, skill, strictness):
+    """Recover one captured top reward without inferring its name, quantity or level from a family.
+
+    Reuse the heading pass when native OCR skipped a row. Retry only an
+    unmatched first row, requiring one overlapping, confident prefixed reading
+    with the same quantity and any already explicit levels. Keep its original
+    geometry and retain the original hold on weak, conflicting or ambiguous evidence.
+    """
+    scale = right / 575
+    floor = ocr_sensitivity.clear_threshold(.8, strictness, .2)
+    options = {} if strictness == ocr_sensitivity.DEFAULT else {"strictness": strictness}
+
+    def matched(row):
+        """Match actual reward text through the unchanged quantity, level and ambiguity rules."""
+        found, found_skill = reward.match(row["text"]), skill.match(row["text"])
+        if row["score"] < floor or not (found or found_skill):
+            return None
+        count = (1 if found.group(1) in ("I", "l") else int(found.group(1))) if found else 1
+        text = (found.group(2).strip() if found else
+                f"{found_skill.group(2).strip()} (Level {found_skill.group(1)})")
+        recipe, score = _match(db, text, count, names, **options)
+        if recipe is None:
+            return None
+        confidence = round(row["score"], 2)
+        if strictness != ocr_sensitivity.DEFAULT:
+            confidence = min(confidence, row["score"])
+        return {"raw": row["text"], "quantity": count, "text": text,
+                "ocr_score": confidence, "y": row["y1"],
+                "recipe": recipe, "match_score": score}
+
+    first = lines[0]
+    if first["y"] - title["y2"] > 90 * scale:
+        earlier = [row for row in header_rows
+                   if row["y1"] >= title["y2"] + 16 * scale
+                   and row["y2"] < first["y"] and 0 <= row["x1"] < row["x2"] <= right
+                   and (reward.match(row["text"]) or skill.match(row["text"]))]
+        recovered = matched(earlier[0]) if len(earlier) == 1 else None
+        if recovered:
+            lines.insert(0, recovered)
+        return
+    if first["recipe"] is not None:
+        return
+    native = next((row for row in detections if row["y1"] == first["y"]), None)
+    if native is None or not (reward.match(first["raw"]) or skill.match(first["raw"])):
+        return
+    top = max(0, round(title["y2"] + 16 * scale))
+    bottom = min(image.height, round(native["y2"] + 16 * scale),
+                 round(lines[1]["y"] - 16 * scale) if len(lines) > 1 else image.height)
+    if bottom <= top:
+        return
+    rows = [row for row in _panel_text(image, top, right, bottom)
+            if top <= row["y1"] < row["y2"] <= bottom and 0 <= row["x1"] < row["x2"] <= right
+            and min(row["y2"], native["y2"]) > max(row["y1"], native["y1"])
+            and (reward.match(row["text"]) or skill.match(row["text"]))]
+    recovered = matched(rows[0]) if len(rows) == 1 else None
+    if (recovered and recovered["quantity"] == first["quantity"]
+            and (not _levels(first["text"]) or _levels(first["text"]) == _levels(recovered["text"]))):
+        recovered["y"] = first["y"]
+        lines[0] = recovered
+
+
 def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, verify_header=True,
                 strictness=ocr_sensitivity.DEFAULT):
     """Read ordered opened rewards, match recipes/families and check visible socket counts.
 
     Use native rows first, optionally verify the heading or run RapidOCR fallback,
     and hold incomplete sequences or socket conflicts in the returned review status.
+    allow_fallback controls the full-image fallback; verified native panels can
+    reuse heading text or retry one unmatched top row within that panel.
     can_use expresses matched geometry/header constraints, not approval to log.
     Lower capture strictness permits tentative known matches; semantic and
     geometry checks still hold them for review when evidence conflicts.
@@ -304,6 +429,9 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
             image = source.convert("RGB")
     detections = runehelper_ocr.recognize(image, **options) if ocr_rows is None else []
     header_verified = False
+    header_captured = False
+    header_rows = []
+    header_right = None
     reward = re.compile(r"^\s*(\d{1,3}|[Il])\s*[xX×]\s+(.+?)\s*$")
     skill = re.compile(r"^Skill Level\s*(\d{1,2})\s*:\s*(.+?)\s*$", re.I)
     if detections and any(reward.match(row["text"]) or skill.match(row["text"]) for row in detections):
@@ -318,19 +446,20 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
             header_right = min(image.width, max(row["x2"] for row in detections))
             header_scale = header_right / 575
             top = max(0, round(first_y - 180 * header_scale))
-            header = image.crop((0, top, header_right,
-                                 max(top + 1, round(first_y - 8 * header_scale))))
-            canvas = Image.new("RGB", (header.width, max(header.width, header.height)), (190, 190, 190))
-            canvas.paste(header, (0, 0))
-            with OCR_LOCK:
-                found = _engine()(canvas)
-            if found.boxes is not None:
-                for box, text, confidence in zip(found.boxes, found.txts, found.scores):
-                    if "runeshapecombinations" in _key(text) and float(confidence) >= heading_threshold:
-                        xs, ys = [float(p[0]) for p in box], [float(p[1]) + top for p in box]
-                        title = {"x1": min(xs), "x2": max(xs), "y1": min(ys), "y2": max(ys)}
-                        header_verified = True
-                        break
+            header_rows = _panel_text(image, top, header_right,
+                                      max(top + 1, round(first_y - 8 * header_scale)))
+            heading = next((row for row in header_rows
+                            if "runeshapecombinations" in _key(row["text"])
+                            and row["score"] >= heading_threshold), None)
+            if heading:
+                title = {key: heading[key] for key in ("x1", "x2", "y1", "y2")}
+                header_verified = True
+            # Padding keeps the detector at reference size; it is not captured
+            # reward evidence and must not introduce a missing top row.
+            header_rows = [row for row in header_rows
+                           if top <= row["y1"] < row["y2"] <= round(first_y - 8 * header_scale)]
+            header_captured = (heading is not None and heading in header_rows
+                               and 0 <= heading["x1"] < heading["x2"] <= header_right)
         right = image.width
     else:
         detections = []
@@ -381,7 +510,6 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
                       "text": name, "ocr_score": score,
                       "y": line["y1"]})
     lines.sort(key=lambda item: item["y"])
-    bottom = int(lines[-1]["y"] + 65) if lines else int(title["y2"] + 180)
     with logger._connect() as db:
         names = [row[0] for row in db.execute("SELECT name FROM recipes")]
         for line in lines:
@@ -389,11 +517,15 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
         lines = [line for line in lines if reward.match(line["raw"]) or
                  skill.match(line["raw"]) or (line["recipe"] and line["match_score"] >=
                                              ocr_sensitivity.review_threshold(.92, strictness, .08))]
+        if header_verified and header_captured and header_right is not None and lines:
+            _recover_top_reward(image, detections, lines, title, header_rows, header_right,
+                                db, names, reward, skill, strictness)
         first = lines[0]["recipe"] if lines else None
         second = lines[1]["recipe"] if len(lines) > 1 else None
         list_complete = _list_complete(image, lines, right)
         family, candidates, complete = _families(db, lines, list_complete)
         sockets = db.execute("SELECT sockets FROM recipes WHERE name=?", (first,)).fetchone() if first else None
+    bottom = int(lines[-1]["y"] + 65) if lines else int(title["y2"] + 180)
     visible_sockets = _icon_count(image, lines[0]["y"], sockets[0] if sockets else None) if lines else None
     first_line_gap = (round(lines[0]["y"] - title["y2"])
                       if lines and (header_verified or not verify_header) else None)

@@ -189,6 +189,193 @@ ENTRIES = (
      "attribution remains unresolved; never infer a full recipe combo from the marked runes alone. "
      "Catalog combos are editable and are not frozen at approval, so later reference edits can change "
      "the reconstructed full combo even though the logged recipe/family IDs remain fixed."),
+    ("rune_meaning_scope", "Rune meanings", "Sources, scope and interpretation",
+     "This dictionary explains Remnant/Runeshape rune effects, not same-named augmentation items or "
+     "support gems. Sources are PoE2DB tooltip and keyword pages, retrieved 2026-10-13 UTC; their "
+     "navigation identifies Runes of Aldur v0.5. These are current reference meanings, not frozen "
+     "historical game-version definitions or measured effects in this dataset. Join rune names from "
+     "the reconstructed effective rune list to these definitions, preserving repeated occurrences "
+     "and the effect's target (Monsters, Remnant or Runes). Gasp is the local label for Volcanic; "
+     "lowercase stone is a spelling variant of Stone. Unresolved is a placeholder, not a rune. "
+     "Unknown/custom labels remain unresolved. Keyword defaults below are not individual rune "
+     "strengths. These sources do not establish rune-specific magnitudes, stacking, caps, "
+     "Effectiveness scaling or loot probabilities; never calculate those from names or occurrence "
+     "counts. Named effects without detailed rules are explicitly left unexplained."),
+    ("rune_meaning_adaptive", "Rune meanings", "Adaptive",
+     "Monsters gain Adaptation: elemental hits make them take less damage from subsequent hits of "
+     "that element. See the Adaptation keyword definition. Source: https://poe2db.tw/us/Adaptive_Rune"),
+    ("rune_meaning_arcane", "Rune meanings", "Arcane",
+     "Monsters gain extra Energy Shield and trigger a stunning nova when their Energy Shield is "
+     "depleted. Source: https://poe2db.tw/us/Arcane_Rune"),
+    ("rune_meaning_bloodletting", "Rune meanings", "Bloodletting",
+     "Monsters gain Life Leech, cannot have Life Leeched from them, and inflict Corrupted Blood on "
+     "hit. Source: https://poe2db.tw/us/Bloodletting_Rune"),
+    ("rune_meaning_bond", "Rune meanings", "Bond",
+     "Rare Monsters may transfer a modifier on death. The Remnant gains increased chance to spawn "
+     "Rare Monsters, and Rare Monsters have more Monster Modifiers. This describes monster "
+     "spawning/modifiers, not a direct acquired-item multiplier. Source: https://poe2db.tw/us/Bond_Rune"),
+    ("rune_meaning_celestial", "Rune meanings", "Celestial",
+     "Monsters gain chances for Fire, Cold and Lightning explosions on death. "
+     "Source: https://poe2db.tw/us/Celestial_Rune"),
+    ("rune_meaning_cold", "Rune meanings", "Cold",
+     "Monsters gain extra Cold Damage. Source: https://poe2db.tw/us/Cold_Rune"),
+    ("rune_meaning_cyclonic", "Rune meanings", "Cyclonic",
+     "Monsters gain chance to inflict Exposure on hit, Armour Break on hit and Wither on hit. "
+     "Source: https://poe2db.tw/us/Cyclonic_Rune"),
+    ("rune_meaning_death", "Rune meanings", "Death",
+     "Slain Monsters may merge into stronger Monsters. The tooltip does not specify the chance or "
+     "merge-strength rule. Source: https://poe2db.tw/us/Death_Rune"),
+    ("rune_meaning_earth", "Rune meanings", "Earth",
+     "The Remnant conjures Earthly Spires. The tooltip does not specify their damage or mechanics. "
+     "Source: https://poe2db.tw/us/Earth_Rune"),
+    ("rune_meaning_electrocuting", "Rune meanings", "Electrocuting",
+     "Monsters gain extra Lightning Damage, their Lightning Damage Electrocutes, and they leave "
+     "Shocked Ground Trails. Source: https://poe2db.tw/us/Electrocuting_Rune"),
+    ("rune_meaning_fire", "Rune meanings", "Fire",
+     "Monsters gain extra Fire Damage. Source: https://poe2db.tw/us/Fire_Rune"),
+    ("rune_meaning_life", "Rune meanings", "Life",
+     "Monsters gain Shared Life. The sourced tooltip does not explain the sharing rule. "
+     "Source: https://poe2db.tw/us/Life_Rune"),
+    ("rune_meaning_lightning", "Rune meanings", "Lightning",
+     "Monsters gain extra Lightning Damage. Source: https://poe2db.tw/us/Lightning_Rune"),
+    ("rune_meaning_momentum", "Rune meanings", "Momentum",
+     "Monsters gain increased Movement Speed, and their Movement Speed cannot be slowed below "
+     "base. Source: https://poe2db.tw/us/Momentum_Rune"),
+    ("rune_meaning_moon", "Rune meanings", "Moon",
+     "The Remnant conjures moon beams. The tooltip does not specify their damage or mechanics. "
+     "Source: https://poe2db.tw/us/Moon_Rune"),
+    ("rune_meaning_oath", "Rune meanings", "Oath",
+     "A Monster summons Allies. The tooltip does not specify which allies, their count or timing. "
+     "Source: https://poe2db.tw/us/Oath_Rune"),
+    ("rune_meaning_opulent", "Rune meanings", "Opulent",
+     "Monsters gain increased Monster Rarity: increased chance for monsters to be Magic or Rare, "
+     "and increased Monster Modifier Chance for Rare Monsters. Monster Rarity is distinct from "
+     "Item Rarity. Source: https://poe2db.tw/us/Opulent_Rune ; "
+     "keyword: https://poe2db.tw/us/Monster_Rarity"),
+    ("rune_meaning_power", "Rune meanings", "Power",
+     "Runes gain Empowered. The sourced tooltip does not explain the empowerment rule or amount. "
+     "Do not substitute the unrelated same-named monster-minion Empowered modifier's numbers. "
+     "Source: https://poe2db.tw/us/Power_Rune"),
+    ("rune_meaning_prismatic", "Rune meanings", "Prismatic",
+     "All Monster Damage can Shock, Chill and Ignite; Monsters also gain increased Elemental "
+     "Resistances. Source: https://poe2db.tw/us/Prismatic_Rune"),
+    ("rune_meaning_protective", "Rune meanings", "Protective",
+     "Monsters periodically gain Verisium Proximity Shields. The sourced tooltip does not "
+     "explain their precise rules or timing. Source: https://poe2db.tw/us/Protective_Rune"),
+    ("rune_meaning_rage", "Rune meanings", "Rage",
+     "Monsters periodically Enrage. The sourced tooltip does not specify Enrage bonuses or "
+     "timing. Source: https://poe2db.tw/us/Rage_Rune"),
+    ("rune_meaning_rebirth", "Rune meanings", "Rebirth",
+     "Monsters gain chance to Rebirth on death. The sourced tooltip does not specify the "
+     "probability or rebirth rules. Source: https://poe2db.tw/us/Rebirth_Rune"),
+    ("rune_meaning_sky", "Rune meanings", "Sky",
+     "The Remnant conjures Elemental Tornados. The tooltip does not specify their damage or "
+     "mechanics. Source: https://poe2db.tw/us/Sky_Rune"),
+    ("rune_meaning_soul", "Rune meanings", "Soul",
+     "Monsters gain Union of Souls: slain pack members transfer their souls to other Monsters "
+     "in their pack, increasing the recipients' Toughness and damage. See the separately sourced "
+     "keyword defaults. Source: https://poe2db.tw/us/Soul_Rune"),
+    ("rune_meaning_stone", "Rune meanings", "Stone",
+     "Monsters gain Armoured, increased Stun Threshold and Earthly Prison. The sourced tooltip "
+     "does not explain Earthly Prison's precise rules. Lowercase stone denotes this same rune. "
+     "Source: https://poe2db.tw/us/Stone_Rune"),
+    ("rune_meaning_tempest", "Rune meanings", "Tempest",
+     "Monsters cannot be Shocked or Chilled; all their Damage contributes to chance to Shock "
+     "and Chill Magnitude. Source: https://poe2db.tw/us/Tempest_Rune"),
+    ("rune_meaning_tidal", "Rune meanings", "Tidal",
+     "The Remnant conjures Tidal Waves. The tooltip does not specify their damage or mechanics. "
+     "Source: https://poe2db.tw/us/Tidal_Rune"),
+    ("rune_meaning_time", "Rune meanings", "Time",
+     "Slain Monsters may respawn as a higher Rarity. This concerns monster rarity, not a direct "
+     "item-rarity roll; probability and respawn rules are unspecified. "
+     "Source: https://poe2db.tw/us/Time_Rune"),
+    ("rune_meaning_toxic", "Rune meanings", "Toxic",
+     "Monsters gain chance to Poison on hit and chance for Toxic Volatiles on death. All their "
+     "Damage from Hits contributes to Poison Magnitude. Source: https://poe2db.tw/us/Toxic_Rune"),
+    ("rune_meaning_vision", "Rune meanings", "Vision",
+     "Monsters Reflect Curses and gain chance to Reflect Shock and Chill. "
+     "Source: https://poe2db.tw/us/Vision_Rune"),
+    ("rune_meaning_volcanic", "Rune meanings", "Volcanic / Gasp",
+     "The local Gasp label denotes Volcanic. Monsters gain extra Fire Damage, all their Damage "
+     "can Ignite, and they leave Ignited Ground Trails. The working source route uses Gasp_Rune "
+     "but its tooltip title is Volcanic Rune. Source: https://poe2db.tw/us/Gasp_Rune"),
+    ("rune_meaning_ward", "Rune meanings", "Ward",
+     "Monsters are protected by Runic Ward, which absorbs damage that would otherwise be fatal; "
+     "insufficient Ward can still allow death. Monsters with Runic Ward cannot be Culled. "
+     "Source: https://poe2db.tw/us/Ward_Rune ; keyword: https://poe2db.tw/us/Runic_Ward"),
+    ("rune_meaning_wisdom", "Rune meanings", "Wisdom",
+     "Monsters gain Increased Experience. The sourced tooltip does not specify the amount or "
+     "scaling rule. Source: https://poe2db.tw/us/Wisdom_Rune"),
+    ("rune_keyword_scope", "Rune keywords", "Keyword defaults and source limits",
+     "These supporting definitions explain terms in rune tooltips. Numerical values are general "
+     "keyword defaults from current source pages, not captured rolls, individual rune strengths or "
+     "historical game-version guarantees. They do not establish a final loot or rune-effect formula."),
+    ("rune_keyword_adaptation", "Rune keywords", "Adaptation",
+     "Taking Elemental Damage from Hits grants Adaptations that reduce damage taken from later "
+     "Hits of that type. Unless otherwise specified, up to 3 Adaptations can coexist and they have "
+     "no duration. Source: https://poe2db.tw/us/Adaptation"),
+    ("rune_keyword_modifiers", "Rune keywords", "Monster Modifiers",
+     "Magic and Rare Monsters have modifiers that make them more powerful and rewarding. By "
+     "default Magic Monsters normally have one modifier and Rare Monsters have up to 4. Each "
+     "modifier grants at least 100% increased Rarity of Items Dropped. Monster Modifier Chance "
+     "increases the potential number of Rare Monster modifiers; each modifier above 4 requires "
+     "twice as much Modifier Chance, and chance above the maximum increases the chance of having "
+     "the maximum. Other mechanics can add modifiers to monsters of any rarity. These defaults "
+     "do not reconstruct actual modifiers or drops from logged Rare kills. "
+     "Source: https://poe2db.tw/us/Monster_Modifiers"),
+    ("rune_keyword_remnant", "Rune keywords", "Verisium Remnant",
+     "A Remnant has slots for inscribed runes and is first found with one rune already inscribed. "
+     "The inscription enables reward selection; the recipe's required runes determine the "
+     "Verisium-infused monster encounter used to complete it. Recipe rewards are distinct from "
+     "observed inventory gains. Source: https://poe2db.tw/us/Verisium_Remnant"),
+    ("rune_keyword_union", "Rune keywords", "Union of Souls",
+     "Slain Monsters transfer their soul to another Monster in their pack, granting the recipient "
+     "6% Toughness and 2% increased damage in the current keyword definition. These are keyword "
+     "defaults, not measured Soul-rune strengths. Source: https://poe2db.tw/us/Union_of_Souls"),
+    ("rune_keyword_armour", "Rune keywords", "Armoured / Armour",
+     "Armour reduces damage taken from Hits and applies only to Physical Damage by default. "
+     "Its reduction depends on hit size and is more effective against smaller hits. "
+     "Source: https://poe2db.tw/us/Armour"),
+    ("rune_keyword_damage_types", "Rune keywords", "All Damage",
+     "Damage types are Physical, Fire, Cold, Lightning and Chaos. All Damage refers to these "
+     "types, not a logged numeric total. Source: https://poe2db.tw/us/Damage_Types"),
+    ("rune_keyword_contributes", "Rune keywords", "Damage contributing to Ailments",
+     "An Ailment normally uses particular damage types in its calculations. Allowing another "
+     "type to contribute sums the relevant types. For chance/buildup calculations this can let "
+     "that damage inflict the Ailment; for magnitude-only calculations such as Bleeding/Poison "
+     "a way to apply the Ailment is still needed (for example, Bleeding or Poison chance). "
+     "Source: https://poe2db.tw/us/Damage_Contributing_to_Ailments"),
+    ("rune_keyword_shock", "Rune keywords", "Shock",
+     "Shock causes 20% increased damage taken by default and lasts 4 seconds on players or "
+     "8 seconds on non-players. Lightning Hit Damage contributes to chance to Shock; by default "
+     "the chance is 1% per 4% of the target's Ailment Threshold dealt. "
+     "Source: https://poe2db.tw/us/Shock"),
+    ("rune_keyword_chill", "Rune keywords", "Chill",
+     "Chill slows a target and lasts 2 seconds on players or 8 seconds on non-players by default. "
+     "Magnitude depends on Chilling Damage relative to Elemental Ailment Threshold, with a "
+     "30% minimum and 50% default maximum. Cold Hits can Chill without application chance, "
+     "but Chills below the minimum are ignored. Source: https://poe2db.tw/us/Chill"),
+    ("rune_keyword_hits", "Rune keywords", "Hits",
+     "Damage other than damage over time is Hit Damage. Damaging Ailments derive their damage "
+     "from the originating Hit; modifiers to damage dealt are not then reapplied directly to "
+     "the Ailment. Source: https://poe2db.tw/us/Hit_Damage"),
+    ("rune_keyword_poison", "Rune keywords", "Poison",
+     "Poison deals Chaos Damage over time, bypasses Energy Shield and lasts 2 seconds by default. "
+     "Physical and Chaos Hit Damage contribute to magnitude, but application requires Poison "
+     "chance. Default damage per second is 20% of the originating Hit's pre-mitigation Physical "
+     "and Chaos Damage; damage-dealt modifiers are not reapplied. Enemy mitigation/debuffs can "
+     "affect damage taken, while hit-only modifiers such as Penetration do not apply to Poison. "
+     "Source: https://poe2db.tw/us/Poison"),
+    ("rune_keyword_monster_rarity", "Rune keywords", "Monster Rarity",
+     "Monster Rarity increases the chance for monsters to be Rare and Magic, and also increases "
+     "Monster Modifier Chance for Rare Monsters. It is distinct from Rarity of Items Found and "
+     "from the measured proportion of Rare kills. Source: https://poe2db.tw/us/Monster_Rarity"),
+    ("rune_keyword_runic_ward", "Rune keywords", "Runic Ward",
+     "When damage would reduce Life to zero, Runic Ward leaves 1 Life and absorbs the remaining "
+     "damage; insufficient Ward still allows death. It does not protect against Life loss that "
+     "is not damage. The current keyword default regeneration is 5% per second. Monsters can "
+     "also have Runic Ward and cannot be Culled while they have it. "
+     "Source: https://poe2db.tw/us/Runic_Ward"),
     ("timestamps", "Interpretation", "UTC and event order",
      "Stored recorded_at and Recorded UTC timestamps use UTC ISO 8601 with second precision and +00:00. "
      "Several events can have the same timestamp; use commits.number / Scan Commit # for their session order. "
@@ -635,6 +822,76 @@ COLUMN_GUIDANCE = (
      "or Points. If imported data contains them, obtain the source definition, unit and aggregation "
      "rule before comparing values. Numeric spreadsheet formatting alone does not establish what "
      "a stat means or prove that an applied-game-effect formula was evaluated."),
+)
+
+# These additive notes describe saved map metadata without changing earlier rune definitions.
+ENTRIES += (
+    ("map_activity_context", "Map analysis", "One selected activity per map",
+     "Activity Type is one user-selected category: None, Breach, Expedition, Grand Expedition, Abyss or Ritual. "
+     "It is not an automatically detected encounter, an encounter count or proof that other mechanics were absent. "
+     "Keep Expedition and Grand Expedition distinct. Selected None is different from unavailable historical "
+     "data, which stays blank/null. Use the saved Map ID's activity, City Type and Biome together when comparing "
+     "Atlas configuration contributions or map-level outcomes. Current character settings do not replace "
+     "these saved map and event values."),
+    ("map_setup_context", "Map analysis", "Map setup availability",
+     "Map Scanned is Yes when the current map's waystone setup was saved through manual map stats or an applied "
+     "waystone scan, and No when its setup was explicitly unsaved. The label does not mean OCR was used: "
+     "manual saved stats also produce Yes. Other scan modes do not establish this status, and a pending or "
+     "rejected waystone scan is not an applied setup. Missing historical waystone_setup_saved stays blank/null; "
+     "do not infer Yes from default tier values, inventory scans or a saved remnant. New maps clear this status, "
+     "while Undo restores the saved workflow state."),
+    ("map_atlas_effect_context", "Atlas interpretation", "Compact Atlas effects for the saved map context",
+     "Atlas Effects JSON is the frozen atlas_effect_snapshot from that map or event, rather than a new copy of "
+     "the full tree. Parse its schema_version, atlas_setup_id, catalog_id/catalog_version, activity_type, "
+     "biome, city_type, ocean and effective_biomes; a saved Ocean Map option can supply Ocean classification "
+     "independently of the Biome selection. totals keeps stat_id, raw_total, display_total, unit and "
+     "conditions for allocated minor/notable nodes and active selected "
+     "choices applicable to that saved city/biome/activity context. The complete setup and definitions remain "
+     "in Atlas Character Settings and the Context/SQL Atlas references. A conditional coefficient remains "
+     "conditional: a per-monster, per-tablet or per-closed-Pit bonus is not multiplied by an unrecorded trigger. "
+     "Condition tags retain unevaluated requirements: runtime_count needs the recorded trigger count, "
+     "catalog_trigger needs the source's stated condition, catalog_target preserves the catalog's target scope, "
+     "area_state_unrecorded lacks the required area state, "
+     "biome_unselected:<biome> lacks a saved biome classification, and vendor_unlock is an unlock rather than "
+     "a map bonus. unresolved identifies missing nodes, unanswered choices or semantic flags by source ID "
+     "and reason. Recover full meanings from the frozen catalog/Context definitions using setup/catalog IDs "
+     "and source stat_id; these descriptions are not duplicated inside each map object. In schema_version 2, "
+     "known applicable general, biome and city bonuses for the same metric combine into one total only "
+     "when pinned source translations verify equal units and signed raw scales. For example, applicable "
+     "general and Desert Pack Size bonuses share map_pack_size_+%; Magic Pack Size remains a different metric. "
+     "source_stat_ids lists the exact contributing identities for a merged metric: use these to resolve its "
+     "wording even when the normalized stat_id has no catalog entry. Missing source_stat_ids means stat_id "
+     "is the sole source identity. These are numeric sums, with no repeated node breakdown. Unknown biome, "
+     "runtime and trigger requirements do not merge into unconditional totals. Earlier schema_version 1 "
+     "retains exact-ID totals and may include contribution_count; it does not combine equivalent area IDs. "
+     "To keep the object compact, absent display_total/unit means unknown and absent conditions means an "
+     "empty list. Never treat unresolved evidence as zero or an unconditional bonus. Native raw units remain "
+     "distinct from verified display units. "
+     "These totals are Atlas configuration contributions, not observed map properties or a simulated final "
+     "game multiplier; never add them again to Item Rarity %, Monster Rarity %, Pack Size % or Effectiveness % "
+     "without a separately established stacking rule. Export carries this object only once per Map ID; "
+     "Scan History retains each event's own saved object, and SQL preserves it in snapshot_json. Missing "
+     "historical snapshots remain blank/null instead of being reconstructed from today's Atlas."),
+)
+
+COLUMN_GUIDANCE += (
+    ("field_activity_type", r"Activity Type", "Selected map activity",
+     "One saved activity category per map: None, Breach, Expedition, Grand Expedition, Abyss or Ritual. "
+     "This is a user selection, not an encounter count or detection. Group outcomes by Map ID and activity "
+     "with biome/city and compatible Atlas settings; selected None and missing historical data differ."),
+    ("field_map_scanned", r"Map Scanned", "Saved manual or scanned map setup",
+     "Yes means saved manual map stats or an applied waystone scan; No means explicitly unsaved setup. "
+     "Other scan modes and unapplied pending scans do not establish Yes. Blank is unavailable historical "
+     "state. This reports setup availability, not OCR confidence or completeness of every logged metric."),
+    ("field_atlas_effect_snapshot", r"Atlas Effects JSON", "Atlas contributions scoped to the saved map",
+     "Parse the frozen JSON object by named fields; it retains setup/catalog identity, saved activity/city/"
+     "biome context, combined applicable stat totals, units, condition tags and unresolved source IDs/reasons. "
+     "Schema 2 merges verified equivalent area stats and lists their source_stat_ids; schema 1 retains "
+     "exact-ID totals. Different targets and unknown requirements remain separate. Join frozen "
+     "Context/catalog definitions for full meanings. Count it once "
+     "per Map ID in Export, not once per recipe or repeated history event. Conditional coefficients remain "
+     "unevaluated without their triggers; do not add configuration contributions to already recorded map "
+     "percentages automatically. Blank means that historical snapshot is unavailable."),
 )
 
 # Store the field dictionary beside the broader analysis rules in both SQL and XLSX context.

@@ -26,6 +26,7 @@
 | [analysis_context.py](PoE2_Data_Logger/core/analysis_context.py) | Field definitions, joins, counting rules and analysis guidance |
 | [analysis_context_data.py](PoE2_Data_Logger/core/analysis_context_data.py) | Ordinary SQLite views for frozen Atlas definitions and scoped observation totals |
 | [analysis_context_rules.py](PoE2_Data_Logger/core/analysis_context_rules.py) | Verified source-to-display unit translations for Atlas stats |
+| [atlas_effect_snapshot.py](PoE2_Data_Logger/core/atlas_effect_snapshot.py) | Combined applicable Atlas source totals for a map’s frozen activity, city and biome |
 | [atlas_catalog.py](PoE2_Data_Logger/core/atlas_catalog.py) | Offline, versioned PoE2 atlas nodes, effects and choice options |
 | [export_files.py](PoE2_Data_Logger/core/export_files.py) | Writes paired exports and restores earlier files if a write fails |
 

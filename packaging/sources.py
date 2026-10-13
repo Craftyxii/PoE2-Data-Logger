@@ -8,6 +8,7 @@ CORE_SOURCES = (
     "core/analysis_context.py",
     "core/analysis_context_data.py",
     "core/analysis_context_rules.py",
+    "core/atlas_effect_snapshot.py",
     "core/undo_store.py",
     "core/logger_store.py",
     "core/store.py",

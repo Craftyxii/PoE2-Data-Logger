@@ -12,6 +12,12 @@ from PoE2_Data_Logger.ocr import opened_scan, runehelper_ocr
 
 
 CAPTURE = Path(__file__).resolve().parents[1] / "PoE2_Data_Logger/region_examples/opened.jpg"
+ALLOY_CAPTURE = Path(__file__).resolve().parent / "fixtures/opened_rewards/Pair67_7socket_Family_28_TranscendentAlloy_opened.jpg"
+ALLOY_PANEL = ALLOY_CAPTURE.with_suffix(".png")
+WITCHCRAFT_CAPTURE = ALLOY_CAPTURE.parent / "Pair63_4socket_Family_64_AncientWitchcraft_opened.jpg"
+CHILLING_CAPTURE = ALLOY_CAPTURE.parent / "Pair74_6socket_Family30_ChillingFlux_opened.jpg"
+GEMS_CAPTURE = ALLOY_CAPTURE.parent / "Pair32_6socket_Family73_Thaumaturgic_Gems_opened.jpg"
+VERISIUM_CAPTURE = ALLOY_CAPTURE.parent / "Pair61_5socket_Family_57_Thaumaturgic_Verisuim_chain_opened.jpg"
 
 
 class OpenedCaptureRegressions(unittest.TestCase):
@@ -77,6 +83,168 @@ class OpenedCaptureRegressions(unittest.TestCase):
         for expected in (3, 4):
             with self.subTest(database_expected=expected):
                 self.assertEqual(opened_scan._icon_count(image, first_reward_y, expected), 3)
+
+    def test_original_single_alloy_reward_keeps_seven_frames_and_family_28(self):
+        """Read the original seven-frame capture without counting its selection arrow."""
+        result = opened_scan.scan_opened(ALLOY_CAPTURE)
+        self.assertEqual([row["recipe"] for row in result["opened_recipes"]], ["Transcendent Alloy"], result)
+        self.assertEqual((result["family"], result["candidates"]), ("Family 28", [28]), result)
+        self.assertEqual((result["sockets"], result["recipe_sockets"], result["socket_source"]),
+                         (7, 7, "opened icons"), result)
+        self.assertIs(type(result["sockets"]), int)
+        self.assertTrue(result["header_verified"], result)
+        self.assertTrue(result["list_complete"], result)
+        self.assertTrue(auto_commit.candidate(result)["ready"], result)
+
+    def test_original_gem_top_reward_is_read_from_pixels_without_changing_other_levels(self):
+        """Recover the garbled Level 20 first row through opened and both scan entry points."""
+        expected = ["Thaumaturgic Flux (Level 20)", "Uncut Skill Gem (Level 20)",
+                    "Uncut Spirit Gem (Level 20)", "Greater Orb of Transmutation",
+                    "Greater Orb of Augmentation", "Uncut Support Gem"]
+        for reader in (opened_scan.scan_opened, opened_scan.scan_both):
+            with self.subTest(reader=reader.__name__):
+                result = reader(GEMS_CAPTURE)
+                self.assertEqual([row["recipe"] for row in result["opened_recipes"]], expected, result)
+                self.assertEqual((result["first_recipe"], result["next_recipe"]), tuple(expected[:2]))
+                self.assertEqual((result["family"], result["candidates"]), ("Family 73", [73]), result)
+                self.assertEqual((result["sockets"], result["recipe_sockets"], result["socket_source"]),
+                                 (6, 6, "opened icons"), result)
+                self.assertEqual(result["first_line_gap"], 45, result)
+                self.assertTrue(auto_commit.candidate(result)["ready"], result)
+        with logger._connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM commits").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM new_export").fetchone()[0], 0)
+
+    def test_original_verisium_top_reward_is_preserved_from_existing_heading_pass(self):
+        """Reuse the captured Level 19 reward before the separate Level 20 skill rows."""
+        expected = ["Thaumaturgic Flux (Level 19)", "Verisium Manifestations (Level 20)",
+                    "Powered by Verisium (Level 20)", "Remnants of Kalguur (Level 20)",
+                    "Grim Pillars (Level 20)", "Bitter Dead (Level 20)"]
+        original_panel_text = opened_scan._panel_text
+        with patch.object(opened_scan, "_panel_text", wraps=original_panel_text) as reading:
+            result = opened_scan.scan_opened(VERISIUM_CAPTURE, allow_fallback=False)
+        self.assertEqual(reading.call_count, 1, "The existing heading read already contains this reward")
+        self.assertEqual([row["recipe"] for row in result["opened_recipes"]], expected, result)
+        self.assertEqual((result["first_recipe"], result["next_recipe"]), tuple(expected[:2]))
+        self.assertEqual((result["family"], result["candidates"]), ("Family 57", [57]), result)
+        self.assertEqual((result["sockets"], result["recipe_sockets"], result["socket_source"]),
+                         (5, 5, "opened icons"), result)
+        self.assertEqual(result["first_line_gap"], 49, result)
+        self.assertTrue(auto_commit.candidate(result)["ready"], result)
+        with logger._connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM commits").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM new_export").fetchone()[0], 0)
+
+    def test_original_four_socket_sequence_keeps_first_frame_after_panel_normalization(self):
+        """Keep the first observed frame when panel detection finds a nonzero left edge."""
+        with Image.open(WITCHCRAFT_CAPTURE) as source:
+            image = source.convert("RGB")
+        rows = runehelper_ocr.recognize(image)
+        reward_y = min(row["y1"] for row in rows)
+        for expected in (3, 4, 7):
+            with self.subTest(database_expected=expected):
+                self.assertEqual(opened_scan._icon_count(image, reward_y, expected), 4)
+        result = opened_scan.scan_opened(image)
+        self.assertEqual(result["first_recipe"], "Ancient Rune of Witchcraft", result)
+        self.assertEqual((result["family"], result["candidates"]), ("Family 64", [64]), result)
+        self.assertEqual((result["sockets"], result["recipe_sockets"], result["socket_source"]),
+                         (4, 4, "opened icons"), result)
+        self.assertTrue(result["can_use"], result)
+        with logger._connect() as db:
+            db.execute("UPDATE recipes SET sockets=3 WHERE name=?", ("Ancient Rune of Witchcraft",))
+        conflicting = opened_scan.scan_opened(image)
+        self.assertEqual((conflicting["sockets"], conflicting["recipe_sockets"]), (4, 3), conflicting)
+        self.assertIn("Opened icons show 4 sockets", conflicting["status"])
+        self.assertFalse(conflicting["can_use"], conflicting)
+        self.assertFalse(auto_commit.candidate(conflicting)["ready"], conflicting)
+
+    def test_original_six_socket_row_cannot_start_at_its_second_frame(self):
+        """The original first border blends into the panel; five later frames are not the full row."""
+        with Image.open(CHILLING_CAPTURE) as source:
+            image = source.convert("RGB")
+        reward_y = min(row["y1"] for row in runehelper_ocr.recognize(image))
+        for expected in (3, 5, 6, 9):
+            with self.subTest(database_expected=expected):
+                self.assertEqual(opened_scan._icon_count(image, reward_y, expected), 6)
+        result = opened_scan.scan_opened(image)
+        self.assertEqual(result["first_recipe"], "Chilling Flux", result)
+        self.assertEqual((result["family"], result["candidates"]), ("Family 30", [30]), result)
+        self.assertEqual((result["sockets"], result["recipe_sockets"], result["socket_source"]),
+                         (6, 6, "opened icons"), result)
+        self.assertTrue(auto_commit.candidate(result)["ready"], result)
+
+    def test_missing_first_socket_cannot_promote_the_remaining_five_frames(self):
+        """A genuinely erased first icon remains uncertain instead of authorizing a five-socket suffix."""
+        with Image.open(CHILLING_CAPTURE) as source:
+            panel = runehelper_ocr.default_frame(source.convert("RGB"))
+        reward_y = min(row["y1"] for row in runehelper_ocr.recognize(panel))
+        top = round(reward_y - 41)
+        # Include the left sampling margin; a partial flat mask would create
+        # artificial contrast against the old border instead of empty parchment.
+        panel.paste(panel.crop((340, top - 5, 394, top + 40)), (39, top - 5))
+        for expected in (5, 6):
+            with self.subTest(database_expected=expected):
+                self.assertIsNone(opened_scan._icon_count(panel, reward_y, expected))
+        result = opened_scan.scan_opened(panel)
+        self.assertEqual(result["first_recipe"], "Chilling Flux", result)
+        self.assertEqual(result["socket_source"], "Recipe DB", result)
+        self.assertFalse(auto_commit.candidate(result)["ready"], result)
+
+    def test_real_small_alloy_scan_does_not_report_four_socket_prefix(self):
+        """Keep seven real frames when resizing loses the fifth frame's closed contour."""
+        with Image.open(ALLOY_PANEL) as source:
+            image = source.convert("RGB").resize((302, 404), Image.Resampling.LANCZOS)
+        result = opened_scan.scan_opened(image)
+        self.assertEqual(result["first_recipe"], "Transcendent Alloy", result)
+        self.assertEqual((result["sockets"], result["recipe_sockets"], result["socket_source"]),
+                         (7, 7, "opened icons"), result)
+        self.assertTrue(result["header_verified"], result)
+        self.assertNotIn("Opened icons show", result["status"])
+        # This crop's completeness and first-line gap remain ambiguous; the
+        # corrected count cannot authorize it independently of those guards.
+        self.assertFalse(result["list_complete"], result)
+        self.assertIsNone(result["family"], result)
+        self.assertFalse(auto_commit.candidate(result)["ready"], result)
+
+    def test_seven_socket_contour_gaps_survive_scale_jitter_and_wrong_db_expectations(self):
+        """Use real glyph evidence after a contour gap, independently of catalog counts."""
+        with Image.open(ALLOY_PANEL) as source:
+            panel = source.convert("RGB")
+        for scale in (.525, .7, .75, 1, 1.25, 2):
+            image = panel.resize((round(panel.width * scale), round(panel.height * scale)),
+                                 Image.Resampling.LANCZOS)
+            for jitter in (-5, 0, 5):
+                for expected in (4, 7, 9):
+                    with self.subTest(scale=scale, jitter=jitter, database_expected=expected):
+                        count = opened_scan._icon_count(image, (178 + jitter) * scale, expected)
+                        self.assertEqual(count, 7)
+                        self.assertIs(type(count), int)
+
+    def test_empty_interior_socket_patch_is_uncertain_when_later_frames_remain(self):
+        """Erased interior sockets cannot become a shorter prefix or an invented filled gap."""
+        with Image.open(ALLOY_PANEL) as source:
+            original = source.convert("RGB")
+        for left, width in ((214, 40), (173, 122)):
+            panel = original.copy()
+            blank = (original.crop((340, 138, 380, 175)) if width == 40
+                     else Image.new("RGB", (width, 37), (190, 190, 190)))
+            panel.paste(blank, (left, 138))
+            for expected in (3, 4, 7):
+                with self.subTest(erased_width=width, database_expected=expected):
+                    self.assertIsNone(opened_scan._icon_count(panel, 178, expected))
+            result = opened_scan.scan_opened(panel)
+            self.assertEqual(result["first_recipe"], "Transcendent Alloy", result)
+            self.assertEqual(result["socket_source"], "Recipe DB", result)
+            self.assertFalse(auto_commit.candidate(result)["ready"], result)
+
+    def test_strong_ink_after_last_frame_cannot_extend_the_recovered_row(self):
+        """Socket-sized ink without another observed frame keeps the count uncertain."""
+        with Image.open(ALLOY_PANEL) as source:
+            panel = source.convert("RGB")
+        # Reuse only a glyph's interior, with no surrounding socket frame.
+        panel.paste(panel.crop((302, 143, 326, 167)), (345, 143))
+        image = panel.resize((302, 404), Image.Resampling.LANCZOS)
+        self.assertIsNone(opened_scan._icon_count(image, 178 * .525, 7))
 
     def panel_with_icons(self, sockets):
         """Extend the real opened panel with additional copied socket frames."""

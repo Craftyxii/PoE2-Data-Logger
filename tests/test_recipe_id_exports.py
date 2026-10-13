@@ -42,11 +42,15 @@ class RecipeIdExportTests(unittest.TestCase):
                                              recipe=self.recipe, **arguments)
 
     def csv_rows(self, producer):
-        """Require a unique header, even row widths and the new ID at the end of each CSV."""
+        """Require even rows and the ID at the end of the established layout before map metadata."""
         rows = list(csv.reader(io.StringIO(producer().decode("utf-8-sig"))))
         self.assertEqual(len(rows[0]), len(set(rows[0])))
         self.assertTrue(all(len(row) == len(rows[0]) for row in rows))
-        self.assertEqual(rows[0][-1], "Propagation Recipe ID")
+        headers = rows[0]
+        previous_headers = (headers[:-len(logger.MAP_CONTEXT_HEADERS)]
+                            if headers[-len(logger.MAP_CONTEXT_HEADERS):] == list(logger.MAP_CONTEXT_HEADERS)
+                            else headers)
+        self.assertEqual(previous_headers[-1], "Propagation Recipe ID")
         return rows[0], [dict(zip(rows[0], row)) for row in rows[1:]]
 
     def recipe_id(self):
@@ -79,7 +83,10 @@ class RecipeIdExportTests(unittest.TestCase):
                     self.assertEqual([headers.index(name) for name in ("Deli", "Wisp")], [129, 130])
                     self.assertEqual(headers[-2], "Propagation Family Source")
                 elif producer in (logger.export_record_history_csv, logger.export_all_csv):
-                    self.assertEqual(headers[-2], "Previous Rune 2")
+                    self.assertEqual(headers[-len(logger.MAP_CONTEXT_HEADERS):], list(logger.MAP_CONTEXT_HEADERS))
+                    previous_headers = headers[:-len(logger.MAP_CONTEXT_HEADERS)]
+                    self.assertEqual(previous_headers[-2], "Previous Rune 2")
+                    self.assertEqual(previous_headers[-1], "Propagation Recipe ID")
                 if producer == logger.export_all_csv:
                     self.assertEqual(headers.index("Type"), 127)
 
@@ -140,7 +147,7 @@ class RecipeIdExportTests(unittest.TestCase):
                 self.assertTrue(all(row["Propagation Recipe ID"] == "" for row in origins))
 
     def test_xlsx_recipe_ids_are_text_and_follow_existing_columns(self):
-        """Carry the reference into both workbook data sheets as text at the last column."""
+        """Keep the ID as text after established columns, before appended history map metadata."""
         self.accept(family=8801)
         logger.add_item_name("Recipe ID Export Test Item")
         primary_headers, _ = self.csv_rows(logger.export_primary_csv)
@@ -151,8 +158,13 @@ class RecipeIdExportTests(unittest.TestCase):
             for path in ("xl/worksheets/sheet1.xml", "xl/worksheets/sheet3.xml"):
                 with self.subTest(sheet=path):
                     rows = ET.fromstring(archive.read(path)).findall("s:sheetData/s:row", namespace)
-                    self.assertEqual("".join(rows[0][-1].itertext()), "Propagation Recipe ID")
-                    column = rows[0][-1].get("r").rstrip("0123456789")
+                    headings = ["".join(cell.itertext()) for cell in rows[0]]
+                    suffix = len(logger.MAP_CONTEXT_HEADERS) if path.endswith("sheet3.xml") else 0
+                    if suffix:
+                        self.assertEqual(headings[-suffix:], list(logger.MAP_CONTEXT_HEADERS))
+                    recipe_cell = rows[0][-suffix - 1]
+                    self.assertEqual("".join(recipe_cell.itertext()), "Propagation Recipe ID")
+                    column = recipe_cell.get("r").rstrip("0123456789")
                     cells = [cell for row in rows[1:] for cell in row
                              if cell.get("r").rstrip("0123456789") == column]
                     self.assertTrue(cells)

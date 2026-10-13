@@ -117,6 +117,11 @@ VIEWS = {
             'master',json_extract(m.snapshot_json,'$.master'),
             'perks',json(COALESCE(json_extract(m.snapshot_json,'$.perks'),'[]')),
             'biome',json_extract(m.snapshot_json,'$.biome'),'city_type',json_extract(m.snapshot_json,'$.city_type'),
+            'activity_type',json_extract(m.snapshot_json,'$.activity_type'),
+            'waystone_setup_saved',json(CASE json_type(m.snapshot_json,'$.waystone_setup_saved')
+                WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE 'null' END),
+            'atlas_effect_snapshot',json(CASE WHEN json_type(m.snapshot_json,'$.atlas_effect_snapshot')='object'
+                THEN json_extract(m.snapshot_json,'$.atlas_effect_snapshot') ELSE 'null' END),
             'irradiated',json_extract(m.snapshot_json,'$.irradiated'),'ocean',json_extract(m.snapshot_json,'$.ocean'),
             'deli',json_extract(m.snapshot_json,'$.deli'),'wisp',json_extract(m.snapshot_json,'$.wisp'),
             'normal_kills',json_extract(m.kills_json,'$[0]'),

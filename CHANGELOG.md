@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.2.17 Beta
+
+- Complete eligible propagation family autofill for weak-text or barless recipients; preserve per-recipe socket order, short-recipe limits, conflicts and manual approval.
+- Reuse crown readings for accepted unchanged panels and currency screenshot/grid previews at result delivery; changed crops and new captures remain independent.
+- Fix opened-remnant selection-arrow/first-frame anchors and corroborated broken-border socket counts, independently of database expectations.
+- Recover the misread Level 20 and missing Level 19 Thaumaturgic Flux first rewards using bounded captured evidence and existing quantity/level/ambiguity guards.
+- Add one Activity Type selection per map and a Map Scanned indicator that accepts saved manual setup or an applied waystone scan, resets on New Map and supports Undo.
+- Save combined applicable Atlas source totals from frozen allocations/choices, scoped to city, biome, Ocean and activity, with source/unit/condition evidence and distinct targets retained.
+- Export Activity Type, Map Scanned and Atlas Effects JSON through Excel/CSV/SQL without rewriting historical snapshots or recorded map percentages.
+- Expand Context with sourced rune/keyword meanings and explanations of the new map metadata and Atlas aggregation.
+- Verify the new snapshot helper in the frozen runtime and retain update/uninstall protection for running 1.3.2.16 clients.
+
+See [release notes](docs/RELEASE_1.3.2.17.md) for validation scope and publication gates. Currency recognition, OCR models/thresholds, screenshot review and explicit propagation approval are retained.
+
 ## 1.3.2.16 Beta
 
 - Automatically save valid pending Atlas / Character Settings through the existing save action before confirmed Excel/CSV folder exports and Save As. Export stays on the current page; failed or invalid saves retain the draft and report an error.

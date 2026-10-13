@@ -18,7 +18,8 @@ Release notes and validation reports describe their named version or tested sour
 
 | Scope | Documents |
 | --- | --- |
-| Current source, 1.3.2.16 Beta | [Release notes](RELEASE_1.3.2.16.md) |
+| Current source, 1.3.2.17 Beta | [Release notes](RELEASE_1.3.2.17.md) |
+| 1.3.2.16 | [Release notes](RELEASE_1.3.2.16.md) |
 | Previous beta, 1.3.2.15 | [Release notes](RELEASE_1.3.2.15.md), [targeted regression review](CHANGE_REGRESSION_REVIEW.md) |
 | 1.3.2.14 | [Release notes](RELEASE_1.3.2.14.md), [code-review fixes](CODE_REVIEW_FIXES_1.3.2.14.md) |
 | 1.3.2.13 | [Release notes](RELEASE_1.3.2.13.md), [OCR audit](OCR_BETA_1.3.2.13_AUDIT.md) |

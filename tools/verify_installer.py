@@ -110,6 +110,7 @@ def running_client_titles(version, beta):
         "PoE2 Data Logger 1.3.2.13 Beta",
         "PoE2 Data Logger 1.3.2.14 Beta",
         "PoE2 Data Logger 1.3.2.15 Beta",
+        "PoE2 Data Logger 1.3.2.16 Beta",
     )
     return tuple(dict.fromkeys(title for title in prior if title != current)) + (current,)
 

@@ -31,6 +31,7 @@ class MapExportExpeditionTests(unittest.TestCase):
         """Validate map CSV structure and return headers plus rows keyed by map ID."""
         raw = list(csv.reader(io.StringIO(logger.export_maps_csv().decode("utf-8-sig"))))
         self.assertEqual(len(raw[0]), len(set(raw[0])))
+        self.assertEqual(raw[0][-len(logger.MAP_CONTEXT_HEADERS):], list(logger.MAP_CONTEXT_HEADERS))
         self.assertTrue(all(len(row) == len(raw[0]) for row in raw))
         return raw[0], {row[0]: dict(zip(raw[0], row)) for row in raw[1:]}
 
@@ -51,10 +52,11 @@ class MapExportExpeditionTests(unittest.TestCase):
         logger.save_settings({"expedition": 4})
         logger.finish_map(4, 5, 6, "")
         headers, rows = self.exported()
-        original_headers = previous_headers[:-2]
+        original_headers = previous_headers[:-len(logger.MAP_CONTEXT_HEADERS) - 2]
         self.assertEqual(headers[:len(original_headers)], original_headers)
         self.assertEqual(headers[len(original_headers):],
-                         ["Expedition 3 Detonated", "Expedition 4 Detonated", "Unique Kills", "Total Kills"])
+                         ["Expedition 3 Detonated", "Expedition 4 Detonated", "Unique Kills", "Total Kills",
+                          *logger.MAP_CONTEXT_HEADERS])
         self.assertEqual(third["expedition_id"], "M0001-E03")
         for number, expected in ((1, "5"), (2, "0"), (3, "31"), (4, "41")):
             self.assertEqual(rows["M0001"][f"Expedition {number} Detonated"], expected)
@@ -67,10 +69,10 @@ class MapExportExpeditionTests(unittest.TestCase):
         logger.save_settings({"expedition": 100000})
         saved = logger.save_detonated(7)
         headers, rows = self.exported()
-        original_headers = previous_headers[:-2]
+        original_headers = previous_headers[:-len(logger.MAP_CONTEXT_HEADERS) - 2]
         self.assertEqual(headers[:len(original_headers)], original_headers)
         self.assertEqual(headers[len(original_headers):],
-                         ["Expedition 100000 Detonated", "Unique Kills", "Total Kills"])
+                         ["Expedition 100000 Detonated", "Unique Kills", "Total Kills", *logger.MAP_CONTEXT_HEADERS])
         self.assertEqual(saved["expedition_id"], "M0001-E100000")
         self.assertEqual(rows["M0001"]["Expedition 100000 Detonated"], "7")
 

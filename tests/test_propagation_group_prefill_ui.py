@@ -48,16 +48,14 @@ class PropagationGroupPrefillUITests(unittest.TestCase):
 
     def verify_all_recipe_selectors(self, image, rows, sockets, *, approve_row=3):
         """Pass real crown geometry into Qt, then verify menus and an explicit noncursor approval."""
+        before = logger.get_state()
         reading = {**self.fixture.scan(image, rows), **logger.scan_context()}
         self.assertEqual(reading["candidates"], [17], reading)
         self.assertEqual(len(reading["choices"]), 5)
         encoded = io.BytesIO()
         image.save(encoded, format="PNG")
-        before = logger.get_state()
         self.window._propagation_read(reading, encoded.getvalue())
-        held = logger.get_state()
-        for key in ("chain", "chain_provenance", "detonated", "scan_commit_count"):
-            self.assertEqual(held[key], before[key], key)
+        self.assertEqual(logger.get_state(), before)
         self.assertFalse(self.window.preview.pixmap().isNull())
         self.assertFalse(self.window.preview.isHidden())
         table = self.window.propagation_recipe_table
@@ -79,6 +77,7 @@ class PropagationGroupPrefillUITests(unittest.TestCase):
                 self.assertEqual(table.cellWidget(row, 1).findChildren(QComboBox), list(fields))
                 for field in fields:
                     self.assertFalse(field.isEditable())
+                    self.assertTrue(field.isEnabled())
                     self.assertEqual([field.itemText(index) for index in range(field.count())],
                                      ["", *names])
                     self.assertEqual([field.itemData(index) for index in range(field.count())],
@@ -93,6 +92,17 @@ class PropagationGroupPrefillUITests(unittest.TestCase):
                 approve = table.cellWidget(row, 2).findChild(QPushButton, "approvePropagationRecipe")
                 self.assertEqual(approve.text(), "Approve")
                 self.assertTrue(approve.isEnabled())
+                # Suggestions leave the existing recipe menus available for manual correction.
+                for index, field in enumerate(fields):
+                    alternate = 0 if index == 0 else len(names) - 1
+                    field.setCurrentIndex(alternate + 1)
+                    self.assertEqual(field.currentData(), alternate)
+                    self.assertEqual(field.currentText(), names[alternate])
+                    field.setCurrentIndex(0 if expected_data[index] is None else
+                                          expected_data[index] + 1)
+                self.assertEqual([field.currentData() for field in fields], expected_data)
+                self.assertEqual([field.currentText() for field in fields], expected_names)
+        self.assertEqual(logger.get_state(), before)
         # No reviewed recipe is logged until the end user clicks its existing Approve button.
         expected = [names_by_row[approve_row][socket - 1] for socket in sockets]
         selected = reading["choices"][approve_row]["selected_recipe"]
@@ -104,7 +114,22 @@ class PropagationGroupPrefillUITests(unittest.TestCase):
         self.assertEqual(saved["chain_provenance"][0]["recipe"], selected)
         self.assertEqual(saved["chain_provenance"][0]["family"], 17)
         self.assertEqual(saved["chain_provenance"][0]["family_candidates"], [17])
+        self.assertEqual(len(saved["chain_provenance"]), 1)
+        self.app.processEvents()
+        self.assertEqual(logger.get_state(), saved)
         return reading
+
+    def panel_with_unmarked_receivers(self, marks, *, weak_text=False, missing_tiles=False):
+        """Leave recipes two and five unmarked, optionally weakening text or erasing their rune bars."""
+        image, rows = self.fixture.family_panel(marks)
+        for receiver in (1, 4):
+            if weak_text:
+                rows[receiver]["score"] = .84
+            if missing_tiles:
+                y = 86 + receiver * 81
+                ImageDraw.Draw(image).rectangle((50, y - 24, image.width - 1, y + 19),
+                                               fill=(176, 161, 130))
+        return image, rows
 
     def test_single_crown_fills_every_existing_family_selector(self):
         """A crown on recipe one suggests its slot for every row, each with its own rune name."""
@@ -131,6 +156,39 @@ class PropagationGroupPrefillUITests(unittest.TestCase):
         top = 86 + 4 * 81 - 18
         ImageDraw.Draw(image).rectangle((50, top, 90, top + 37), fill=(176, 161, 130))
         self.verify_all_recipe_selectors(image, rows, [2], approve_row=4)
+
+    def test_three_crowned_recipes_prefill_lower_confidence_unmarked_receivers(self):
+        """Crowns on recipes one, three and four also fill recipes two and five at OCR score .84."""
+        image, rows = self.panel_with_unmarked_receivers(
+            {0: [2], 2: [2], 3: [2]}, weak_text=True)
+        self.verify_all_recipe_selectors(image, rows, [2], approve_row=1)
+
+    def test_three_crowned_recipes_prefill_receivers_without_local_rune_bars(self):
+        """Unmarked recipes two and five use the proven family socket after their rune bars disappear."""
+        image, rows = self.panel_with_unmarked_receivers(
+            {0: [2], 2: [2], 3: [2]}, missing_tiles=True)
+        self.verify_all_recipe_selectors(image, rows, [2], approve_row=4)
+
+    def test_three_crowned_recipes_prefill_weak_receivers_without_local_rune_bars(self):
+        """The formerly blank receivers fill despite both .84 OCR scores and absent local geometry."""
+        image, rows = self.panel_with_unmarked_receivers(
+            {0: [2], 2: [2], 3: [2]}, weak_text=True, missing_tiles=True)
+        self.verify_all_recipe_selectors(image, rows, [2], approve_row=4)
+
+    def test_separate_source_sockets_prefill_both_slots_for_weak_unmarked_receivers(self):
+        """Independent source recipes prove both slots while weak receivers have no local rune bars."""
+        image, rows = self.panel_with_unmarked_receivers(
+            {0: [2], 2: [5]}, weak_text=True, missing_tiles=True)
+        self.verify_all_recipe_selectors(image, rows, [2, 5], approve_row=1)
+
+    def test_fragment_consensus_prefills_weak_receivers_without_local_rune_bars(self):
+        """Two independent partial source marks fill weak receivers for manual review and approval."""
+        image, rows = self.panel_with_unmarked_receivers({}, weak_text=True, missing_tiles=True)
+        self.fixture.fragment(image, 0, 2)
+        self.fixture.fragment(image, 2, 2)
+        reading = self.verify_all_recipe_selectors(image, rows, [2], approve_row=4)
+        self.assertTrue(all(choice["position_source"] == "fragment_consensus"
+                            for choice in reading["choices"]))
 
     def test_original_family57_capture_fills_existing_controls_before_manual_approval(self):
         """The actual formerly blank capture reaches all six unchanged dropdown rows and saves only on click."""

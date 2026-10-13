@@ -4,7 +4,7 @@ Three crown peaks mark propagation; a gold tile frame is optional. Verified
 positions index each stored recipe combination and can recover missing crowns
 across a recognized family. Two rows with matching plausible fragments, or one
 fragment for a lone recipe, supply tentative suggestions requiring manual approval.
-Unverified text, conflicting marks or unverified panel origins remain unresolved."""
+Unrecognized recipes, conflicting marks or unverified source origins remain unresolved."""
 
 from __future__ import annotations
 
@@ -41,7 +41,11 @@ def _panel(image, strictness=ocr_sensitivity.DEFAULT):
         return None
     candidate = image.resize((575, max(1, round(image.height * 575 / image.width))),
                              Image.Resampling.LANCZOS)
-    _, marked, _ = _marked_image(candidate)
+    marks = _marked_image(candidate)
+    _, marked, _ = marks
+    # Only an accepted candidate reuses this reading. Reframing below changes
+    # the pixels and must perform its own crown search.
+    candidate.info["propagation_marks"] = marks
     if marked:
         # Already-cropped panels can omit the arrow margin. The generic frame
         # finder may otherwise mistake a recipe border for the panel header.
@@ -64,7 +68,9 @@ def _panel(image, strictness=ocr_sensitivity.DEFAULT):
     if frame.width < 160 or frame.height < 120:
         return None
     scale = 575 / frame.width
-    return frame.resize((575, max(1, round(frame.height * scale))), Image.Resampling.LANCZOS)
+    panel = frame.resize((575, max(1, round(frame.height * scale))), Image.Resampling.LANCZOS)
+    panel.info.pop("propagation_marks", None)
+    return panel
 
 
 def _rapid_rows(image):
@@ -415,9 +421,10 @@ def _recover_group_slots(db, panel, marked, incomplete, rows, candidates, choice
 
     Independent complete crowns contribute distinct indices across recipes.
     Plausible fragments can suggest a slot when two separate rows agree, or
-    when just one recipe is visible. Each receiving row still needs a verified
-    panel lattice and database rune order. Short recipes receive only shared
-    sockets that exist in their combination; contradictions hold the group.
+    when just one recipe is visible. Sources need verified geometry and clear
+    text; family recipients use their resolved database rune order. Short
+    recipes receive only shared sockets that exist in their combination;
+    conflicting crown evidence holds the group.
     Fragment consensus is tentative and always requires manual approval.
     """
     if not rows or (len(rows) > 1 and len(candidates) != 1):
@@ -463,8 +470,7 @@ def _recover_group_slots(db, panel, marked, incomplete, rows, candidates, choice
             continue
         layout = row_layouts.get(index)
         if layout is None:
-            # Missing origins already hold their own rows. An unlocated
-            # partial could hide a second socket, so it also holds recovery.
+            # An unlocated mark could hide a second socket, so it holds recovery.
             conflict = True
             continue
         first_x, pitch = layout
@@ -489,7 +495,10 @@ def _recover_group_slots(db, panel, marked, incomplete, rows, candidates, choice
     for index, (row, choice, runes) in enumerate(zip(rows, choices, combinations)):
         clear = (row["score"] >= ocr_sensitivity.clear_threshold(.85, strictness, .15) and
                  row["match_score"] >= ocr_sensitivity.clear_threshold(.9, strictness, .08))
-        if index not in row_layouts or not clear:
+        # A unique family supplies each recipient's socket order. Only a lone
+        # recipe must establish its own geometry and confidence at this stage.
+        if (row.get("socket_span_conflict") or
+                (len(rows) == 1 and (index not in row_layouts or not clear))):
             recovered.append(choice)
             continue
         ordered = sorted(socket for socket in positions if 1 <= socket <= len(runes))
@@ -535,6 +544,11 @@ def _scope_row_marks(db, panel, rows, marked, incomplete, row_layouts, shared_la
             height = reference[1] * 38 / 41
             layout = _tile_layout(panel, top, height, aligned, min_first_x,
                                   entry["sockets"], reference=reference)
+            # The same supported lattice without recipe bounds distinguishes
+            # extra visible sockets from missing recipient geometry.
+            if layout is None and _tile_layout(panel, top, height, aligned, min_first_x,
+                                               reference=reference) is not None:
+                row["socket_span_conflict"] = True
         if layout is None or peak_masks is None:
             # Without a verified origin, retain uncertainty rather than
             # converting a guessed standard offset into a rune selection.
@@ -570,7 +584,7 @@ def scan_propagation(image: Image.Image | Path, strictness=ocr_sensitivity.DEFAU
 
     Capture strictness applies to recipe text. Three-peak geometry confirms
     crowns; supported fragment consensus can suggest sockets for manual review.
-    Verified origins, paired-mark conflict checks and explicit approval remain
+    Verified source origins, paired-mark conflict checks and explicit approval remain
     mandatory. Recovery changes no database records or dropdown definitions.
     """
     strictness = ocr_sensitivity.validate(strictness)
@@ -586,7 +600,8 @@ def scan_propagation(image: Image.Image | Path, strictness=ocr_sensitivity.DEFAU
     detections, title = panel.info.get("propagation_rows") or _read_panel_rows(panel, **options)
     if title is None:
         return _result("Runeshape Combinations panel was not found — review the capture.")
-    mask, marked, incomplete = _marked_image(panel)
+    cached_marks = panel.info.pop("propagation_marks", None)
+    mask, marked, incomplete = cached_marks if cached_marks is not None else _marked_image(panel)
     cursors = _cursors(mask)
     with logger._connect() as db:
         rows = _reward_rows(db, detections, **options)
