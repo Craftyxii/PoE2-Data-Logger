@@ -1,14 +1,17 @@
-"""Qt export checks requiring Atlas/rarity drafts to be saved before CSV/XLSX while allowing database backups."""
+"""Excel exports preserve Atlas drafts; CSV keeps its existing save-first behavior."""
 
 import csv
 import os
 from pathlib import Path
 import re
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile
+
+from openpyxl import load_workbook
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -20,7 +23,7 @@ from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
 class ExportSettingsGuardTests(unittest.TestCase):
-    """Check CSV and workbook exports require saving Atlas drafts while database backups remain available."""
+    """Exercise export buttons and menu actions with valid and incomplete Atlas drafts."""
     @classmethod
     def setUpClass(cls):
         """Create or reuse the QApplication required by the Qt test fixtures."""
@@ -73,9 +76,10 @@ class ExportSettingsGuardTests(unittest.TestCase):
         self.assertEqual(self.page.settings()["gear_item_rarity"], 187.25)
         self.assertEqual(logger.get_state()["settings"]["atlas_settings"]["gear_item_rarity"], 12)
 
-    def trigger_export(self, entrypoint, kind):
+    def trigger_export(self, entrypoint, kind, *, navigate=True):
         """Activate the requested folder button or Save As menu action for an export format."""
-        self.window.tabs.setCurrentIndex(5)
+        if navigate:
+            self.window.tabs.setCurrentIndex(5)
         if entrypoint == "folder":
             self.window.export_folder.setText(str(self.folder))
             button = next(button for button in self.window.findChildren(QPushButton)
@@ -88,15 +92,15 @@ class ExportSettingsGuardTests(unittest.TestCase):
                           if action.text() == f"Save Export {kind.upper()} as…")
             action.trigger()
 
-    def assert_exported_rarity(self, kind):
-        """Read the generated CSV or workbook and assert it contains the newly saved gear rarity."""
+    def assert_exported_rarity(self, kind, expected):
+        """Reopen the generated CSV or workbook and verify its saved gear rarity."""
         destination = Path(self.results[-1]["path"])
         self.assertTrue(destination.is_file())
         if kind == "csv":
             with destination.open(encoding="utf-8-sig", newline="") as stream:
                 rows = list(csv.DictReader(stream))
             self.assertTrue(rows)
-            self.assertEqual({row["Gear Item Rarity %"] for row in rows}, {"187.25"})
+            self.assertEqual({row["Gear Item Rarity %"] for row in rows}, {str(expected)})
         else:
             with ZipFile(destination) as archive:
                 for number in (1, 2):
@@ -110,19 +114,62 @@ class ExportSettingsGuardTests(unittest.TestCase):
                               for cell in row.findall("s:c", ns)
                               if re.sub(r"\d+$", "", cell.get("r")) == column}
                     if number == 1:
-                        self.assertEqual(values, {"187.25"})
+                        self.assertEqual(values, {str(expected)})
                     else:
-                        self.assertIn("187.25", values)
+                        self.assertIn(str(expected), values)
+            workbook = load_workbook(destination, read_only=True)
+            try:
+                self.assertEqual(workbook.sheetnames,
+                                 ["Export", "Atlas Character Settings", "Scan History", "Analysis Context",
+                                  "Family Database", "Recipe Database", "Seed Database", "Reference Aliases"])
+                for name in ("Export", "Atlas Character Settings"):
+                    rows = workbook[name].iter_rows(values_only=True)
+                    column = next(rows).index("Gear Item Rarity %")
+                    values = {row[column] for row in rows}
+                    self.assertIn(float(expected), values)
+            finally:
+                workbook.close()
 
-    def check_export_guard(self, entrypoint, kind):
-        """Assert a rarity draft blocks export, then save it and verify the resulting export."""
+    def check_export_draft(self, entrypoint, kind, *, incomplete=False):
+        """Export saved data through the real action while retaining the page and Atlas draft."""
         self.edit_rarity()
+        self.page.toggle_node("AtlasExpeditionNotable8")
+        if incomplete:
+            field = self.page.gear_rarity.lineEdit()
+            field.selectAll()
+            QTest.keyClicks(field, ".")
+            self.assertEqual(field.text(), "." + self.page.gear_rarity.suffix())
+        draft = self.page.settings()
+        raw_rarity = self.page.gear_rarity.lineEdit().text()
+        expected_page = 12 if incomplete else 5
+        before = (logger.export_primary_csv(), logger.export_atlas_csv(), logger.export_all_csv())
         destination = self.folder / f"chosen.{kind}"
         with patch.object(QFileDialog, "getSaveFileName", return_value=(str(destination), "")) as chooser, \
                 patch.object(QMessageBox, "question") as question:
-            self.trigger_export(entrypoint, kind)
-            chooser.assert_not_called()
+            self.trigger_export(entrypoint, kind, navigate=not incomplete)
             question.assert_not_called()
+            self.assertEqual(len(self.submissions), 1)
+            self.assertTrue(self.page.dirty)
+            self.assertEqual(self.window.tabs.currentIndex(), expected_page)
+            self.assertIn("Export saved:", self.window.statusBar().currentMessage())
+            self.assertEqual(self.page.settings(), draft)
+            self.assertEqual(self.page.gear_rarity.lineEdit().text(), raw_rarity)
+            self.assertEqual(logger.get_state()["settings"]["atlas_settings"]["gear_item_rarity"], 12)
+            self.assertEqual((logger.export_primary_csv(), logger.export_atlas_csv(), logger.export_all_csv()), before)
+            if entrypoint == "save_as":
+                chooser.assert_called_once()
+            else:
+                chooser.assert_not_called()
+            question.assert_not_called()
+        self.assert_exported_rarity(kind, 12)
+
+    def check_csv_guard(self, entrypoint):
+        """Keep the existing CSV redirect/save requirement intact through both UI actions."""
+        self.edit_rarity()
+        destination = self.folder / "chosen.csv"
+        with patch.object(QFileDialog, "getSaveFileName", return_value=(str(destination), "")) as chooser:
+            self.trigger_export(entrypoint, "csv")
+            chooser.assert_not_called()
             self.assertEqual(self.submissions, [])
             self.assertEqual(list(self.folder.iterdir()), [])
             self.assertTrue(self.page.dirty)
@@ -130,30 +177,73 @@ class ExportSettingsGuardTests(unittest.TestCase):
             self.assertIn("Save Atlas / Character Settings", self.window.statusBar().currentMessage())
             self.page.save_button.click()
             self.assertFalse(self.page.dirty)
-            self.trigger_export(entrypoint, kind)
+            self.trigger_export(entrypoint, "csv")
             self.assertEqual(len(self.submissions), 1)
-            if entrypoint == "save_as":
-                chooser.assert_called_once()
-            else:
-                chooser.assert_not_called()
-            question.assert_not_called()
-        self.assert_exported_rarity(kind)
+        self.assert_exported_rarity("csv", 187.25)
 
     def test_folder_csv_requires_saving_current_rarity(self):
-        """Verify folder CSV requires saving current rarity."""
-        self.check_export_guard("folder", "csv")
+        """Verify the CSV folder button retains its existing Atlas draft guard."""
+        self.check_csv_guard("folder")
 
-    def test_folder_xlsx_requires_saving_current_rarity(self):
-        """Verify folder XLSX requires saving current rarity."""
-        self.check_export_guard("folder", "xlsx")
+    def test_folder_xlsx_preserves_unsaved_atlas_without_redirecting(self):
+        """Verify the Excel folder button creates a readable workbook with an Atlas draft."""
+        self.check_export_draft("folder", "xlsx")
 
     def test_save_as_csv_requires_saving_current_rarity(self):
-        """Verify save as CSV requires saving current rarity."""
-        self.check_export_guard("save_as", "csv")
+        """Verify the CSV menu retains its existing Atlas draft guard."""
+        self.check_csv_guard("save_as")
 
-    def test_save_as_xlsx_requires_saving_current_rarity(self):
-        """Verify save as XLSX requires saving current rarity."""
-        self.check_export_guard("save_as", "xlsx")
+    def test_save_as_xlsx_preserves_unsaved_atlas_without_redirecting(self):
+        """Verify the Excel menu creates a readable workbook with an Atlas draft."""
+        self.check_export_draft("save_as", "xlsx")
+
+    def test_save_as_xlsx_preserves_incomplete_rarity(self):
+        """Export from the Atlas page's File menu without consuming unfinished raw rarity text."""
+        self.check_export_draft("save_as", "xlsx", incomplete=True)
+
+    def test_cancelled_xlsx_keeps_page_and_unsaved_atlas(self):
+        """Cancel the Excel chooser without writing files, redirecting or changing the draft."""
+        self.edit_rarity()
+        draft = self.page.settings()
+        with patch.object(QFileDialog, "getSaveFileName", return_value=("", "")) as chooser:
+            self.trigger_export("save_as", "xlsx")
+        chooser.assert_called_once()
+        self.assertEqual(self.window.tabs.currentIndex(), 5)
+        self.assertEqual(self.submissions, [])
+        self.assertEqual(list(self.folder.iterdir()), [])
+        self.assertTrue(self.page.dirty)
+        self.assertEqual(self.page.settings(), draft)
+
+    def test_explicit_save_is_included_in_next_xlsx(self):
+        """Saving the preserved Atlas draft explicitly updates the next workbook's recorded rarity."""
+        self.check_export_draft("folder", "xlsx")
+        self.window.tabs.setCurrentWidget(self.page)
+        self.page.save_button.click()
+        self.assertFalse(self.page.dirty)
+        self.trigger_export("folder", "xlsx")
+        self.assertEqual(self.window.tabs.currentIndex(), 5)
+        self.assert_exported_rarity("xlsx", 187.25)
+
+    def test_folder_xlsx_real_worker_creates_readable_workbook_without_redirecting(self):
+        """Complete the Excel button's real worker and Qt callback with an unsaved Atlas draft."""
+        self.edit_rarity()
+        draft = self.page.settings()
+        real_submit = LoggerWindow._submit.__get__(self.window, LoggerWindow)
+        with patch.object(self.window, "_submit", real_submit):
+            self.trigger_export("folder", "xlsx")
+            deadline = time.monotonic() + 15
+            while self.window._pending_tasks and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.01)
+        self.assertEqual(self.window._pending_tasks, {}, self.window.statusBar().currentMessage())
+        self.assertIn("Export saved:", self.window.statusBar().currentMessage())
+        self.assertEqual(self.window.tabs.currentIndex(), 5)
+        self.assertTrue(self.page.dirty)
+        self.assertEqual(self.page.settings(), draft)
+        files = list(self.folder.glob("*.xlsx"))
+        self.assertEqual(len(files), 1)
+        self.results.append({"path": str(files[0])})
+        self.assert_exported_rarity("xlsx", 12)
 
     def test_database_backup_remains_available_with_unsaved_settings(self):
         """Verify database backup remains available with unsaved settings."""

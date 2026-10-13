@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.2.16 Beta
+
+- Fix Excel folder export and Save As being blocked by unsaved Atlas / Character Settings and redirecting to the Atlas page. Excel exports the saved database, retains the current page, and preserves Atlas editor drafts.
+- Verify both Excel entrypoints, the real export worker, all eight independently reopened sheets, cancellation, saved versus unsaved settings, and existing CSV/SQLite behavior.
+- Update installer and version labels while retaining running-client protection for 1.3.2.15.
+
+This is a targeted Excel export fix. Existing Context/reference sheets, OCR, logging, Atlas saving, CSV/SQL exports and HUD controls are retained. Publication requires the established exact-source Windows gates; see [release notes](docs/RELEASE_1.3.2.16.md).
+
 ## 1.3.2.15 Beta
 
 - Deliver scan completions without waiting on a competing database writer. Retain recognized Currency/Ritual rows for approval retry, and briefly retry unpresented remnant reservation work without rerunning OCR or replaying a saved result.

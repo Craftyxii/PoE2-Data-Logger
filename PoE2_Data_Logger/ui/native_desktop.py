@@ -49,7 +49,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.15 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.16 Beta"
 SCAN_TIMEOUT_MS = 90000
 SCAN_PRESENTATION_RETRY_MS = 100
 SCAN_PRESENTATION_WAIT_SECONDS = 10
@@ -6766,9 +6766,9 @@ class LoggerWindow(QMainWindow):
                                   f"{rewards} reward entries")
 
     def write_export(self, kind):
-        """Queue spreadsheet or full SQLite export; require saved Atlas drafts only for spreadsheets."""
+        """Queue saved-data exports; Excel preserves the page and unsaved Atlas draft."""
         page = getattr(self, "atlas_settings_page", None)
-        if kind in ("csv", "xlsx") and page is not None and page.dirty:
+        if kind == "csv" and page is not None and page.dirty:
             self.tabs.setCurrentWidget(page)
             raise ValueError("Save Atlas / Character Settings before exporting CSV or XLSX.")
         logger.save_export_folder(value(self.export_folder))
@@ -6790,10 +6790,10 @@ class LoggerWindow(QMainWindow):
 
     def save_as(self, kind):
         """Choose an export destination, confirm existing CSV companions, and queue writing
-        after checking unsaved Atlas settings.
+        from saved data; Excel preserves the page and unsaved Atlas draft.
         """
         page = getattr(self, "atlas_settings_page", None)
-        if kind in ("csv", "xlsx") and page is not None and page.dirty:
+        if kind == "csv" and page is not None and page.dirty:
             self.tabs.setCurrentWidget(page)
             raise ValueError("Save Atlas / Character Settings before exporting CSV or XLSX.")
         choices = {
@@ -7100,6 +7100,7 @@ def instance_lock():
         user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
         window = (user32.FindWindowW(None, WINDOW_TITLE)
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.14 Beta")
+                  or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.15 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.13 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.12 Beta")
                   or user32.FindWindowW(None, "PoE2 Data Logger 1.3.2.11 Beta")

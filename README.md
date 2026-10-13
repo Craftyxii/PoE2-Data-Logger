@@ -4,9 +4,9 @@ A Windows desktop logger for Path of Exile 2. Record Expedition remnants and run
 
 ## Download and source status
 
-This source targets [1.3.2.15 Beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.15-beta). Its [installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.15-beta/PoE2-Data-Logger-Setup-v1.3.2.15-beta.exe) becomes available after the required release checks pass. See the [release notes](docs/RELEASE_1.3.2.15.md). The [previous beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.14-beta) and [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2) remain available.
+This source targets [1.3.2.16 Beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.16-beta). Its [installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.16-beta/PoE2-Data-Logger-Setup-v1.3.2.16-beta.exe) becomes available after the required release checks pass. See the [release notes](docs/RELEASE_1.3.2.16.md). The [previous beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.15-beta) and [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2) remain available.
 
-Changes from the previous beta include safer scan completion during database contention, Snapshot and shortcut rollback, atomic reference-name registration, Atlas city-to-biome autofill, and expanded analysis/reference exports. See the [changelog](CHANGELOG.md#13215-beta). Installer, executable and window version labels identify 1.3.2.15 Beta.
+This beta fixes Excel export being blocked by unsaved Atlas edits and redirecting to the Atlas page. It retains the eight-sheet analysis/reference export and other improvements from 1.3.2.15. See the [changelog](CHANGELOG.md#13216-beta). Installer, executable and window version labels identify 1.3.2.16 Beta.
 
 ## What you can record
 

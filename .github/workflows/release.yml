@@ -80,6 +80,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Chain contention and cleanup fixture checks failed.' }
           python tools/run_tests.py --pattern test_snapshot_shortcut_contention_ui.py
           if ($LASTEXITCODE -ne 0) { throw 'Snapshot/shortcut contention fixture checks failed.' }
+          python tools/run_tests.py --pattern test_export_settings_guard.py
+          if ($LASTEXITCODE -ne 0) { throw 'Excel export regression checks failed.' }
       - name: Check native Windows HUD interaction
         # Real Windows input and hit testing complement offscreen workflow checks.
         # A failed native pass blocks installer publication and retains screenshots.
@@ -158,7 +160,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $releaseArgs = @('release', 'create', $env:GITHUB_REF_NAME, $env:INSTALLER, "$env:INSTALLER.sha256", '--verify-tag', '--target', 'main', '--title', "PoE2 Data Logger $($env:DISPLAY_VERSION)")
-          if ($env:PRERELEASE -eq 'True') { $releaseArgs += @('--prerelease', '--latest=false', '--notes-file', 'docs/RELEASE_1.3.2.15.md') }
+          if ($env:PRERELEASE -eq 'True') { $releaseArgs += @('--prerelease', '--latest=false', '--notes-file', 'docs/RELEASE_1.3.2.16.md') }
           else { $releaseArgs += @('--latest=true', '--notes-file', 'docs/RELEASE_1.3.2.md') }
           gh @releaseArgs
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
