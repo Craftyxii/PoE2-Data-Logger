@@ -6,7 +6,7 @@ A Windows desktop logger for Path of Exile 2. Record Expedition remnants and run
 
 This source targets [1.3.2.16 Beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.16-beta). Its [installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.16-beta/PoE2-Data-Logger-Setup-v1.3.2.16-beta.exe) becomes available after the required release checks pass. See the [release notes](docs/RELEASE_1.3.2.16.md). The [previous beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.15-beta) and [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2) remain available.
 
-This beta makes Excel and CSV exports automatically save valid pending Atlas edits, then export without redirecting to the Atlas page. It retains the eight-sheet analysis/reference export and other improvements from 1.3.2.15. See the [changelog](CHANGELOG.md#13216-beta). Installer, executable and window version labels identify 1.3.2.16 Beta.
+This beta makes Excel and CSV exports automatically save valid pending Atlas edits, then export without redirecting to the Atlas page. It also restores a complete inventory count of 1 when an independent reader agrees and wider retry crops pick up item artwork; conflicting counts remain under manual review. The eight-sheet analysis/reference export and other improvements from 1.3.2.15 remain included. See the [changelog](CHANGELOG.md#13216-beta). Installer, executable and window version labels identify 1.3.2.16 Beta.
 
 ## What you can record
 

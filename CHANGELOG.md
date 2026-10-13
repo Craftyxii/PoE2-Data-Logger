@@ -4,9 +4,10 @@
 
 - Automatically save valid pending Atlas / Character Settings through the existing save action before confirmed Excel/CSV folder exports and Save As. Export stays on the current page; failed or invalid saves retain the draft and report an error.
 - Verify spreadsheet entrypoints and real workers, all eight Excel sheets, CSV companions, automatic Atlas saving, cancellation, validation/storage failure, clean drafts and existing frozen-map rules. SQLite backups keep their existing behavior.
+- Retain complete Currency inventory count-of-1 evidence when wider retry crops include item artwork. Independent native agreement can restore that count; conflicts remain under manual review. Preserve valid multi-digit stacks and existing clipping recovery.
 - Update installer and version labels while retaining running-client protection for 1.3.2.15.
 
-This is a targeted spreadsheet export fix using the existing Atlas save action. Context/reference sheets, OCR, other logging rules, export file generation and HUD controls are retained. Publication requires the established exact-source Windows gates; see [release notes](docs/RELEASE_1.3.2.16.md).
+Changes are limited to the requested spreadsheet export autosave and inventory quantity reconciliation. Context/reference sheets, other OCR modes and logging rules, export file generation and HUD controls are retained. Publication requires the established exact-source Windows gates; see [release notes](docs/RELEASE_1.3.2.16.md).
 
 ## 1.3.2.15 Beta
 

@@ -395,14 +395,17 @@ def _inventory_labels(image):
         for slot, readings in alternatives.items():
             masked, raw = readings["mask"], readings["raw"]
             if labels[slot].get("count") == 1:
+                # Retain the complete-crop result when a wider retry proposes
+                # another value, so the independent native reader can resolve
+                # artwork in the raw crop without losing a real trailing digit.
                 if len(masked) >= 2 and len(set(masked)) == 1 and masked[0] != 1:
-                    labels[slot].pop("count")
+                    labels[slot]["complete_count"] = labels[slot].pop("count")
                     labels[slot]["count_candidate"] = masked[0]
                 elif 11 in raw:
-                    labels[slot].pop("count")
+                    labels[slot]["complete_count"] = labels[slot].pop("count")
                     labels[slot]["count_candidate"] = 11
                 elif len(raw) >= 2 and len(set(raw)) == 1 and raw[0] != 1:
-                    labels[slot].pop("count")
+                    labels[slot]["complete_count"] = labels[slot].pop("count")
                     labels[slot]["count_candidate"] = raw[0]
                 continue
             value = max(dict.fromkeys(masked), key=masked.count) if masked else None
@@ -566,11 +569,19 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
                 # A failed presence detector currently supplies quantity one.
                 # Check that assumption too: a confidently recognised icon
                 # cannot verify a stack whose digits were missed by geometry.
-                native_count = (reader.count(cell) if verify_count or (generic_count is None and
-                                labels[slot].get("count_candidate") is None) else None)
+                complete_count = labels[slot].get("complete_count")
+                native_count = (reader.count(cell) if verify_count or complete_count is not None or
+                                (generic_count is None and
+                                 labels[slot].get("count_candidate") is None) else None)
                 quantity = (generic_count if generic_count is not None
                             else labels[slot].get("count_candidate") or native_count or 1)
                 guessed = generic_count is None
+                if complete_count is not None and native_count == complete_count:
+                    # Raw retry crops include artwork outside the aligned digit
+                    # cluster. Do not let their tentative extra glyph replace
+                    # complete-crop digits corroborated by the native reader.
+                    # Conflicting evidence still requires the same manual review.
+                    quantity = complete_count
                 if verify_count and native_count is not None and native_count != generic_count:
                     # A confident prefix can still omit trailing digits. An
                     # independent glyph reader disagreeing keeps the row held.
