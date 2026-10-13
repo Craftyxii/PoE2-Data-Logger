@@ -6765,9 +6765,31 @@ class LoggerWindow(QMainWindow):
         self.ritual_saved.setText(f"{map_id or 'No active map'} · {len(pages)} saved Ritual pages · "
                                   f"{rewards} reward entries")
 
+    def _save_atlas_for_export(self):
+        """Save a pending Atlas draft through its existing validated action before spreadsheet export."""
+        page = getattr(self, "atlas_settings_page", None)
+        if page is None or not page.dirty:
+            return
+        requested = []
+
+        def validated(_data):
+            """Distinguish editor validation failure from a rejected persistence attempt."""
+            requested.append(True)
+
+        page.saved.connect(validated)
+        try:
+            page._request_save()
+        finally:
+            page.saved.disconnect(validated)
+        if page.dirty:
+            detail = self.statusBar().currentMessage() if requested else page.status.text()
+            raise ValueError(detail or "Atlas / Character Settings could not be saved. Check the draft and retry.")
+
     def write_export(self, kind):
-        """Queue saved-data exports while preserving the page and unsaved Atlas draft."""
+        """Save pending Atlas edits for spreadsheets, then queue export without changing pages."""
         logger.save_export_folder(value(self.export_folder))
+        if kind in ("csv", "xlsx"):
+            self._save_atlas_for_export()
         self._submit(f"Writing {kind.upper()}…",
                      lambda: logger.save_export_file(kind),
                      lambda result: self._export_saved(result))
@@ -6786,7 +6808,7 @@ class LoggerWindow(QMainWindow):
 
     def save_as(self, kind):
         """Choose an export destination, confirm existing CSV companions, and queue writing
-        from saved data while preserving the page and unsaved Atlas draft.
+        after saving a pending Atlas draft for a confirmed spreadsheet export.
         """
         choices = {
             "csv": (logger.export_filename("csv"), "CSV (*.csv)", logger.export_primary_csv),
@@ -6812,6 +6834,8 @@ class LoggerWindow(QMainWindow):
                     QMessageBox.StandardButton.No)
                 if answer != QMessageBox.StandardButton.Yes:
                     return
+            if kind in ("csv", "xlsx"):
+                self._save_atlas_for_export()
             def write():
                 """Generate and write the chosen export in the worker, reading all three CSV
                 files from one database snapshot and using recoverable grouped writes.

@@ -39,6 +39,7 @@ class CsvExportConfirmationTests(unittest.TestCase):
         self.saved = []
         self.window = SimpleNamespace(_export_saved=self.saved.append)
         self.window._submit = self.submit
+        self.window._save_atlas_for_export = LoggerWindow._save_atlas_for_export.__get__(self.window, LoggerWindow)
 
     def tearDown(self):
         """Remove the temporary export destinations."""
