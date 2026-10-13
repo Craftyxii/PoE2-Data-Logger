@@ -6,7 +6,7 @@
 - Reuse crown readings for accepted unchanged panels and currency screenshot/grid previews at result delivery; changed crops and new captures remain independent.
 - Fix opened-remnant selection-arrow/first-frame anchors and corroborated broken-border socket counts, independently of database expectations.
 - Recover the misread Level 20 and missing Level 19 Thaumaturgic Flux first rewards using bounded captured evidence and existing quantity/level/ambiguity guards.
-- Add one Activity Type selection per map and a Map Scanned indicator that accepts saved manual setup or an applied waystone scan, resets on New Map and supports Undo.
+- Add one Activity Type selection per map and a Map Scanned indicator that accepts saved manual setup or an applied waystone scan, resets on New Map and supports Undo. Compact headers use space beside the title so the existing Scan regions controls fit a 1366-by-720 window.
 - Save combined applicable Atlas source totals from frozen allocations/choices, scoped to city, biome, Ocean and activity, with source/unit/condition evidence and distinct targets retained.
 - Export Activity Type, Map Scanned and Atlas Effects JSON through Excel/CSV/SQL without rewriting historical snapshots or recorded map percentages.
 - Expand Context with sourced rune/keyword meanings and explanations of the new map metadata and Atlas aggregation.

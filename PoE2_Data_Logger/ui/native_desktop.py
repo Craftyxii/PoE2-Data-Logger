@@ -900,7 +900,7 @@ class LoggerWindow(QMainWindow):
         top = QGridLayout()
         self._header_layout = top
         self._header_arrangement = None
-        heading = QVBoxLayout()
+        heading = QGridLayout()
         self.page_title = QLabel("Review")
         self.page_title.setStyleSheet("font-size:24px;font-weight:700;color:#FFFFFF;")
         self.page_title.setWordWrap(True)
@@ -908,7 +908,7 @@ class LoggerWindow(QMainWindow):
         self.page_subtitle = QLabel("Check the latest scan, then Approve to save it.")
         self.page_subtitle.setProperty("role", "subheading")
         self.page_subtitle.setWordWrap(True)
-        heading.addWidget(self.page_title)
+        heading.addWidget(self.page_title, 0, 0)
         # Keep the two map context fields inside the existing heading area;
         # the counters, kill controls and review panels keep their layout.
         self.header_map_context = QWidget()
@@ -933,8 +933,8 @@ class LoggerWindow(QMainWindow):
         map_context.addWidget(activity_caption, 0, 0)
         map_context.addWidget(self.header_map_scanned, 0, 1)
         map_context.addWidget(self.header_activity, 1, 0, 1, 2)
-        heading.addWidget(self.header_map_context)
-        heading.addWidget(self.page_subtitle)
+        heading.addWidget(self.header_map_context, 1, 0)
+        heading.addWidget(self.page_subtitle, 2, 0)
         self._header_heading = heading
         self._build_kill_controls(top, compact=True)
         top.removeWidget(self.kill_counts_group)
@@ -1075,6 +1075,22 @@ class LoggerWindow(QMainWindow):
         # Keep long page headings from wrapping excessively beside the wider counters and actions.
         compact = self.width() < 1600
         if self._header_arrangement is None or self._header_arrangement[0] != compact:
+            # In the existing compact header, use the spare width beside the
+            # title for the new fields instead of adding height above standalone
+            # settings pages. Their controls and preview keep their old bounds.
+            heading = self._header_heading
+            for field in (self.page_title, self.page_subtitle, self.header_map_context):
+                heading.removeWidget(field)
+            if compact:
+                heading.addWidget(self.page_title, 0, 0)
+                heading.addWidget(self.page_subtitle, 1, 0)
+                heading.addWidget(self.header_map_context, 0, 1, 2, 1)
+                heading.setColumnStretch(0, 1)
+            else:
+                heading.addWidget(self.page_title, 0, 0, 1, 2)
+                heading.addWidget(self.header_map_context, 1, 0, 1, 2)
+                heading.addWidget(self.page_subtitle, 2, 0, 1, 2)
+                heading.setColumnStretch(0, 0)
             # Balance map/remnant labels with smaller numbers; expedition keeps its existing caption size.
             for counter in (self.header_map_id, self.header_remnant_id):
                 counter.setStyleSheet(f"font-size:{41 if compact else 54}px;font-weight:700;color:#FFFFFF;")

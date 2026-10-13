@@ -259,6 +259,17 @@ class UIRegressionTests(unittest.TestCase):
             self.assertTrue(target.isVisible())
             self.assertTrue(self.window.rect().contains(rect),
                             f"{type(target).__name__} {target.accessibleName() or getattr(target, 'text', lambda: '')()}: {rect}")
+            # Window containment alone can include the status bar or clipped
+            # workspace content. Require the unchanged region controls to fit
+            # the actual view without scrolling after the header additions.
+            parent = target.parentWidget()
+            while parent is not None:
+                if isinstance(parent, native_desktop.QScrollArea):
+                    visible = QRect(target.mapTo(parent.viewport(), QPoint()), target.size())
+                    self.assertTrue(parent.viewport().rect().contains(visible), str(visible))
+                parent = parent.parentWidget()
+            hit = self.window.childAt(target.mapTo(self.window, target.rect().center()))
+            self.assertTrue(hit is target or target.isAncestorOf(hit))
         self.assertEqual(self.window.height(), 720)
 
     def opened_result(self):

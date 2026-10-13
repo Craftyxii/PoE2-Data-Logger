@@ -236,7 +236,7 @@ class MapActivityHeaderUITests(unittest.TestCase):
                     self.window.header_map_id, self.window.header_remnant_id,
                     self.window.header_expedition, self.window.header_complete_chain_button,
                     self.window.undo_button, new_map)
-        for width in (900, 1024, 1366, 1920):
+        for width in (900, 1024, 1366, 1920, 1366):
             with self.subTest(width=width):
                 self.window.resize(width, 800)
                 self.app.processEvents()
