@@ -356,9 +356,11 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.native.click(new_map)
         self.assertEqual(self.window.header_map_id.text(), "#2")
         self.assertEqual(self.window.header_remnant_id.text(), "—")
+        self.assertEqual(self.window.header_map_scanned.text(), "Map scanned: No")
         self.native.click(undo)
         self.assertEqual(self.window.header_map_id.text(), "#1")
         self.assertEqual(self.window.header_remnant_id.text(), "#1")
+        self.assertEqual(self.window.header_map_scanned.text(), "Map scanned: No")
         self.phase("05-map-advance-and-undo")
 
     def check_tablet_and_waystone(self):
@@ -395,7 +397,10 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"],before+1)
         self.assertEqual(logger.get_state()["settings"]["tier"],16)
         self.assertEqual(logger.get_state()["settings"]["waystone"],93.5)
-        self.assertEqual(self.window.header_map_scanned.text(), "Map scanned: Yes")
+        # Earlier propagation froze M0001 without a waystone setup. Editing
+        # future settings cannot establish readiness for that historical map.
+        self.assertFalse(logger.get_state()["current_map_setup_saved"])
+        self.assertEqual(self.window.header_map_scanned.text(), "Map scanned: No")
         self.phase("07-waystone-manual-review")
 
     def check_currency_and_ritual(self):
