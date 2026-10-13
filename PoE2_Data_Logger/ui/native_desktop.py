@@ -6766,11 +6766,7 @@ class LoggerWindow(QMainWindow):
                                   f"{rewards} reward entries")
 
     def write_export(self, kind):
-        """Queue saved-data exports; Excel preserves the page and unsaved Atlas draft."""
-        page = getattr(self, "atlas_settings_page", None)
-        if kind == "csv" and page is not None and page.dirty:
-            self.tabs.setCurrentWidget(page)
-            raise ValueError("Save Atlas / Character Settings before exporting CSV or XLSX.")
+        """Queue saved-data exports while preserving the page and unsaved Atlas draft."""
         logger.save_export_folder(value(self.export_folder))
         self._submit(f"Writing {kind.upper()}…",
                      lambda: logger.save_export_file(kind),
@@ -6790,12 +6786,8 @@ class LoggerWindow(QMainWindow):
 
     def save_as(self, kind):
         """Choose an export destination, confirm existing CSV companions, and queue writing
-        from saved data; Excel preserves the page and unsaved Atlas draft.
+        from saved data while preserving the page and unsaved Atlas draft.
         """
-        page = getattr(self, "atlas_settings_page", None)
-        if kind == "csv" and page is not None and page.dirty:
-            self.tabs.setCurrentWidget(page)
-            raise ValueError("Save Atlas / Character Settings before exporting CSV or XLSX.")
         choices = {
             "csv": (logger.export_filename("csv"), "CSV (*.csv)", logger.export_primary_csv),
             "xlsx": (logger.export_filename("xlsx"), "Excel workbook (*.xlsx)", export_xlsx),

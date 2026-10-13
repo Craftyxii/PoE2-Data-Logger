@@ -2,11 +2,11 @@
 
 ## 1.3.2.16 Beta
 
-- Fix Excel folder export and Save As being blocked by unsaved Atlas / Character Settings and redirecting to the Atlas page. Excel exports the saved database, retains the current page, and preserves Atlas editor drafts.
-- Verify both Excel entrypoints, the real export worker, all eight independently reopened sheets, cancellation, saved versus unsaved settings, and existing CSV/SQLite behavior.
+- Fix Excel and CSV folder export and Save As being blocked by unsaved Atlas / Character Settings and redirecting to the Atlas page. Both spreadsheet formats export the saved database, retain the current page, and preserve Atlas editor drafts.
+- Verify folder and Save As spreadsheet entrypoints, real export workers, all eight independently reopened Excel sheets, CSV companion files, cancellation, saved versus unsaved settings, and SQLite backups.
 - Update installer and version labels while retaining running-client protection for 1.3.2.15.
 
-This is a targeted Excel export fix. Existing Context/reference sheets, OCR, logging, Atlas saving, CSV/SQL exports and HUD controls are retained. Publication requires the established exact-source Windows gates; see [release notes](docs/RELEASE_1.3.2.16.md).
+This is a targeted spreadsheet export fix. Existing Context/reference sheets, OCR, logging, Atlas saving, export file generation and HUD controls are retained. Publication requires the established exact-source Windows gates; see [release notes](docs/RELEASE_1.3.2.16.md).
 
 ## 1.3.2.15 Beta
 

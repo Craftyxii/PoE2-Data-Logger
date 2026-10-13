@@ -81,7 +81,7 @@ jobs:
           python tools/run_tests.py --pattern test_snapshot_shortcut_contention_ui.py
           if ($LASTEXITCODE -ne 0) { throw 'Snapshot/shortcut contention fixture checks failed.' }
           python tools/run_tests.py --pattern test_export_settings_guard.py
-          if ($LASTEXITCODE -ne 0) { throw 'Excel export regression checks failed.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Spreadsheet export regression checks failed.' }
       - name: Check native Windows HUD interaction
         # Real Windows input and hit testing complement offscreen workflow checks.
         # A failed native pass blocks installer publication and retains screenshots.

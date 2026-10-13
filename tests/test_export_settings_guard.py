@@ -1,4 +1,4 @@
-"""Excel exports preserve Atlas drafts; CSV keeps its existing save-first behavior."""
+"""Excel and CSV exports use saved data without redirecting or consuming Atlas drafts."""
 
 import csv
 import os
@@ -101,6 +101,13 @@ class ExportSettingsGuardTests(unittest.TestCase):
                 rows = list(csv.DictReader(stream))
             self.assertTrue(rows)
             self.assertEqual({row["Gear Item Rarity %"] for row in rows}, {str(expected)})
+            atlas_path = Path(self.results[-1]["atlas_path"])
+            history_path = Path(self.results[-1]["history_path"])
+            self.assertTrue(atlas_path.is_file())
+            self.assertTrue(history_path.is_file())
+            with atlas_path.open(encoding="utf-8-sig", newline="") as stream:
+                atlas_rows = list(csv.DictReader(stream))
+            self.assertIn(str(expected), {row["Gear Item Rarity %"] for row in atlas_rows})
         else:
             with ZipFile(destination) as archive:
                 for number in (1, 2):
@@ -163,35 +170,21 @@ class ExportSettingsGuardTests(unittest.TestCase):
             question.assert_not_called()
         self.assert_exported_rarity(kind, 12)
 
-    def check_csv_guard(self, entrypoint):
-        """Keep the existing CSV redirect/save requirement intact through both UI actions."""
-        self.edit_rarity()
-        destination = self.folder / "chosen.csv"
-        with patch.object(QFileDialog, "getSaveFileName", return_value=(str(destination), "")) as chooser:
-            self.trigger_export(entrypoint, "csv")
-            chooser.assert_not_called()
-            self.assertEqual(self.submissions, [])
-            self.assertEqual(list(self.folder.iterdir()), [])
-            self.assertTrue(self.page.dirty)
-            self.assertIs(self.window.tabs.currentWidget(), self.page)
-            self.assertIn("Save Atlas / Character Settings", self.window.statusBar().currentMessage())
-            self.page.save_button.click()
-            self.assertFalse(self.page.dirty)
-            self.trigger_export(entrypoint, "csv")
-            self.assertEqual(len(self.submissions), 1)
-        self.assert_exported_rarity("csv", 187.25)
-
-    def test_folder_csv_requires_saving_current_rarity(self):
-        """Verify the CSV folder button retains its existing Atlas draft guard."""
-        self.check_csv_guard("folder")
+    def test_folder_csv_preserves_unsaved_atlas_without_redirecting(self):
+        """Verify the CSV folder button creates the saved-data export with an Atlas draft."""
+        self.check_export_draft("folder", "csv")
 
     def test_folder_xlsx_preserves_unsaved_atlas_without_redirecting(self):
         """Verify the Excel folder button creates a readable workbook with an Atlas draft."""
         self.check_export_draft("folder", "xlsx")
 
-    def test_save_as_csv_requires_saving_current_rarity(self):
-        """Verify the CSV menu retains its existing Atlas draft guard."""
-        self.check_csv_guard("save_as")
+    def test_save_as_csv_preserves_unsaved_atlas_without_redirecting(self):
+        """Verify the CSV menu creates the saved-data export with an Atlas draft."""
+        self.check_export_draft("save_as", "csv")
+
+    def test_save_as_csv_preserves_incomplete_rarity(self):
+        """Export CSV from the Atlas page's File menu without consuming unfinished rarity text."""
+        self.check_export_draft("save_as", "csv", incomplete=True)
 
     def test_save_as_xlsx_preserves_unsaved_atlas_without_redirecting(self):
         """Verify the Excel menu creates a readable workbook with an Atlas draft."""
@@ -224,13 +217,21 @@ class ExportSettingsGuardTests(unittest.TestCase):
         self.assertEqual(self.window.tabs.currentIndex(), 5)
         self.assert_exported_rarity("xlsx", 187.25)
 
-    def test_folder_xlsx_real_worker_creates_readable_workbook_without_redirecting(self):
-        """Complete the Excel button's real worker and Qt callback with an unsaved Atlas draft."""
+    def check_real_worker_export(self, kind):
+        """Complete a spreadsheet button's real worker and Qt callback with an unsaved Atlas draft."""
         self.edit_rarity()
         draft = self.page.settings()
         real_submit = LoggerWindow._submit.__get__(self.window, LoggerWindow)
-        with patch.object(self.window, "_submit", real_submit):
-            self.trigger_export("folder", "xlsx")
+        real_done = self.window._export_saved
+
+        def record_done(result):
+            """Retain the actual worker result and deliver the production export completion."""
+            self.results.append(result)
+            real_done(result)
+
+        with patch.object(self.window, "_submit", real_submit), \
+                patch.object(self.window, "_export_saved", side_effect=record_done):
+            self.trigger_export("folder", kind)
             deadline = time.monotonic() + 15
             while self.window._pending_tasks and time.monotonic() < deadline:
                 self.app.processEvents()
@@ -240,10 +241,17 @@ class ExportSettingsGuardTests(unittest.TestCase):
         self.assertEqual(self.window.tabs.currentIndex(), 5)
         self.assertTrue(self.page.dirty)
         self.assertEqual(self.page.settings(), draft)
-        files = list(self.folder.glob("*.xlsx"))
-        self.assertEqual(len(files), 1)
-        self.results.append({"path": str(files[0])})
-        self.assert_exported_rarity("xlsx", 12)
+        self.assertEqual(len(list(self.folder.iterdir())), 3 if kind == "csv" else 1)
+        self.assertEqual(len(self.results), 1)
+        self.assert_exported_rarity(kind, 12)
+
+    def test_folder_xlsx_real_worker_creates_readable_workbook_without_redirecting(self):
+        """Create and independently reopen all Excel sheets through the real worker and Qt callback."""
+        self.check_real_worker_export("xlsx")
+
+    def test_folder_csv_real_worker_creates_companions_without_redirecting(self):
+        """Create all three CSV files through the real worker and Qt callback with an Atlas draft."""
+        self.check_real_worker_export("csv")
 
     def test_database_backup_remains_available_with_unsaved_settings(self):
         """Verify database backup remains available with unsaved settings."""
