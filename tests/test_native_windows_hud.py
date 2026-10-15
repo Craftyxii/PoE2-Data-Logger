@@ -397,10 +397,15 @@ class NativeWindowsHUDTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["scan_commit_count"],before+1)
         self.assertEqual(logger.get_state()["settings"]["tier"],16)
         self.assertEqual(logger.get_state()["settings"]["waystone"],93.5)
-        # Earlier propagation froze M0001 without a waystone setup. Editing
-        # future settings cannot establish readiness for that historical map.
-        self.assertFalse(logger.get_state()["current_map_setup_saved"])
-        self.assertEqual(self.window.header_map_scanned.text(), "Map scanned: No")
+        # The preceding Undo New map explicitly reopened M0001, so this
+        # approved correction must update its saved setup and readiness.
+        self.assertTrue(logger.get_state()["current_map_setup_saved"])
+        self.assertEqual(self.window.header_map_scanned.text(), "Map scanned: Yes")
+        with logger._connect() as db:
+            corrected = json.loads(db.execute(
+                "SELECT snapshot_json FROM maps WHERE map_id='M0001'").fetchone()[0])
+        self.assertEqual((corrected["tier"], corrected["waystone"], corrected["base_map_mods"]),
+                         (16, 93.5, 1))
         self.phase("07-waystone-manual-review")
 
     def check_currency_and_ritual(self):
