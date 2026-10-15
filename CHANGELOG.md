@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.2.18 Beta
+
+- Reopen the previous map's setup for correction after Undo New map. Save corrections to that map's snapshot and exports, then freeze its corrected setup when advancing again. Ordinary recorded-map setup protection remains in place.
+- Include allocated Delirium coefficients in applicable Atlas totals when the map has Deli enabled, independently of its single Activity Type selection. Retain source identities, units and runtime conditions.
+- Accept verified zero-modifier Normal waystones while retaining unknown values for incomplete or unverified tooltips.
+- Enable manual propagation saving by selecting a waiting recipe when needed and retaining its available context with the entered runes.
+
+These fixes address the reported failures. Version metadata and update/uninstall guards identify 1.3.2.18 and protect running 1.3.2.17 clients. See [release notes](docs/RELEASE_1.3.2.18.md) for validation scope and publication gates.
+
 ## 1.3.2.17 Beta
 
 - Complete eligible propagation family autofill for weak-text or barless recipients; preserve per-recipe socket order, short-recipe limits, conflicts and manual approval.

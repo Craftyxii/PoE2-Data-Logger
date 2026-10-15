@@ -46,6 +46,8 @@ WAYSTONE_DEFAULTS = {"tier": 15, "waystone": 0, "map_mods": 0, "waystone_name": 
                      "waystone_mods": [], "item_rarity": None, "monster_rarity": None,
                      "pack_size": None, "effectiveness": None}
 WAYSTONE_SETUP_FIELDS = frozenset(("tier", "waystone", "map_mods"))
+MAP_SETUP_FIELDS = frozenset(WAYSTONE_DEFAULTS) | frozenset((
+    "aldur", "irradiated", "ocean", "deli", "wisp", "biome", "city_type"))
 MAX_RITUAL_REWARDS = 120
 BASE_EXTRA_HEADERS = ("Item Rarity %", "Monster Rarity %", "Pack Size %",
                         "Effectiveness %", "Waystone Name", "Biome", "City Type", "Ocean Map",
@@ -305,7 +307,7 @@ def _with_atlas_effect_snapshot(db, context):
     prior = result.get("atlas_effect_snapshot")
     if isinstance(prior, dict) and prior.get("schema_version") == 2 and all(prior.get(key) == result.get(key, default)
             for key, default in (("atlas_setup_id", None), ("activity_type", "None"),
-                                 ("biome", "None"), ("city_type", "None"), ("ocean", "No"))):
+                                 ("biome", "None"), ("city_type", "None"), ("ocean", "No"), ("deli", "No"))):
         return result
     catalog_id = result.get("atlas_catalog_id")
     if catalog_id == _atlas_catalog_identity()[0]:
@@ -870,8 +872,8 @@ def undo_action():
 def undo_last_action():
     """Undo saved logging rows atomically, reopen map transitions and retire stale captures.
 
-    Undoing New map retains the preceding map's finalized stats and makes it
-    active again. A fresh generation prevents old OCR callbacks and save retries
+    Undoing New map retains the preceding map's finalized stats and reopens its
+    setup for explicit correction. A fresh generation prevents old OCR callbacks and save retries
     from writing into restored maps or reused remnant and commit numbers.
     """
     with _connect() as db:
@@ -882,6 +884,8 @@ def undo_last_action():
         if action == "New map":
             _set_meta(db, "pending_new_map", False)
             _set_meta(db, "prepared_waystone_setup", None)
+            current = _meta(db, "current_map_number", 0)
+            _set_meta(db, "reopened_map_id", _map_id(current) if current else None)
             if _meta(db, "current_map_number", 0) and previous_waystone:
                 settings = _meta(db, "settings")
                 settings.update(_waystone_settings(previous_waystone))
@@ -1026,11 +1030,40 @@ def _validate_settings(db, data):
     return c
 
 
+def _correct_reopened_map_setup(db, prior, config, fields):
+    """Apply explicit map corrections without adopting queued Atlas, master or tablet settings.
+
+    Only the map's current summary changes; earlier event snapshots retain the
+    settings recorded when those events were approved.
+    """
+    context = dict(prior)
+    selected = _snapshot(config)
+    corrected_fields = set(fields) - {"map_mods"}
+    for key in fields - {"map_mods"}:
+        context[key] = selected[key]
+    if "city_type" in fields:
+        context["biome"] = selected["biome"]
+        corrected_fields.add("biome")
+    if fields & {"tier", "irradiated", "ocean"}:
+        context["area"] = area_level({"tier": context.get("tier", config["tier"]),
+                                      "irradiated": context.get("irradiated") == "Yes",
+                                      "ocean": context.get("ocean") == "Yes"})
+        corrected_fields.add("area")
+    if "map_mods" in fields:
+        context["base_map_mods"] = config["map_mods"]
+        context["map_mods"] = config["map_mods"] + context.get("master_adds_mod", 0)
+        context["total_mods"] = context["map_mods"] + context.get("tablet_mods", 0)
+        corrected_fields.update(("base_map_mods", "map_mods", "total_mods"))
+    context["map_setup_corrected_fields"] = sorted(set(prior.get("map_setup_corrected_fields", [])) | corrected_fields)
+    return _with_atlas_effect_snapshot(db, context)
+
+
 def _save_settings(db, data, *, confirmed_affixes=()):
     """Save validated edits on the caller's connection and stage upcoming waystone fields.
 
     Update an active map snapshot before activity or while its first waystone
-    setup is incomplete and start inventory is its only activity.
+    setup is incomplete and start inventory is its only activity. Undo New map
+    separately permits explicit map-setup corrections until the next finalization.
     """
     for name in confirmed_affixes:
         if not isinstance(name, str) or not name.strip() or len(name) > 120 or "%" in name:
@@ -1070,9 +1103,11 @@ def _save_settings(db, data, *, confirmed_affixes=()):
         waystone_save = bool(waystone_fields)
         first_setup = (waystone_save and prior.get("waystone_setup_saved") is False and
                        _map_has_only_start_inventory(db, mid))
-        if not _map_has_activity(db, mid) or first_setup:
-            context = _snapshot(c)
-            if first_setup:
+        reopened = bool(prior) and _meta(db, "reopened_map_id") == mid and bool(MAP_SETUP_FIELDS & data.keys())
+        if not _map_has_activity(db, mid) or first_setup or reopened:
+            context = (_correct_reopened_map_setup(db, prior, c,
+                       (MAP_SETUP_FIELDS | {"activity_type"}) & data.keys()) if reopened else _snapshot(c))
+            if first_setup and not reopened:
                 context = _bind_atlas_context(db, mid, context)
             if "waystone_setup_saved" in prior:
                 fields = set(prior.get("waystone_setup_fields", [])) | waystone_fields
@@ -2627,6 +2662,7 @@ def finish_map(normal, magic, rare, detonated=_UNSET, *, unique=_UNSET):
         db.execute("INSERT INTO expeditions VALUES(?,?,?,?) ON CONFLICT(expedition_id) DO UPDATE SET detonated=excluded.detonated",
                    (eid, mid, expedition, count))
         _patch_first(db, "expedition_id", eid, {33: "" if count is None else count})
+        _set_meta(db, "reopened_map_id", None)
         _set_meta(db, "pending_new_map", True)
         _record_commit(db, "Map totals", mid, eid, details={"kills": values,
                        "unique_kills": unique_count, "detonated": count})
@@ -2689,6 +2725,7 @@ def start_map():
         _set_meta(db, "current_map_number", number)
         _set_meta(db, "pending_new_map", False)
         _set_meta(db, "prepared_waystone_setup", None)
+        _set_meta(db, "reopened_map_id", None)
     return get_state()
 
 
@@ -2755,6 +2792,7 @@ def clear_export_and_reset_ids():
         _set_meta(db, "previous_waystone_settings", None)
         _set_meta(db, "previous_biome", None)
         _set_meta(db, "prepared_waystone_setup", None)
+        _set_meta(db, "reopened_map_id", None)
         _set_meta(db, "scan_commit_count", 0)
         config = _meta(db, "settings")
         config["expedition"] = 1
@@ -4176,6 +4214,8 @@ def export_primary_csv(*, _db=None):
             db.execute("BEGIN")
         legacy = csv.DictReader(io.StringIO(export_csv(_db=db).decode("utf-8-sig")))
         summaries = csv.DictReader(io.StringIO(export_map_summary_csv(_db=db).decode("utf-8-sig")))
+        corrected_fields = {row["map_id"]: set(_load(row["snapshot_json"]).get("map_setup_corrected_fields", []))
+                            for row in db.execute("SELECT map_id,snapshot_json FROM maps")}
         obsolete = {"Map Mods", "# +2 Mod Tablets", "Tablet Mods", "Total Mods", "Master +Mods",
                     "Base Map Mods", "+2 Tablet Mods"}
         legacy_headers = ["Map Modifiers" if header == "Waystone %" else header
@@ -4206,6 +4246,18 @@ def export_primary_csv(*, _db=None):
             row["Type"] = ("Chain" if row.get("Chain Step #") else
                            "Remnant" if row.get("Remnant ID") or row.get("Matched Recipe") else "Map totals")
             map_id = row.get("Map ID")
+            # Explicit reopened-map corrections override these repeated map
+            # labels in the current Export only. Recipe rows and history stay
+            # as recorded; modifier/stat columns already use the map summary.
+            for field, source, target in (
+                    ("tier", "Tier", "Tier"), ("area", "Area Level", "Area Level"),
+                    ("aldur", "Aldur's Saga", "Aldur's Saga Affix"),
+                    ("irradiated", "Irradiated", "Irradiated"), ("ocean", "Ocean Map", "Ocean Map"),
+                    ("deli", "Deli", "Deli"), ("wisp", "Wisp", "Wisp"),
+                    ("biome", "Biome", "Biome"), ("city_type", "City Type", "City Type"),
+                    ("waystone_name", "Waystone Name", "Waystone Name")):
+                if field in corrected_fields.get(map_id, ()) and map_id in by_map:
+                    row[target] = by_map[map_id].get(source, row.get(target, ""))
             if map_id in by_map and map_id not in counted:
                 summary = by_map[map_id]
                 row.update({header: summary.get(header, "") for header in supplemental})

@@ -87,6 +87,16 @@ class TooltipImageAuditTests(unittest.TestCase):
         self.assertEqual(result["fields"]["map_mods"], 2)
         self.assertTrue(clear_waystone_read(result))
 
+    def test_explicit_normal_waystone_pixels_preserve_zero_without_copied_properties(self):
+        """Read a complete Normal tooltip through the engine without an Item Level or drop-chance row."""
+        lines = ["Rarity: Normal", "Waystone (Tier 16)", "Revives Available: 6",
+                 "Can be used in a Map Device"]
+        result = item_text.read_screen_tooltip(self.tooltip(lines, 1), self.affixes)
+        self.assertIsNotNone(result)
+        self.assertEqual((result["fields"]["tier"], result["fields"]["waystone"],
+                          result["fields"]["map_mods"], result["mods"]), (16, 0, 0, []))
+        self.assertIsNone(item_text.read_screen_tooltip(self.tooltip(lines[1:], 1), self.affixes))
+
     def test_title_free_pixels_cannot_route_or_invent_an_item(self):
         """Keep blank and isolated modifier text from becoming a waystone or tablet proposal."""
         for image in (Image.new("RGB", (1000, 400), (15, 15, 20)),

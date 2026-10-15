@@ -205,9 +205,29 @@ def _data_sheet(data, *, hyperlinks=None, numeric_columns=()):
 
 
 def _analysis_context_sheet(data):
-    """Format explanatory notes as wrapped, readable rows without changing their SQL text."""
+    """Keep Context guidance lossless across Excel cells while retaining its SQL/CSV columns."""
+    source = csv.reader(io.StringIO(data.decode("utf-8-sig")))
+    headers = next(source)
+    rows = list(source)
+    for number, values in enumerate(rows, 2):
+        if len(values) != len(headers):
+            raise ValueError(f"Export row {number} has an invalid width.")
+    guidance_column = headers.index("Guidance")
+    continuations = max((max(0, (len(row[guidance_column]) - 1) // 32767) for row in rows), default=0)
+    if continuations > 0:
+        # Only oversized Context guidance is split. Original columns and the
+        # underlying SQL/CSV text keep their established order and values.
+        output = io.StringIO(newline="")
+        writer = csv.writer(output)
+        writer.writerow([*headers, *(f"Guidance continuation {n}" for n in range(1, continuations + 1))])
+        for values in rows:
+            guidance = values[guidance_column]
+            values[guidance_column] = guidance[:32767]
+            writer.writerow([*values, *(guidance[n * 32767:(n + 1) * 32767]
+                                        for n in range(1, continuations + 1))])
+        data = output.getvalue().encode("utf-8-sig")
     sheet = Sheet(_data_sheet(data))
-    widths = (22, 42, 112, 19)
+    widths = (22, 42, 112, 19, *([112] * continuations))
     for column, width in zip(sheet.root.findall(f"{{{NS}}}cols/{{{NS}}}col"), widths):
         column.set("width", str(width))
     for number, row in sheet.rows.items():

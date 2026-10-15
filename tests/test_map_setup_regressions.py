@@ -99,6 +99,110 @@ class MapSetupRegressionTests(unittest.TestCase):
         # The explicit next-map preparation was already complete before M0002 started.
         self.assertEqual(self.snapshot("M0002")["waystone"], 10)
 
+    def test_undo_new_map_allows_setup_correction_across_restart_and_refreezes(self):
+        """Correct only the reopened map, retain event history and freeze again on advancing."""
+        logger.save_atlas_settings(self.atlas(100))
+        self.waystone(40)
+        self.inventory("end", 5)
+        logger.commit_remnant("Perfect Chaos Orb x3", "Perfect Exalted Orb x3", 3)
+        logger.finish_map(10, 2, 1, 1)
+        original = self.snapshot()
+        with logger._connect() as db:
+            history = [tuple(row) for row in db.execute("SELECT * FROM commits ORDER BY number")]
+        logger.start_map()
+        logger.undo_last_action()
+        logger._READY = False
+        logger.initialize()
+        logger.save_atlas_settings(self.atlas(200))
+        logger.save_settings({"tier": 15, "waystone": 99, "map_mods": 7,
+                              "item_rarity": 24, "monster_rarity": 35, "pack_size": 46,
+                              "effectiveness": 57, "irradiated": True, "ocean": True,
+                              "biome": "Forest", "city_type": "Faridun", "deli": True, "wisp": True,
+                              "waystone_name": "Corrected map", "waystone_mods": ["Corrected modifier"]})
+        corrected = self.snapshot()
+        self.assertEqual((corrected["waystone"], corrected["tier"], corrected["area"],
+                          corrected["base_map_mods"], corrected["map_mods"], corrected["total_mods"]),
+                         (99, 15, 81, 7, 7 + original["master_adds_mod"],
+                          7 + original["master_adds_mod"] + original["tablet_mods"]))
+        self.assertEqual(corrected["atlas_setup_id"], original["atlas_setup_id"])
+        self.assertEqual(corrected["gear_item_rarity"], 100)
+        self.assertTrue(corrected["waystone_setup_saved"])
+        with logger._connect() as db:
+            self.assertEqual([tuple(row) for row in db.execute(
+                "SELECT * FROM commits WHERE number<=? ORDER BY number", (history[-1][0],))], history)
+        logger.finish_map(11, 2, 1, 1)
+        self.assertEqual(self.rows(logger.export_maps_csv)[0]["Waystone %"], "99")
+        primary = self.rows(logger.export_primary_csv)[0]
+        self.assertEqual((primary["Item Rarity %"], primary["Monster Rarity %"],
+                          primary["Pack Size %"], primary["Effectiveness %"]), ("24", "35", "46", "57"))
+        for row in self.rows(logger.export_primary_csv):
+            if row["Map ID"] == "M0001":
+                self.assertEqual((row["Tier"], row["Area Level"], row["Biome"], row["City Type"],
+                                  row["Irradiated"], row["Ocean Map"], row["Deli"], row["Wisp"]),
+                                 ("15", "81", "Forest", "Faridun", "Yes", "Yes", "Yes", "Yes"))
+                self.assertEqual(row["Waystone Name"], "Corrected map")
+        old_remnant = next(row for row in self.rows(logger.export_record_history_csv) if row["Type"] == "Remnant")
+        self.assertEqual((old_remnant["Tier"], old_remnant["Waystone %"]), ("16", "40"))
+        self.assertEqual(old_remnant["Waystone Name"], "Storm Peak")
+        logger.start_map()
+        self.inventory("end", 6)
+        next_map = self.snapshot("M0002")
+        self.waystone(12)
+        self.assertEqual(self.snapshot(), corrected)
+        self.assertEqual(self.snapshot("M0002"), next_map)
+
+    def test_reopened_setup_correction_can_be_undone_without_losing_editability(self):
+        """Undo a correction atomically, then allow another correction to the same reopened map."""
+        self.waystone(40)
+        self.inventory("end")
+        logger.finish_map(10, 0, 0)
+        logger.start_map()
+        logger.undo_last_action()
+        before = self.snapshot()
+        logger.save_settings({"waystone": 99})
+        self.assertEqual(self.snapshot()["waystone"], 99)
+        logger.undo_last_action()
+        self.assertEqual(self.snapshot(), before)
+        logger.save_settings({"waystone": 77})
+        self.assertEqual(self.snapshot()["waystone"], 77)
+        logger.finish_map(10, 0, 0)
+        logger.mark_next_map(False)
+        logger.save_settings({"waystone": 22})
+        self.assertEqual(self.snapshot()["waystone"], 77)
+
+    def test_reopened_setup_does_not_adopt_queued_tablets_or_master(self):
+        """A map correction retains the tablet and master coefficients saved for that map."""
+        self.waystone(40)
+        self.inventory("end")
+        logger.finish_map(10, 0, 0)
+        logger.start_map()
+        logger.undo_last_action()
+        before = self.snapshot()
+        selections = logger.get_state()["settings"]["master_selections"]
+        selections["Jado"] = ["Unexpected Missions", "None", "None", "None"]
+        logger.save_settings({"atlas_master": "Jado", "master_selections": selections,
+                              "plus_two_tablets": 2, "tablets_used": 4})
+        logger.save_settings({"waystone": 99, "map_mods": 7})
+        saved = self.snapshot()
+        for key in ("master", "perks", "master_selections", "master_adds_mod", "tablets",
+                    "tablet_mods", "tablets_used", "tablet_capacity", "tablet_values", "tablet_affixes"):
+            self.assertEqual(saved[key], before[key], key)
+        self.assertEqual(saved["map_mods"], 7 + before["master_adds_mod"])
+        self.assertEqual(saved["total_mods"], saved["map_mods"] + before["tablet_mods"])
+
+    def test_session_reset_cannot_reuse_reopened_map_editability(self):
+        """Reusing M0001 in a fresh session must restore normal setup freezing."""
+        self.waystone(40)
+        logger.finish_map(10, 0, 0)
+        logger.start_map()
+        logger.undo_last_action()
+        logger.clear_export_and_reset_ids()
+        logger.start_map()
+        self.waystone(60)
+        self.inventory("end")
+        self.waystone(99)
+        self.assertEqual(self.snapshot()["waystone"], 60)
+
     def test_first_setup_exception_requires_only_start_inventory(self):
         """Verify end inventory, remnants, chains, Ritual or counts prevent later first-waystone completion."""
         for activity in ("end", "remnant", "chain", "ritual", "counts"):

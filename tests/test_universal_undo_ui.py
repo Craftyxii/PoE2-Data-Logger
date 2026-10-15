@@ -1,5 +1,6 @@
 """Desktop undo checks for saved actions, restored forms and retired asynchronous scan work."""
 
+import csv
 import io
 import json
 import os
@@ -141,6 +142,22 @@ class UniversalUndoUITests(unittest.TestCase):
         self.assertEqual(self.window.state["current_map_id"], "M0002")
         self.click(self.window.undo_button)
         self.assertEqual(self.window.normal.text(), "77")
+
+    def test_new_map_after_undo_saves_waystone_correction_to_map_export(self):
+        """Reopen through the shared Undo button, save setup edits and export the corrected map."""
+        self.window.waystone.setText("40")
+        self.window.save_map_settings()
+        self.window.normal.setText("10")
+        self.window.finish_map()
+        self.click(self.window.undo_button)
+        self.window.waystone.setText("99")
+        self.window.save_map_settings()
+        self.assertNotIn("recorded setup is unchanged", self.window.map_scan_status.text())
+        self.window.finish_map()
+        rows = list(csv.DictReader(io.StringIO(logger.export_maps_csv().decode("utf-8-sig"))))
+        first = next(row for row in rows if row["Map ID"] == "M0001")
+        self.assertEqual((first["Waystone %"], first["Normal Kills"]), ("99", "10"))
+        self.assertEqual(self.window.state["current_map_id"], "M0002")
 
     def test_undo_chain_completion_restores_the_saved_chain_and_expedition(self):
         """Reopen the completed expedition while preserving its approved rune part and remnant count."""

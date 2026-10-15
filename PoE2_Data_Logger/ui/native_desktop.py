@@ -49,7 +49,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.17 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.18 Beta"
 SCAN_TIMEOUT_MS = 90000
 SCAN_PRESENTATION_RETRY_MS = 100
 SCAN_PRESENTATION_WAIT_SECONDS = 10
@@ -182,9 +182,11 @@ def clear_waystone_read(result):
     """Require complete fields, unambiguous observed properties and the captured OCR evidence floor."""
     fields = result.get("fields") or {}
     mods = result.get("mods") or []
+    normal_unmodified = (result.get("_normal_unmodified") is True and not mods and
+                         fields.get("waystone") == 0 and fields.get("map_mods") == 0)
     if (result.get("uncertain") or fields.get("tier") not in (15, 16) or fields.get("waystone") is None or
             fields.get("map_mods") is None or fields["map_mods"] != len(mods) or
-            not 1 <= len(mods) <= 10):
+            (not normal_unmodified and not 1 <= len(mods) <= 10)):
         return False
     if result.get("source") == "screen OCR":
         strictness = ocr_sensitivity.validate(result.get("_ocr_strictness", ocr_sensitivity.DEFAULT))
@@ -3797,6 +3799,16 @@ class LoggerWindow(QMainWindow):
         """Open propagation entry without changing a held remnant's identity."""
         self._load_chain_context()
         if self._manual_propagation_context:
+            # A scan with no selected recipe leaves the table without a current
+            # row. Associate fallback input with the sole unresolved reward
+            # before edits start, while preserving any existing row selection.
+            if self.propagation_recipe_table.currentRow() < 0:
+                waiting = [row for row, choice in enumerate(self._propagation_choices)
+                           if not choice.get("denied")]
+                unresolved = [row for row in waiting if not self._propagation_row_inputs[row]]
+                target = unresolved if len(unresolved) == 1 else waiting
+                if len(target) == 1:
+                    self.propagation_recipe_table.setCurrentCell(target[0], 0)
             self._propagation_manual_requested = True
             self._manual_propagation_changed()
             self.tabs.setCurrentIndex(0)
@@ -3865,6 +3877,7 @@ class LoggerWindow(QMainWindow):
         choice = self._propagation_choices[row]
         if choice.get("denied"):
             raise ValueError("Select a waiting propagation recipe.")
+        choice = self._manual_propagation_choice(row)
         self.propagation_recipe_table.setCurrentCell(row, 0)
         if self._propagation_row_inputs[row]:
             try:
@@ -3892,7 +3905,7 @@ class LoggerWindow(QMainWindow):
             runes = choice["runes"]
         result = {**self._manual_propagation_context, **choice,
                   "can_use": True, "runes": runes,
-                  "selected_recipe": choice["selected_recipe"]}
+                  "selected_recipe": choice.get("selected_recipe") or ""}
         self._accept_manual_propagation(result)
 
     def _focus_manual_propagation(self):
@@ -3936,9 +3949,24 @@ class LoggerWindow(QMainWindow):
         choice = self._propagation_choices[row] if 0 <= row < len(self._propagation_choices) else {}
         if self._propagation_choices and (not choice or choice.get("denied")):
             raise ValueError("Select a waiting propagation recipe before adding its runes.")
-        result = {**context, "can_use": True, "runes": self._manual_propagation_runes(),
-                  "selected_recipe": choice.get("selected_recipe", "")}
+        choice = self._manual_propagation_choice(row) if choice else {}
+        result = {**context, **choice, "can_use": True, "runes": self._manual_propagation_runes(),
+                  "selected_recipe": choice.get("selected_recipe") or ""}
         self._accept_manual_propagation(result)
+
+    def _manual_propagation_choice(self, row):
+        """Keep this row's evidence and resolve only an exact catalog reward for manual approval."""
+        choice = dict(self._propagation_choices[row])
+        if not choice.get("selected_recipe"):
+            reward = (choice.get("reward_text") or "").strip()
+            quantity = re.fullmatch(r"(\d{1,3})\s*[xX×]\s+(.+)", reward)
+            with logger._connect() as db:
+                recipe = logger._recipe_catalog_name(db, reward)
+                if recipe is None and quantity:
+                    count, name = int(quantity[1]), quantity[2].strip()
+                    recipe = logger._recipe_catalog_name(db, name if count == 1 else f"{name} x{count}")
+                choice["selected_recipe"] = recipe or ""
+        return choice
 
     def _accept_manual_propagation(self, result):
         """Save accepted manual runes while retaining any held remnant review, then retire

@@ -14,7 +14,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QScrollArea
 
 from PoE2_Data_Logger.core import logger_store as logger, store
-from PoE2_Data_Logger.ocr.item_text import parse_item_text
+from PoE2_Data_Logger.ocr.item_text import parse_item_text, read_screen_tooltip
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
@@ -157,6 +157,63 @@ class ItemReviewRecoveryTests(unittest.TestCase):
         self.assertEqual(self.window.waystone.text(), "0")
         self.tab(2)
         self.assertFalse(self.window.map_ocr_overrides.isVisible())
+
+    def normal_waystone(self, *, screen=False, score=.99):
+        """Parse an explicitly Normal tooltip with no percentage, modifiers or copied Item Level."""
+        lines = ["Rarity: Normal", "Waystone (Tier 16)", "Revives Available: 6",
+                 "Can be used in a Map Device"]
+        if screen:
+            result = read_screen_tooltip(Image.new("RGB", (500, 700)),
+                                         ocr_rows=[{"text": text, "score": score} for text in lines])
+        else:
+            result = parse_item_text("\n".join(["Item Class: Waystones", *lines]))
+        result.update(logger.scan_context())
+        self.window._hover_item_read(result, self.raw)
+        self.app.processEvents()
+
+    def test_normal_waystone_approves_zero_percentage_and_zero_modifiers(self):
+        """The normal Approve action saves a white waystone without editing missing-number fields."""
+        self.normal_waystone()
+        self.assertEqual((self.window.waystone.text(), self.window.map_mods.text()), ("0", "0"))
+        self.assertEqual([self.window.found_table.item(row, 1).text() for row in (1, 2)], ["0", "0"])
+        self.click(self.window.approve_scan_button)
+        state = logger.get_state()
+        self.assertEqual((state["settings"]["waystone"], state["settings"]["map_mods"]), (0, 0))
+        self.assertFalse(any(state["settings"]["waystone_mods"]))
+        self.assertEqual(state["scan_commit_count"], 1)
+        self.assertIsNone(self.window.pending_review_kind)
+
+    def test_normal_screen_waystone_auto_commits_when_confident(self):
+        """The OCR reader and existing automatic-save path persist a complete Normal zero read."""
+        self.window.set_auto_all(True)
+        self.normal_waystone(screen=True)
+        state = logger.get_state()
+        self.assertEqual((state["settings"]["waystone"], state["settings"]["map_mods"]), (0, 0))
+        self.assertEqual(state["scan_commit_count"], 1)
+        self.assertIsNone(self.window.pending_review_kind)
+
+    def test_normal_screen_waystone_held_for_confidence_can_be_manually_approved(self):
+        """Low-confidence recognition holds automatic saving while retaining valid zeroes for review."""
+        self.window.set_auto_all(True)
+        self.normal_waystone(screen=True, score=.5)
+        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+        self.assertEqual(self.window.pending_review_kind, "waystone")
+        self.assertIn("held", self.window.map_scan_status.text())
+        self.assertEqual((self.window.waystone.text(), self.window.map_mods.text()), ("0", "0"))
+        self.click(self.window.approve_scan_button)
+        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
+
+    def test_unknown_empty_waystone_still_rejects_missing_percentage(self):
+        """An empty non-Normal reading cannot silently save zero through the same review path."""
+        self.window.set_auto_all(True)
+        result = parse_item_text("Item Class: Waystones\nWaystone (Tier 16)\n"
+                                 "Item Level: 82\nCan be used in a Map Device")
+        result.update(logger.scan_context())
+        self.window._hover_item_read(result, self.raw)
+        self.assertEqual((self.window.waystone.text(), self.window.map_mods.text()), ("", ""))
+        with self.assertRaisesRegex(ValueError, "Waystone % must be a number"):
+            self.window.commit_review()
+        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
     def test_scanning_second_tablet_exposes_its_fields_at_the_new_capacity(self):
         """Increasing scan capacity immediately shows the slot whose fields need correction."""

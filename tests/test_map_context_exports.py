@@ -201,7 +201,7 @@ class MapContextExportTests(unittest.TestCase):
                    for key in allocated if catalog["nodes"][key].get("choices")}
         logger.save_atlas_settings({"catalog_version": catalog["version"], "allocated": allocated,
                                     "choices": choices, "gear_item_rarity": None})
-        logger.save_settings({"activity_type": "Abyss", "city_type": "Vaal", "ocean": True})
+        logger.save_settings({"activity_type": "Abyss", "city_type": "Vaal", "ocean": True, "deli": True})
         logger.start_map()
         # Keep the deliberate manual unknown after city classification on map creation.
         logger.save_settings({"biome": "None"})
@@ -209,8 +209,8 @@ class MapContextExportTests(unittest.TestCase):
             original = json.loads(db.execute("SELECT snapshot_json FROM maps WHERE map_id='M0001'").fetchone()[0])
             guidance = db.execute("SELECT guidance FROM analysis_context_complete "
                                   "WHERE section='Map settings' AND topic='M0001'").fetchone()[0]
-        self.assertEqual((original["activity_type"], original["biome"], original["city_type"], original["ocean"]),
-                         ("Abyss", "None", "Vaal", "Yes"))
+        self.assertEqual((original["activity_type"], original["biome"], original["city_type"], original["ocean"], original["deli"]),
+                         ("Abyss", "None", "Vaal", "Yes", "Yes"))
         _, primary = self.rows(logger.export_primary_csv())
         snapshot_text = primary[0]["Atlas Effects JSON"]
         self.assertGreater(len(snapshot_text), 25000, "Stress the actual large compact aggregate")
@@ -226,6 +226,84 @@ class MapContextExportTests(unittest.TestCase):
                             if row["Section"] == "Map settings" and row["Topic"] == "M0001")
         self.assertEqual(map_guidance, guidance)
         self.assertEqual(json.loads(map_guidance)["atlas_effect_snapshot"], original["atlas_effect_snapshot"])
+
+    def test_real_delirium_allocation_survives_sql_csv_and_excel_with_independent_activity(self):
+        """The source coefficient remains conditional in all exports and is frozen with its Deli map."""
+        node_id = "AtlasDeliriumSmall1"
+        stat_id = "map_delirium_giga_mirror_chance_+%_at_max_depth"
+        logger.save_atlas_settings({"allocated": [node_id]})
+        logger.save_settings({"activity_type": "Expedition", "biome": "Desert", "deli": True})
+        logger.start_map()
+        logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 1}])
+        # Future settings may differ; exports must describe the already-recorded map.
+        logger.save_settings({"deli": False})
+        with logger._connect() as db:
+            original = json.loads(db.execute("SELECT snapshot_json FROM maps WHERE map_id='M0001'").fetchone()[0])
+        snapshot = original["atlas_effect_snapshot"]
+        self.assertEqual((original["activity_type"], original["deli"], snapshot["deli"]),
+                         ("Expedition", "Yes", "Yes"))
+        self.assertEqual(original["atlas_settings"]["allocated"], [node_id])
+        self.assertEqual(len(snapshot["totals"]), 1)
+        coefficient = snapshot["totals"][0]
+        self.assertEqual((coefficient["stat_id"], coefficient["raw_total"]), (stat_id, 5))
+        self.assertIn("catalog_trigger", coefficient["conditions"])
+        _, csv_maps = self.rows(logger.export_maps_csv())
+        self.assertEqual(json.loads(csv_maps[0]["Atlas Effects JSON"]), snapshot)
+        workbook = workbook_export.export_xlsx()
+        self.assertEqual(json.loads(self.workbook_rows(workbook, 1)[0]["Atlas Effects JSON"]), snapshot)
+        backup = Path(self.temporary.name) / "deli-context.sqlite3"
+        backup.write_bytes(logger.backup_bytes())
+        with closing(sqlite3.connect(backup)) as db:
+            raw = json.loads(db.execute("SELECT snapshot_json FROM maps WHERE map_id='M0001'").fetchone()[0])
+        self.assertEqual(raw["atlas_effect_snapshot"], snapshot)
+        self.assertEqual(raw["atlas_settings"]["allocated"], [node_id])
+
+    def test_large_delirium_context_guidance_round_trips_through_continuation_columns(self):
+        """The previously truncated all-node Deli context remains exact JSON with ordinary map stats/perks."""
+        catalog = atlas_catalog.catalog()
+        allocated = [key for key, node in catalog["nodes"].items() if node.get("allocatable")]
+        choices = {key: max(catalog["nodes"][key]["choices"],
+                           key=lambda choice: len(json.dumps(choice.get("stats", {}))))["id"]
+                   for key in allocated if catalog["nodes"][key].get("choices")}
+        logger.save_atlas_settings({"catalog_version": catalog["version"], "allocated": allocated, "choices": choices})
+        logger.save_settings({"activity_type": "Abyss", "city_type": "Vaal", "ocean": True, "deli": True,
+                              "tier": 16, "waystone": 150, "map_mods": 8, "waystone_name": "Corrupted Waystone of Abundance",
+                              "item_rarity": 123.5, "monster_rarity": 234.5, "pack_size": 45.5, "effectiveness": 178.5,
+                              "irradiated": True, "wisp": True, "atlas_master": "Doryani",
+                              "master_selections": {"Doryani": ["Evolutionary Pressure", "Remnants of Greatness",
+                                                                  "Improved Calibration", "Mechanical Guardians"]}})
+        logger.start_map()
+        logger.save_settings({"biome": "None"})
+        logger.finish_map(1250, 137, 23, 2)
+        with logger._connect() as db:
+            expected = [tuple(row) for row in db.execute("SELECT section,topic,guidance,context_version "
+                                                        "FROM analysis_context_complete ORDER BY position,key")]
+        map_guidance = next(row[2] for row in expected if row[:2] == ("Map settings", "M0001"))
+        self.assertGreater(len(map_guidance), 32767, "Exercise the actual Deli-induced overflow")
+        data = workbook_export.export_xlsx()
+        rows = self.workbook_rows(data, 4)
+        with ZipFile(io.BytesIO(data)) as archive:
+            root = ET.fromstring(archive.read("xl/worksheets/sheet4.xml"))
+        header_row = root.find(f"{{{workbook_export.NS}}}sheetData/{{{workbook_export.NS}}}row")
+        headers = ["".join(cell.itertext()) for cell in header_row]
+        self.assertEqual(headers[:4], list(analysis_context.HEADERS))
+        self.assertEqual(headers[4:], ["Guidance continuation 1"])
+        reconstructed = []
+        for row in rows:
+            self.assertTrue(all(len(value) <= 32767 for value in row.values()))
+            guidance = row["Guidance"] + row["Guidance continuation 1"]
+            reconstructed.append((row["Section"], row["Topic"], guidance, row["Context Version"]))
+        self.assertEqual(reconstructed, expected)
+        exported_map = next(row for row in rows if row["Section"] == "Map settings" and row["Topic"] == "M0001")
+        self.assertEqual(exported_map["Guidance"], map_guidance[:32767])
+        self.assertEqual(exported_map["Guidance continuation 1"], map_guidance[32767:])
+        self.assertEqual(json.loads(exported_map["Guidance"] + exported_map["Guidance continuation 1"]),
+                         json.loads(map_guidance))
+        _, csv_rows = self.rows(logger.export_analysis_context_csv())
+        self.assertEqual([tuple(row[name] for name in analysis_context.HEADERS) for row in csv_rows], expected)
+        with logger._connect() as db:
+            self.assertEqual([tuple(row) for row in db.execute("SELECT section,topic,guidance,context_version "
+                                                             "FROM analysis_context_complete ORDER BY position,key")], expected)
 
 
 if __name__ == "__main__":

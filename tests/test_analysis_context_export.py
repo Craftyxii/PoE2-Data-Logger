@@ -199,6 +199,38 @@ class AnalysisContextExportTests(unittest.TestCase):
             self.assertEqual(alignment.get("wrapText"), "1")
             self.assertEqual(alignment.get("vertical"), "top")
 
+    def test_context_guidance_continuations_preserve_boundaries_and_normal_columns(self):
+        """Oversized notes reconstruct exactly while ordinary rows and existing columns stay intact."""
+        for length in (32767, 32768, 65534, 65535):
+            with self.subTest(length=length):
+                token = " é=literal\n"
+                guidance = (token * (length // len(token) + 1))[:length]
+                buffer = io.StringIO(newline="")
+                writer = csv.writer(buffer)
+                writer.writerow(analysis_context.HEADERS)
+                writer.writerow(("Long", "Boundary", guidance, "5"))
+                writer.writerow(("Short", "Ordinary", "Unchanged note", "5"))
+                root = ET.fromstring(workbook_export._analysis_context_sheet(buffer.getvalue().encode("utf-8-sig")))
+                rows = root.findall(f"{{{workbook_export.NS}}}sheetData/{{{workbook_export.NS}}}row")
+                headers = ["".join(cell.itertext()) for cell in rows[0]]
+                extra = (length - 1) // 32767
+                self.assertEqual(headers, [*analysis_context.HEADERS,
+                                           *(f"Guidance continuation {n}" for n in range(1, extra + 1))])
+                decoded = []
+                for row in rows[1:]:
+                    values = {headers[workbook_export._col_number(cell.get("r")) - 1]: "".join(cell.itertext())
+                              for cell in row}
+                    self.assertEqual(values["Context Version"], "5")
+                    self.assertTrue(all(len(value) <= 32767 for value in values.values()))
+                    decoded.append(values)
+                parts = [decoded[0]["Guidance"], *(decoded[0].get(f"Guidance continuation {n}", "")
+                                                  for n in range(1, extra + 1))]
+                self.assertEqual("".join(parts), guidance)
+                self.assertEqual(parts[0], guidance[:32767])
+                self.assertEqual(decoded[1], {"Section": "Short", "Topic": "Ordinary",
+                                             "Guidance": "Unchanged note", "Context Version": "5"})
+                self.assertFalse(root.findall(f".//{{{workbook_export.NS}}}f"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,7 @@
 """Atlas aggregates retain their source, target and historical map context."""
 import copy
 import hashlib
+from itertools import product
 import json
 from pathlib import Path
 import tempfile
@@ -29,6 +30,7 @@ def fixture_catalog():
         {"id": "alternate", "stats": {"map_desert_monster_potency_+%": 100}, "effects": ["100% alternate"]}])
     node("breach", {"map_breach_monster_potency_+%": 20}, "Breach")
     node("ritual", {"map_ritual_tribute_+%": 5}, "Ritual")
+    node("delirium", {"map_delirium_giga_mirror_chance_+%_at_max_depth": 5}, "Delirium")
     node("expedition", {"expedition_monsters_logbook_chance_+%": 5}, "Expedition")
     node("grand", {"map_expedition_logbook_level_+": 1, "dummy_expedition_logbooks_have_up_to_3_modifiers": 1}, "Expedition")
     node("conditional", {"map_expedition_runic_monsters_logbook_chance_+%_per_runic_modifier": 50}, "Expedition")
@@ -109,6 +111,37 @@ class AtlasEffectSnapshotTests(unittest.TestCase):
         self.assertTrue(conditional["conditions"])
         self.assertTrue(totals["map_corrupted_rare_monster_modifiers_chance_%"]["conditions"])
 
+    def test_deli_flag_includes_delirium_independently_of_primary_activity(self):
+        """Each primary encounter keeps its own tree while Deli adds its allocated coefficient once."""
+        stat = "map_delirium_giga_mirror_chance_+%_at_max_depth"
+        for activity in logger.ACTIVITY_TYPES:
+            for deli in (True, "Yes", False, "No", None):
+                with self.subTest(activity=activity, deli=deli):
+                    context = snapshot_context()
+                    context.update({"activity_type": activity, "deli": deli})
+                    context["atlas_settings"]["allocated"].append("delirium")
+                    original = copy.deepcopy(context)
+                    result = build_snapshot(context, fixture_catalog())
+                    totals = {row["stat_id"]: row for row in result["totals"]}
+                    if deli is True or deli == "Yes":
+                        self.assertEqual(totals[stat]["raw_total"], 5)
+                        self.assertEqual(totals[stat]["conditions"], ["catalog_trigger"])
+                    else:
+                        self.assertNotIn(stat, totals)
+                    self.assertEqual("map_breach_monster_potency_+%" in totals, activity == "Breach")
+                    self.assertEqual("map_ritual_tribute_+%" in totals, activity == "Ritual")
+                    self.assertEqual("expedition_monsters_logbook_chance_+%" in totals,
+                                     activity in ("Expedition", "Grand Expedition"))
+                    self.assertEqual(result["deli"], deli)
+                    self.assertEqual(context, original)
+
+    def test_deli_flag_does_not_activate_unallocated_delirium_nodes(self):
+        """The map option only filters saved allocations; it cannot allocate the Delirium tree."""
+        context = snapshot_context()
+        context["deli"] = "Yes"
+        context["atlas_settings"]["allocated"].remove("delirium")
+        self.assertNotIn("map_delirium_giga_mirror_chance_+%_at_max_depth", self.effects(context))
+
     def test_display_conversion_requires_matching_frozen_source(self):
         """Only the pinned translation turns 1500 raw into its displayed 15%, without guessing units."""
         stat = "map_ezomyte_anomaly_%_chance_extra_deadly_boss_lineage"
@@ -163,11 +196,11 @@ class AtlasEffectSnapshotTests(unittest.TestCase):
         for activity in logger.ACTIVITY_TYPES:
             for city in logger.CITY_TYPES:
                 for biome in logger.BIOMES:
-                    for ocean in ("No", "Yes"):
-                        with self.subTest(activity=activity, city=city, biome=biome, ocean=ocean):
+                    for ocean, deli in product(("No", "Yes"), repeat=2):
+                        with self.subTest(activity=activity, city=city, biome=biome, ocean=ocean, deli=deli):
                             result = build_snapshot({"atlas_settings": settings, "atlas_setup_id": "A" + "a" * 64,
                                 "atlas_catalog_id": "c" * 64, "activity_type": activity,
-                                "city_type": city, "biome": biome, "ocean": ocean}, data, rules)
+                                "city_type": city, "biome": biome, "ocean": ocean, "deli": deli}, data, rules)
                             encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
                             self.assertLess(len(encoded), 32767)
                             self.assertEqual(json.loads(encoded), result)
@@ -276,6 +309,28 @@ class FrozenMapAtlasEffectTests(unittest.TestCase):
         self.assertEqual(updated["atlas_setup_id"], original["atlas_setup_id"])
         self.assertEqual(self.map_snapshot(), stale)
         self.assertEqual(stale["atlas_effect_snapshot"]["schema_version"], 1)
+
+    def test_deli_flag_invalidates_cache_in_both_directions_and_old_missing_flag(self):
+        """A Deli toggle or pre-fix cache cannot reuse totals calculated for different map context."""
+        logger.save_settings({"deli": False, "activity_type": "Expedition"})
+        logger.save_atlas_settings({"allocated": ["delirium", "expedition"]})
+        logger.start_map()
+        original = self.map_snapshot()
+        stat = "map_delirium_giga_mirror_chance_+%_at_max_depth"
+        with logger._connect() as db:
+            enabled = logger._with_atlas_effect_snapshot(db, {**original, "deli": "Yes"})
+            disabled = logger._with_atlas_effect_snapshot(db, {**enabled, "deli": "No"})
+            legacy = copy.deepcopy(enabled)
+            legacy["atlas_effect_snapshot"].pop("deli")
+            legacy["atlas_effect_snapshot"]["totals"] = []
+            rebuilt = logger._with_atlas_effect_snapshot(db, legacy)
+        enabled_totals = {row["stat_id"]: row for row in enabled["atlas_effect_snapshot"]["totals"]}
+        self.assertEqual(enabled_totals[stat]["raw_total"], 5)
+        self.assertIn("expedition_monsters_logbook_chance_+%", enabled_totals)
+        self.assertEqual(rebuilt["atlas_effect_snapshot"], enabled["atlas_effect_snapshot"])
+        self.assertEqual(disabled["atlas_effect_snapshot"], original["atlas_effect_snapshot"])
+        self.assertEqual(self.map_snapshot(), original)
+        self.assertNotIn(stat, {row["stat_id"] for row in original["atlas_effect_snapshot"]["totals"]})
 
 
 if __name__ == "__main__":

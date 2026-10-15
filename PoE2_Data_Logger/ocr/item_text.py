@@ -18,6 +18,7 @@ _PROPERTY = re.compile(r"^(?:Item Level|Waystone Tier|Revives Available|Waystone
                        r"Monster Effectiveness|Rare Monsters|Uses Remaining|Tablet|Rarity|Item Class)\s*:", re.I)
 _FOOTER = re.compile(r"^(?:Can be used|Waystones can|Right click|Shift click|Press Alt|"
                      r"Corrupted$|Mirrored$|Unidentified$|Note:)", re.I)
+_WAYSTONE_USAGE = re.compile(r"^(?:Can be used|Waystones can)\b", re.I)
 _PERCENT = re.compile(r"([+-]?\d+(?:[.,]\d+)?)\s*%")
 _TABLET_TITLE = re.compile(r"^(?:[A-Za-z' -]+\s+)?Tab[li1]ets?(?:\s+\d+)?$", re.I)
 _WAYSTONE_SUBJECT = re.compile(
@@ -110,6 +111,34 @@ def _waystone_modifiers(lines):
     return merged, uncertain
 
 
+def _unmodified_normal_waystone(lines, mods, fields, uncertain):
+    """Prove an empty Normal tooltip from its rarity, tier title and complete usage boundary."""
+    rarities = [line.split(":", 1)[1].strip().casefold() for line in lines
+                if re.match(r"^Rarity\s*:", line, re.I)]
+    title = next((i for i, line in enumerate(lines)
+                  if re.fullmatch(r"Waystone\s*\(Tier\s*\d{1,2}\)", line, re.I)), None)
+    if (rarities != ["normal"] or title is None or mods or uncertain or
+            any(re.fullmatch(r"Unidentified", line, re.I) for line in lines) or
+            any(fields.get(key) not in (None, 0) for key in
+                ("waystone", "item_rarity", "monster_rarity", "pack_size", "effectiveness"))):
+        return False
+    title_tier = int(re.search(r"\d{1,2}", lines[title]).group())
+    tier_properties = [re.fullmatch(r"Waystone Tier\s*:\s*(\d{1,2})", line, re.I)
+                       for line in lines if re.match(r"^Waystone Tier\s*:", line, re.I)]
+    percentage_properties = [line for line in lines if re.match(
+        r"^(?:Waystone Drop Chance|Item Rarity|Monster Rarity|(?:Monster )?Pack Size|"
+        r"(?:Monster )?Effectiveness)\s*:", line, re.I)]
+    if (fields.get("tier") != title_tier or
+            any(match is None or int(match.group(1)) != title_tier for match in tier_properties) or
+            any(_number(line) != 0 for line in percentage_properties)):
+        return False
+    end = next((i for i in range(title + 1, len(lines)) if _WAYSTONE_USAGE.match(lines[i])), None)
+    return end is not None and all(
+        _SEPARATOR.match(line) or _PROPERTY.match(line) or
+        re.fullmatch(r"Corrupted|Mirrored", line, re.I)
+        for line in lines[title + 1:end])
+
+
 def parse_item_text(text, affixes=()):
     """Parse supported copied items into reviewable fields, holding ambiguous observed waystone rolls."""
     lines = _normal_lines(text)
@@ -142,18 +171,26 @@ def parse_item_text(text, affixes=()):
             uncertain.append(property_line)
     explicit = [line for line in mods if "(enchant)" not in line.lower()]
     fields["map_mods"] = len(explicit) if mods else None
+    normal_unmodified = _unmodified_normal_waystone(lines, mods, fields, uncertain)
+    if normal_unmodified:
+        fields["waystone"] = fields["map_mods"] = 0
     base = next((i for i, line in enumerate(lines[:8])
                  if re.search(r"Waystone\s*\(Tier", line, re.I)), None)
     name = lines[base - 1] if base is not None and base >= 1 else ""
-    return {"kind": kind, "fields": fields, "mods": mods, "name": name, "uncertain": uncertain,
-            "status": "review"}
+    if normal_unmodified and (_PROPERTY.match(name) or _SEPARATOR.match(name)):
+        name = ""
+    result = {"kind": kind, "fields": fields, "mods": mods, "name": name, "uncertain": uncertain,
+              "status": "review"}
+    if normal_unmodified:
+        result["_normal_unmodified"] = True
+    return result
 
 
 def parse_screen_tooltip(ocr_rows, affixes=()):
     """Find a waystone/tablet title and parse its bounded tooltip body.
 
-    Waystones need a drop-chance boundary; tablets merge likely wrapped modifiers
-    and retain OCR rows alongside matching and uncertain affix proposals.
+    Waystones need a drop-chance boundary or a complete explicitly Normal tooltip;
+    tablets merge likely wrapped modifiers and retain OCR rows alongside proposals.
     """
     lines = [row["text"].strip() if isinstance(row, dict) else str(row).strip()
              for row in ocr_rows]
@@ -165,6 +202,17 @@ def parse_screen_tooltip(ocr_rows, affixes=()):
     if anchor is None:
         return None
     index, kind = anchor
+    if kind == "waystone":
+        rarity = [line for line in lines[max(0, index - 2):index]
+                  if re.match(r"^Rarity\s*:", line, re.I)]
+        usage = next((i for i in range(index + 1, len(lines)) if _WAYSTONE_USAGE.match(lines[i])), None)
+        if (rarity and usage is not None and
+                not any(re.fullmatch(r"Unidentified", line, re.I) for line in lines)):
+            normal = parse_item_text("\n".join(["Item Class: Waystones",
+                                                *lines[max(0, index - 2):usage + 1]]), affixes)
+            if normal and normal.get("_normal_unmodified"):
+                normal["source"] = "screen OCR"
+                return normal
     end = next((i for i in range(index + 1, len(lines)) if _is_footer(lines[i])), len(lines))
     if end - index < 3:
         return None

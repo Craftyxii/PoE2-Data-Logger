@@ -52,6 +52,12 @@ ENTRIES = (
      "through later rescans or edits, while Current Inventory Snapshot, Session Found Quantity and "
      "ordinary Chain Status are projected from the current state at export time. Discard audit rows explicitly "
      "have Chain Status Discarded. History is not a purely historical-state table."),
+    ("context_continuations", "Workbook", "Reading long Analysis Context guidance",
+     "Analysis Context keeps Section, Topic, Guidance and Context Version in their original columns. "
+     "When guidance exceeds Excel's 32,767-character cell limit, the workbook appends columns named "
+     "Guidance continuation 1, Guidance continuation 2 and so on. For each row, concatenate Guidance "
+     "and its numbered continuation columns in order without separators before reading or parsing JSON. "
+     "Blank continuation cells add nothing. SQLite and CSV retain the complete guidance in one field."),
     ("map_metrics", "Aggregation", "Map totals appear once",
      "In Export, acquired-item columns, map kill totals, scanned map/tablet modifiers and Expedition N Detonated "
      "columns appear only on the first exported row for that Map ID. Later rows leave these fields blank. "
@@ -843,8 +849,10 @@ ENTRIES += (
     ("map_atlas_effect_context", "Atlas interpretation", "Compact Atlas effects for the saved map context",
      "Atlas Effects JSON is the frozen atlas_effect_snapshot from that map or event, rather than a new copy of "
      "the full tree. Parse its schema_version, atlas_setup_id, catalog_id/catalog_version, activity_type, "
-     "biome, city_type, ocean and effective_biomes; a saved Ocean Map option can supply Ocean classification "
-     "independently of the Biome selection. totals keeps stat_id, raw_total, display_total, unit and "
+     "biome, city_type, ocean, deli and effective_biomes; a saved Ocean Map option can supply Ocean classification "
+     "independently of the Biome selection. Saved Deli=Yes includes allocated Delirium tree coefficients "
+     "alongside the selected Activity tree; their catalog conditions still apply. Older aggregates without "
+     "deli may omit those coefficients; consult the full frozen allocation. totals keeps stat_id, raw_total, display_total, unit and "
      "conditions for allocated minor/notable nodes and active selected "
      "choices applicable to that saved city/biome/activity context. The complete setup and definitions remain "
      "in Atlas Character Settings and the Context/SQL Atlas references. A conditional coefficient remains "

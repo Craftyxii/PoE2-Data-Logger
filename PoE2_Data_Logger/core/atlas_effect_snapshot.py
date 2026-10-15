@@ -57,9 +57,11 @@ def _effects(settings, data):
             yield node_id, choice_id or "", node, choice
 
 
-def _tree_applies(tree, activity):
-    """Select the shared main tree and the map's one encounter tree."""
-    return tree in _GENERAL_ACTIVITIES or tree == ("Expedition" if activity == "Grand Expedition" else activity)
+def _tree_applies(tree, activity, deli):
+    """Select shared/encounter trees plus Delirium when its independent map flag is set."""
+    return (tree in _GENERAL_ACTIVITIES
+            or tree == ("Expedition" if activity == "Grand Expedition" else activity)
+            or (tree == "Delirium" and (deli is True or deli == "Yes")))
 
 
 def _scope(stat, biomes, city, activity, base_biome_known):
@@ -89,6 +91,10 @@ def _scope(stat, biomes, city, activity, base_biome_known):
     if "_per_" in stat:
         conditions.append("runtime_count")
     if "_if_" in stat or "_for_each_" in stat or ("_when_" in stat and "when_opening_a_" not in stat):
+        conditions.append("catalog_trigger")
+    if stat == "map_delirium_giga_mirror_chance_+%_at_max_depth":
+        # This retained coefficient requires the catalog's boss-within-fog
+        # trigger; the Deli map flag alone does not record that event.
         conditions.append("catalog_trigger")
     if any(token in stat for token in ("corrupted", "cleansed", "powerful_boss", "unique_lake", "unique_moment_of_zen", "unique_selenite", "unique_untainted", "_anomaly_")):
         conditions.append("area_state_unrecorded")
@@ -178,13 +184,14 @@ def build_snapshot(context, data, rules=()):
     city = str(context.get("city_type") or "None")
     biomes = {biome.lower()} if biome.lower() in _BIOMES else set()
     ocean = context.get("ocean", "No")
+    deli = context.get("deli", "No")
     if ocean is True or ocean == "Yes":
         biomes.add("ocean")
     active, unresolved = [], []
     for node_id, choice_id, node, effect in _effects(settings, data):
         if node is None:
             unresolved.append({"node_id": node_id, "choice_id": choice_id, "reason": "node_missing"})
-        elif _tree_applies(node.get("activity", "Main Atlas"), activity):
+        elif _tree_applies(node.get("activity", "Main Atlas"), activity, deli):
             if effect is None:
                 unresolved.append({"node_id": node_id, "choice_id": choice_id, "reason": "choice_unresolved"})
             else:
@@ -235,6 +242,6 @@ def build_snapshot(context, data, rules=()):
     return {"schema_version": 2, "atlas_setup_id": context.get("atlas_setup_id"),
             "catalog_id": context.get("atlas_catalog_id", settings.get("catalog_id")),
             "catalog_version": settings.get("catalog_version"), "activity_type": activity,
-            "biome": biome, "city_type": city, "ocean": ocean,
+            "biome": biome, "city_type": city, "ocean": ocean, "deli": deli,
             "effective_biomes": sorted(item.title() for item in biomes),
             "totals": _combined_totals(result, rules, hashes), "unresolved": unresolved}
