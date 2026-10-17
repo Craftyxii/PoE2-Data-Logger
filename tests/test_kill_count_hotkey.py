@@ -180,7 +180,8 @@ class KillCountHotkeyTests(unittest.TestCase):
     def test_dedicated_kills_need_no_chain_or_other_activity_and_do_not_copy(self):
         self.configure()
         copied, tooltip = Mock(), Mock()
-        manager = self.manager(supported=True, hover_reader=copied, tooltip_grabber=tooltip)
+        manager = self.manager(supported=True, hover_reader=copied, tooltip_grabber=tooltip,
+                               focused=lambda: True)
         with patch.object(hotkey.sys, "platform", "linux"):
             manager.capture("kills")
         event = manager.status()["latest"]
@@ -239,7 +240,7 @@ class KillCountHotkeyTests(unittest.TestCase):
                 tooltip = Image.new("RGB", (600, 700), (40, 50, 60))
                 copied = Mock(return_value="Item Class: Waystones\nA copied item")
                 manager = self.manager(supported=True, hover_reader=copied,
-                                       tooltip_grabber=Mock(return_value=tooltip))
+                                       tooltip_grabber=Mock(return_value=tooltip), focused=lambda: True)
                 item_kind = "tablet" if kind == "tablet" else "waystone"
                 item = {"kind": item_kind, "matches": ["an affix"]}
                 with patch.object(hotkey.sys, "platform", "linux"), \

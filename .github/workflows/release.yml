@@ -74,6 +74,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Region fixture checks failed.' }
           python tools/run_tests.py --pattern test_platform.py
           if ($LASTEXITCODE -ne 0) { throw 'Platform fixture checks failed.' }
+          python tools/run_tests.py --pattern test_kill_count_hotkey.py
+          if ($LASTEXITCODE -ne 0) { throw 'Kill-count capture fixture checks failed.' }
           python tools/run_tests.py --pattern test_user_review_navigation.py
           if ($LASTEXITCODE -ne 0) { throw 'Review navigation fixture checks failed.' }
           python tools/run_tests.py --pattern test_chain_approval_responsiveness.py
