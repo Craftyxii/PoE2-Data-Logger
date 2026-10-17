@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import sys
 import tempfile
 import threading
 import time
+import uuid
 from dataclasses import replace
 from pathlib import Path
 
@@ -31,7 +33,8 @@ WM_TIMER = 0x0113
 WM_QUIT = 0x0012
 HOTKEY_ID = 0x4A31
 CAPTURE_TIMEOUT_SECONDS = 90
-DEDICATED = ("remnant", "waystone", "tablet", "currency", "ritual", "propagation", "overlay")
+KILL_COUNT_TIMEOUT_SECONDS = 5
+DEDICATED = ("remnant", "waystone", "tablet", "currency", "ritual", "propagation", "overlay", "kills")
 GENERAL_MODES = ("seed", "opened", "both")
 KEY_CODES = {
     "BACKSPACE": 0x08, "TAB": 0x09, "ENTER": 0x0D, "PAUSE": 0x13,
@@ -503,6 +506,7 @@ class HotkeyManager:
 
     def _perform_capture(self, kind, mode, revision, strictness_values=None):
         """Stop canceled requests between GUI preparation, capture, clipboard and recognition."""
+        kill_capture = None
         try:
             if self._capture_cancelled(revision):
                 self._finish_capture(None, None, revision)
@@ -528,6 +532,9 @@ class HotkeyManager:
                 expedition = 1 if not number or logger._meta(db, "pending_new_map", False) else logger._meta(db, "settings")["expedition"]
                 chain_revision = logger._chain_revision(db, logger._exp_id(capture_map, expedition)) if capture_map else 0
                 phase = logger._meta(db, "inventory_scan_phase", "start")
+                kill_enabled = logger._meta(db, "kill_count_scan_enabled", False) is True
+                kill_region = logger._meta(db, "kill_count_region", None) if kill_enabled else None
+            bounds = None
             if self.supported and sys.platform == "win32":
                 from PoE2_Data_Logger.platform.hover_copy import _tooltip_bounds
                 from PoE2_Data_Logger.ui.region_select import region_for, validate_capture_resolution
@@ -552,6 +559,12 @@ class HotkeyManager:
                     right = max(r["x"] + r["w"] for r in selected)
                     bottom = max(r["y"] + r["h"] for r in selected)
                     region = {"x": left, "y": top, "w": right - left, "h": bottom - top}
+            if self._capture_cancelled(revision):
+                self._finish_capture(None, None, revision)
+                return
+            kill_capture = self._capture_kills(kind, revision, kill_enabled, kill_region, bounds)
+            if mode == "kills" and kill_capture is None:
+                raise ValueError("Select and enable the Kill counts region in Scan regions first.")
             if self._capture_cancelled(revision):
                 self._finish_capture(None, None, revision)
                 return
@@ -615,11 +628,91 @@ class HotkeyManager:
                 self._finish_capture(None, None, revision)
                 return
             args = (kind, mode, region, image, tooltip, remnant_map, capture_map, generation, expedition, activity_crops, copied, phase, pending_map, revision, strictness_values, chain_revision)
-            self._read_capture(*args)
+            if kill_capture is None:
+                self._read_capture(*args)
+            else:
+                self._read_capture(*args, kill_capture=kill_capture)
         except Exception as exc:
-            self._finish_capture({"mode": mode, "result": None,
-                                  "error": f"Screen scan failed: {exc}"}, None, revision,
-                                 adapter_complete=True)
+            event = {"mode": mode, "result": None, "error": f"Screen scan failed: {exc}"}
+            if kill_capture is not None and not self._capture_cancelled(revision):
+                level = (strictness_values or {}).get("kills", ocr_sensitivity.DEFAULT)
+                event["kill_counts"] = self._read_kills(kill_capture, revision, level)
+            self._finish_capture(event, None, revision, adapter_complete=True)
+
+    def _capture_kills(self, kind, revision, enabled, region, bounds):
+        """Freeze an opted-in counter crop and map context before the primary recognition.
+
+        Failure is an auxiliary result: a missing counter never prevents the
+        existing scan, clipboard path, or manual propagation review.
+        """
+        if not enabled:
+            return None
+        payload = {"request_id": str(uuid.uuid4()), "source_mode": kind,
+                   "scope": "map_final" if kind == "kills" else "map_stage"}
+        try:
+            from PoE2_Data_Logger.core.kill_counts import capture_context
+            payload["context"] = capture_context(source_mode=kind)
+            if kind != "kills" and payload["context"].get("_capture_chain_associated"):
+                payload["scope"] = "chain_stage"
+            if bounds is not None:
+                from PoE2_Data_Logger.ui.region_select import region_for
+                region = region_for("kill_count_region", bounds)
+            if not region:
+                raise ValueError("Select the Kill counts capture region in Scan regions first.")
+            if self._capture_cancelled(revision):
+                return payload
+            image = self._grab_kill_region(region, bounds)
+            self._check_image(image)
+            # Keep both recognition input and evidence independent of any
+            # adapter reusing its buffer or primary reader mutating an image.
+            image = image.convert("RGB").copy()
+            memory = io.BytesIO()
+            image.save(memory, format="PNG", compress_level=1)
+            payload["image_base64"] = base64.b64encode(memory.getvalue()).decode("ascii")
+            payload["_image"] = image
+        except Exception as exc:
+            payload["error"] = f"Kill count capture failed: {exc}"
+        return payload
+
+    def _read_kills(self, payload, revision, strictness):
+        """Run the auxiliary reader within a short remaining capture budget."""
+        result = {key: value for key, value in payload.items() if key != "_image"}
+        if payload.get("error") or "_image" not in payload:
+            return result
+        try:
+            reader = self.readers.get("kills")
+            if reader is None:
+                from PoE2_Data_Logger.ocr.kill_counts import scan as reader
+            result["result"] = self._ocr_capture_call(
+                revision, reader, payload["_image"], strictness=strictness,
+                _timeout=KILL_COUNT_TIMEOUT_SECONDS)
+        except Exception as exc:
+            result["error"] = f"Kill count scan failed: {exc}"
+        return result
+
+    def _grab_kill_region(self, region, bounds=None):
+        """Capture a small native counter ROI without relaxing primary scan limits.
+
+        Counter calibration scales with the game window, so a valid 720p crop
+        can be smaller than the legacy 200×100 primary-capture minimum.
+        """
+        keys = ("x", "y", "w", "h")
+        if not isinstance(region, dict) or any(type(region.get(key)) is not int for key in keys):
+            raise ValueError("Select a valid Kill counts screen region with whole-pixel coordinates.")
+        x, y, width, height = (region[key] for key in keys)
+        if not (20 <= width <= 8192 and 20 <= height <= 8192) or width * height > store.MAX_IMAGE_PIXELS:
+            raise ValueError("The Kill counts region must be at least 20×20 and at most 12 megapixels.")
+        box = (x, y, x + width, y + height)
+        if any(abs(value) > 32768 for value in box):
+            raise ValueError("The Kill counts screen region is out of range.")
+        if bounds is not None:
+            if (not isinstance(bounds, (tuple, list)) or len(bounds) != 4 or
+                    any(type(value) is not int for value in bounds) or
+                    bounds[0] >= bounds[2] or bounds[1] >= bounds[3] or
+                    x < bounds[0] or y < bounds[1] or
+                    box[2] > bounds[2] or box[3] > bounds[3]):
+                raise ValueError("Keep the Kill counts region inside the game window.")
+        return self.grabber(bbox=box, all_screens=True)
 
     def _grab(self, region):
         """Validate an explicit screen rectangle before capture, or grab the primary screen
@@ -638,7 +731,7 @@ class HotkeyManager:
         if image.width * image.height > store.MAX_IMAGE_PIXELS:
             raise ValueError("Screen capture exceeds 12 megapixels. Use a smaller game resolution.")
 
-    def _read_capture(self, kind, mode, region, image, tooltip, remnant_map=None, capture_map=None, generation=None, expedition=None, activity_crops=None, copied=None, phase="start", pending_map=False, revision=None, strictness_values=None, chain_revision=None):
+    def _read_capture(self, kind, mode, region, image, tooltip, remnant_map=None, capture_map=None, generation=None, expedition=None, activity_crops=None, copied=None, phase="start", pending_map=False, revision=None, strictness_values=None, chain_revision=None, kill_capture=None):
         """Route captured pixels or copied item text to the appropriate reader, preserve
         ownership and publish through the revision guard. Built-in recognition runs
         in bounded killable children with frozen strictness; injected readers retain their API.
@@ -650,13 +743,16 @@ class HotkeyManager:
             strictness_values = {key: ocr_sensitivity.validate(level) for key, level in values.items()}
             remnant_strictness = strictness_values.get("remnant", ocr_sensitivity.DEFAULT)
             remnant_options = {} if remnant_strictness == ocr_sensitivity.DEFAULT else {"strictness": remnant_strictness}
+            if mode == "kills":
+                event = {"mode": "kills", "result": None, "error": ""}
+                return
             if kind == "propagation":
                 from PoE2_Data_Logger.ocr.propagation_scan import scan_propagation
                 reader = self.readers.get("propagation")
                 if reader is None:
                     reader = scan_propagation
                 memory = io.BytesIO()
-                image.convert("RGB").save(memory, format="PNG")
+                image.convert("RGB").save(memory, format="PNG", compress_level=1)
                 raw = memory.getvalue()
                 level = strictness_values.get("propagation", ocr_sensitivity.DEFAULT)
                 options = {"strictness": level} if reader is scan_propagation and level != ocr_sensitivity.DEFAULT else {}
@@ -796,6 +892,9 @@ class HotkeyManager:
             raw = None
             event = {"mode": mode, "result": None, "error": f"Screen scan failed: {exc}"}
         finally:
+            if event and kill_capture is not None and (revision is None or not self._capture_cancelled(revision)):
+                level = (strictness_values or {}).get("kills", ocr_sensitivity.DEFAULT)
+                event["kill_counts"] = self._read_kills(kill_capture, revision, level)
             if event and event.get("result") is not None and strictness_values is not None:
                 event["result"]["_ocr_strictness_values"] = dict(strictness_values)
                 key = {"opened": "remnant", "seed": "seed", "propagation": "propagation"}.get(event["mode"])
@@ -811,7 +910,7 @@ class HotkeyManager:
                     event["result"]["map_id"] = remnant_map if phase == "start" else capture_map
             self._finish_capture(event, raw, revision, adapter_complete=True)
 
-    def _ocr_capture_call(self, revision, function, *args, **kwargs):
+    def _ocr_capture_call(self, revision, function, *args, _timeout=None, **kwargs):
         """Run unchanged recognition with the original capture deadline and cancellable native-child ownership."""
         if revision is not None and self._capture_cancelled(revision):
             raise RuntimeError("Screen capture was cancelled.")
@@ -824,6 +923,14 @@ class HotkeyManager:
                     raise RuntimeError("Screen capture was cancelled.")
                 if self._capture_deadline is not None:
                     job = replace(job, deadline=self._capture_deadline)
+            if _timeout is not None:
+                now = time.monotonic()
+                deadline = now + _timeout
+                if self._capture_deadline is not None:
+                    deadline = min(deadline, self._capture_deadline - .25)
+                if deadline <= now:
+                    raise TimeoutError("The primary scan used the available capture time. Scan kills again.")
+                job = replace(job, deadline=deadline)
             future = ocr_workers.submit(job)
             if revision is not None:
                 self._ocr_capture_future = future

@@ -1,0 +1,45 @@
+{
+  "format": "poe2-data-logger-references",
+  "version": 3,
+  "data": {
+    "families": [
+      {
+        "id": 19,
+        "top_socket": 7,
+        "valid": 1,
+        "recipes_json": "[\"Cadigan's Epiphany\",\"Astrid's Creativity\",\"Chaos Orb x10\"]"
+      }
+    ],
+    "recipes": [
+      {
+        "name": "Chaos Orb x10",
+        "recipe_id": "RCP-3d3b9c16959c508f96961e1e8a0e3d6f",
+        "sockets": 7,
+        "combo": "Wisdom + Vision + Rebirth + Rage + Power + Arcane + Adaptive",
+        "level_band": "Lv70+",
+        "category": "Currency",
+        "source": "https://poe2db.tw/us/Runeshape_Combinations"
+      }
+    ],
+    "aliases": [],
+    "seed_states": [
+      {
+        "family": 19,
+        "sockets": 7,
+        "seed_slot": "P1",
+        "seed_rune": "Wisdom",
+        "rewards_json": "[\"Chaos Orb x10\",\"Astrid's Creativity\",\"Cadigan's Epiphany\"]",
+        "status": "local"
+      }
+    ],
+    "affixes": [],
+    "master_perks": [],
+    "currency_names": [],
+    "omen_names": [],
+    "item_names": [],
+    "glyphs": [],
+    "icons": [],
+    "scans": [],
+    "review_icon_examples": []
+  }
+}

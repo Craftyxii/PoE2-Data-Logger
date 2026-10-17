@@ -8,7 +8,7 @@ import uuid
 
 
 TABLES = (
-    "meta", "legacy_export", "new_export", "maps", "map_unique_kills", "expeditions",
+    "meta", "legacy_export", "new_export", "maps", "map_unique_kills", "kill_count_snapshots", "expeditions",
     "chain_completions", "chain_step_provenance", "scan_links", "commits",
     "currency_snapshots", "ritual_pages", "currency_items", "item_names", "ritual_names",
     "currency_icons", "item_icons", "omen_icons", "review_icon_examples", "affixes",

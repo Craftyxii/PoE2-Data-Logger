@@ -125,6 +125,62 @@ assert all(session.get_session_options().intra_op_num_threads == 4 for session i
                                 cwd=root, capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_real_sessions_honor_other_supported_counts_with_preserved_options(self):
+        """Use actual ONNX sessions at one, two and six threads without CPU mocks."""
+        root = Path(__file__).resolve().parents[1]
+        program = """
+import sys
+from pathlib import Path
+import onnxruntime as ort
+from PIL import Image, ImageDraw, ImageFont
+from PoE2_Data_Logger.core import logger_store as logger, ocr_runtime, store
+from PoE2_Data_Logger.ocr import item_ocr, opened_scan, runehelper_ocr
+
+store.DATA_DIR = Path(sys.argv[1])
+logger._READY = False
+count = int(sys.argv[2])
+with logger._connect() as db:
+    logger._set_meta(db, "ocr_cpu_threads", count)
+engine = opened_scan._engine()
+rapid_sessions = [part.session.session for part in
+    (engine.text_det, engine.text_cls, engine.text_rec)]
+native = runehelper_ocr._model()[1]
+assert ocr_runtime.active_threads() == count
+for session in [native] + rapid_sessions:
+    options = session.get_session_options()
+    assert options.intra_op_num_threads == count
+    assert options.inter_op_num_threads == 1
+    assert session.get_providers() == ["CPUExecutionProvider"]
+for kind, session in zip(("Det", "Cls", "Rec"), rapid_sessions):
+    assert engine.cfg[kind].session is session
+    options = session.get_session_options()
+    assert options.enable_cpu_mem_arena is False
+    assert options.graph_optimization_level == ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    assert options.log_severity_level == 4
+image = Image.new("RGB", (600, 150), "white")
+font = ImageFont.truetype("PoE2_Data_Logger/fonts/DejaVuSans.ttf", 36)
+ImageDraw.Draw(image).text((20, 40), "Chaos Orb", font=font, fill="black")
+assert any("Chaos Orb" in row["text"] for row in item_ocr.ocr_lines(image))
+assert opened_scan._engine() is engine
+assert runehelper_ocr._model()[1] is native
+"""
+        for count in (1, 2, 6):
+            with self.subTest(threads=count):
+                result = subprocess.run(
+                    [sys.executable, "-c", program, str(Path(self.tmp.name) / str(count)), str(count)],
+                    cwd=root, capture_output=True, text=True, timeout=60)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_model_integrity_is_checked_before_creating_custom_sessions(self):
+        """Keep damaged bundled models from reaching the custom-session constructor."""
+        from PoE2_Data_Logger.ocr import opened_scan
+
+        with patch.object(opened_scan, "verify_models", side_effect=RuntimeError("missing or damaged")), \
+                patch("onnxruntime.InferenceSession") as create:
+            with self.assertRaisesRegex(RuntimeError, "missing or damaged"):
+                opened_scan._engine.__wrapped__()
+            create.assert_not_called()
+
 
 class OCRThreadSettingUITests(unittest.TestCase):
     """Check the thread selector shows saved and active counts, restart requirements and save failures."""

@@ -8,7 +8,7 @@ import csv
 import io
 
 
-CONTEXT_VERSION = "5"
+CONTEXT_VERSION = "6"
 HEADERS = ("Section", "Topic", "Guidance", "Context Version")
 ENTRIES = (
     ("purpose", "Overview", "How to use this export",
@@ -48,7 +48,7 @@ ENTRIES = (
      "Ritual offers or chain steps. Imported rows without a commit can also appear. "
      "Use Scan Commit # to group an event; do not treat each history row as another scan or acquired item."),
     ("snapshot", "Workbook", "Snapshot and current projections",
-     "All eight worksheets use one SQLite read snapshot. Saved event details and settings remain frozen "
+     "All worksheets use one SQLite read snapshot. Saved event details and settings remain frozen "
      "through later rescans or edits, while Current Inventory Snapshot, Session Found Quantity and "
      "ordinary Chain Status are projected from the current state at export time. Discard audit rows explicitly "
      "have Chain Status Discarded. History is not a purely historical-state table."),
@@ -902,6 +902,66 @@ COLUMN_GUIDANCE += (
      "percentages automatically. Blank means that historical snapshot is unavailable."),
 )
 
+# Keep screenshot observations separate from the established manual map metrics.
+ENTRIES += (
+    ("kill_count_readings", "Kill counts", "Kill Count Readings: screenshot observations",
+     "Kill Count Readings is an independent sequence of screenshot observations, with one row per saved "
+     "Kill Snapshot ID. Normal kills correspond to the white skull, Magic to the purple/blue skull, Rare "
+     "to the yellow skull and Unique to the orange skull. The four counts are the cumulative numbers "
+     "visible at capture time, not kills gained since the previous reading. Total Kills (Observed) is "
+     "the sum of those four categories within that single reading. Never sum rows, scopes or repeated "
+     "readings to calculate map kills. An image alone does not establish when the game counters reset "
+     "or whether the observation covers the whole map. These observations do not change existing manual end-map totals, "
+     "their save behavior or the established Export/Scan History kill fields."),
+    ("kill_count_scopes", "Kill counts", "Optional chain links and final map readings",
+     "Kill Count Scope is chain_stage for a reading captured with an active remnant chain, map_stage for "
+     "a reading without that link, or map_final for a dedicated final-map kill-count scan. Expedition ID "
+     "is optional and is present only for chain_stage; no chain is required to save map_stage or map_final. "
+     "A chain link describes capture context and does not prove the observed kills came solely from "
+     "that chain. These are not chain-only deltas or kills per remnant. A map_final row is the observed "
+     "reading requested through the final-map scan path; it represents the actual end of the map only "
+     "if the user captures it then. The app does not obtain an independent game-computed final total. "
+     "Keep map_final and the existing manual end-map record separate; neither overwrites the other."),
+    ("kill_count_provenance", "Kill counts", "Capture provenance and missing readings",
+     "Each saved observation retains its Map ID, optional Expedition ID, stable Kill Snapshot ID, "
+     "request identity, source mode, capture/recording times, image hash and JSON recognition/capture "
+     "context. Use that frozen context rather than current live settings. Only complete valid OCR "
+     "readings are automatically persisted. A missing, incomplete or unreadable scan is unknown, not "
+     "zero, and does not create a zero observation. Explicitly recognized zero counts remain zero. "
+     "OCR evidence supports auditing but is not ground truth. Saving does not approve a propagation "
+     "draft or create a chain. Undo/session reset can remove these observations; they are surviving "
+     "session records rather than an immutable audit archive."),
+    ("sql_kill_count_readings", "SQLite schema", "kill_count_snapshots",
+     "kill_count_snapshots stores one surviving observed reading per snapshot_id, with a unique "
+     "request_id, captured session generation, map_id, optional expedition_id, scope, normal, magic, "
+     "rare and unique_kills integer counts, scan_commit_number, source_mode, captured_at and recorded_at. "
+     "image_sha256 identifies image_png evidence when supplied. ocr_json retains the original result "
+     "and context_json retains the captured map/session ownership; payload_sha256 checks duplicate "
+     "request consistency. Join scan_commit_number to commits.number for the saved event and its "
+     "frozen map configuration. This table is separate from maps.kills_json and map_unique_kills; "
+     "it neither replaces manual totals nor stores per-interval gains."),
+)
+COLUMN_GUIDANCE += (
+    ("field_kill_observation_counts", r"(?:Normal|Magic|Rare|Unique|Total) Kills \(Observed\)",
+     "Observed cumulative kill counts",
+     "These integers are screenshot-observed cumulative counts for one Kill Snapshot ID. Total Kills "
+     "(Observed) adds its four categories only. They are independent of manual map totals and are not "
+     "increments, chain-attributed kills, loot quantities or values to sum across readings."),
+    ("field_kill_observation_identity", r"Kill Snapshot ID|Request ID|Kill Count Scope|Count Interpretation",
+     "Kill-reading identity and scope",
+     "Kill Snapshot ID identifies one surviving observation and Request ID identifies the capture "
+     "request. Use these as identifiers rather than numeric measurements. Kill Count Scope is "
+     "chain_stage, map_stage or map_final; Count Interpretation records cumulative observation "
+     "semantics. A scope or chain link does not turn the displayed counts into interval deltas. "
+     "No active chain is required for a map reading."),
+    ("field_kill_observation_evidence", r"Source Mode|Captured UTC|Image SHA256|OCR JSON|Capture Context JSON",
+     "Kill-reading capture evidence",
+     "Source Mode records which scan path requested the kill reading. Captured UTC is the image "
+     "capture time, distinct from Recorded UTC. Image SHA256 identifies supplied screenshot bytes; "
+     "it is not an accuracy score. OCR JSON preserves recognition evidence and Capture Context JSON "
+     "preserves the map/session context frozen for the request. Parse JSON properties by name; "
+     "do not substitute current settings or infer gameplay attribution from this metadata."),
+)
 # Store the field dictionary beside the broader analysis rules in both SQL and XLSX context.
 ENTRIES += tuple((key, "Field guide", topic,
                   f"Column headers (full-match regular expression): {pattern}. {guidance}")

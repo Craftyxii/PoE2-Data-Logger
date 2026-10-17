@@ -129,7 +129,7 @@ class ExportSettingsGuardTests(unittest.TestCase):
             try:
                 self.assertEqual(workbook.sheetnames,
                                  ["Export", "Atlas Character Settings", "Scan History", "Analysis Context",
-                                  "Family Database", "Recipe Database", "Seed Database", "Reference Aliases"])
+                                  "Family Database", "Recipe Database", "Seed Database", "Reference Aliases", "Kill Count Readings"])
                 for name in workbook.sheetnames:
                     rows = workbook[name].iter_rows(values_only=True)
                     headers = next(rows)
@@ -326,7 +326,7 @@ class ExportSettingsGuardTests(unittest.TestCase):
         saved = logger.get_state()["settings"]["atlas_settings"]
         self.assertEqual({key: saved[key] for key in draft}, draft)
         self.assertEqual(logger.get_state()["scan_commit_count"], before + 1)
-        self.assertEqual(len(list(self.folder.iterdir())), 3 if kind == "csv" else 1)
+        self.assertEqual(len(list(self.folder.iterdir())), 4 if kind == "csv" else 1)
         self.assertEqual(len(self.results), 1)
         self.assert_exported_rarity(kind, 187.25)
 
@@ -335,7 +335,7 @@ class ExportSettingsGuardTests(unittest.TestCase):
         self.check_real_worker_export("xlsx")
 
     def test_folder_csv_real_worker_creates_companions_without_redirecting(self):
-        """Create all three CSV files through the real worker and Qt callback with an Atlas draft."""
+        """Create all four CSV files through the real worker and Qt callback with an Atlas draft."""
         self.check_real_worker_export("csv")
 
     def test_database_backup_remains_available_with_unsaved_settings(self):

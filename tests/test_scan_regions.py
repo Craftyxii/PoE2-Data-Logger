@@ -55,6 +55,7 @@ class ScanRegionsTests(unittest.TestCase):
             ("Tablet tooltip", "tablet_region"),
             ("Currency / items", "inventory_region"),
             ("Ritual rewards", "ritual_region"),
+            ("Kill counts · include all four skulls", "kill_count_region"),
         )
         self.assertEqual(self.page.region_tabs.count(), len(expected))
         for index, (title, key) in enumerate(expected):

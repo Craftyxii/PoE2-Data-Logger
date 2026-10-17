@@ -92,7 +92,7 @@ def _prepare_row(gray: np.ndarray, height: int, stride: int):
     return padded, width // stride
 
 
-def _read_row(gray: np.ndarray):
+def _decode_row(gray: np.ndarray):
     """Decode a row by collapsing repeated CTC winners and skipping blanks.
 
     Return text and the mean emitted-character softmax confidence on a 0–100 scale.
@@ -110,6 +110,49 @@ def _read_row(gray: np.ndarray):
             confidence.append(1.0 / float(np.exp(column.astype(np.float64)).sum()))
         previous = index
     return "".join(text).strip(), 100 * sum(confidence) / len(confidence) if confidence else 0
+
+
+def _reward_signature(text: str):
+    """Retain the quantity and explicit levels actually read from reward pixels."""
+    quantity = re.match(r"^(\d{1,3}|[Il])\s*[xX×]\s+", text)
+    if quantity:
+        levels = tuple(re.findall(r"\bLevel\s*(\d{1,2})\b", text, re.I))
+        return "quantity", quantity[1], levels
+    skill = re.match(r"^Skill Level\s*(\d{1,2})\s*:", text, re.I)
+    return ("skill", skill[1]) if skill else None
+
+
+def _reward_frame_crop(gray: np.ndarray):
+    """Remove a near-full-height panel rail in the last 15% of a reward input."""
+    height, width = gray.shape
+    ink = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+    columns = (ink > 0).sum(axis=0)
+    left = max(1, int(width * .85))
+    for edge in np.flatnonzero(columns[left:] >= height * .95) + left:
+        if edge - 1 >= 8:
+            return gray[:, :edge - 1]
+    return None
+
+
+def _read_row(gray: np.ndarray, minimum_confidence=80):
+    """Retry reward pixels when a vertical panel rail could be decoded as text.
+
+    Headings keep their original reading. A retry must preserve the actual
+    quantity/levels and meet the capture's confidence floor; no name lookup or
+    trailing-character substitution is involved.
+    """
+    initial = _decode_row(gray)
+    signature = _reward_signature(initial[0])
+    if signature is None:
+        return initial
+    bounded = _reward_frame_crop(gray)
+    if bounded is None:
+        return initial
+    retried = _decode_row(bounded)
+    if (retried[0] == initial[0] or _reward_signature(retried[0]) != signature
+            or retried[1] < max(80, minimum_confidence)):
+        return initial
+    return retried
 
 
 def _gray_panel(image: Image.Image):
@@ -131,12 +174,14 @@ def _gray_panel(image: Image.Image):
     return gray, scale
 
 
-def _rows(gray: np.ndarray):
-    """Find right-aligned text bands, rejecting frame columns, oversized bands and dense artwork."""
+_REWARD_PREFIX = re.compile(
+    r"^(?:(?:\d{1,3}|[Il])\s*[xX×]\s|Skill Level\s*\d{1,2}\s*:)", re.I)
+
+
+def _row_mask(gray):
+    """Keep the existing threshold and persistent-frame suppression unchanged."""
     h, w = gray.shape
-    x0 = w // 2
-    right = gray[:, x0:]
-    dark = cv2.threshold(right, 115, 255, cv2.THRESH_BINARY_INV)[1]
+    dark = cv2.threshold(gray[:, w // 2:], 115, 255, cv2.THRESH_BINARY_INV)[1]
     dark = cv2.morphologyEx(dark, cv2.MORPH_CLOSE, np.ones((2, 3), np.uint8))
     sums = (dark > 0).sum(axis=0)
     dark[:, sums >= h * .95] = 0
@@ -145,6 +190,32 @@ def _rows(gray: np.ndarray):
         if sums[x] >= h * .5:
             dark[:, max(0, x - 1):] = 0
             break
+    return dark
+
+
+def _row_bands(gray, refine=False):
+    """Return legacy bands and rejected ink spans, or geometrically refined proposals.
+
+    The default branch reproduces the original detector. Refinement removes only
+    thin tall frame rails and disconnected wide horizontal separator components;
+    proposals are never substituted for an existing recognized reward.
+    """
+    h, w = gray.shape
+    dark = _row_mask(gray)
+    width = dark.shape[1]
+    geometry = {"rails": [], "separators": []}
+    if refine:
+        _, labels, stats, _ = cv2.connectedComponentsWithStats(dark, 8)
+        geometry["rails"] = [int(x) for x, y, cw, ch, area in stats[1:]
+                             if x >= width * .85 and cw <= 3
+                             and ch >= max(24, width * .10)]
+        if geometry["rails"]:
+            dark[:, max(0, min(geometry["rails"]) - 1):] = 0
+        _, labels, stats, _ = cv2.connectedComponentsWithStats(dark, 8)
+        for label, (x, y, cw, ch, area) in enumerate(stats[1:], 1):
+            if cw >= width * .8 and ch <= width * .1:
+                dark[labels == label] = 0
+                geometry["separators"].append((int(y), int(y + ch)))
     row_ink = (dark > 0).sum(axis=1)
     bands = []
     start = end = -1
@@ -163,30 +234,85 @@ def _rows(gray: np.ndarray):
     if start >= 0:
         bands.append((start, end))
     if not bands:
-        return []
+        return [], [], geometry
     edges = []
     for start, end in bands:
         minimum = max(1, math.ceil((end - start + 1) * .2))
-        cols = (dark[start:end + 1] > 0).sum(axis=0)
-        found = np.flatnonzero(cols >= minimum)
+        columns = (dark[start:end + 1] > 0).sum(axis=0)
+        found = np.flatnonzero(columns >= minimum)
         edges.append(int(found[-1]) if found.size else -1)
-    aligned = max(edges) - dark.shape[1] * .08
+    anchor = max(edges)
+    if refine:
+        eligible = [edge for (start, end), edge in zip(bands, edges)
+                    if 6 <= end - start + 1 <= max(24, w * .06)]
+        clusters = [[edge for edge in eligible if abs(edge - candidate) <= width * .04]
+                    for candidate in eligible]
+        if clusters:
+            anchor = max(max(clusters, key=lambda cluster: (len(cluster), max(cluster))))
+    aligned = anchor - width * .08
     heights = sorted(end - start + 1 for (start, end), edge in zip(bands, edges)
                      if end - start + 1 >= 6 and edge >= aligned)
     median = heights[len(heights) // 2] if heights else 0
-    rows = []
+    rows, rejected = [], []
     for (start, end), edge in zip(bands, edges):
         band_h = end - start + 1
-        if band_h < 6 or (median and band_h > median * 3) or edge < aligned:
+        if band_h < 6 or (median and band_h > median * 3):
             continue
+        if edge < aligned:
+            rejected.append({"start": start, "end": end, "reason": "alignment"})
+            continue
+        original_end = end
         if median and band_h > median * 2:
             end = start + median - 1
         reference = median or band_h
         y1 = max(0, start - max(2, reference * 66 // 100))
         y2 = min(h, end + max(2, reference * 33 // 100) + 1)
-        if np.count_nonzero(dark[y1:y2]) / max((y2 - y1) * dark.shape[1], 1) <= .25:
+        if refine:
+            for separator_start, separator_end in geometry["separators"]:
+                if separator_end <= start:
+                    y1 = max(y1, separator_end)
+                elif separator_start > end:
+                    y2 = min(y2, separator_start)
+        if np.count_nonzero(dark[y1:y2]) / max((y2 - y1) * width, 1) <= .25:
             rows.append((y1, y2))
-    return rows
+        else:
+            rejected.append({"start": start, "end": original_end, "reason": "density"})
+    return rows, rejected, geometry
+
+
+def _rows(gray):
+    """Preserve the original row detector and its existing test/caller contract."""
+    return _row_bands(gray)[0]
+
+
+def _refined_rows(gray, scale, original):
+    """Offer only evidenced rejected bands below a captured reward, without overlap."""
+    existing = [row for row in original if _REWARD_PREFIX.match(row["text"])]
+    if not existing:
+        return []
+    _, rejected, _ = _row_bands(gray)
+    if not rejected:
+        return []
+    proposals, _, geometry = _row_bands(gray, refine=True)
+    selected = []
+    for y1, y2 in proposals:
+        evidence = [band for band in rejected
+                    if min(y2, band["end"] + 1) > max(y1, band["start"])]
+        proven_geometry = any(
+            (band["reason"] == "alignment" and geometry["rails"]) or
+            (band["reason"] == "density" and any(
+                min(end, band["end"] + 1) > max(start, band["start"])
+                for start, end in geometry["separators"]))
+            for band in evidence)
+        if not proven_geometry or y1 / scale <= min(row["y2"] for row in existing):
+            continue
+        if any(min(y2 / scale, row["y2"]) > max(y1 / scale, row["y1"])
+               for row in original):
+            continue
+        if any(min(y2, end) > max(y1, start) for start, end in selected):
+            continue
+        selected.append((y1, y2))
+    return selected
 
 
 def _text_start(row: np.ndarray):
@@ -305,32 +431,38 @@ def _text_start(row: np.ndarray):
     return in_gap if coverage < .08 else after_tile
 
 
-def _recognize_rows(image: Image.Image, strictness=50):
-    """Filter rows using capture strictness and retry missing reward prefixes.
-
-    Default 50 retains the 80-percent floor. Map row boxes back through panel
-    scaling so callers receive capture coordinates for manual review.
-    """
-    from PoE2_Data_Logger.core.ocr_sensitivity import review_threshold
-    threshold = review_threshold(80, strictness, 20)
-    gray, scale = _gray_panel(image)
+def _read_rows(gray, scale, width, threshold, bands):
+    """Use the unchanged prefix retry and floor on supplied image bands."""
     results = []
-    for y1, y2 in _rows(gray):
+    for y1, y2 in bands:
         row = gray[y1:y2]
         start = _text_start(row)
         if start >= row.shape[1] - 8:
             continue
-        text, confidence = _read_row(row[:, start:])
-        prefix = r"^(?:(?:\d{1,3}|[Il])\s*[xX×]\s|Skill Level\s*\d{1,2}\s*:)"
-        if not re.match(prefix, text, re.I):
-            full_text, full_confidence = _read_row(row)
-            if full_confidence >= threshold and re.match(prefix, full_text, re.I):
+        text, confidence = _read_row(row[:, start:], minimum_confidence=threshold)
+        if not _REWARD_PREFIX.match(text):
+            full_text, full_confidence = _read_row(row, minimum_confidence=threshold)
+            if full_confidence >= threshold and _REWARD_PREFIX.match(full_text):
                 text, confidence, start = full_text, full_confidence, 0
         if confidence >= threshold and text:
             results.append({"text": text, "score": confidence / 100,
                             "x1": round(start / scale), "y1": round(y1 / scale),
-                            "x2": image.width, "y2": round(y2 / scale)})
+                            "x2": width, "y2": round(y2 / scale)})
     return results
+
+
+def _recognize_rows(image, strictness=50):
+    """Preserve recognized rows and add only independently read, bounded missing rows."""
+    from PoE2_Data_Logger.core.ocr_sensitivity import review_threshold
+    threshold = review_threshold(80, strictness, 20)
+    gray, scale = _gray_panel(image)
+    original = _read_rows(gray, scale, image.width, threshold, _rows(gray))
+    candidates = _refined_rows(gray, scale, original)
+    if not candidates:
+        return original
+    additions = [row for row in _read_rows(gray, scale, image.width, threshold, candidates)
+                 if _REWARD_PREFIX.match(row["text"])]
+    return sorted(original + additions, key=lambda row: row["y1"])
 
 
 def recognize(image: Image.Image, strictness=50):

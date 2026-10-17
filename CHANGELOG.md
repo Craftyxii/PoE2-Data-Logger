@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+## 1.3.2.19 Beta
+
+- Honor the selected OCR CPU thread count in every OCR session, including hosts with fewer CPUs than the selected count. Preserve the existing restart requirement, cached models and CPU execution settings.
+- Add opt-in skull-counter OCR from a separate Kill counts region alongside scan hotkeys, plus a standalone final-map kill-count key. Preserve each map/chain-stage observation and screenshot evidence in an undoable record and separate exports, without requiring a remnant chain or changing manual end-map entries and saving behavior.
+- Recover missing opened-reward text bands only where detected panel rails or separators caused their rejection. Retry frame-contaminated reward pixels without changing quantities, levels, capture strictness or existing readings; retain family suffix autofill and manual propagation approval.
+- Recover an opened remnant with a clipped first rune bar only when its visible frame bottoms and two complete following bars independently verify the same socket stage and ordered family. Preserve the actual capture gap, uncertain/conflicting review holds, full-family autofill and manual propagation approval.
+- Reduce propagation capture's PNG compression work before OCR dispatch while preserving lossless screenshot pixels and mandatory manual approval. Recognition models, thresholds and the HUD are unchanged.
+- Provide an optional, three-record [Family 19 reference update](docs/reference_updates/family19-chaos-x10/README.md) for the confirmed Chaos Orb x10 reward. The existing import and Undo controls apply it explicitly; Aldur's Saga and historical records remain intact.
+
 ## 1.3.2.18 Beta
 
 - Reopen the previous map's setup for correction after Undo New map. Save corrections to that map's snapshot and exports, then freeze its corrected setup when advancing again. Ordinary recorded-map setup protection remains in place.

@@ -744,15 +744,15 @@ class HundredMapSession(unittest.TestCase):
             self.wait_tasks()
             self.button("Save XLSX to folder", 5)
             self.wait_tasks()
-            csv_path = next(p for p in destination.glob("*.csv") if not p.stem.endswith(("_Atlas", "_Scan_History")))
+            csv_path = next(p for p in destination.glob("*.csv") if not p.stem.endswith(("_Atlas", "_Scan_History", "_Kill_Counts")))
             xlsx_path = next(destination.glob("*.xlsx"))
-            # A second folder export must preserve the first trio, even with same timestamp.
+            # A second folder export must preserve all four files, even with same timestamp.
             original = {p.name: p.read_bytes() for p in destination.iterdir()}
             self.button("Save CSV to folder", 5)
             self.wait_tasks()
             for name, data in original.items():
                 self.check((destination / name).read_bytes() == data, True, "exports:folder-no-overwrite")
-            self.check(len(list(destination.glob("*.csv"))), 6, "exports:second-csv-trio")
+            self.check(len(list(destination.glob("*.csv"))), 8, "exports:second-csv-four-companions")
             self.coverage["folder selection and collision preservation"] += 1
         else:
             csv_path = destination / "Session.csv"

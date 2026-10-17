@@ -13,6 +13,7 @@ import re
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile, ZIP_DEFLATED
 
+from PoE2_Data_Logger.core import kill_counts
 from PoE2_Data_Logger.core import logger_store as logger
 from PoE2_Data_Logger.core import workbook_references as references
 
@@ -120,7 +121,8 @@ def _numeric_column(name):
         "Start Count", "End Count", "Net Change", "Normal Kills", "Magic Kills", "Rare Kills", "Unique Kills", "Total Kills",
         "New Find Quantity", "Session Found Quantity", "Ritual Tribute Available", "Ritual Rerolls Remaining", "Visible Seed Sockets",
         "Page", "Currency Commit #", "Ritual Commit #", "Start Scan Commit #", "End Scan Commit #",
-        "Gear Item Rarity %", "Points"}
+        "Gear Item Rarity %", "Points", "Normal Kills (Observed)", "Magic Kills (Observed)",
+        "Rare Kills (Observed)", "Unique Kills (Observed)", "Total Kills (Observed)"}
         or name in {"Top Socket Count", "Recipe # In Family", "Alias Position"}
         or re.fullmatch(r"Tablet \d Mod \d (?:%|Value)", name)
         or re.fullmatch(r"Tablet \d Random Modifiers", name)
@@ -250,6 +252,7 @@ def export_xlsx():
     indices. Read all sources and item headers in one transaction, then add setup
     hyperlinks and worksheet styles to the ZIP package. Append reference sheets
     after the existing four so their indices, fields and event accounting stay intact.
+    Append independent kill-count observations last without changing manual map totals.
     """
     with logger._connect() as db:
         db.execute("BEGIN")
@@ -258,6 +261,7 @@ def export_xlsx():
                        ("Scan History", logger.export_all_csv(_db=db)),
                        ("Analysis Context", logger.export_analysis_context_csv(_db=db))]
         data_sheets.extend(references.export_sheets(db))
+        data_sheets.append(("Kill Count Readings", kill_counts.export_csv(_db=db)))
         item_headers = logger.map_summary_item_headers(_db=db)
     setup_links = {number: _atlas_setup_hyperlinks(data, data_sheets[1][1], data_sheets[1][0])
                    for number, (_, data) in enumerate(data_sheets, 1) if number in (1, 3)}

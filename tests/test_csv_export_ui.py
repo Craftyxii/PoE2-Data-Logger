@@ -1,4 +1,4 @@
-"""Qt Save As checks for cancel/overwrite decisions and the coordinated main, Atlas and history CSV files."""
+"""Qt Save As checks for cancel/overwrite decisions and four coordinated CSV files."""
 
 from contextlib import contextmanager
 import os
@@ -13,7 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-from PoE2_Data_Logger.core import logger_store as logger
+from PoE2_Data_Logger.core import kill_counts, logger_store as logger
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 
 
@@ -35,6 +35,7 @@ class CsvExportConfirmationTests(unittest.TestCase):
         self.destination = Path(self.temporary.name) / "research.csv"
         self.companion = self.destination.with_name("research_Atlas.csv")
         self.history = self.destination.with_name("research_Scan_History.csv")
+        self.kills = self.destination.with_name("research_Kill_Counts.csv")
         self.submissions = []
         self.saved = []
         self.window = SimpleNamespace(_export_saved=self.saved.append)
@@ -54,37 +55,49 @@ class CsvExportConfirmationTests(unittest.TestCase):
         """Verify declining companion overwrite preserves both files and submits no task."""
         self.destination.write_bytes(b"previous main")
         self.companion.write_bytes(b"previous Atlas")
+        self.kills.write_bytes(b"previous kills")
         with patch.object(QFileDialog, "getSaveFileName", return_value=(str(self.destination), "CSV (*.csv)")), \
                 patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No) as question:
             LoggerWindow.save_as(self.window, "csv")
         self.assertEqual(self.destination.read_bytes(), b"previous main")
         self.assertEqual(self.companion.read_bytes(), b"previous Atlas")
+        self.assertEqual(self.kills.read_bytes(), b"previous kills")
         self.assertEqual(self.submissions, [])
         self.assertEqual(self.saved, [])
         question.assert_called_once()
         arguments = question.call_args.args
         self.assertIn(str(self.companion), arguments[2])
+        self.assertIn(str(self.kills), arguments[2])
         self.assertEqual(arguments[4], QMessageBox.StandardButton.No)
 
     def test_approving_existing_companion_writes_both_exports(self):
-        """Verify overwrite approval saves main, Atlas and history CSVs from one database connection."""
+        """Verify overwrite approval saves all four CSVs from one database connection."""
         self.destination.write_bytes(b"previous main")
         self.companion.write_bytes(b"previous Atlas")
+        self.kills.write_bytes(b"previous kills")
         with patch.object(QFileDialog, "getSaveFileName", return_value=(str(self.destination), "CSV (*.csv)")), \
                 patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes) as question, \
                 patch.object(logger, "_connect", export_database), \
                 patch.object(logger, "export_primary_csv", return_value=b"new main") as main_export, \
                 patch.object(logger, "export_atlas_csv", return_value=b"new Atlas") as atlas_export, \
-                patch.object(logger, "export_all_csv", return_value=b"new history") as history_export:
+                patch.object(logger, "export_all_csv", return_value=b"new history") as history_export, \
+                patch.object(kill_counts, "export_csv", return_value=b"new kills") as kills_export:
             LoggerWindow.save_as(self.window, "csv")
         question.assert_called_once()
         self.assertEqual(self.destination.read_bytes(), b"new main")
         self.assertEqual(self.companion.read_bytes(), b"new Atlas")
         self.assertEqual(self.history.read_bytes(), b"new history")
+        self.assertEqual(self.kills.read_bytes(), b"new kills")
+        self.assertEqual(set(Path(self.temporary.name).iterdir()),
+                         {self.destination, self.companion, self.history, self.kills})
         self.assertEqual(len(self.submissions), 1)
         self.assertEqual(self.saved[0]["atlas_path"], str(self.companion))
+        self.assertEqual(self.saved[0]["history_path"], str(self.history))
+        self.assertEqual(self.saved[0]["kill_counts_path"], str(self.kills))
         self.assertIs(main_export.call_args.kwargs["_db"], atlas_export.call_args.kwargs["_db"])
         self.assertIs(main_export.call_args.kwargs["_db"], history_export.call_args.kwargs["_db"])
+        self.assertIs(main_export.call_args.kwargs["_db"], kills_export.call_args.kwargs["_db"])
+        self.assertIn(str(self.kills), question.call_args.args[2])
 
     def test_new_pair_is_saved_without_overwrite_question(self):
         """Verify new main, Atlas and history destinations save without an overwrite prompt."""
@@ -93,13 +106,15 @@ class CsvExportConfirmationTests(unittest.TestCase):
                 patch.object(logger, "_connect", export_database), \
                 patch.object(logger, "export_primary_csv", return_value=b"new main"), \
                 patch.object(logger, "export_atlas_csv", return_value=b"new Atlas"), \
-                patch.object(logger, "export_all_csv", return_value=b"new history"):
+                patch.object(logger, "export_all_csv", return_value=b"new history"), \
+                patch.object(kill_counts, "export_csv", return_value=b"new kills"):
             LoggerWindow.save_as(self.window, "csv")
         question.assert_not_called()
-        self.assertIn("Atlas and Scan History", chooser.call_args.args[1])
+        self.assertIn("Atlas, Scan History and Kill Counts", chooser.call_args.args[1])
         self.assertEqual(self.destination.read_bytes(), b"new main")
         self.assertEqual(self.companion.read_bytes(), b"new Atlas")
         self.assertEqual(self.history.read_bytes(), b"new history")
+        self.assertEqual(self.kills.read_bytes(), b"new kills")
 
     def test_declining_history_overwrite_preserves_all_files(self):
         """Verify declining history overwrite preserves all files."""

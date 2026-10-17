@@ -40,6 +40,7 @@ from PoE2_Data_Logger.ocr.affix_capture import new_affix_names, affix_unit, modi
 from PoE2_Data_Logger.ocr import item_ocr
 from PoE2_Data_Logger.core import service
 from PoE2_Data_Logger.core import store
+from PoE2_Data_Logger.core import kill_counts
 from PoE2_Data_Logger.ui.region_select import RegionEditor, ScanRegionsPage
 from PoE2_Data_Logger.ui.atlas_settings import AtlasSettingsPage
 from PoE2_Data_Logger.ui.currency_counter import SessionCurrencyCounter
@@ -49,7 +50,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.18 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.19 Beta"
 SCAN_TIMEOUT_MS = 90000
 SCAN_PRESENTATION_RETRY_MS = 100
 SCAN_PRESENTATION_WAIT_SECONDS = 10
@@ -393,6 +394,7 @@ class LoggerWindow(QMainWindow):
         self._chain_save_pending = None
         self._task_id = 0
         self._latest_hotkey = 0
+        self._pending_kill_count_saves = {}
         self._latest_overlay = service.HOTKEY.status().get("overlay_sequence", 0)
         with logger._connect() as db:
             self._overlay_enabled = bool(logger._meta(db, "hud_overlay", False))
@@ -1773,7 +1775,8 @@ class LoggerWindow(QMainWindow):
                                                ("tablet", "Tablet"), ("currency", "Currency inventory"),
                                                ("ritual", "Ritual page"),
                                                ("propagation", "Propagation scan"),
-                                               ("overlay", "Show / hide HUD")), 1):
+                                               ("overlay", "Show / hide HUD"),
+                                               ("kills", "Map kill counts · final reading")), 1):
             keys.addWidget(QLabel(title), index, 0)
             label = QLabel("Off")
             self.direct_hotkey_labels[kind] = label
@@ -1788,6 +1791,12 @@ class LoggerWindow(QMainWindow):
                                   "Complete chain finishes the chain and advances the expedition number.")
         propagation_help.setWordWrap(True)
         hotkey.addWidget(propagation_help)
+        kill_help = QLabel(
+            "Select the Kill counts region in Scan regions to capture the four skull counters with scans. "
+            "Use the Map kill counts key for the final map reading, with or without a remnant chain. "
+            "OCR readings are saved separately; manual end-map entries stay unchanged.")
+        kill_help.setWordWrap(True)
+        hotkey.addWidget(kill_help)
         overlay = self._group("HUD overlay", content)
         self.overlay_checkbox = QCheckBox("Enable HUD overlay")
         self.overlay_checkbox.setChecked(self._overlay_enabled)
@@ -2841,7 +2850,7 @@ class LoggerWindow(QMainWindow):
         """
         shortcuts = service.HOTKEY.status()
         scan_key = bool(shortcuts["combo"] or any(shortcuts["combos"].get(kind)
-                        for kind in ("remnant", "waystone", "tablet", "currency", "ritual", "propagation")))
+                        for kind in ("remnant", "waystone", "tablet", "currency", "ritual", "propagation", "kills")))
         active = bool(shortcuts["registered"] and scan_key)
         if active and service.HOTKEY.focused is not None:
             active = service.HOTKEY.focused()
@@ -5674,6 +5683,65 @@ class LoggerWindow(QMainWindow):
         self.scan_status.show()
         self.note(f"{saved['remnant_id']} logged to {saved['map_id']}.", True)
 
+    def _queue_kill_count_reading(self, payload):
+        """Persist independent OCR snapshots without replacing manual count drafts or other reviews."""
+        if not isinstance(payload, dict):
+            return
+        result = payload.get("result")
+        if payload.get("error") or not isinstance(result, dict) or result.get("complete") is not True:
+            detail = result.get("status") if isinstance(result, dict) else None
+            reason = payload.get("error") or detail or "The four counters were not verified."
+            self.note("Kill counts not saved: " + str(reason))
+            return
+        request_id = payload.get("request_id")
+        if not isinstance(request_id, str):
+            self.note("Kill counts not saved: missing capture identity.")
+            return
+        if request_id not in self._pending_kill_count_saves:
+            self._pending_kill_count_saves[request_id] = (
+                payload, time.monotonic() + SCAN_PRESENTATION_WAIT_SECONDS)
+        self._save_kill_count_reading(request_id)
+
+    def _save_kill_count_reading(self, request_id):
+        """Retry temporary writer contention with the original frozen map and request token."""
+        pending = self._pending_kill_count_saves.get(request_id)
+        if pending is None:
+            return
+        if self._closed:
+            self._pending_kill_count_saves.pop(request_id, None)
+            return
+        payload, deadline = pending
+        try:
+            encoded = payload.get("image_base64") or ""
+            if not isinstance(encoded, str) or len(encoded) > service.MAX_UPLOAD * 4 // 3 + 4:
+                raise ValueError("Kill-count evidence exceeds the image limit.")
+            raw = base64.b64decode(encoded, validate=True) if encoded else None
+            with store.database_timeout(0):
+                saved = kill_counts.save_snapshot(
+                    payload["result"], context=payload.get("context"), request_id=request_id,
+                    source_mode=payload.get("source_mode", ""), scope=payload.get("scope", "map_stage"),
+                    image_bytes=raw)
+        except sqlite3.OperationalError as error:
+            if ("locked" in str(error).lower() or "busy" in str(error).lower()) and time.monotonic() < deadline:
+                QTimer.singleShot(SCAN_PRESENTATION_RETRY_MS, lambda: self._save_kill_count_reading(request_id))
+                return
+            self._pending_kill_count_saves.pop(request_id, None)
+            self.note("Kill counts not saved: " + str(error))
+            return
+        except (ValueError, TypeError, KeyError) as error:
+            self._pending_kill_count_saves.pop(request_id, None)
+            self.note("Kill counts not saved: " + str(error))
+            return
+        except Exception as error:
+            self._pending_kill_count_saves.pop(request_id, None)
+            logging.exception("Could not save auxiliary kill-count reading")
+            self.note("Kill counts not saved: " + str(error))
+            return
+        self._pending_kill_count_saves.pop(request_id, None)
+        self._set_commit_badge(saved["scan_commit_number"])
+        label = {"map_final": "Final map", "chain_stage": "Chain stage"}.get(saved["scope"], "Map stage")
+        self.note(f"{label} kill reading saved to {saved['map_id']}.", True)
+
     def poll(self):
         """Consume new hotkey events on the GUI thread, route activity captures and maintain
         HUD restoration availability.
@@ -5699,11 +5767,17 @@ class LoggerWindow(QMainWindow):
         event = hotkey["latest"]
         if event and event["id"] != self._latest_hotkey:
             self._latest_hotkey = event["id"]
+            if event.get("kill_counts"):
+                self._queue_kill_count_reading(event["kill_counts"])
             if not event["error"]:
                 self._overlay_capture_restore = None
             if event["error"]:
                 self._restore_overlay_capture_failure()
                 self.error(event["error"])
+            elif event["mode"] == "kills":
+                # The independent snapshot was handled above. Keep all manual
+                # fields and any unrelated pending review exactly as they are.
+                pass
             elif event["mode"] == "item":
                 self.run(lambda: self._hover_item_read(event["result"], service.HOTKEY.image(event["id"])))
             elif event["mode"] == "propagation":
@@ -6891,6 +6965,8 @@ class LoggerWindow(QMainWindow):
             paths.append(result["atlas_path"])
         if result.get("history_path"):
             paths.append(result["history_path"])
+        if result.get("kill_counts_path"):
+            paths.append(result["kill_counts_path"])
         self.note("Export saved: " + " and ".join(paths), True)
 
     def save_as(self, kind):
@@ -6903,14 +6979,15 @@ class LoggerWindow(QMainWindow):
             "backup": ("PoE2_Data_Backup.sqlite3", "SQLite database (*.sqlite3)", logger.backup_bytes),
         }
         name, extension, produce = choices[kind]
-        title = "Save CSV with Atlas and Scan History companions" if kind == "csv" else "Save file"
+        title = "Save CSV with Atlas, Scan History and Kill Counts companions" if kind == "csv" else "Save file"
         path, _ = QFileDialog.getSaveFileName(self, title, str(Path.home() / name), extension)
         if path:
             destination = Path(path)
             logger.validate_export_destination(destination)
             atlas_path = destination.with_name(destination.stem + "_Atlas.csv")
             history_path = destination.with_name(destination.stem + "_Scan_History.csv")
-            existing = [companion for companion in (atlas_path, history_path)
+            kill_counts_path = destination.with_name(destination.stem + "_Kill_Counts.csv")
+            existing = [companion for companion in (atlas_path, history_path, kill_counts_path)
                         if companion.exists() or companion.is_symlink()] if kind == "csv" else []
             if existing:
                 answer = QMessageBox.question(
@@ -6924,30 +7001,33 @@ class LoggerWindow(QMainWindow):
             if kind in ("csv", "xlsx"):
                 self._save_atlas_for_export()
             def write():
-                """Generate and write the chosen export in the worker, reading all three CSV
+                """Generate and write the chosen export in the worker, reading all companion CSV
                 files from one database snapshot and using recoverable grouped writes.
                 """
                 atlas_data = None
                 history_data = None
+                kill_counts_data = None
                 if kind == "csv":
                     with logger._connect() as db:
                         db.execute("BEGIN")
                         data = logger.export_primary_csv(_db=db)
                         atlas_data = logger.export_atlas_csv(_db=db)
                         history_data = logger.export_all_csv(_db=db)
+                        kill_counts_data = kill_counts.export_csv(_db=db)
                 else:
                     data = produce()
                 if atlas_data is not None:
-                    for target in (destination, atlas_path, history_path):
+                    for target in (destination, atlas_path, history_path, kill_counts_path):
                         logger.validate_export_destination(target)
                     write_export_files({destination: data, atlas_path: atlas_data,
-                                        history_path: history_data})
+                                        history_path: history_data, kill_counts_path: kill_counts_data})
                 else:
                     logger._write_export_bytes(destination, data)
                 result = {"path": str(destination), "bytes": len(data)}
                 if atlas_data is not None:
                     result["atlas_path"] = str(atlas_path)
                     result["history_path"] = str(history_path)
+                    result["kill_counts_path"] = str(kill_counts_path)
                 return result
             self._submit(f"Writing {kind.upper()}…", write, self._export_saved)
 

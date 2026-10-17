@@ -345,9 +345,10 @@ class AtlasStoreTests(unittest.TestCase):
             result = logger.save_export_file("csv")
         main_path = Path(result["path"])
         self.assertEqual(set(captured), {main_path, Path(result["atlas_path"]),
-                                        Path(result["history_path"])})
+                                        Path(result["history_path"]), Path(result["kill_counts_path"])})
         self.assertEqual(Path(result["atlas_path"]).stem, main_path.stem + "_Atlas")
         self.assertEqual(Path(result["history_path"]).stem, main_path.stem + "_Scan_History")
+        self.assertEqual(Path(result["kill_counts_path"]).stem, main_path.stem + "_Kill_Counts")
         main_ids = {row["Atlas Setup ID"] for row in self.rows(captured[Path(result["path"])])}
         atlas_ids = {row["Atlas Setup ID"] for row in self.rows(captured[Path(result["atlas_path"])])}
         self.assertEqual(main_ids, atlas_ids)
@@ -361,7 +362,7 @@ class AtlasStoreTests(unittest.TestCase):
         with patch.object(logger, "export_filename", return_value="PoE2_Export_20261007_123456.csv"):
             first = logger.save_export_file("csv")
             originals = {key: Path(first[key]).read_bytes()
-                         for key in ("path", "atlas_path", "history_path")}
+                         for key in ("path", "atlas_path", "history_path", "kill_counts_path")}
             logger.save_currency_snapshot("end", [{"name": "Chaos Orb", "quantity": 11}])
             second = logger.save_export_file("csv")
         for key, data in originals.items():
@@ -371,7 +372,7 @@ class AtlasStoreTests(unittest.TestCase):
         second_rows = self.rows(Path(second["path"]).read_bytes())
         self.assertEqual(first_rows[0]["Chaos Orb"], "7")
         self.assertEqual(second_rows[0]["Chaos Orb"], "11")
-        self.assertEqual(len(list(Path(self.tmp.name).glob("PoE2_Export*.csv"))), 6)
+        self.assertEqual(len(list(Path(self.tmp.name).glob("PoE2_Export*.csv"))), 8)
 
 
 if __name__ == "__main__":

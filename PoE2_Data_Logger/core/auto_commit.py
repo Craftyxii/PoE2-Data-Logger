@@ -28,6 +28,35 @@ def _score(value):
         return 0.0
 
 
+def _clipped_first_row(opened):
+    """Validate the scanner's separate partial-bar and following-row evidence."""
+    evidence = opened.get("clipped_first_row")
+    lines = opened.get("opened_recipes")
+    if (not isinstance(evidence, dict) or opened.get("header_verified") is not True or
+            opened.get("socket_source") != "Recipe DB" or
+            type(evidence.get("sockets")) is not int or
+            evidence["sockets"] != opened.get("sockets") or
+            evidence["sockets"] != opened.get("recipe_sockets") or
+            type(opened.get("first_line_gap")) is not int or opened["first_line_gap"] <= 0 or
+            evidence.get("first_line_gap") != opened["first_line_gap"] or
+            not isinstance(lines, list) or len(lines) < 3):
+        return None
+    for key, low, high in (("header_gap", 16, 40), ("row_pitch", 60, 100)):
+        value = evidence.get(key)
+        if (type(value) not in (int, float) or not math.isfinite(value) or not low <= value <= high or
+                (key == "header_gap" and value == high)):
+            return None
+    witnesses = evidence.get("supporting_rows")
+    if not isinstance(witnesses, list) or len(witnesses) != 2:
+        return None
+    for index, row in enumerate(witnesses, 1):
+        if (not isinstance(row, dict) or type(row.get("index")) is not int or row["index"] != index or
+                not isinstance(lines[index], dict) or row.get("recipe") != lines[index].get("recipe") or
+                type(row.get("sockets")) is not int or row["sockets"] != evidence["sockets"]):
+            return None
+    return evidence
+
+
 def candidate(opened, seed=None, resolver=logger.resolve):
     """Require one family, icon-derived sockets and confident ordered opened rewards.
 
@@ -52,12 +81,13 @@ def candidate(opened, seed=None, resolver=logger.resolve):
             opened.get("candidates") != [family]):
         return review("The opened remnant needs manual review.")
     sockets = opened.get("sockets")
+    clipped = _clipped_first_row(opened)
     if (type(sockets) is not int or sockets not in range(3, 11) or
-            opened.get("socket_source") != "opened icons" or
+            (opened.get("socket_source") != "opened icons" and clipped is None) or
             sockets != opened.get("recipe_sockets")):
         return review("The opened socket count needs manual review.")
     gap = opened.get("first_line_gap")
-    if type(gap) is not int or not 30 <= gap <= 90:
+    if type(gap) is not int or (not 30 <= gap <= 90 and clipped is None):
         return review("The first opened reward line needs manual review.")
     lines = opened.get("opened_recipes")
     if (not isinstance(lines, list) or not lines or
@@ -87,6 +117,9 @@ def candidate(opened, seed=None, resolver=logger.resolve):
             not rows or rows[0]["sockets"] != sockets or len(lines) > len(rows) or
             [line["recipe"] for line in lines] != [row["recipe"] for row in rows[:len(lines)]]):
         return review("The opened rewards do not match a verified family sequence.")
+    if clipped and any(rows[row["index"]]["sockets"] != row["sockets"]
+                       for row in clipped["supporting_rows"]):
+        return review("The opened socket count needs manual review.")
     return {"ready": True, "first": first, "next": second, "family": family}
 
 

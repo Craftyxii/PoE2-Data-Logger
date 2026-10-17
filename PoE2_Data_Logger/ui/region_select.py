@@ -13,7 +13,7 @@ from pathlib import Path
 from PIL import Image
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTabBar, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTabBar, QVBoxLayout, QWidget
 
 from PoE2_Data_Logger.core import logger_store as logger
 from PoE2_Data_Logger.core import store
@@ -27,6 +27,7 @@ REGIONS = {
     "tablet_region": ("Tablet tooltip", "inventory", (0, 0, 1, 1), "#EFCBA1"),
     "inventory_region": ("Currency / items", "inventory", (.601, .609, .339, .259), "#C18DC9"),
     "ritual_region": ("Ritual rewards", "ritual", (.098, .106, .379, .78), "#E5AA32"),
+    "kill_count_region": ("Kill counts · include all four skulls", "kills", (.85, .24, .15, .12), "#8BA8E5"),
 }
 
 GAME_RESOLUTIONS = {
@@ -317,6 +318,13 @@ class ScanRegionsPage(QWidget):
                                       "Windows display scaling is handled automatically.")
         self.resolution_note.setWordWrap(True)
         layout.addWidget(self.resolution_note)
+        self.kill_count_capture = QCheckBox("Capture kill counts with scan hotkeys")
+        self.kill_count_capture.setToolTip(
+            "Read the four skull counters from the separate Kill counts region. "
+            "OCR snapshots do not replace manual end-map entries.")
+        with logger._connect() as db:
+            self.kill_count_capture.setChecked(bool(logger._meta(db, "kill_count_scan_enabled", False)))
+        layout.addWidget(self.kill_count_capture)
         toolbar = QHBoxLayout()
         live = QPushButton("Select region in game")
         live.clicked.connect(lambda: self.select_in_game.emit(self.canvas.active))
@@ -376,6 +384,8 @@ class ScanRegionsPage(QWidget):
         if key not in REGIONS:
             raise ValueError("Unknown scan region.")
         self.canvas.boxes[key] = checked_box(box)
+        if key == "kill_count_region":
+            self.kill_count_capture.setChecked(True)
         self._legacy_regions.discard(key)
         self.status.setText(self._legacy_instruction() if self._legacy_regions else
                             "Unsaved changes. Save regions when ready.")
@@ -448,6 +458,7 @@ class ScanRegionsPage(QWidget):
                 db.execute("BEGIN IMMEDIATE")
                 logger._set_meta(db, "scan_region_boxes", boxes)
                 logger._set_meta(db, "scan_region_resolution", self.game_resolution.currentData())
+                logger._set_meta(db, "kill_count_scan_enabled", self.kill_count_capture.isChecked())
             status = "✓ Scan regions saved."
             if self._legacy_regions:
                 status += " " + self._legacy_instruction()

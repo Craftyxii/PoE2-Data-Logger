@@ -445,6 +445,18 @@ def initialize():
                     recorded_at TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS map_unique_kills(
                     map_id TEXT PRIMARY KEY,unique_kills INTEGER);
+                CREATE TABLE IF NOT EXISTS kill_count_snapshots(
+                    snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id TEXT NOT NULL UNIQUE,session_generation INTEGER NOT NULL,
+                    map_id TEXT NOT NULL,expedition_id TEXT,
+                    scope TEXT NOT NULL CHECK(scope IN ('map_stage','chain_stage','map_final')),
+                    normal INTEGER NOT NULL CHECK(normal>=0),magic INTEGER NOT NULL CHECK(magic>=0),
+                    rare INTEGER NOT NULL CHECK(rare>=0),unique_kills INTEGER NOT NULL CHECK(unique_kills>=0),
+                    scan_commit_number INTEGER NOT NULL UNIQUE,source_mode TEXT NOT NULL,
+                    captured_at TEXT NOT NULL,recorded_at TEXT NOT NULL,
+                    image_sha256 TEXT NOT NULL,image_png BLOB,
+                    ocr_json TEXT NOT NULL,context_json TEXT NOT NULL,payload_sha256 TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS kill_count_map_idx ON kill_count_snapshots(map_id,snapshot_id);
                 CREATE TABLE IF NOT EXISTS expeditions(
                     expedition_id TEXT PRIMARY KEY,map_id TEXT NOT NULL,number INTEGER NOT NULL,
                     detonated INTEGER);
@@ -1443,7 +1455,7 @@ def _has_remnant(db, map_id):
 
 def _map_has_activity(db, map_id):
     """Detect exported records, inventories, Ritual pages or saved count activity for a map."""
-    for table in ("legacy_export", "new_export", "currency_snapshots", "ritual_pages"):
+    for table in ("legacy_export", "new_export", "currency_snapshots", "ritual_pages", "kill_count_snapshots"):
         if db.execute(f"SELECT 1 FROM {table} WHERE map_id=? LIMIT 1", (map_id,)).fetchone():
             return True
     if _unique_kills_for_map(db, map_id) is not None:
@@ -1458,7 +1470,7 @@ def _map_has_only_start_inventory(db, map_id):
     if phases != ["start"]:
         return False
     if any(db.execute(f"SELECT 1 FROM {table} WHERE map_id=? LIMIT 1", (map_id,)).fetchone()
-           for table in ("legacy_export", "new_export", "ritual_pages")):
+           for table in ("legacy_export", "new_export", "ritual_pages", "kill_count_snapshots")):
         return False
     if _unique_kills_for_map(db, map_id) is not None:
         return False
@@ -2403,7 +2415,7 @@ def discard_current_map_logs(expected_context=None):
             _retire_chain_requests(db, row[0])
         for table in ("chain_completions", "chain_step_provenance", "chain_append_receipts"):
             db.execute(f"DELETE FROM {table} WHERE expedition_id LIKE ?", (mid + "-E%",))
-        for table in ("legacy_export", "new_export", "expeditions", "map_unique_kills",
+        for table in ("legacy_export", "new_export", "expeditions", "map_unique_kills", "kill_count_snapshots",
                       "currency_snapshots", "ritual_pages", "commits"):
             db.execute(f"DELETE FROM {table} WHERE map_id=?", (mid,))
         db.execute("UPDATE maps SET kills_json=? WHERE map_id=?", (_dump([None, None, None]), mid))
@@ -2778,11 +2790,11 @@ def clear_export_and_reset_ids():
         _set_meta(db, "session_generation", _meta(db, "session_generation", 0) + 1)
         _set_meta(db, "chain_revisions", {})
         _set_meta(db, "retired_chain_requests", {})
-        for table in ("legacy_export", "new_export", "maps", "map_unique_kills", "expeditions", "scan_links",
+        for table in ("legacy_export", "new_export", "maps", "map_unique_kills", "kill_count_snapshots", "expeditions", "scan_links",
                       "currency_snapshots", "ritual_pages", "commits", "chain_completions", "chain_append_receipts",
                       "chain_step_provenance"):
             db.execute(f"DELETE FROM {table}")
-        db.execute("DELETE FROM sqlite_sequence WHERE name IN ('new_export','ritual_pages')")
+        db.execute("DELETE FROM sqlite_sequence WHERE name IN ('new_export','ritual_pages','kill_count_snapshots')")
         _set_meta(db, "current_map_number", 0)
         _set_meta(db, "next_remnant_number", 1)
         _set_meta(db, "pending_new_map", False)
@@ -4429,11 +4441,13 @@ def save_export_file(kind="xlsx"):
     elif kind == "sqlite3":
         contents = {".sqlite3": backup_bytes()}
     else:
+        from PoE2_Data_Logger.core import kill_counts
         with _connect() as db:
             db.execute("BEGIN")
             contents = {".csv": export_primary_csv(_db=db),
                         "_Atlas.csv": export_atlas_csv(_db=db),
-                        "_Scan_History.csv": export_all_csv(_db=db)}
+                        "_Scan_History.csv": export_all_csv(_db=db),
+                        "_Kill_Counts.csv": kill_counts.export_csv(_db=db)}
     from PoE2_Data_Logger.core.export_files import ExportWriteError, write_export_files
     stem = Path(export_filename(kind)).stem
     with _EXPORT_WRITE_LOCK:
@@ -4460,7 +4474,9 @@ def save_export_file(kind="xlsx"):
         result.update(atlas_path=str(destinations["_Atlas.csv"]),
                       atlas_bytes=len(contents["_Atlas.csv"]),
                       history_path=str(destinations["_Scan_History.csv"]),
-                      history_bytes=len(contents["_Scan_History.csv"]))
+                      history_bytes=len(contents["_Scan_History.csv"]),
+                      kill_counts_path=str(destinations["_Kill_Counts.csv"]),
+                      kill_counts_bytes=len(contents["_Kill_Counts.csv"]))
     return result
 
 

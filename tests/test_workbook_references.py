@@ -107,7 +107,7 @@ class WorkbookReferenceTests(unittest.TestCase):
             aliases = [tuple(row) for row in db.execute("SELECT position,alias,target FROM aliases ORDER BY position")]
         workbook = self.workbook()
         self.assertEqual(list(workbook), ["Export", "Atlas Character Settings", "Scan History", "Analysis Context",
-                                         "Family Database", "Recipe Database", "Seed Database", "Reference Aliases"])
+                                         "Family Database", "Recipe Database", "Seed Database", "Reference Aliases", "Kill Count Readings"])
         for name, raw in reference_csvs:
             expected = [tuple(row) for row in csv.reader(io.StringIO(raw.decode("utf-8-sig")))]
             self.assertEqual(workbook[name], expected)

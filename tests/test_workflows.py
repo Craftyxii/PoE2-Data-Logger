@@ -84,7 +84,7 @@ class WorkflowTests(unittest.TestCase):
             workbook = ET.fromstring(archive.read("xl/workbook.xml"))
             self.assertEqual([row.get("name") for row in workbook.findall("s:sheets/s:sheet", ns)],
                              ["Export", "Atlas Character Settings", "Scan History", "Analysis Context",
-                              "Family Database", "Recipe Database", "Seed Database", "Reference Aliases"])
+                              "Family Database", "Recipe Database", "Seed Database", "Reference Aliases", "Kill Count Readings"])
             sheet = ET.fromstring(archive.read("xl/worksheets/sheet3.xml"))
             rows = sheet.findall("s:sheetData/s:row", ns)
             headers = {cell.get("r").rstrip("1"): "".join(cell.itertext()) for cell in rows[0]}

@@ -107,7 +107,8 @@ class AnalysisContextExportTests(unittest.TestCase):
                              [("Export", "1"), ("Atlas Character Settings", "2"),
                               ("Scan History", "3"), ("Analysis Context", "4"),
                               ("Family Database", "5"), ("Recipe Database", "6"),
-                              ("Seed Database", "7"), ("Reference Aliases", "8")])
+                              ("Seed Database", "7"), ("Reference Aliases", "8"),
+                              ("Kill Count Readings", "9")])
             _, rows = self.worksheet_rows(archive, 4)
             self.assertEqual(rows[0], list(analysis_context.HEADERS))
             self.assertEqual([tuple(row) for row in rows[1:]], expected)

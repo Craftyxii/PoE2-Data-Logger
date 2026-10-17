@@ -30,6 +30,10 @@ The three peaks above each propagated rune identify its mark. Include the gold a
 
 **Counts:** enter Normal, Magic, Rare and Unique kills per map. Approving a propagation scan adds one remnant detonation to its expedition, even with two runes. **+ New map** saves kill totals for the map you’re leaving.
 
+**Kill-count OCR:** in **Scan regions**, select **Kill counts**, include all four skulls and numbers with some blank space to the left of the Normal number, and enable **Capture kill counts with scan hotkeys**, then **Save regions**. White is Normal, purple/blue is Magic, yellow is Rare, and orange is Unique. Keep that counter bar visible when scanning. Each successful reading is saved as a separate map snapshot, linked to the captured chain when applicable. These are observed counter totals, not increments to add together.
+
+Set **Map kill counts · final reading** in **Scan settings** to capture the final reading without scanning another activity. Start a map first; no remnant chain is required. Capture the final counters before advancing to the next map. Missing or uncertain counters are not saved as zero: rescan or use the existing manual fields. OCR does not fill or overwrite those manual end-map entries. Stage and final OCR readings appear in the **Kill Count Readings** worksheet and **_Kill_Counts.csv** companion; the existing manual totals remain in their original export fields.
+
 **Currency/items:** select **Start of map** or **End of map** before scanning the inventory. These snapshots measure the change in item quantities.
 
 **Currency** shows tracked item types in groups as icon, name and count cards, including zero totals. Found items move ahead of zero-count items while keeping their groups. Every approved end scan updates the positive end-minus-start gains across maps. If no start scan was taken, the map starts with an assumed empty inventory. Rescans replace that map's contribution. Use the search to find a type. Resetting IDs clears the totals. Manual inventory icon-reference tools are under **Data export → Developer Mode**.

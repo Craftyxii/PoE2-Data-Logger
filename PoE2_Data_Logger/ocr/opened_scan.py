@@ -308,6 +308,74 @@ def _icon_count(image, reward_y, expected=None):
     return reference
 
 
+def _clipped_first_row(image, title, lines, strictness):
+    """Verify a clipped top bar from its visible bottoms and two complete following bars.
+
+    Keep the missing full-bar count and actual heading gap intact. This narrow
+    alternative requires three confident consecutive rewards at the same socket
+    stage, regular row spacing, and independent partial/full icon evidence.
+    """
+    if len(lines) < 3 or strictness == 100:
+        return None
+    if any(not line.get("recipe") or
+           line["ocr_score"] < ocr_sensitivity.clear_threshold(.8, strictness, .2) or
+           line["match_score"] < ocr_sensitivity.clear_threshold(.95, strictness, .15)
+           for line in lines[:3]):
+        return None
+    offset = 0
+    if image.width >= 900 and image.height >= 600 and image.width >= image.height * 1.25:
+        import cv2
+        window = image.crop((0, 0, min(image.width, round(image.height * .70)), image.height))
+        gray = cv2.cvtColor(np.asarray(window), cv2.COLOR_RGB2GRAY)
+        _, offset, right, bottom = runehelper_ocr._find_panel(gray)
+        if right >= window.width:
+            return None
+        image = window.crop((0, offset, right, bottom))
+    scale = 575 / image.width
+    if image.width != 575:
+        image = image.resize((575, max(1, round(image.height * scale))), Image.Resampling.LANCZOS)
+    ys = [(line["y"] - offset) * scale for line in lines[:3]]
+    heading_bottom = (title["y2"] - offset) * scale
+    gap = ys[0] - heading_bottom
+    pitch = ys[2] - ys[1]
+    # The normal reference sample starts 40 px above the reward. A shorter
+    # heading gap can put title ink in that sample; a skipped row is not clipping.
+    if not (16 <= gap < 40 and 60 <= pitch <= 100 and
+            abs((ys[1] - ys[0]) - pitch) <= pitch * .12):
+        return None
+
+    def partial_count(y):
+        """Count the captured frame bottoms on the existing reference icon grid."""
+        top, bottom = round(y - 13), round(y - 5)
+        if top <= heading_bottom + 1 or bottom > image.height or bottom - top < 6:
+            return None
+        strengths = [float(np.asarray(image.crop((42 + 41 * i, top, 68 + 41 * i, bottom))).std())
+                     for i in range(10)]
+        count = 0
+        for strength in strengths:
+            if strength <= 32:
+                break
+            count += 1
+        return count if count >= 3 and not any(value > 38 for value in strengths[count + 1:]) else None
+
+    count = partial_count(ys[0])
+    if count is None:
+        return None
+    with logger._connect() as db:
+        expected = [db.execute("SELECT sockets FROM recipes WHERE name=?", (line["recipe"],)).fetchone()
+                    for line in lines[:3]]
+    if any(row is None or row[0] != count for row in expected):
+        return None
+    witnesses = []
+    for index in (1, 2):
+        if (ys[index] - 40 <= heading_bottom or partial_count(ys[index]) != count or
+                _icon_count(image, ys[index]) != count):
+            return None
+        witnesses.append({"index": index, "recipe": lines[index]["recipe"], "sockets": count})
+    return {"sockets": count, "first_line_gap": round(lines[0]["y"] - title["y2"]),
+            "header_gap": round(gap, 3), "row_pitch": round(pitch, 3), "supporting_rows": witnesses}
+
+
 @lru_cache(maxsize=1)
 def _engine():
     """Cache a verified shared RapidOCR engine configured for the active OCR thread count.
@@ -317,16 +385,32 @@ def _engine():
     try:
         import rapidocr
         from rapidocr import RapidOCR
+        from omegaconf import AnyNode
+        import onnxruntime as ort
     except ImportError as error:
         raise RuntimeError("Opened-remnant OCR needs RapidOCR. Run Install Dependencies.bat again.") from error
     model_root = Path(rapidocr.__file__).resolve().parent / "models"
     models = {"Det": "PP-OCRv6_det_small.onnx", "Rec": "PP-OCRv6_rec_small.onnx",
               "Cls": "ch_ppocr_mobile_v2.0_cls_mobile.onnx"}
     verify_models(model_root)
-    return RapidOCR(params={"EngineConfig.onnxruntime.intra_op_num_threads": ocr_runtime.active_threads(),
-                            "EngineConfig.onnxruntime.inter_op_num_threads": 1,
-                            **{f"{kind}.model_path": str(model_root / filename)
-                               for kind, filename in models.items()}})
+    threads = ocr_runtime.active_threads()
+    params = {"EngineConfig.onnxruntime.intra_op_num_threads": threads,
+              "EngineConfig.onnxruntime.inter_op_num_threads": 1}
+    for kind, filename in models.items():
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = threads
+        options.inter_op_num_threads = 1
+        options.log_severity_level = 4
+        options.enable_cpu_mem_arena = False
+        options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        path = str(model_root / filename)
+        session = ort.InferenceSession(path, sess_options=options,
+            providers=[("CPUExecutionProvider", {"arena_extend_strategy": "kSameAsRequested"})])
+        params[f"{kind}.model_path"] = path
+        # RapidOCR silently drops counts above os.cpu_count(). Its supported
+        # session input honors our frozen setting; AnyNode permits that object.
+        params[f"{kind}.session"] = AnyNode(session, flags={"allow_objects": True})
+    return RapidOCR(params=params)
 
 
 def _panel_text(image, top, right, bottom):
@@ -530,6 +614,9 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
     first_line_gap = (round(lines[0]["y"] - title["y2"])
                       if lines and (header_verified or not verify_header) else None)
     recipe_sockets = sockets[0] if sockets else None
+    clipped = (_clipped_first_row(image, title, lines, strictness)
+               if visible_sockets is None and header_verified and header_captured and
+               family is not None and complete and len(candidates) == 1 else None)
     socket_conflict = bool(visible_sockets and recipe_sockets and visible_sockets != recipe_sockets)
     for line in lines:
         line.pop("text")
@@ -562,6 +649,7 @@ def scan_opened(path: Path | Image.Image, ocr_rows=None, allow_fallback=True, ve
             "family": f"Family {family}" if family else None,
             "candidates": candidates,
             "can_use": complete and not socket_conflict and (header_verified or not verify_header),
+            **({"clipped_first_row": clipped} if clipped else {}),
             **({"_ocr_strictness": strictness} if strictness != ocr_sensitivity.DEFAULT else {}),
             "bar_bounds": {"x": 0, "y": max(0, int(title["y1"])-20),
                            "width": int(right),
