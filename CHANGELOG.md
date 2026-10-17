@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Explain Gaining Traction's +50% Monster Rarity per completed remnant on the same map and the matching increased Rare/Magic Monster chance bonuses in Analysis Context. Keep stage interpretation and double-counting guidance separate from saved map percentages and kill totals.
+
 ## 1.3.2.19 Beta
 
 - Honor the selected OCR CPU thread count in every OCR session, including hosts with fewer CPUs than the selected count. Preserve the existing restart requirement, cached models and CPU execution settings.

@@ -8,7 +8,7 @@ import csv
 import io
 
 
-CONTEXT_VERSION = "6"
+CONTEXT_VERSION = "7"
 HEADERS = ("Section", "Topic", "Guidance", "Context Version")
 ENTRIES = (
     ("purpose", "Overview", "How to use this export",
@@ -374,8 +374,26 @@ ENTRIES = (
      "Source: https://poe2db.tw/us/Poison"),
     ("rune_keyword_monster_rarity", "Rune keywords", "Monster Rarity",
      "Monster Rarity increases the chance for monsters to be Rare and Magic, and also increases "
-     "Monster Modifier Chance for Rare Monsters. It is distinct from Rarity of Items Found and "
+     "Monster Modifier Chance for Rare Monsters. Each 1% increased Monster Rarity grants 1% increased "
+     "Rare Monster chance and 1% increased Magic Monster chance: 50% Monster Rarity grants 50% to each "
+     "of those bonuses. These are increased-chance bonuses, not percentage points of the observed "
+     "kill distribution. Monster Rarity is distinct from Rarity of Items Found and "
      "from the measured proportion of Rare kills. Source: https://poe2db.tw/us/Monster_Rarity"),
+    ("gaining_traction", "Map analysis", "Gaining Traction: Monster Rarity per completed remnant",
+     "With Gaining Traction allocated, Verisium Remnants have +50% increased Monster Rarity per "
+     "remnant completed in the area (the same map). After N completed remnants, its contribution "
+     "is +(50 x N)% Monster Rarity, giving the same +(50 x N)% increased Rare Monster chance and "
+     "increased Magic Monster chance for those remnants. "
+     "For example, one completed remnant gives +50% to each chance bonus; two give +100% to each. "
+     "The bonus accumulates across remnant chains on the same map and starts again on the next map. "
+     "It depends on completed remnants, not recipe rows, scanned rewards, or the number of chains. "
+     "Use saved Atlas allocation and completion-stage evidence when analysing it; a whole-map kill "
+     "reading includes earlier stages and does not give each monster the final accumulated bonus. "
+     "Do not add this contribution again where a recorded Monster Rarity value already includes it. "
+     "These notes explain the mechanic without changing saved percentages, kill counts or game state. "
+     "Source: bundled Atlas node AtlasExpeditionNotable12 (Gaining Traction), user-provided Monster "
+     "Rarity scaling clarification, and Monster Rarity keyword: "
+     "https://poe2db.tw/us/Monster_Rarity"),
     ("rune_keyword_runic_ward", "Rune keywords", "Runic Ward",
      "When damage would reduce Life to zero, Runic Ward leaves 1 Life and absorbs the remaining "
      "damage; insufficient Ward still allows death. It does not protect against Life loss that "
@@ -691,6 +709,10 @@ COLUMN_GUIDANCE = (
      "game rule. Start/End setup changes can explain differences between phase snapshots."),
     ("field_monster_rarity", r"Monster Rarity %", "Recorded monster rarity",
      "Monster Rarity % is a saved map percentage, not a measured proportion of Rare kills. "
+     "Each 1% Monster Rarity grants 1% increased Rare Monster chance and 1% increased Magic Monster "
+     "chance, so 50% grants 50% to each bonus. With Gaining Traction allocated, Verisium Remnants gain "
+     "+50% Monster Rarity per remnant completed on that map; see the Gaining Traction stage guidance before comparing "
+     "readings or combining bonuses. "
      "Compare outcomes alongside actual recorded Normal/Magic/Rare/Unique kill composition, map/gear "
      "rarity and other settings. The logger does not convert this percentage into a guaranteed monster "
      "distribution or drop formula; blank is unknown and zero is an explicit value."),
