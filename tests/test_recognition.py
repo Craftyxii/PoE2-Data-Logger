@@ -185,7 +185,7 @@ class RecognitionTests(unittest.TestCase):
     def test_reset_during_auto_commit_resolution_is_rechecked_inside_commit_transaction(self):
         """Verify a reset after resolution is caught before any transactional save."""
         old = self.fresh_auto_capture()
-        original_candidate = auto_commit.candidate
+        original_candidate = auto_commit.family_candidate
         after_reset = {}
         def reset_after_resolution(opened, seed=None):
             """Resolve the candidate, reset the session and record the fresh database state."""
@@ -196,7 +196,7 @@ class RecognitionTests(unittest.TestCase):
                                 ("remnant_id", "map_id", "expedition_id")))
             after_reset["records"] = self.auto_commit_records()
             return result
-        with patch.object(auto_commit, "candidate", side_effect=reset_after_resolution):
+        with patch.object(auto_commit, "family_candidate", side_effect=reset_after_resolution):
             saved = auto_commit.commit(old)
         self.assertFalse(saved["committed"])
         self.assertIn("previous session", saved["reason"])

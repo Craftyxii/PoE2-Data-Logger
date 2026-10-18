@@ -151,6 +151,7 @@ class CurrencyReader:
         self._scaled_candidates = {}
         self._example_atlases = OrderedDict()
         self._example_rank_cache = OrderedDict()
+        self._count_caches = threading.local()
         self._example_thread = threading.get_ident()
         self.context = quickjs.Context()
         self.context.set_memory_limit(128 * 1024 * 1024)
@@ -469,6 +470,18 @@ class CurrencyReader:
         """
         image = image.copy()
         image.thumbnail((96, 96), Image.Resampling.LANCZOS)
+        # Cache only this independent reader's exact input, including failed
+        # readings. Never reuse an icon match or a caller's quantity decision.
+        state = getattr(self._count_caches, "state", None)
+        if state is None or state[0] is not self.read_count:
+            state = (self.read_count, OrderedDict())
+            self._count_caches.state = state
+        cache = state[1]
+        rgba = image.convert("RGBA")
+        key = (rgba.size, rgba.tobytes())
+        if key in cache:
+            cache.move_to_end(key)
+            return cache[key]
         size = image.size
         scale = max(.5, min(size) / 40)
         pixels = self._pixels(image)
@@ -479,12 +492,13 @@ class CurrencyReader:
             if (re.fullmatch(r"\d{1,5}", trial.get("text", "")) and
                     trial.get("conf", 0) >= .76 and int(trial["text"]) > 0):
                 results.append((float(trial["conf"]), int(trial["text"])))
-        if not results:
-            return None
-        best = max(results)
+        value = max(results)[1] if results else None
         if len(results) > 1 and results[0][1] != results[1][1] and abs(results[0][0] - results[1][0]) < .08:
-            return None
-        return best[1]
+            value = None
+        cache[key] = value
+        if len(cache) > 128:
+            cache.popitem(last=False)
+        return value
 
 
 def resolve_tier(members, cell: Image.Image, read_text):

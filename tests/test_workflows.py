@@ -267,8 +267,10 @@ class WorkflowTests(unittest.TestCase):
                 for name, index in fields.items():
                     self.assertEqual(headers.index(name), index)
                 if exporter == logger.export_currency_csv:
-                    self.assertEqual(headers[-6:-2], ["Start Deli", "Start Wisp", "End Deli", "End Wisp"])
-                    self.assertEqual(headers[-2:], ["Start Baseline", "Session Found Quantity"])
+                    self.assertEqual(headers[-4:], ["Start Currency Scan ID", "End Currency Scan ID",
+                                                   "Start Currency Scan #", "End Currency Scan #"])
+                    self.assertEqual(headers[:-4][-6:-2], ["Start Deli", "Start Wisp", "End Deli", "End Wisp"])
+                    self.assertEqual(headers[:-4][-2:], ["Start Baseline", "Session Found Quantity"])
 
     def test_reset_preserves_settings_references_and_backup(self):
         """Verify reset preserves settings references and backup."""

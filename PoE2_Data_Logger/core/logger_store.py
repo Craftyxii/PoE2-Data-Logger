@@ -589,6 +589,8 @@ def initialize():
                 _set_meta(db, "bootstrapped", True)
             _initialize_references(db)
             _sync_recipe_ids(db)
+            from PoE2_Data_Logger.core.reference_updates import apply_bundled_updates
+            apply_bundled_updates(db)
             # Upgrade only explicitly attributed recipe names; older unknown
             # origins retain their missing identity instead of being guessed.
             db.execute("UPDATE chain_step_provenance SET recipe_id=(SELECT recipe_id FROM recipe_ids "
@@ -3111,7 +3113,45 @@ def currency_target_map(phase):
         return _map_id(number)
 
 
-def save_currency_snapshot(phase, items, expected_map_id=None, *, register_names=False, icon_examples=()):
+def _validate_currency_context(db, result):
+    """Validate map-owned inventory captures without binding them to an expedition."""
+    if not isinstance(result, dict):
+        raise ValueError("The currency capture context is invalid. Scan again.")
+    if "_scan_generation" not in result:
+        return
+    if result["_scan_generation"] != _meta(db, "session_generation", 0):
+        raise ValueError("This scan belongs to the previous session. Scan again.")
+    number = _meta(db, "current_map_number", 0)
+    if result.get("_capture_map_id") != (_map_id(number) if number else None):
+        raise ValueError("The map changed during the scan. Scan the current map again.")
+    if ("_capture_map_pending" in result and
+            result["_capture_map_pending"] != bool(_meta(db, "pending_new_map", False))):
+        raise ValueError("The map ended during the scan. Scan again.")
+
+
+def validate_currency_context(result):
+    """Check inventory map/session ownership; expedition changes do not invalidate it."""
+    with _connect() as db:
+        db.execute("BEGIN")
+        _validate_currency_context(db, result)
+
+
+def _currency_scan_identities(db):
+    """Project stable map-local IDs, leaving pre-ID history rows unchanged on disk."""
+    identities, counts = {}, {}
+    for row in db.execute("SELECT number,map_id,details_json FROM commits WHERE kind='Currency' ORDER BY number"):
+        map_id = row["map_id"]
+        counts[map_id] = counts.get(map_id, 0) + 1
+        details = _load(row["details_json"])
+        number = details.get("currency_scan_number", counts[map_id])
+        identities[row["number"]] = {
+            "currency_scan_number": number,
+            "currency_scan_id": details.get("currency_scan_id", f"{map_id}-C{number:03d}")}
+    return identities
+
+
+def save_currency_snapshot(phase, items, expected_map_id=None, *, register_names=False, icon_examples=(),
+                           expected_context=None):
     """Replace a map's approved inventory phase and append its commit atomically.
 
     Aggregate duplicate names, optionally register labels and teach icons, and preserve bound Atlas context.
@@ -3121,6 +3161,8 @@ def save_currency_snapshot(phase, items, expected_map_id=None, *, register_names
         raise ValueError("A snapshot needs up to 60 inventory rows.")
     with _connect(undo_label='Currency approval') as db:
         db.execute("BEGIN IMMEDIATE")
+        if expected_context is not None:
+            _validate_currency_context(db, expected_context)
         number = _meta(db, "current_map_number", 0)
         if phase == "start" and (not number or _meta(db, "pending_new_map", False)):
             number += 1
@@ -3171,12 +3213,15 @@ def save_currency_snapshot(phase, items, expected_map_id=None, *, register_names
                    (map_id, phase, _dump(totals), _now(), _dump(context)))
         has_start = db.execute("SELECT 1 FROM currency_snapshots WHERE map_id=? AND phase='start'",
                                (map_id,)).fetchone() is not None
-        _record_commit(db, "Currency", map_id, reference=phase.title() + " inventory", context=context,
-                       details={"phase": phase, "items": totals,
-                                "start_baseline": "Scanned" if has_start else "Assumed empty",
-                                "item_kinds": {name: "Item" if name.casefold() in item_catalog else "Currency"
-                                               for name in totals}})
-    return currency_for_map(map_id)
+        scan_number = db.execute("SELECT COUNT(*) FROM commits WHERE kind='Currency' AND map_id=?",
+                                 (map_id,)).fetchone()[0] + 1
+        identity = {"currency_scan_number": scan_number, "currency_scan_id": f"{map_id}-C{scan_number:03d}"}
+        commit_number = _record_commit(db, "Currency", map_id, reference=phase.title() + " inventory", context=context,
+            details={"phase": phase, "items": totals, **identity,
+                     "start_baseline": "Scanned" if has_start else "Assumed empty",
+                     "item_kinds": {name: "Item" if name.casefold() in item_catalog else "Currency"
+                                    for name in totals}})
+    return {**currency_for_map(map_id), **identity, "scan_commit_number": commit_number}
 
 
 def currency_for_map(map_id):
@@ -3272,6 +3317,7 @@ def export_currency_csv():
         commits = {(row["map_id"], row["reference"].split(" ", 1)[0].lower()): row["number"]
                    for row in db.execute("SELECT number,map_id,reference FROM commits WHERE kind='Currency' "
                                          "ORDER BY number")}
+        identities = _currency_scan_identities(db)
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     writer.writerow(["Map ID", "Currency", "Start Count", "End Count", "Net Change",
@@ -3281,7 +3327,8 @@ def export_currency_csv():
                      *(f"Start {header}" for header in ATLAS_EXPORT_HEADERS),
                      *(f"End {header}" for header in ATLAS_EXPORT_HEADERS),
                      "Start Deli", "Start Wisp", "End Deli", "End Wisp", "Start Baseline",
-                     "Session Found Quantity"])
+                     "Session Found Quantity", "Start Currency Scan ID", "End Currency Scan ID",
+                     "Start Currency Scan #", "End Currency Scan #"])
     for map_id, phases in sorted(snapshots.items()):
         start = _load(phases["start"]["items_json"]) if "start" in phases else {}
         end = _load(phases["end"]["items_json"]) if "end" in phases else {}
@@ -3302,7 +3349,11 @@ def export_currency_csv():
                              *start_config[-2:], *end_config[-2:],
                              "Scanned" if "start" in phases else "Assumed empty",
                              max(0, end.get(name, 0) - start.get(name, 0))
-                             if name and "end" in phases else 0 if "end" in phases else ""]))
+                             if name and "end" in phases else 0 if "end" in phases else "",
+                             *(identities.get(commits.get((map_id, phase)), {}).get("currency_scan_id", "")
+                               if phase in phases else "" for phase in ("start", "end")),
+                             *(identities.get(commits.get((map_id, phase)), {}).get("currency_scan_number", "")
+                               if phase in phases else "" for phase in ("start", "end"))]))
     return output.getvalue().encode("utf-8-sig")
 
 
@@ -3889,11 +3940,16 @@ def export_commits_csv():
     """Export the ordered commit index without expanding event details or configuration snapshots."""
     output = io.StringIO(newline="")
     writer = csv.writer(output)
-    writer.writerow(["Scan Commit #", "Type", "Map ID", "Expedition ID", "Reference", "Recorded UTC"])
+    writer.writerow(["Scan Commit #", "Type", "Map ID", "Expedition ID", "Reference", "Recorded UTC",
+                     "Currency Scan ID", "Currency Scan #"])
     with _connect() as db:
+        db.execute("BEGIN")
+        identities = _currency_scan_identities(db)
         for row in db.execute("SELECT number,kind,map_id,expedition_id,reference,recorded_at "
                               "FROM commits ORDER BY number"):
-            writer.writerow(_csv_row(list(row)))
+            identity = identities.get(row["number"], {})
+            writer.writerow(_csv_row([*row, identity.get("currency_scan_id", ""),
+                                      identity.get("currency_scan_number", "")]))
     return output.getvalue().encode("utf-8-sig")
 
 
@@ -3915,6 +3971,7 @@ CHAIN_RECIPE_ID_HEADER = "Propagation Recipe ID"
 HISTORY_APPEND_HEADERS = (*KILL_EXPORT_HEADERS, "Remnants Detonated (Scan)", "Start Baseline",
                           "Current Inventory Snapshot", "Session Found Quantity", *CHAIN_EXPORT_HEADERS,
                           *CHAIN_CORRECTION_HEADERS, CHAIN_RECIPE_ID_HEADER)
+CURRENCY_STAGE_HEADERS = ("Currency Scan ID", "Currency Scan #", "Final Currency Scan")
 
 
 def _origin_export_values(origin):
@@ -3968,12 +4025,13 @@ def export_record_history_csv(*, _db=None):
                      *HISTORY_DETAIL_HEADERS, *CONFIG_EXPORT_HEADERS[:-4], "Tablet Slot Capacity",
                      *(f"{master} Configured Perk {n}" for master in ("Jado", "Doryani", "Hilda")
                        for n in range(1, 5)), *ATLAS_EXPORT_HEADERS, "Deli", "Wisp", *HISTORY_APPEND_HEADERS,
-                     *MAP_CONTEXT_HEADERS])
+                     *MAP_CONTEXT_HEADERS, *CURRENCY_STAGE_HEADERS])
     starts = {}
     with (nullcontext(_db) if _db is not None else _connect()) as db:
         if _db is None:
             db.execute("BEGIN")
         current_inventories, current_commits = _current_inventory_projection(db)
+        identities = _currency_scan_identities(db)
         completed = {row[0] for row in db.execute("SELECT expedition_id FROM chain_completions")}
         recipe_ids = {row["recipe_name"]: row["recipe_id"] for row in db.execute("SELECT * FROM recipe_ids")}
         for commit in db.execute("SELECT * FROM commits ORDER BY number"):
@@ -3986,6 +4044,11 @@ def export_record_history_csv(*, _db=None):
             if commit["kind"] == "Currency":
                 phase = details.get("phase", "")
                 shared["Inventory Phase"] = phase
+                identity = identities[commit["number"]]
+                shared.update({"Currency Scan ID": identity["currency_scan_id"],
+                               "Currency Scan #": identity["currency_scan_number"],
+                               "Final Currency Scan": phase == "end" and
+                                   current_commits.get((commit["map_id"], "end")) == commit["number"]})
                 totals = details.get("items", {})
                 start = starts.get(commit["map_id"])
                 shared["Start Baseline"] = details.get("start_baseline") or (
@@ -4096,7 +4159,8 @@ def export_record_history_csv(*, _db=None):
                                            *(_origin_export_values(origin) if chain_event else [""] * len(CHAIN_ORIGIN_HEADERS)),
                                            *(values.get(name, "") for name in CHAIN_CORRECTION_HEADERS),
                                            _origin_recipe_id_export_value(origin, recipe_ids) if chain_event else "",
-                                           *_map_context_export_values(context)]))
+                                           *_map_context_export_values(context),
+                                           *(shared.get(name, "") for name in CURRENCY_STAGE_HEADERS)]))
     return output.getvalue().encode("utf-8-sig")
 
 
@@ -4163,15 +4227,16 @@ def export_all_csv(*, _db=None):
     remnant_reader = csv.DictReader(io.StringIO(remnant_data.decode("utf-8-sig")))
     remnant_headers = [name for name in remnant_reader.fieldnames
                        if name not in (*ATLAS_EXPORT_HEADERS, "Deli", "Wisp", *HISTORY_APPEND_HEADERS,
-                                       *MAP_CONTEXT_HEADERS)]
+                                       *MAP_CONTEXT_HEADERS, *CURRENCY_STAGE_HEADERS)]
     remnants = list(remnant_reader)
     history_reader = csv.DictReader(io.StringIO(history_data.decode("utf-8-sig")))
     headers = remnant_headers + [name for name in history_reader.fieldnames
                                 if name not in remnant_headers and
                                 name not in ("Recipe", *ATLAS_EXPORT_HEADERS, "Deli", "Wisp", *HISTORY_APPEND_HEADERS,
-                                             *MAP_CONTEXT_HEADERS)]
+                                             *MAP_CONTEXT_HEADERS, *CURRENCY_STAGE_HEADERS)]
     headers.extend(item_columns)
-    headers.extend([*ATLAS_EXPORT_HEADERS, "Deli", "Wisp", *HISTORY_APPEND_HEADERS, *MAP_CONTEXT_HEADERS])
+    headers.extend([*ATLAS_EXPORT_HEADERS, "Deli", "Wisp", *HISTORY_APPEND_HEADERS, *MAP_CONTEXT_HEADERS,
+                    *CURRENCY_STAGE_HEADERS])
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=headers, extrasaction="ignore")
     writer.writeheader()

@@ -1,4 +1,4 @@
-"""Real-pixel clipped-header recovery retains independent geometry and save guards."""
+"""Real-pixel recovery retains strict evidence warnings under the selected family save policy."""
 
 import copy
 import json
@@ -50,14 +50,25 @@ class OpenedClippedHeaderTests(unittest.TestCase):
         """Bind a real scanner reading to its current disposable map reservation."""
         return {**copy.deepcopy(reading), **logger.scan_context(), **logger.assign_ocr_id('opened')}
 
-    def assert_held_without_remnant(self, reading):
-        """Exercise the production automatic writer, not only its preliminary gate."""
+    def assert_warning_and_family_policy(self, reading, *, family_saves=True):
+        """Keep original evidence warnings and test the explicitly changed writer policy."""
         self.assertFalse(auto_commit.candidate(reading)['ready'], reading)
-        saved = auto_commit.commit(self.captured(reading))
-        self.assertFalse(saved['committed'], saved)
         with logger._connect() as db:
-            self.assertEqual(db.execute("SELECT count(*) FROM commits WHERE kind='Remnant'").fetchone()[0], 0)
-            self.assertEqual(db.execute("SELECT count(*) FROM new_export WHERE remnant_id IS NOT NULL").fetchone()[0], 0)
+            before = db.execute("SELECT count(*) FROM commits WHERE kind='Remnant'").fetchone()[0]
+        if family_saves:
+            self.assertEqual((reading['family'], reading['candidates']), ('Family 57', [57]), reading)
+        else:
+            self.assertNotEqual((reading.get('family'), reading.get('candidates')), ('Family 57', [57]), reading)
+        saved = auto_commit.commit(self.captured(reading))
+        self.assertEqual(saved['committed'], family_saves, saved)
+        with logger._connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM commits WHERE kind='Remnant'").fetchone()[0],
+                             before + int(family_saves))
+            if family_saves:
+                stored = json.loads(db.execute("SELECT details_json FROM commits WHERE number=?",
+                                               (saved['scan_commit_number'],)).fetchone()[0])
+                family = json.loads(db.execute('SELECT recipes_json FROM families WHERE id=57').fetchone()[0])
+                self.assertEqual([row['recipe'] for row in stored['recipes']], family[1:])
 
     def erase(self, image, box, background_x=300):
         """Replace a tested icon region with real blank parchment from its own row."""
@@ -98,7 +109,7 @@ class OpenedClippedHeaderTests(unittest.TestCase):
         reading = opened_scan.scan_opened(image)
         self.assertEqual(reading['first_recipe'], 'Verisium Manifestations (Level 20)', reading)
         self.assertNotIn('clipped_first_row', reading)
-        self.assert_held_without_remnant(reading)
+        self.assert_warning_and_family_policy(reading)
 
     def test_extra_first_bar_socket_cannot_be_replaced_by_the_catalog_count(self):
         image = self.clipped_panel()
@@ -107,7 +118,7 @@ class OpenedClippedHeaderTests(unittest.TestCase):
         reading = opened_scan.scan_opened(image)
         self.assertEqual(reading['first_recipe'], 'Verisium Manifestations (Level 20)', reading)
         self.assertNotIn('clipped_first_row', reading)
-        self.assert_held_without_remnant(reading)
+        self.assert_warning_and_family_policy(reading)
 
     def test_one_visible_witness_does_not_authorize_clipped_first_row(self):
         image = self.clipped_panel().crop((0, 0, 575, 238))
@@ -115,14 +126,14 @@ class OpenedClippedHeaderTests(unittest.TestCase):
         self.assertEqual(reading['first_recipe'], 'Verisium Manifestations (Level 20)', reading)
         self.assertEqual(len(reading['opened_recipes']), 2, reading)
         self.assertNotIn('clipped_first_row', reading)
-        self.assert_held_without_remnant(reading)
+        self.assert_warning_and_family_policy(reading)
 
     def test_missing_captured_heading_does_not_authorize_recovery(self):
         image = self.clipped_panel()
         reading = opened_scan.scan_opened(image.crop((0, 103, 575, image.height)))
         self.assertFalse(reading.get('header_verified'), reading)
         self.assertNotIn('clipped_first_row', reading)
-        self.assert_held_without_remnant(reading)
+        self.assert_warning_and_family_policy(reading)
 
     def test_skipped_recipe_row_does_not_authorize_recovery(self):
         image = self.clipped_panel()
@@ -134,17 +145,17 @@ class OpenedClippedHeaderTests(unittest.TestCase):
         self.assertEqual(reading['first_recipe'], 'Verisium Manifestations (Level 20)', reading)
         self.assertEqual(reading['next_recipe'], 'Remnants of Kalguur (Level 20)', reading)
         self.assertNotIn('clipped_first_row', reading)
-        self.assert_held_without_remnant(reading)
+        self.assert_warning_and_family_policy(reading, family_saves=False)
 
-    def test_visible_witness_socket_conflict_stays_held(self):
+    def test_visible_witness_socket_conflict_preserves_evidence_warning(self):
         image = self.erase(self.clipped_panel(), (213, 158, 253, 201))
         reading = opened_scan.scan_opened(image)
         self.assertEqual(reading['first_recipe'], 'Verisium Manifestations (Level 20)', reading)
         self.assertEqual(reading['next_recipe'], 'Powered by Verisium (Level 20)', reading)
         self.assertNotIn('clipped_first_row', reading)
-        self.assert_held_without_remnant(reading)
+        self.assert_warning_and_family_policy(reading)
 
-    def test_observed_first_bar_conflicts_keep_the_original_hold(self):
+    def test_observed_first_bar_conflicts_keep_the_original_warning(self):
         for delta, observed in ((87, 4), (91, 7), (97, 10), (101, 9)):
             with self.subTest(scroll_pixels=delta):
                 reading = opened_scan.scan_opened(self.clipped_panel(delta))
@@ -152,23 +163,23 @@ class OpenedClippedHeaderTests(unittest.TestCase):
                 self.assertEqual(reading['socket_source'], 'opened icons', reading)
                 self.assertNotIn('clipped_first_row', reading)
                 self.assertIn(f'Opened icons show {observed} sockets', reading['status'])
-                self.assert_held_without_remnant(reading)
+                self.assert_warning_and_family_policy(reading)
 
     def test_maximum_strictness_remains_manual(self):
         reading = opened_scan.scan_opened(self.clipped_panel(), strictness=100)
         self.assertEqual(reading['_ocr_strictness'], 100, reading)
-        self.assert_held_without_remnant(reading)
+        self.assert_warning_and_family_policy(reading, family_saves=False)
 
-    def test_weak_observed_confidence_cannot_be_bypassed_by_valid_evidence(self):
+    def test_weak_observed_confidence_warns_but_unique_family_can_save(self):
         original = opened_scan.scan_opened(self.clipped_panel())
         self.assertIn('clipped_first_row', original)
         for key, score in (('ocr_score', .79), ('match_score', .94)):
             with self.subTest(confidence=key):
                 reading = copy.deepcopy(original)
                 reading['opened_recipes'][2][key] = score
-                self.assert_held_without_remnant(reading)
+                self.assert_warning_and_family_policy(reading)
 
-    def test_missing_or_corrupted_evidence_stays_held(self):
+    def test_missing_or_corrupted_evidence_preserves_strict_warning(self):
         original = opened_scan.scan_opened(self.clipped_panel())
         self.assertIn('clipped_first_row', original)
         cases = []
@@ -189,21 +200,21 @@ class OpenedClippedHeaderTests(unittest.TestCase):
         cases.append(('same witness twice', duplicate))
         for name, reading in cases:
             with self.subTest(evidence=name):
-                self.assert_held_without_remnant(reading)
+                self.assert_warning_and_family_policy(reading)
 
     def test_current_catalog_drift_invalidates_saved_witness_evidence(self):
         reading = opened_scan.scan_opened(self.clipped_panel())
         self.assertTrue(auto_commit.candidate(reading)['ready'], reading)
         logger.save_recipe({'name': 'Powered by Verisium (Level 20)', 'sockets': 4,
                             'combo': 'Arcane + Earth + Ward + Vision'})
-        self.assert_held_without_remnant(reading)
+        self.assert_warning_and_family_policy(reading)
 
     def test_witness_with_different_recipe_stage_does_not_supply_first_count(self):
         logger.save_recipe({'name': 'Powered by Verisium (Level 20)', 'sockets': 4,
                             'combo': 'Arcane + Earth + Ward + Vision'})
         reading = opened_scan.scan_opened(self.clipped_panel())
         self.assertNotIn('clipped_first_row', reading)
-        self.assert_held_without_remnant(reading)
+        self.assert_warning_and_family_policy(reading)
 
     def test_recovery_keeps_auto_commit_toggle_and_capture_context_guards(self):
         reading = opened_scan.scan_opened(self.clipped_panel())

@@ -47,6 +47,7 @@ class HotkeyScanTimeoutTests(unittest.TestCase):
                 self.assertEqual(event["mode"], mode)
                 self.assertIn("timed out", event["error"])
                 self.assertFalse(self.manager._capture_lock.locked())
+                self.manager.ack_event(event["id"])
                 current = self.reserve(mode)
                 self.assertNotEqual(current, old)
                 self.manager._finish_capture({"mode": mode, "error": "", "result": {"late": True}}, b"late", old)
@@ -57,6 +58,7 @@ class HotkeyScanTimeoutTests(unittest.TestCase):
                 self.manager._finish_capture({"mode": mode, "error": "", "result": {"new": True}}, b"new", current)
                 self.assertFalse(self.manager._capture_lock.locked())
                 self.assertEqual(self.manager.status()["latest"]["result"], {"new": True})
+                self.manager.ack_event(self.manager.status()["latest"]["id"])
 
     def test_cancelled_capture_timeout_releases_reservation_without_new_error(self):
         """Free a cancelled hung reader without showing a timeout for an intentionally abandoned scan."""

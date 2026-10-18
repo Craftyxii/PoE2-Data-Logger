@@ -41,12 +41,14 @@ GAME_RESOLUTIONS = {
 }
 
 MINIMUM_REGION_FRACTIONS = (200 / 1920, 100 / 1080)
+KILL_MINIMUM_REGION_FRACTIONS = (20 / 1920, 20 / 1080)
 
 
-def minimum_region_pixels(width=1920, height=1080):
-    """Scale the shared 200×100-at-1080p minimum to the native capture resolution."""
-    return (math.ceil(width * MINIMUM_REGION_FRACTIONS[0]),
-            math.ceil(height * MINIMUM_REGION_FRACTIONS[1]))
+def minimum_region_pixels(width=1920, height=1080, region_key=None):
+    """Scale the region-specific 1080p minimum to the native capture resolution."""
+    minimum = (KILL_MINIMUM_REGION_FRACTIONS if region_key == "kill_count_region"
+               else MINIMUM_REGION_FRACTIONS)
+    return (math.ceil(width * minimum[0]), math.ceil(height * minimum[1]))
 
 
 def validate_capture_resolution(bounds, resolution=None):
@@ -318,12 +320,12 @@ class ScanRegionsPage(QWidget):
                                       "Windows display scaling is handled automatically.")
         self.resolution_note.setWordWrap(True)
         layout.addWidget(self.resolution_note)
-        self.kill_count_capture = QCheckBox("Capture kill counts with scan hotkeys")
+        self.kill_count_capture = QCheckBox("Enable kill-count scan")
         self.kill_count_capture.setToolTip(
             "Read the four skull counters from the separate Kill counts region. "
             "OCR snapshots do not replace manual end-map entries.")
         with logger._connect() as db:
-            self.kill_count_capture.setChecked(bool(logger._meta(db, "kill_count_scan_enabled", False)))
+            self.kill_count_capture.setChecked(bool(logger._meta(db, "kill_count_scan_enabled", True)))
         layout.addWidget(self.kill_count_capture)
         toolbar = QHBoxLayout()
         live = QPushButton("Select region in game")
@@ -449,9 +451,12 @@ class ScanRegionsPage(QWidget):
                      if key not in self._legacy_regions}
             if not boxes:
                 raise ValueError(self._legacy_instruction())
-            if any(box[2] < MINIMUM_REGION_FRACTIONS[0] or
-                   box[3] < MINIMUM_REGION_FRACTIONS[1] for box in boxes.values()):
-                raise ValueError("Make each region at least 200×100 pixels at 1080p.")
+            for key, box in boxes.items():
+                minimum = (KILL_MINIMUM_REGION_FRACTIONS if key == "kill_count_region"
+                           else MINIMUM_REGION_FRACTIONS)
+                if box[2] < minimum[0] or box[3] < minimum[1]:
+                    size = "20×20" if key == "kill_count_region" else "200×100"
+                    raise ValueError(f"Make the {REGIONS[key][0]} region at least {size} pixels at 1080p.")
             with store.database_timeout(0), logger._connect() as db:
                 # A concurrent reader/worker may own the write lock. Do not
                 # spend SQLite's default ten-second wait on the GUI thread.
@@ -473,9 +478,10 @@ class ScanRegionsPage(QWidget):
 
 class RegionEditor(QDialog):
     """Select in widget coordinates and return native pixels when capture bounds are supplied."""
-    def __init__(self, current=None, parent=None, screenshot=None, screen_bounds=None):
+    def __init__(self, current=None, parent=None, screenshot=None, screen_bounds=None, region_key=None):
         """Display a physical game capture at the matched monitor's logical geometry."""
         super().__init__(parent)
+        self.region_key = region_key
         self.capture_bounds = QRect(*screen_bounds) if screen_bounds else None
         bounds = QRect(*screen_bounds) if screen_bounds else QRect()
         if screen_bounds:
@@ -619,12 +625,12 @@ class RegionEditor(QDialog):
             moved.moveTop(max(0, min(moved.top(), self.height() - moved.height())))
             self.selection = moved
         elif self.operation == "resize":
-            minimum_width, minimum_height = minimum_region_pixels()
+            minimum_width, minimum_height = minimum_region_pixels(region_key=self.region_key)
             if self.capture_bounds is not None:
                 # The normalized minimum is shared with Save regions. Convert
                 # it to native pixels before applying the overlay's DPI scale.
                 native_width, native_height = minimum_region_pixels(
-                    self.capture_bounds.width(), self.capture_bounds.height())
+                    self.capture_bounds.width(), self.capture_bounds.height(), self.region_key)
                 minimum_width = math.ceil(native_width * self.width() / self.capture_bounds.width())
                 minimum_height = math.ceil(native_height * self.height() / self.capture_bounds.height())
             end = QPoint(min(self.width() - 1, max(self.initial.left() + minimum_width - 1, pos.x())),
@@ -651,15 +657,16 @@ class RegionEditor(QDialog):
         """Accept the same normalized minimum as Save regions, expressed in native capture pixels."""
         self.selection = self.selection.intersected(self.rect())
         region = self.region()
-        minimum_width, minimum_height = minimum_region_pixels()
+        minimum_width, minimum_height = minimum_region_pixels(region_key=self.region_key)
         if self.capture_bounds is not None:
             minimum_width, minimum_height = minimum_region_pixels(
-                self.capture_bounds.width(), self.capture_bounds.height())
+                self.capture_bounds.width(), self.capture_bounds.height(), self.region_key)
         if region["w"] >= minimum_width and region["h"] >= minimum_height:
             self.accept()
         else:
+            reference = "20×20" if self.region_key == "kill_count_region" else "200×100"
             self.hint = (f"Select a region at least {minimum_width}×{minimum_height} pixels "
-                         "(200×100 at 1080p).\nEnter to save · Esc to cancel")
+                         f"({reference} at 1080p).\nEnter to save · Esc to cancel")
             self.update()
 
     def region(self):

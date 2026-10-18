@@ -34,6 +34,12 @@ WM_QUIT = 0x0012
 HOTKEY_ID = 0x4A31
 CAPTURE_TIMEOUT_SECONDS = 90
 KILL_COUNT_TIMEOUT_SECONDS = 5
+MAX_PENDING_SCAN_EVENTS = 8
+MAX_PENDING_SCAN_BYTES = 128 * 1024 * 1024
+# RGB PNG bytes (or their kill-evidence base64) fit under four bytes per
+# source pixel plus encoder overhead. Reserve before capture, never evict an
+# unconsumed result after its expensive recognition has completed.
+MAX_SCAN_EVIDENCE_BYTES = store.MAX_IMAGE_PIXELS * 4 + 1024 * 1024
 DEDICATED = ("remnant", "waystone", "tablet", "currency", "ritual", "propagation", "overlay", "kills")
 GENERAL_MODES = ("seed", "opened", "both")
 KEY_CODES = {
@@ -121,11 +127,11 @@ def parse_combo(value):
 
 
 class HotkeyManager:
-    """Own shortcut registration, a single reserved scan and latest-result publication with
+    """Own shortcut registration, serialized scans and ordered result publication with
     cancellation revisions and bounded physical capture adapters.
     """
     def __init__(self, grabber=None, readers=None, supported=None, hover_reader=None,
-                 tooltip_grabber=None, focused=None):
+                 tooltip_grabber=None, focused=None, *, ordered_delivery=True):
         """Initialize injectable capture/read/focus adapters, synchronization locks and
         independent scan/HUD event counters.
         """
@@ -159,6 +165,12 @@ class HotkeyManager:
         self._ocr_capture_future = None
         self._ocr_capture_revision = None
         self._active_capture_mode = None
+        self._active_capture_kind = None
+        self._active_strictness_values = None
+        self._remnant_capture = None
+        self._deferred_propagation = None
+        self._events = {}
+        self._ordered_delivery = ordered_delivery
         self._latest = None
         self._image = None
         self._sequence = 0
@@ -417,7 +429,7 @@ class HotkeyManager:
             for ident in registered:
                 user32.UnregisterHotKey(None, ident)
 
-    def capture(self, kind="default", background=False):
+    def capture(self, kind="default", background=False, *, _cached_capture=None):
         """Reserve a bounded scan or report a retired adapter that has not yet returned."""
         if kind == "overlay":
             with logger._connect() as db:
@@ -427,21 +439,70 @@ class HotkeyManager:
                     self._overlay_sequence += 1
                 self._notify_event()
             return
-        if self.focused is not None and not self.focused():
+        if _cached_capture is None and self.focused is not None and not self.focused():
             return
         with self._lock:
             mode = self.mode if kind in ("default", "remnant") else kind
             if kind in ("default", "remnant") and mode not in GENERAL_MODES:
                 mode = "opened"
             if not self._capture_lock.acquire(blocking=False):
+                if (kind == "propagation" and self._active_capture_kind in ("default", "remnant")
+                        and self._active_capture_mode in GENERAL_MODES):
+                    # One subsequent propagation request belongs to this exact
+                    # remnant image, including a key pressed before the grab returns.
+                    if self._deferred_propagation is None:
+                        try:
+                            context = logger.scan_context()
+                        except Exception as exc:
+                            self._deferred_error(f"Screen scan failed: {exc}")
+                            self._notify_event()
+                            return
+                        pending = {"revision": self._capture_owner, "context": context,
+                                   "strictness_values": self._active_strictness_values,
+                                   "deadline": time.monotonic() + CAPTURE_TIMEOUT_SECONDS}
+                        timer = threading.Timer(CAPTURE_TIMEOUT_SECONDS,
+                                                self._expire_deferred_propagation, args=(pending,))
+                        timer.daemon = True
+                        pending["timer"] = timer
+                        self._deferred_propagation = pending
+                        try:
+                            timer.start()
+                        except Exception as exc:
+                            self._deferred_propagation = None
+                            self._deferred_error(f"Screen scan failed: {exc}")
+                            self._notify_event()
                 return
+            reserved = 1 if _cached_capture is not None else 2
+            retained_bytes = sum(len(raw or b"") + len((event.get("kill_counts") or {}).get("image_base64", ""))
+                                 for event, raw in self._events.values())
+            if (len(self._events) >= MAX_PENDING_SCAN_EVENTS - int(_cached_capture is None) or
+                    retained_bytes + reserved * MAX_SCAN_EVIDENCE_BYTES > MAX_PENDING_SCAN_BYTES):
+                self._capture_lock.release()
+                self.error = "Pending scan results are full. Review them before scanning again."
+                self._notify_event()
+                return
+            if (kind == "propagation" and _cached_capture is None and self._remnant_capture is not None
+                    and self._capture_adapter_owner is None):
+                captured, self._remnant_capture = self._remnant_capture, None
+                try:
+                    logger.validate_scan_context(captured["context"])
+                except ValueError:
+                    # A stale completed image never changes the destination of
+                    # a fresh independent propagation keypress.
+                    pass
+                except Exception as exc:
+                    self._capture_lock.release()
+                    self._publish_event({"mode": mode, "result": None,
+                                         "error": f"Screen scan failed: {exc}"}, None)
+                    self._notify_event()
+                    return
+                else:
+                    _cached_capture = captured
             if self._capture_adapter_owner is not None:
                 self._capture_lock.release()
-                self._sequence += 1
-                self._latest = {"mode": mode, "result": None, "id": self._sequence,
+                self._publish_event({"mode": mode, "result": None,
                                 "error": "The previous screen capture adapter is still busy. "
-                                         "Wait for it to finish, then scan again."}
-                self._image = None
+                                         "Wait for it to finish, then scan again."}, None)
                 busy = True
             else:
                 busy = False
@@ -451,6 +512,10 @@ class HotkeyManager:
                 self._capture_owner = revision
                 self._capture_adapter_owner = revision
                 self._active_capture_mode = mode
+                self._active_capture_kind = kind
+                self._active_strictness_values = None
+                if kind != "propagation":
+                    self._remnant_capture = None
                 self._capture_deadline = time.monotonic() + CAPTURE_TIMEOUT_SECONDS
         if busy:
             self._notify_event()
@@ -465,7 +530,13 @@ class HotkeyManager:
                 self._capture_watchdog = watchdog
                 watchdog.start()
             try:
-                strictness_values = dict(ocr_sensitivity.saved_values())
+                strictness_values = (dict(_cached_capture["strictness_values"]) if _cached_capture
+                                     else dict(ocr_sensitivity.saved_values()))
+                with self._lock:
+                    if revision == self._capture_revision:
+                        self._active_strictness_values = dict(strictness_values)
+                    if self._deferred_propagation and self._deferred_propagation["revision"] == revision:
+                        self._deferred_propagation["strictness_values"] = dict(strictness_values)
             finally:
                 self._release_capture_adapter(revision)
             if self._capture_cancelled(revision):
@@ -473,10 +544,16 @@ class HotkeyManager:
             if background:
                 # Reserve the settings as well as the capture slot before
                 # scheduling, so changes cannot alter an already queued scan.
-                threading.Thread(target=self._capture, args=(kind, mode, revision, strictness_values),
+                arguments = (kind, mode, revision, strictness_values)
+                if _cached_capture is not None:
+                    arguments += (_cached_capture,)
+                threading.Thread(target=self._capture, args=arguments,
                                  daemon=True, name="poe2-hotkey-capture").start()
             else:
-                self._capture(kind, mode, revision, strictness_values)
+                if _cached_capture is None:
+                    self._capture(kind, mode, revision, strictness_values)
+                else:
+                    self._capture(kind, mode, revision, strictness_values, _cached_capture)
         except Exception as exc:
             self._release_capture_adapter(revision)
             self._finish_capture({"mode": mode, "result": None,
@@ -487,14 +564,17 @@ class HotkeyManager:
         with self._lock:
             return revision != self._capture_revision
 
-    def _capture(self, kind, mode, revision, strictness_values=None):
+    def _capture(self, kind, mode, revision, strictness_values=None, cached_capture=None):
         """Bound physical capture work independently of its cancellable logical reservation."""
         with self._lock:
             if revision != self._capture_owner or revision != self._capture_revision:
                 return
             self._capture_adapter_owner = revision
         try:
-            self._perform_capture(kind, mode, revision, strictness_values)
+            if cached_capture is None:
+                self._perform_capture(kind, mode, revision, strictness_values)
+            else:
+                self._read_cached_propagation(revision, cached_capture)
         finally:
             self._release_capture_adapter(revision)
 
@@ -503,8 +583,60 @@ class HotkeyManager:
         with self._lock:
             if self._capture_adapter_owner == revision:
                 self._capture_adapter_owner = None
+            self._run_deferred_propagation()
 
-    def _perform_capture(self, kind, mode, revision, strictness_values=None):
+    def _expire_deferred_propagation(self, pending):
+        """Bound a retained keypress even when a cancelled physical adapter never returns."""
+        with self._lock:
+            if self._deferred_propagation is not pending:
+                return
+            pending["timer"].cancel()
+            self._deferred_propagation = self._remnant_capture = None
+            self._publish_event({"mode": "propagation", "result": None,
+                                 "error": "Queued propagation scan timed out. Scan again."}, None)
+        self._notify_event()
+
+    def _run_deferred_propagation(self):
+        """Transfer one retained request only after its physical predecessor has returned."""
+        pending = self._deferred_propagation
+        if (pending is None or self._capture_owner is not None or
+                self._capture_adapter_owner is not None or self._capture_lock.locked()):
+            return
+        if time.monotonic() >= pending["deadline"]:
+            self._expire_deferred_propagation(pending)
+            return
+        captured = self._remnant_capture
+        self._deferred_propagation = self._remnant_capture = None
+        pending["timer"].cancel()
+        if captured is None or captured["revision"] != pending["revision"]:
+            # Cancellation before the screenshot returned cannot reuse those
+            # late pixels. Take a standalone screenshot after the adapter exits,
+            # retaining the queued request's original destination and settings.
+            captured = {"image": None, "context": pending["context"],
+                        "strictness_values": dict(pending["strictness_values"] or {})}
+        self.capture("propagation", background=True, _cached_capture=captured)
+
+    def _read_cached_propagation(self, revision, captured):
+        """Read a queued propagation request from the independent lossless remnant image."""
+        try:
+            context = captured["context"]
+            logger.validate_scan_context(context)
+            if self._capture_cancelled(revision):
+                self._finish_capture(None, None, revision, adapter_complete=True)
+                return
+            if captured["image"] is None:
+                self._perform_capture("propagation", "propagation", revision,
+                                      captured["strictness_values"], frozen_context=context)
+                return
+            self._read_capture("propagation", "propagation", captured["region"],
+                               captured["image"], None, **captured["arguments"],
+                               revision=revision, strictness_values=captured["strictness_values"])
+        except Exception as exc:
+            self._finish_capture({"mode": "propagation", "result": None,
+                                  "error": f"Screen scan failed: {exc}"}, None, revision,
+                                 adapter_complete=True)
+
+    def _perform_capture(self, kind, mode, revision, strictness_values=None, frozen_context=None):
         """Stop canceled requests between GUI preparation, capture, clipboard and recognition."""
         kill_capture = None
         try:
@@ -517,7 +649,9 @@ class HotkeyManager:
                 self._finish_capture(None, None, revision)
                 return
             if self.focused is not None and not self.focused():
-                self._finish_capture(None, None, revision, adapter_complete=True)
+                self._finish_capture({"mode": mode, "result": None,
+                                      "error": "The game lost focus before capture. Scan again."},
+                                     None, revision, adapter_complete=True)
                 return
             with logger._connect() as db:
                 region_key = {"opened": "live_region", "propagation": "propagation_region",
@@ -532,8 +666,15 @@ class HotkeyManager:
                 expedition = 1 if not number or logger._meta(db, "pending_new_map", False) else logger._meta(db, "settings")["expedition"]
                 chain_revision = logger._chain_revision(db, logger._exp_id(capture_map, expedition)) if capture_map else 0
                 phase = logger._meta(db, "inventory_scan_phase", "start")
-                kill_enabled = logger._meta(db, "kill_count_scan_enabled", False) is True
+                kill_enabled = logger._meta(db, "kill_count_scan_enabled", True) is True
                 kill_region = logger._meta(db, "kill_count_region", None) if kill_enabled else None
+            if frozen_context is not None:
+                logger.validate_scan_context(frozen_context)
+                capture_map = frozen_context["_capture_map_id"]
+                generation = frozen_context["_scan_generation"]
+                expedition = frozen_context["_capture_expedition"]
+                pending_map = frozen_context["_capture_map_pending"]
+                chain_revision = frozen_context["_capture_chain_revision"]
             bounds = None
             if self.supported and sys.platform == "win32":
                 from PoE2_Data_Logger.platform.hover_copy import _tooltip_bounds
@@ -562,7 +703,8 @@ class HotkeyManager:
             if self._capture_cancelled(revision):
                 self._finish_capture(None, None, revision)
                 return
-            kill_capture = self._capture_kills(kind, revision, kill_enabled, kill_region, bounds)
+            if kind == "kills":
+                kill_capture = self._capture_kills(kind, revision, kill_enabled, kill_region, bounds)
             if mode == "kills" and kill_capture is None:
                 raise ValueError("Select and enable the Kill counts region in Scan regions first.")
             if self._capture_cancelled(revision):
@@ -576,6 +718,16 @@ class HotkeyManager:
                 else:
                     image = self._grab(region)
                 self._check_image(image)
+                with self._lock:
+                    if revision == self._capture_revision:
+                        self._remnant_capture = {
+                            "revision": revision, "image": image.convert("RGB").copy(), "region": region,
+                            "strictness_values": dict(strictness_values or {}),
+                            "context": {"_scan_generation": generation, "_capture_map_id": capture_map,
+                                        "_capture_expedition": expedition, "_capture_map_pending": pending_map},
+                            "arguments": {"remnant_map": remnant_map, "capture_map": capture_map,
+                                          "generation": generation, "expedition": expedition,
+                                          "pending_map": pending_map, "chain_revision": chain_revision}}
                 if mode == "opened" and not region:
                     from PoE2_Data_Logger.ocr.runehelper_ocr import default_frame
                     image = default_frame(image)
@@ -613,7 +765,7 @@ class HotkeyManager:
                 from PoE2_Data_Logger.ui.region_select import region_for
                 frozen_bounds = bounds if self.supported and sys.platform == "win32" else (
                     0, 0, tooltip.width, tooltip.height)
-                for activity, key in (("ritual", "ritual_region"), ("currency", "inventory_region")):
+                for activity, key in (("ritual", "ritual_region"),):
                     try:
                         selected = region_for(key, frozen_bounds)
                         activity_crops[activity] = (selected["x"] - frozen_bounds[0], selected["y"] - frozen_bounds[1],
@@ -640,20 +792,14 @@ class HotkeyManager:
             self._finish_capture(event, None, revision, adapter_complete=True)
 
     def _capture_kills(self, kind, revision, enabled, region, bounds):
-        """Freeze an opted-in counter crop and map context before the primary recognition.
-
-        Failure is an auxiliary result: a missing counter never prevents the
-        existing scan, clipboard path, or manual propagation review.
-        """
-        if not enabled:
+        """Freeze only the dedicated kill-key crop and its independent map context."""
+        if kind != "kills" or not enabled:
             return None
         payload = {"request_id": str(uuid.uuid4()), "source_mode": kind,
                    "scope": "map_final" if kind == "kills" else "map_stage"}
         try:
             from PoE2_Data_Logger.core.kill_counts import capture_context
             payload["context"] = capture_context(source_mode=kind)
-            if kind != "kills" and payload["context"].get("_capture_chain_associated"):
-                payload["scope"] = "chain_stage"
             if bounds is not None:
                 from PoE2_Data_Logger.ui.region_select import region_for
                 region = region_for("kill_count_region", bounds)
@@ -675,7 +821,7 @@ class HotkeyManager:
         return payload
 
     def _read_kills(self, payload, revision, strictness):
-        """Run the auxiliary reader within a short remaining capture budget."""
+        """Run the dedicated reader within a short remaining capture budget."""
         result = {key: value for key, value in payload.items() if key != "_image"}
         if payload.get("error") or "_image" not in payload:
             return result
@@ -837,15 +983,6 @@ class HotkeyManager:
                     raise ValueError(f"No {mode} tooltip found near the cursor.")
                 if copied:
                     raise ValueError("The hovered item is not a waystone or tablet.")
-                box = (activity_crops or {}).get("currency")
-                if kind == "default" and box:
-                    inventory = item_ocr.inventory_grid(tooltip_image.crop(box))
-                    if inventory.info.get("poe2_inventory_aligned"):
-                        memory = io.BytesIO()
-                        inventory.convert("RGB").save(memory, format="PNG")
-                        raw = memory.getvalue()
-                        event = {"mode": "currency", "result": {"captured": True, "map_id": capture_map}, "error": ""}
-                        return
             if mode in ("currency", "ritual") and not region:
                 raise ValueError(f"Select the {mode} capture region in Scan settings first.")
             if image is None:
@@ -953,6 +1090,12 @@ class HotkeyManager:
         """
         modes = None if modes is None else frozenset((modes,) if isinstance(modes, str) else modes)
         with self._lock:
+            if modes is None or "propagation" in modes:
+                if self._deferred_propagation is not None:
+                    self._deferred_propagation["timer"].cancel()
+                self._deferred_propagation = None
+            if modes is None or modes.intersection(GENERAL_MODES) and self._deferred_propagation is None:
+                self._remnant_capture = None
             if modes is None or self._active_capture_mode in modes:
                 owner = self._capture_owner
                 self._capture_revision += 1
@@ -962,6 +1105,8 @@ class HotkeyManager:
                     self._finish_capture(None, None, owner)
             if modes is None or self._latest and self._latest.get("mode") in modes:
                 self._latest = self._image = None
+            self._events = {key: entry for key, entry in self._events.items()
+                            if modes is not None and entry[0].get("mode") not in modes}
 
     def _expire_capture(self, mode, revision):
         """Terminate an overdue isolated reader and release only its still-owned capture reservation."""
@@ -990,24 +1135,68 @@ class HotkeyManager:
                 event = None
             if expired:
                 self._capture_revision += 1
+            captured = self._remnant_capture
+            if expired:
+                if captured and captured["revision"] == revision:
+                    self._remnant_capture = None
+            elif event is not None and event.get("mode") not in GENERAL_MODES:
+                self._remnant_capture = None
             self._capture_owner = None
             self._active_capture_mode = None
+            self._active_capture_kind = None
+            self._active_strictness_values = None
             self._capture_deadline = None
             if self._capture_watchdog is not None:
                 self._capture_watchdog.cancel()
                 self._capture_watchdog = None
             if event is not None:
-                self._sequence += 1
-                event["id"] = self._sequence
-                self._latest = event
-                self._image = raw
+                self._publish_event(event, raw)
             self._capture_lock.release()
+            # Reserve a retained propagation request before another key can
+            # claim the slot. Physical ownership still prevents overlap after
+            # cancellation or expiry of an external adapter.
+            self._run_deferred_propagation()
         if event is not None:
             self._notify_event()
 
-    def image(self, event_id):
-        """Return image bytes only when the requested event still owns the latest capture."""
+    def _deferred_error(self, message):
+        """Reserve room for the active remnant and its accepted propagation result."""
+        if len(self._events) < MAX_PENDING_SCAN_EVENTS - 2:
+            self._publish_event({"mode": "propagation", "result": None, "error": message}, None)
+        else:
+            self.error = message
+
+    def enable_ordered_delivery(self):
+        """Subscribe the native consumer without changing the legacy latest-only API."""
         with self._lock:
+            self._ordered_delivery = True
+            if self._latest:
+                self._events.setdefault(self._latest["id"], (self._latest, self._image))
+
+    def _publish_event(self, event, raw):
+        """Retain each completed result and screenshot until the UI acknowledges it."""
+        self._sequence += 1
+        event["id"] = self._sequence
+        self._latest, self._image = event, raw
+        if self._ordered_delivery:
+            self._events[self._sequence] = (event, raw)
+
+    def next_event(self, after_id=0):
+        """Return the oldest unacknowledged scan after the UI's consumed sequence."""
+        with self._lock:
+            return next((event for ident, (event, _) in self._events.items()
+                         if ident > after_id), None)
+
+    def ack_event(self, event_id):
+        """Release retained result evidence after the UI copied it into its review state."""
+        with self._lock:
+            self._events.pop(event_id, None)
+
+    def image(self, event_id):
+        """Return an unconsumed event's own evidence, retaining the legacy latest lookup."""
+        with self._lock:
+            if event_id in self._events:
+                return self._events[event_id][1]
             if self._latest and self._latest["id"] == event_id:
                 return self._image
         return None

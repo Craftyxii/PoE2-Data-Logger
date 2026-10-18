@@ -8,7 +8,7 @@ import csv
 import io
 
 
-CONTEXT_VERSION = "7"
+CONTEXT_VERSION = "8"
 HEADERS = ("Section", "Topic", "Guidance", "Context Version")
 ENTRIES = (
     ("purpose", "Overview", "How to use this export",
@@ -114,6 +114,30 @@ ENTRIES = (
      "Rescans replace a phase's current snapshot rather than adding quantities. Currency scans also include "
      "registered equipment/items and Omens. Item name headers can carry a category prefix to avoid metadata collisions; "
      "labels differing only in case share current gain counts."),
+    ("inventory_stages", "Inventory", "Currency scan IDs and stages within a map",
+     "Each approved Currency scan has a Currency Scan ID and Currency Scan # within its Map ID, "
+     "independent of Expedition ID. One scan can expand into several item rows: group by Currency "
+     "Scan ID to recover the stage, not by worksheet row. The scan number is an ordering identifier, "
+     "not an item quantity or an additional map. Historical stages retain their approved quantities "
+     "and saved settings. Rescanning replaces the applicable current inventory; never add earlier "
+     "stage quantities to a later scan. For example, End scans showing 1 Divine Orb then 3 Divine "
+     "Orbs leave an End count of 3, not 4; the separate baseline and gain rules still apply. "
+     "Final Currency Scan identifies the latest approved End scan used by those rules at export time. "
+     "A currency absent from an approved replacement inventory is not carried forward from an older "
+     "stage. IDs for older records lacking a stored scan ID are derived from surviving Currency "
+     "commit order during export; the historical commit payload is not rewritten."),
+    ("remnant_review_policy", "Remnants", "Family matching and explicit confirmations",
+     "With remnant auto-commit enabled, an opened reading with one matched family and a recognized "
+     "first recipe in that family saves its catalog suffix, including unseen rows. Independent OCR "
+     "confidence, heading, geometry and visible-socket warnings do not hold this unique match; the "
+     "eligibility check does not rewrite those OCR fields. A repeated consecutive same-family scan still requires explicit "
+     "confirmation. Ambiguous families and invalid or stale ownership remain unresolved. Propagation "
+     "always requires manual approval. A recognized remnant waiting for a database writer retains "
+     "its original capture and ownership for admission retry; this does not approve or save it. "
+     "After a gap over 60 seconds since the last accepted chain "
+     "entry, Yes retains the chain; No discards an older unapproved propagation review, completes "
+     "the logged chain using Complete chain, and leaves the incoming part in the next expedition "
+     "for explicit approval or Commit. Unknown legacy timing does not establish a gap."),
     ("inventory_gains", "Inventory", "Signed net versus acquired counts",
      "Net Change is signed End Count minus Start Count. Export's acquired-item columns and Session Found Quantity "
      "use max(0, latest End minus latest Start) per map and label. Negative deltas indicate inventory loss or spending "
@@ -138,7 +162,10 @@ ENTRIES = (
      "Obtained rewards count only when present in approved inventory gains."),
     ("ritual_history", "Ritual", "Page replacements and repeated offers",
      "ritual_pages stores the latest saved page for (Map ID, page_number), while commits retain surviving earlier "
-     "Ritual approvals. The same reward can appear on multiple pages or rescans. Do not sum every history offer "
+     "Ritual approvals. A map can contain more than 50 saved pages. Completed Ritual captures wait in order "
+     "while the current Ritual page is being read or awaiting approval/rejection; clear pages can still save "
+     "automatically when enabled. Rescanning the same capture hash updates its page while retaining approval "
+     "history. The same reward can appear on multiple pages or rescans. Do not sum every history offer "
      "as a unique reward. Deferred status is a recorded offer attribute, not an acquisition flag."),
     ("missing_values", "Interpretation", "Blank, zero and Unknown",
      "Blank can mean unrecorded, inapplicable, legacy data without metadata, or a repeated map-level field "
@@ -767,7 +794,9 @@ COLUMN_GUIDANCE = (
      "Map Mod 1..10 are the first ten positions in that same list, so count neither representation "
      "twice and do not infer the full count from ten cells. Tablet N Modifiers is that tablet's "
      "saved text. Compare specific observed affixes/rolls with stated parsing rules; text is evidence, "
-     "not a normalized total bonus, and individual unit/stacking meanings must be preserved."),
+     "not a normalized total bonus, and individual unit/stacking meanings must be preserved. "
+     "Hotkey captures waiting for new-affix registration retain their original image and context "
+     "for retry before review; waiting does not save a new map setup."),
     ("field_tablet_affixes", r"Tablet \d+ Mod \d+ (?:Affix|%|Value|Unit)|Tablet \d+ Random Modifiers", "Tablet affix values and units",
      "Affix names the recorded modifier; Value with Unit is the authoritative pair (%/count/seconds/flag). "
      "The legacy % field is populated only for percent affixes; a blank there does not mean a flat "
@@ -816,6 +845,19 @@ COLUMN_GUIDANCE = (
      "Current Inventory Snapshot marks the latest saved phase approval, not recognition confidence. "
      "Currency Scan Status describes which approved phases exist for the map. Use these to select "
      "comparable complete maps and distinguish unscanned End, explicit empty End and assumed baseline."),
+    ("field_currency_scan_id", r"(?:(?:Start|End) )?Currency Scan ID", "Currency stage identity",
+     "Currency Scan ID identifies one approved inventory scan within its Map ID, independently of "
+     "Expedition ID and the session-wide Scan Commit #. Repeated item rows with the same ID belong "
+     "to one scan. Start/End Currency Scan ID identifies the current saved phase. Blank is unavailable "
+     "or not a Currency event, not an additional scan."),
+    ("field_currency_scan_number", r"(?:(?:Start|End) )?Currency Scan #", "Currency stage order",
+     "Currency Scan # orders approved Currency scans within the map. It is not an item quantity or "
+     "a global commit number. Start/End prefixes identify the current saved phase; do not sum scan "
+     "numbers or stage quantities to calculate a map total."),
+    ("field_currency_scan_final", r"Final Currency Scan", "Current final currency approval",
+     "Final Currency Scan marks the latest approved End Currency scan for the map at export time. "
+     "Earlier approvals remain in history and are not additional currency gains. This is a current "
+     "selection flag, not OCR confidence or proof that the user actually ended the map then."),
     ("field_item_columns", r"(?:Item|Currency|Omen): .+", "Named acquired-item columns",
      "Named item columns in Export contain that label's current positive inventory gain once per map. "
      "Many currency/Omen names use plain headers; Item:/Currency:/Omen: prefixes disambiguate categories "
@@ -936,14 +978,20 @@ ENTRIES += (
      "or whether the observation covers the whole map. These observations do not change existing manual end-map totals, "
      "their save behavior or the established Export/Scan History kill fields."),
     ("kill_count_scopes", "Kill counts", "Optional chain links and final map readings",
-     "Kill Count Scope is chain_stage for a reading captured with an active remnant chain, map_stage for "
+     "Current screenshot capture uses only the dedicated kill-count key, has map-only ownership, and records "
+     "map_final as a compatibility scope label for each cumulative snapshot; Currency, "
+     "General and other scan keys do not capture kill counts. Historical Kill Count Scope can be "
+     "chain_stage for a reading captured with an active remnant chain, map_stage for "
      "a reading without that link, or map_final for a dedicated final-map kill-count scan. Expedition ID "
      "is optional and is present only for chain_stage; no chain is required to save map_stage or map_final. "
      "A chain link describes capture context and does not prove the observed kills came solely from "
      "that chain. These are not chain-only deltas or kills per remnant. A map_final row is the observed "
      "reading requested through the final-map scan path; it represents the actual end of the map only "
      "if the user captures it then. The app does not obtain an independent game-computed final total. "
-     "Keep map_final and the existing manual end-map record separate; neither overwrites the other."),
+     "Multiple readings per map are allowed. Current Map Kill Reading selects the latest surviving "
+     "approval by Scan Commit # for that Map ID, independently of expedition. Counts of 10 then 20 "
+     "mean 20 observed kills, not 30. Select the latest row, not the largest count or a sum of readings. "
+     "Keep these observations and the existing manual end-map record separate; neither overwrites the other."),
     ("kill_count_provenance", "Kill counts", "Capture provenance and missing readings",
      "Each saved observation retains its Map ID, optional Expedition ID, stable Kill Snapshot ID, "
      "request identity, source mode, capture/recording times, image hash and JSON recognition/capture "
@@ -964,6 +1012,12 @@ ENTRIES += (
      "it neither replaces manual totals nor stores per-interval gains."),
 )
 COLUMN_GUIDANCE += (
+    ("field_kill_observation_current", r"Current Map Kill Reading", "Latest cumulative map reading",
+     "True marks the latest surviving approved kill snapshot for its Map ID by Scan Commit #. "
+     "Its four categories and Total Kills (Observed) are the current OCR counts; earlier rows remain "
+     "history and must not be added. This selection has no expedition dependency, does not replace "
+     "manual end-map totals, and does not prove the user has finished the map. Undo selects the "
+     "previous surviving observation; no observation means unknown rather than zero."),
     ("field_kill_observation_counts", r"(?:Normal|Magic|Rare|Unique|Total) Kills \(Observed\)",
      "Observed cumulative kill counts",
      "These integers are screenshot-observed cumulative counts for one Kill Snapshot ID. Total Kills "

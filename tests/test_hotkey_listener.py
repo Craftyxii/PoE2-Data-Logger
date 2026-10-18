@@ -159,7 +159,10 @@ class HotkeyListenerTests(unittest.TestCase):
                 release_prepare.set()
                 self.assertTrue(finished.wait(2))
         manager.grabber.assert_not_called()
-        self.assertIsNone(manager.status()["latest"])
+        event = manager.status()["latest"]
+        self.assertEqual(event["mode"], "opened")
+        self.assertIsNone(event["result"])
+        self.assertIn("lost focus before capture", event["error"])
         self.assertIsNone(manager._active_capture_mode)
         self.assertTrue(manager._capture_lock.acquire(False))
         manager._capture_lock.release()

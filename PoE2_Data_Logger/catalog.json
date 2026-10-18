@@ -1516,11 +1516,11 @@
       "seed_slot": "P1",
       "seed_rune": "Wisdom",
       "rewards": [
-        "Aldur's Saga",
+        "Chaos Orb x10",
         "Astrid's Creativity",
         "Cadigan's Epiphany"
       ],
-      "status": "calculator"
+      "status": "local"
     },
     {
       "family": 24,

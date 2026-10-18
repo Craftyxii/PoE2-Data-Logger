@@ -24,6 +24,7 @@ CSV_HEADERS = (
     "Unique Kills (Observed)", "Total Kills (Observed)", "Count Interpretation",
     "Scan Commit #", "Source Mode", "Captured UTC", "Recorded UTC", "Request ID",
     "Image SHA256", "OCR JSON", "Capture Context JSON",
+    "Current Map Kill Reading",
 )
 COUNT_INTERPRETATION = "Observed counter totals; not increments"
 MAX_IMAGE_BYTES = 16 * 1024 * 1024
@@ -56,6 +57,13 @@ def capture_context(source_mode=""):
         db.execute("BEGIN")
         number = logger._meta(db, "current_map_number", 0)
         mid = logger._map_id(number) if number else ""
+        if source_mode == "kills":
+            return {
+                "_scan_generation": logger._meta(db, "session_generation", 0),
+                "_capture_map_id": mid,
+                "_capture_map_pending": bool(logger._meta(db, "pending_new_map", False)),
+                "source_mode": source_mode, "captured_at": logger._now(),
+            }
         expedition = logger._meta(db, "settings")["expedition"]
         eid = logger._exp_id(mid, expedition) if mid else ""
         associated = bool(mid and (source_mode in ("propagation", "remnant") or
@@ -76,12 +84,13 @@ def _validate_context(db, context, *, allow_final=False):
     """Reject delayed callbacks after a map transition, reset, discard or Undo."""
     if (not isinstance(context, dict) or
             type(context.get("_scan_generation")) is not int or
-            type(context.get("_capture_expedition")) is not int or
-            context["_capture_expedition"] < 1 or
-            type(context.get("_capture_chain_revision")) is not int or
-            type(context.get("_capture_chain_associated")) is not bool or
             type(context.get("_capture_map_pending")) is not bool or
             not isinstance(context.get("captured_at"), str) or not context["captured_at"]):
+        raise ValueError("The kill-count capture context is invalid. Scan again.")
+    if context.get("source_mode") != "kills" and (
+            type(context.get("_capture_expedition")) is not int or context["_capture_expedition"] < 1 or
+            type(context.get("_capture_chain_revision")) is not int or
+            type(context.get("_capture_chain_associated")) is not bool):
         raise ValueError("The kill-count capture context is invalid. Scan again.")
     number = logger._meta(db, "current_map_number", 0)
     if not number:
@@ -174,7 +183,7 @@ def save_snapshot(result, *, context, request_id, source_mode="", scope="map_sta
             if existing["payload_sha256"] != payload_sha256:
                 raise ValueError("This kill-count request ID was already used for a different reading.")
             return _saved_result(existing, already_saved=True)
-        associated = context["_capture_chain_associated"]
+        associated = context.get("_capture_chain_associated", False)
         if scope == "chain_stage" and not associated:
             scope = "map_stage"
         eid = None
@@ -210,6 +219,7 @@ def export_csv(*, _db=None):
     with (nullcontext(_db) if _db is not None else logger._connect()) as db:
         if _db is None:
             db.execute("BEGIN")
+        current = dict(db.execute("SELECT map_id,MAX(scan_commit_number) FROM kill_count_snapshots GROUP BY map_id"))
         for row in db.execute("SELECT * FROM kill_count_snapshots ORDER BY snapshot_id"):
             counts = [row[key] for key in ("normal", "magic", "rare", "unique_kills")]
             writer.writerow(logger._csv_row([
@@ -217,5 +227,6 @@ def export_csv(*, _db=None):
                 *counts, sum(counts), COUNT_INTERPRETATION, row["scan_commit_number"], row["source_mode"],
                 row["captured_at"], row["recorded_at"], row["request_id"], row["image_sha256"],
                 row["ocr_json"], row["context_json"],
+                row["scan_commit_number"] == current[row["map_id"]],
             ]))
     return output.getvalue().encode("utf-8-sig")

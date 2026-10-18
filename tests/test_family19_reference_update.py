@@ -35,6 +35,16 @@ def write_pack(path, value):
         archive.writestr("manifest.json", json.dumps(value, ensure_ascii=False))
 
 
+def restore_legacy_family19():
+    """Retain the optional packet's documented .18 baseline after shipped defaults advance."""
+    with logger._connect() as db:
+        db.execute("UPDATE families SET recipes_json=? WHERE id=19", (logger._dump(OLD_NAMES),))
+        db.execute("UPDATE seed_states SET rewards_json=?,status='calculator' WHERE family=19 AND sockets=7",
+                   (logger._dump(list(reversed(OLD_NAMES))),))
+        db.execute("DELETE FROM recipes WHERE name=?", (NAMES[-1],))
+        db.execute("DELETE FROM recipe_ids WHERE recipe_name=?", (NAMES[-1],))
+
+
 class Family19ReferenceUpdateTests(unittest.TestCase):
     """Validate controlled reference changes without using a personal profile."""
 
@@ -45,6 +55,7 @@ class Family19ReferenceUpdateTests(unittest.TestCase):
         store.DATA_DIR = Path(self.temporary.name)
         logger._READY = False
         logger.initialize()
+        restore_legacy_family19()
         logger.clear_export_and_reset_ids()
         logger.start_map()
         logger.save_recipe({"name": "Unrelated local reward", "sockets": 3,

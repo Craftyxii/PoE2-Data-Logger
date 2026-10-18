@@ -25,7 +25,7 @@ from PoE2_Data_Logger.ocr.scan import scan
 
 
 MAX_UPLOAD = 16 * 1024 * 1024
-HOTKEY = HotkeyManager()
+HOTKEY = HotkeyManager(ordered_delivery=False)
 
 
 def _image(encoded):

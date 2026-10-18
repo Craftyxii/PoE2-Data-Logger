@@ -413,7 +413,7 @@ class PropagationUITests(unittest.TestCase):
         self.assertFalse(self.window.header_complete_chain_button.isEnabled())
 
     def test_pending_currency_blocks_header_completion_until_review_is_rejected(self):
-        """Keep a currency capture's expedition stable while its review remains pending."""
+        """Keep the existing completion prerequisite until the pending review is resolved."""
         self.scan(["Death", "Power"], "Divine Orb x2")
         self.assertTrue(self.window.header_complete_chain_button.isEnabled())
         before = logger.get_state()["scan_commit_count"]
@@ -1345,6 +1345,8 @@ class PropagationUITests(unittest.TestCase):
                             "can_use": True, **logger.scan_context()}}
         status = service.HOTKEY.status()
         with patch.object(service.HOTKEY, "status", return_value={**status, "latest": event}), \
+             patch.object(service.HOTKEY, "next_event", side_effect=[event, None]), \
+             patch.object(service.HOTKEY, "ack_event"), \
              patch.object(service.HOTKEY, "image", return_value=self.raw.getvalue()), \
              patch.object(logger, "assign_ocr_id", side_effect=AssertionError("remnant path")):
             self.window.poll()

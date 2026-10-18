@@ -1,8 +1,18 @@
 # Changelog
 
-## Unreleased
+## 1.3.2.20 Beta
 
+- Preserve completed Ritual pages in capture order while the previous Ritual page is being read or reviewed; retain existing Currency replacement and map/Undo clearing behavior.
+- Retain recognized hotkey remnants and Waystone/Tablet modifier discoveries during database writer contention; retry before review without rerunning OCR or replaying saves, and restore the existing HUD while waiting.
 - Explain Gaining Traction's +50% Monster Rarity per completed remnant on the same map and the matching increased Rare/Magic Monster chance bonuses in Analysis Context. Keep stage interpretation and double-counting guidance separate from saved map percentages and kill totals.
+- Give approved currency scans map-local stage IDs in history and currency exports, with map-only capture validation and context guidance; preserve earlier approved quantities and settings.
+- Keep Currency and kill-count OCR on their own keys, enable kill capture by default, and allow a tightly selected kill-count region without changing other capture-region minimums.
+- Retain multiple cumulative kill snapshots per map without expedition dependence; mark the latest surviving OCR reading in exports, never sum snapshots or overwrite manual end-map totals.
+- Retain a propagation request made during remnant recognition, with one-shot reuse of the current remnant image and ordered delivery of both results; retain standalone propagation and manual approval.
+- Cache bounded, exact-pixel raw OCR evidence and native count readings without caching approval, ownership, recipe or family decisions.
+- Auto-save unique opened family matches using the catalog suffix despite socket/confidence holds; require confirmation for consecutive same-family scans and preserve manual propagation approval.
+- Ask about chain continuity after more than 60 seconds; No completes the logged chain, discards an older unapproved review and retains the new part for explicit approval in the next expedition.
+- Apply the source-traced Family 19 reward correction only to unchanged defaults, with atomic Undo and custom-reference protection. Leave alloy reference corrections unapplied.
 
 ## 1.3.2.19 Beta
 

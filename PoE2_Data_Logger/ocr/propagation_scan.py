@@ -9,6 +9,9 @@ Unrecognized recipes, conflicting marks or unverified source origins remain unre
 from __future__ import annotations
 
 import re
+import hashlib
+import threading
+from collections import OrderedDict
 from pathlib import Path
 
 import cv2
@@ -21,6 +24,8 @@ from PoE2_Data_Logger.ocr import opened_scan, runehelper_ocr
 from PoE2_Data_Logger.ocr.propagation_marks import (
     PEAK_EXPOSURES, supported_fragment_peak_boxes, supported_partial_peak_boxes, supported_peak_boxes, three_peak_boxes,
 )
+
+_RAW_ROW_CACHE = threading.local()
 
 
 def _result(status, **values):
@@ -74,16 +79,52 @@ def _panel(image, strictness=ocr_sensitivity.DEFAULT):
 
 
 def _rapid_rows(image):
-    """Run the shared RapidOCR engine under its lock and return independent text boxes."""
+    """Reuse bounded worker-local raw OCR evidence for exactly unchanged pixels.
+
+    Recipe/family matching, strictness, mark geometry and approval are evaluated
+    afresh by callers. Cached row dictionaries never escape to caller mutation.
+    """
     with opened_scan.OCR_LOCK:
-        found = opened_scan._engine()(image)
-    if found.boxes is None:
-        return []
-    rows = []
-    for box, text, score in zip(found.boxes, found.txts, found.scores):
-        xs, ys = [float(p[0]) for p in box], [float(p[1]) for p in box]
-        rows.append({"text": text.strip(), "score": float(score), "x1": min(xs),
-                     "x2": max(xs), "y1": min(ys), "y2": max(ys)})
+        engine = opened_scan._engine()
+        parts = tuple(getattr(engine, name, None) for name in ("text_det", "text_cls", "text_rec"))
+        sessions = tuple(getattr(part, "session", None) for part in parts)
+        owners = (engine, getattr(engine, "load_img", None), *parts, *sessions,
+                  *(getattr(session, "session", None) for session in sessions),
+                  *(getattr(part, "postprocess_op", None) for part in parts))
+        attributes = (("limit_side_len", "limit_type", "mean", "std"),
+                      ("cls_image_shape", "cls_batch_num", "cls_thresh"),
+                      ("rec_image_shape", "rec_batch_num"))
+        processing = tuple(repr(tuple(getattr(part, name, None) for name in names))
+                           for part, names in zip(parts, attributes))
+        detection = getattr(parts[0], "postprocess_op", None)
+        signature = (repr(getattr(engine, "cfg", None)),
+                     tuple(getattr(engine, name, None) for name in
+                           ("text_score", "use_det", "use_cls", "use_rec", "min_side_len", "max_side_len")),
+                     processing, repr(tuple(getattr(detection, name, None) for name in
+                         ("thresh", "box_thresh", "max_candidates", "unclip_ratio", "use_dilation", "score_mode"))))
+        state = getattr(_RAW_ROW_CACHE, "state", None)
+        if (state is None or any(old is not new for old, new in zip(state[0], owners))
+                or state[1] != signature):
+            state = (owners, signature, OrderedDict())
+            _RAW_ROW_CACHE.state = state
+        cache = state[2]
+        key = (image.mode, image.size, hashlib.sha256(image.tobytes()).digest())
+        if key in cache:
+            cache.move_to_end(key)
+            return [dict(row) for row in cache[key]]
+        found = engine(image)
+        rows = []
+        if found.boxes is not None:
+            for box, text, score in zip(found.boxes, found.txts, found.scores):
+                xs, ys = [float(p[0]) for p in box], [float(p[1]) for p in box]
+                rows.append({"text": text.strip(), "score": float(score), "x1": min(xs),
+                             "x2": max(xs), "y1": min(ys), "y2": max(ys)})
+        # Eight small raw-evidence sets; oversized arbitrary inputs still run
+        # normally and do not enlarge a long-lived worker's retained memory.
+        if len(rows) <= 1024 and sum(len(row["text"].encode("utf-8")) for row in rows) <= 65536:
+            cache[key] = tuple(dict(row) for row in rows)
+            if len(cache) > 8:
+                cache.popitem(last=False)
     return rows
 
 

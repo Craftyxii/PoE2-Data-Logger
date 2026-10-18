@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QApplication, QPushButton
 from PoE2_Data_Logger.core import logger_store as logger, reference_pack, store
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
 from tests import test_propagation_ocr as fixtures
+from tests.test_family19_reference_update import restore_legacy_family19
 
 PACK = Path(__file__).resolve().parents[1] / "docs/reference_updates/family19-chaos-x10/Family19_ChaosOrb_x10_reference_proposal.zip"
 
@@ -33,6 +34,7 @@ class Family19SelectorProof(unittest.TestCase):
         store.DATA_DIR = Path(self.temp.name)
         logger._READY = False
         logger.initialize()
+        restore_legacy_family19()
         logger.start_map()
         self.fixture = fixtures.PropagationOCRTests()
         self.fixture.glyph = Image.new("RGB", (29, 29), "black")

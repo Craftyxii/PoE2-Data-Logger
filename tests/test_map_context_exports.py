@@ -113,7 +113,7 @@ class MapContextExportTests(unittest.TestCase):
             self.replace_snapshot(context, commit=number)
         for producer in (logger.export_record_history_csv, logger.export_all_csv):
             headers, rows = self.rows(producer())
-            self.assertEqual(headers[-3:], list(logger.MAP_CONTEXT_HEADERS))
+            self.assertEqual(headers[-6:], [*logger.MAP_CONTEXT_HEADERS, *logger.CURRENCY_STAGE_HEADERS])
             if producer == logger.export_all_csv:
                 self.assertEqual(headers.index("Type"), 127)
                 self.assertEqual(headers.index("Scan Commit #"), 90)
@@ -123,6 +123,7 @@ class MapContextExportTests(unittest.TestCase):
                 self.assertEqual(row["Activity Type"], context["activity_type"])
                 self.assertEqual(row["Map Scanned"], "Yes" if context["waystone_setup_saved"] else "No")
                 self.assertEqual(json.loads(row["Atlas Effects JSON"]), context["atlas_effect_snapshot"])
+                self.assertTrue(all(row[name] == "" for name in logger.CURRENCY_STAGE_HEADERS))
         _, history = self.rows(logger.export_all_csv())
         self.assertEqual(self.workbook_rows(workbook_export.export_xlsx(), 3), history)
 

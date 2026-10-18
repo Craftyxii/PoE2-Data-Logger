@@ -1,4 +1,4 @@
-"""Protect optional screenshot kill-count capture at the existing shortcut boundary."""
+"""Protect dedicated screenshot kill-count capture and independent scan-key routing."""
 
 import base64
 from concurrent.futures import Future
@@ -88,6 +88,24 @@ class KillCountHotkeyTests(unittest.TestCase):
         self.managers.append(manager)
         return manager
 
+    def test_missing_enable_preference_defaults_to_dedicated_kill_capture(self):
+        with logger._connect() as db:
+            logger._set_meta(db, "kill_count_region", self.region)
+        manager = self.manager()
+        manager.capture("kills")
+        event = manager.status()["latest"]
+        self.assertEqual(event["mode"], "kills")
+        self.assertTrue(event["kill_counts"]["result"]["complete"])
+        manager.grabber.assert_called_once_with(bbox=(1600, 250, 1860, 380), all_screens=True)
+
+    def test_focus_guard_prevents_dedicated_kill_capture(self):
+        self.configure()
+        manager = self.manager(focused=lambda: False)
+        manager.capture("kills")
+        manager.grabber.assert_not_called()
+        manager.readers["kills"].assert_not_called()
+        self.assertIsNone(manager.status()["latest"])
+
     def test_disabled_setting_keeps_existing_primary_capture_and_no_extra_work(self):
         self.configure(enabled=False)
         manager = self.manager()
@@ -103,79 +121,80 @@ class KillCountHotkeyTests(unittest.TestCase):
     def test_corrupt_truthy_opt_in_does_not_enable_new_capture(self):
         self.configure(enabled="true")
         manager = self.manager()
-        manager.capture("propagation")
-        self.assertNotIn("kill_counts", manager.status()["latest"])
+        manager.capture("kills")
+        event = manager.status()["latest"]
+        self.assertNotIn("kill_counts", event)
+        self.assertIn("Kill counts region", event["error"])
+        manager.grabber.assert_not_called()
         manager.readers["kills"].assert_not_called()
         self.context_reader.assert_not_called()
 
-    def test_optional_roi_and_context_are_frozen_before_primary_recognition(self):
+    def test_dedicated_roi_and_context_are_frozen_before_recognition(self):
         self.configure()
         manager = self.manager()
-        def primary(picture):
-            self.calls.append("read-primary")
+        def read(picture, strictness):
             self.context["_capture_map_id"] = "M0999"
             picture.putpixel((0, 0), (255, 0, 0))
-            return {"positions": [2], "runes": ["Ward"], "can_use": True}
-        manager.readers["propagation"].side_effect = primary
-        manager.capture("propagation")
+            return {"normal": 984, "magic": 719, "rare": 656, "unique": 4,
+                    "complete": True, "status": "ready", "readings": []}
+        manager.readers["kills"].side_effect = read
+        manager.capture("kills")
         event = manager.status()["latest"]
-        aux = event["kill_counts"]
-        self.assertEqual(self.calls, ["context", "grab-kills", "grab-main", "read-primary", "read-kills"])
-        self.assertEqual(aux["context"]["_capture_map_id"], "M0001")
-        self.assertEqual(aux["source_mode"], "propagation")
-        self.assertEqual(aux["scope"], "map_stage")
-        self.assertEqual(str(uuid.UUID(aux["request_id"])), aux["request_id"])
-        evidence = Image.open(io.BytesIO(base64.b64decode(aux["image_base64"], validate=True)))
+        reading = event["kill_counts"]
+        self.assertEqual(self.calls, ["context", "grab-kills"])
+        self.assertEqual(reading["context"]["_capture_map_id"], "M0001")
+        self.assertEqual(reading["source_mode"], "kills")
+        self.assertEqual(reading["scope"], "map_final")
+        self.assertEqual(str(uuid.UUID(reading["request_id"])), reading["request_id"])
+        evidence = Image.open(io.BytesIO(base64.b64decode(reading["image_base64"], validate=True)))
         self.assertEqual(evidence.format, "PNG")
         self.assertEqual(evidence.size, (260, 130))
         self.assertEqual(evidence.getpixel((0, 0)), (10, 20, 30))
-        primary_evidence = Image.open(io.BytesIO(manager.image(event["id"])))
-        self.assertEqual(primary_evidence.getpixel((0, 0)), (70, 80, 90))
-        self.assertTrue(event["result"]["can_use"])
-        self.assertNotIn("approved", event["result"])
+        self.assertIsNone(event["result"])
+        self.assertIsNone(manager.image(event["id"]))
 
-    def test_auxiliary_reader_mutation_cannot_change_frozen_counter_evidence(self):
+    def test_dedicated_reader_mutation_cannot_change_frozen_counter_evidence(self):
         self.configure()
         def read(image, strictness):
             image.putpixel((0, 0), (255, 0, 0))
             return {"normal": 984, "magic": 719, "rare": 656, "unique": 4,
                     "complete": True, "status": "ready", "readings": []}
         manager = self.manager(kill_reader=Mock(side_effect=read))
-        manager.capture("propagation")
+        manager.capture("kills")
         aux = manager.status()["latest"]["kill_counts"]
         evidence = Image.open(io.BytesIO(base64.b64decode(aux["image_base64"])))
         self.assertEqual(evidence.getpixel((0, 0)), (10, 20, 30))
         self.assertTrue(aux["result"]["complete"])
 
-    def test_native_opened_shortcut_early_return_still_attaches_counter(self):
+    def test_native_opened_shortcut_early_return_never_reads_kills(self):
         self.configure()
         manager = self.manager()
         manager.readers["opened"] = hotkey.scan_opened
         native = {"mode": "opened", "family": 57, "source": "native"}
         def recognition(revision, reader, *args, **kwargs):
-            if reader is hotkey.scan_opened:
-                self.calls.append("read-primary")
-                self.assertEqual(kwargs, {"allow_fallback": False, "verify_header": True})
-                return dict(native)
-            kwargs.pop("_timeout", None)
-            return reader(*args, **kwargs)
+            self.assertIs(reader, hotkey.scan_opened)
+            self.assertEqual(kwargs, {"allow_fallback": False, "verify_header": True})
+            return dict(native)
         with patch.object(manager, "_ocr_capture_call", side_effect=recognition), \
                 patch("PoE2_Data_Logger.core.auto_commit.candidate", return_value={"ready": True}):
             manager.capture("default")
         event = manager.status()["latest"]
         self.assertEqual(event["error"], "")
         self.assertEqual(event["result"]["family"], 57)
-        self.assertTrue(event["kill_counts"]["result"]["complete"])
-        manager.readers["kills"].assert_called_once()
+        self.assertNotIn("kill_counts", event)
+        manager.readers["kills"].assert_not_called()
+        self.context_reader.assert_not_called()
 
-    def test_chain_association_uses_captured_flag_but_final_scope_stays_map(self):
+    def test_chain_association_does_not_enable_sidecars_and_final_scope_stays_map(self):
         self.configure()
         self.context["_capture_chain_associated"] = True
         manager = self.manager()
         manager.capture("propagation")
-        self.assertEqual(manager.status()["latest"]["kill_counts"]["scope"], "chain_stage")
+        self.assertNotIn("kill_counts", manager.status()["latest"])
         manager.capture("kills")
-        self.assertEqual(manager.status()["latest"]["kill_counts"]["scope"], "map_final")
+        reading = manager.status()["latest"]["kill_counts"]
+        self.assertEqual(reading["scope"], "map_final")
+        self.assertTrue(reading["context"]["_capture_chain_associated"])
 
     def test_dedicated_kills_need_no_chain_or_other_activity_and_do_not_copy(self):
         self.configure()
@@ -217,7 +236,7 @@ class KillCountHotkeyTests(unittest.TestCase):
         manager.grabber.assert_not_called()
         self.context_reader.assert_not_called()
 
-    def test_all_existing_image_scan_modes_attach_one_auxiliary_reading(self):
+    def test_all_other_image_scan_keys_never_capture_or_read_kills(self):
         self.configure()
         for kind, mode in (("remnant", "opened"), ("remnant", "seed"),
                            ("remnant", "both"), ("default", "opened"),
@@ -229,11 +248,12 @@ class KillCountHotkeyTests(unittest.TestCase):
                 manager.capture(kind)
                 event = manager.status()["latest"]
                 self.assertEqual(event["error"], "")
-                self.assertTrue(event["kill_counts"]["result"]["complete"])
-                self.assertEqual(manager.grabber.call_count, 2)
-                manager.readers["kills"].assert_called_once()
+                self.assertNotIn("kill_counts", event)
+                self.assertEqual(manager.grabber.call_count, 1)
+                manager.readers["kills"].assert_not_called()
+        self.context_reader.assert_not_called()
 
-    def test_copied_item_early_return_keeps_primary_tooltip_and_auxiliary(self):
+    def test_copied_item_early_return_keeps_tooltip_without_kill_sidecar(self):
         self.configure()
         for kind in ("default", "waystone", "tablet"):
             with self.subTest(kind=kind):
@@ -250,66 +270,69 @@ class KillCountHotkeyTests(unittest.TestCase):
                 self.assertEqual(event["mode"], "item")
                 self.assertEqual(event["result"]["kind"], item_kind)
                 self.assertEqual(event["error"], "")
-                self.assertTrue(event["kill_counts"]["result"]["complete"])
+                self.assertNotIn("kill_counts", event)
                 copied.assert_called_once_with()
                 self.assertIsNotNone(manager.image(event["id"]))
                 manager.readers["propagation"].assert_not_called()
-                manager.readers["kills"].assert_called_once()
+                manager.readers["kills"].assert_not_called()
 
-    def test_uncertainty_does_not_change_the_primary_result_or_request_approval(self):
+    def test_uncertain_dedicated_kill_reading_preserves_unknown_values(self):
         self.configure()
         uncertain = {"normal": None, "magic": 719, "rare": 656, "unique": 4,
                      "complete": False, "status": "review", "readings": []}
         manager = self.manager(kill_reader=Mock(return_value=uncertain))
-        manager.capture("propagation")
+        manager.capture("kills")
         event = manager.status()["latest"]
         self.assertEqual(event["error"], "")
-        self.assertTrue(event["result"]["can_use"])
+        self.assertIsNone(event["result"])
         self.assertEqual(event["kill_counts"]["result"], uncertain)
-        self.assertEqual(event["mode"], "propagation")
+        self.assertEqual(event["mode"], "kills")
 
-    def test_auxiliary_ocr_and_capture_failures_do_not_drop_primary_scans(self):
+    def test_dedicated_kill_failures_preserve_mode_and_do_not_run_other_readers(self):
         self.configure()
-        manager = self.manager(kill_reader=Mock(side_effect=RuntimeError("counter unreadable")))
-        manager.capture("propagation")
-        event = manager.status()["latest"]
-        self.assertEqual(event["error"], "")
-        self.assertTrue(event["result"]["can_use"])
-        self.assertIn("counter unreadable", event["kill_counts"]["error"])
-        self.assertIsNotNone(manager.image(event["id"]))
-        manager = self.manager()
-        manager.grabber.side_effect = [RuntimeError("counter crop unavailable"), Image.new("RGB", (600, 700))]
-        manager.capture("propagation")
-        event = manager.status()["latest"]
-        self.assertEqual(event["error"], "")
-        self.assertTrue(event["result"]["can_use"])
-        self.assertIn("counter crop unavailable", event["kill_counts"]["error"])
-        manager.readers["kills"].assert_not_called()
+        for failure in ("recognition", "capture"):
+            with self.subTest(failure=failure):
+                manager = self.manager(kill_reader=Mock(side_effect=RuntimeError("counter unreadable")))
+                if failure == "capture":
+                    manager.grabber.side_effect = RuntimeError("counter crop unavailable")
+                manager.capture("kills")
+                event = manager.status()["latest"]
+                self.assertEqual(event["mode"], "kills")
+                self.assertEqual(event["error"], "")
+                self.assertIsNone(event["result"])
+                self.assertIn("failed", event["kill_counts"]["error"])
+                self.assertEqual(manager.grabber.call_count, 1)
+                for name in ("seed", "opened", "both", "propagation"):
+                    manager.readers[name].assert_not_called()
 
-    def test_missing_kill_region_keeps_primary_scanning(self):
+    def test_missing_kill_region_is_reported_only_for_dedicated_key(self):
         self.configure()
         with logger._connect() as db:
             logger._set_meta(db, "kill_count_region", None)
         manager = self.manager()
         manager.capture("propagation")
+        self.assertNotIn("kill_counts", manager.status()["latest"])
+        self.assertEqual(manager.grabber.call_count, 1)
+        manager.capture("kills")
         event = manager.status()["latest"]
-        self.assertEqual(event["error"], "")
+        self.assertEqual(event["mode"], "kills")
         self.assertIn("Select the Kill counts", event["kill_counts"]["error"])
         manager.readers["kills"].assert_not_called()
         self.assertEqual(manager.grabber.call_count, 1)
 
-    def test_primary_capture_failure_can_still_deliver_an_independent_counter(self):
+    def test_primary_capture_failure_never_attempts_an_unrequested_kill_scan(self):
         self.configure()
         manager = self.manager()
-        manager.grabber.side_effect = [Image.new("RGB", (260, 130), (10, 20, 30)),
-                                       RuntimeError("main panel unavailable")]
+        manager.grabber.side_effect = RuntimeError("main panel unavailable")
         manager.capture("propagation")
         event = manager.status()["latest"]
         self.assertIn("main panel unavailable", event["error"])
-        self.assertTrue(event["kill_counts"]["result"]["complete"])
+        self.assertNotIn("kill_counts", event)
+        self.context_reader.assert_not_called()
+        manager.readers["kills"].assert_not_called()
         manager.readers["propagation"].assert_not_called()
 
-    def test_primary_cancellation_discards_frozen_auxiliary_without_reading_it(self):
+    def test_propagation_cancellation_never_reads_kills(self):
         self.configure()
         manager = self.manager()
         manager.readers["propagation"].side_effect = lambda _image: manager.cancel_capture()
@@ -318,30 +341,29 @@ class KillCountHotkeyTests(unittest.TestCase):
         manager.readers["kills"].assert_not_called()
         self.assertFalse(manager._capture_lock.locked())
 
-    def test_auxiliary_cancellation_cannot_publish_a_late_primary_or_sidecar(self):
+    def test_dedicated_kill_cancellation_cannot_publish_late_reading(self):
         self.configure()
         manager = self.manager()
         manager.readers["kills"].side_effect = lambda *_args, **_kwargs: manager.cancel_capture()
-        manager.capture("propagation")
+        manager.capture("kills")
         self.assertIsNone(manager.status()["latest"])
         self.assertFalse(manager._capture_lock.locked())
 
-    def test_windows_region_uses_full_native_game_bounds_without_resampling(self):
+    def test_windows_dedicated_kill_key_uses_only_its_native_region(self):
         self.configure()
         manager = self.manager(supported=True, focused=lambda: True)
         selected = {"x": 2150, "y": 320, "w": 450, "h": 200}
         def region_for(key, bounds):
+            self.assertEqual(key, "kill_count_region")
             self.assertEqual(bounds, (100, 50, 2660, 1490))
-            return selected if key == "kill_count_region" else self.main_region
+            return selected
         with patch.object(hotkey.sys, "platform", "win32"), \
                 patch("PoE2_Data_Logger.platform.hover_copy._tooltip_bounds", return_value=(100, 50, 2660, 1490)), \
                 patch("PoE2_Data_Logger.ui.region_select.region_for", side_effect=region_for) as convert:
-            manager.capture("propagation")
+            manager.capture("kills")
         self.assertEqual(manager.status()["latest"]["error"], "")
-        self.assertEqual(manager.grabber.call_args_list[0].kwargs,
-                         {"bbox": (2150, 320, 2600, 520), "all_screens": True})
-        self.assertEqual([call.args[0] for call in convert.call_args_list],
-                         ["propagation_region", "kill_count_region"])
+        manager.grabber.assert_called_once_with(bbox=(2150, 320, 2600, 520), all_screens=True)
+        self.assertEqual([call.args[0] for call in convert.call_args_list], ["kill_count_region"])
 
     def test_native_counter_capture_preserves_pixels_at_720p_1080p_1440p_and_4k(self):
         self.configure()
@@ -378,7 +400,7 @@ class KillCountHotkeyTests(unittest.TestCase):
                 self.assertEqual(saved.tobytes(), source.tobytes())
                 self.assertEqual(event["kill_counts"]["scope"], "map_final")
 
-    def test_invalid_counter_regions_are_nonfatal_to_primary_scans(self):
+    def test_invalid_counter_regions_never_capture_or_invent_kill_values(self):
         self.configure()
         invalid = [
             {**self.region, "w": 0}, {**self.region, "h": -1},
@@ -397,12 +419,12 @@ class KillCountHotkeyTests(unittest.TestCase):
                 with logger._connect() as db:
                     logger._set_meta(db, "kill_count_region", region)
                 manager = self.manager()
-                manager.capture("propagation")
+                manager.capture("kills")
                 event = manager.status()["latest"]
                 self.assertEqual(event["error"], "")
-                self.assertTrue(event["result"]["can_use"])
+                self.assertIsNone(event["result"])
                 self.assertIn("Kill count capture failed", event["kill_counts"]["error"])
-                self.assertEqual(manager.grabber.call_count, 1)
+                self.assertEqual(manager.grabber.call_count, 0)
                 manager.readers["kills"].assert_not_called()
 
     def test_known_game_bounds_reject_counter_crops_outside_the_window(self):
@@ -414,12 +436,12 @@ class KillCountHotkeyTests(unittest.TestCase):
         with patch.object(hotkey.sys, "platform", "win32"), \
                 patch("PoE2_Data_Logger.platform.hover_copy._tooltip_bounds", return_value=(100, 50, 2660, 1490)), \
                 patch("PoE2_Data_Logger.ui.region_select.region_for", side_effect=region_for):
-            manager.capture("propagation")
+            manager.capture("kills")
         event = manager.status()["latest"]
         self.assertEqual(event["error"], "")
-        self.assertTrue(event["result"]["can_use"])
+        self.assertIsNone(event["result"])
         self.assertIn("inside the game", event["kill_counts"]["error"])
-        self.assertEqual(manager.grabber.call_count, 1)
+        self.assertEqual(manager.grabber.call_count, 0)
         manager.readers["kills"].assert_not_called()
 
     def test_small_counter_roi_does_not_relax_existing_primary_region_validation(self):
@@ -432,7 +454,7 @@ class KillCountHotkeyTests(unittest.TestCase):
             manager._grab(small)
         self.assertEqual(manager.grabber.call_count, 1)
 
-    def test_auxiliary_worker_uses_a_short_deadline_and_frozen_strictness(self):
+    def test_dedicated_kill_worker_uses_short_deadline_and_frozen_strictness(self):
         manager = self.manager()
         manager._capture_lock.acquire()
         manager._capture_revision = manager._capture_owner = 1
@@ -452,7 +474,7 @@ class KillCountHotkeyTests(unittest.TestCase):
         self.assertIsNone(manager._ocr_capture_future)
         manager._finish_capture(None, None, 1)
 
-    def test_auxiliary_deadline_cannot_spend_the_primary_publication_margin(self):
+    def test_dedicated_kill_deadline_preserves_publication_margin(self):
         manager = self.manager()
         manager._capture_lock.acquire()
         manager._capture_revision = manager._capture_owner = 1

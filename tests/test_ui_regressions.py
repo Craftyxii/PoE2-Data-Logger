@@ -113,17 +113,16 @@ class UIRegressionTests(unittest.TestCase):
                 self.assertEqual(self.window._review_latest_layout.spacing(), 5 if compact else 6)
 
     def test_expedition_selector_keeps_pending_snapshot_approvable(self):
-        """Refuse context changes through both selectors instead of stranding a pending inventory."""
+        """Both selectors may change expedition while the inventory stays on its original map."""
         self.window.show()
         self.window._inventory_read({"items": [{"slot": 1, "name": "Chaos Orb", "quantity": 7}],
                                      "unknown": []}, live=False)
-        for control in (self.window.expedition, self.window.header_expedition):
-            select(control, 2)
-            with self.assertRaisesRegex(ValueError, "before changing expedition"):
-                self.window.set_expedition(control)
-            self.assertEqual(logger.get_state()["current_expedition_id"], "M0001-E01")
-            self.assertEqual(self.window.expedition.currentData(), 1)
-            self.assertEqual(self.window.header_expedition.currentData(), 1)
+        for expedition, control in enumerate((self.window.expedition, self.window.header_expedition), 2):
+            select(control, expedition)
+            self.window.set_expedition(control)
+            self.assertEqual(logger.get_state()["current_expedition_id"], f"M0001-E{expedition:02}")
+            self.assertEqual(self.window.expedition.currentData(), expedition)
+            self.assertEqual(self.window.header_expedition.currentData(), expedition)
         self.window.approve_scan_button.click()
         self.assertEqual(logger.currency_for_map("M0001")["start"], {"Chaos Orb": 7})
 

@@ -40,7 +40,7 @@ from PoE2_Data_Logger.ocr.affix_capture import new_affix_names, affix_unit, modi
 from PoE2_Data_Logger.ocr import item_ocr
 from PoE2_Data_Logger.core import service
 from PoE2_Data_Logger.core import store
-from PoE2_Data_Logger.core import kill_counts
+from PoE2_Data_Logger.core import kill_counts, chain_gap
 from PoE2_Data_Logger.ui.region_select import RegionEditor, ScanRegionsPage
 from PoE2_Data_Logger.ui.atlas_settings import AtlasSettingsPage
 from PoE2_Data_Logger.ui.currency_counter import SessionCurrencyCounter
@@ -50,7 +50,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.19 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.20 Beta"
 SCAN_TIMEOUT_MS = 90000
 SCAN_PRESENTATION_RETRY_MS = 100
 SCAN_PRESENTATION_WAIT_SECONDS = 10
@@ -393,7 +393,10 @@ class LoggerWindow(QMainWindow):
         self._scan_presentation_retries = {}
         self._chain_save_pending = None
         self._task_id = 0
+        service.HOTKEY.enable_ordered_delivery()
         self._latest_hotkey = 0
+        self._latest_hotkey_error = None
+        self._hotkey_presentation_retry = None
         self._pending_kill_count_saves = {}
         self._latest_overlay = service.HOTKEY.status().get("overlay_sequence", 0)
         with logger._connect() as db:
@@ -431,6 +434,9 @@ class LoggerWindow(QMainWindow):
         self._ritual_reading = None
         self._ritual_capture_context = None
         self._remnant_reading = None
+        self._remnant_family_scope = None
+        self._last_remnant_scan_family = None
+        self._seen_remnant_scan_requests = set()
         self._propagation_reading = None
         self._manual_propagation_context = None
         self._propagation_review_active = False
@@ -438,6 +444,7 @@ class LoggerWindow(QMainWindow):
         self._chain_drafts = {}
         self._chain_scan_number = 0
         self._chain_save_request = None
+        self._chain_gap_draft = None
         self._accepted_propagation_requests = set()
         self._saved_chain_view_key = None
         self._saved_chain_edit_context = None
@@ -1428,7 +1435,8 @@ class LoggerWindow(QMainWindow):
 
     def reject_review(self):
         """Cancel and clear the active non-remnant review, restoring saved form state without
-        committing it or retaining its isolated recognition worker.
+        committing it or retaining its isolated recognition worker. Later captured Ritual
+        pages remain queued for their own review.
         """
         kind = self.pending_review_kind
         if kind == "propagation":
@@ -1437,7 +1445,8 @@ class LoggerWindow(QMainWindow):
             return self.reject_remnant_scan()
         if kind is None:
             return
-        service.HOTKEY.cancel_capture(modes=("propagation",) if kind == "propagation" else None)
+        if kind != "ritual":
+            service.HOTKEY.cancel_capture(modes=("propagation",) if kind == "propagation" else None)
         self._failed_review = False
         self._remnant_reading = None
         if kind == "waystone":
@@ -1785,18 +1794,6 @@ class LoggerWindow(QMainWindow):
             keys.addWidget(button("Clear", lambda checked=False, target=kind:
                                   self.run(lambda: self.clear_hotkey(target))), index, 3)
         hotkey.addLayout(keys)
-        propagation_help = QLabel("Propagation uses only its own key. Each accepted scan counts one detonated remnant "
-                                  "and saves its runes to the selected expedition. "
-                                  "Every propagation scan requires manual review; recipe Approve saves its runes directly. "
-                                  "Complete chain finishes the chain and advances the expedition number.")
-        propagation_help.setWordWrap(True)
-        hotkey.addWidget(propagation_help)
-        kill_help = QLabel(
-            "Select the Kill counts region in Scan regions to capture the four skull counters with scans. "
-            "Use the Map kill counts key for the final map reading, with or without a remnant chain. "
-            "OCR readings are saved separately; manual end-map entries stay unchanged.")
-        kill_help.setWordWrap(True)
-        hotkey.addWidget(kill_help)
         overlay = self._group("HUD overlay", content)
         self.overlay_checkbox = QCheckBox("Enable HUD overlay")
         self.overlay_checkbox.setChecked(self._overlay_enabled)
@@ -3271,14 +3268,13 @@ class LoggerWindow(QMainWindow):
         failure.
         """
         control = self.expedition if widget is None else widget
-        # Inventory and Ritual snapshots retain their capture expedition. Do
-        # not let a selector change leave a visible, otherwise valid review
-        # stranded behind the store's stale-context validation.
-        if self.pending_review_kind in ("currency", "ritual"):
+        # Ritual snapshots retain their capture expedition. Inventory is owned
+        # by its captured map and remains valid when the expedition changes.
+        if self.pending_review_kind == "ritual":
             self.state = logger.get_state()
             select(self.expedition, self.state["settings"]["expedition"])
             self._sync_header_ids(self.state)
-            raise ValueError("Save or reject the current inventory or Ritual review before changing expedition.")
+            raise ValueError("Save or reject the current Ritual review before changing expedition.")
         try:
             logger.save_settings({"expedition": value(control)})
         except Exception:
@@ -3763,6 +3759,7 @@ class LoggerWindow(QMainWindow):
     def _prepare_manual_propagation(self, result, *, manual=False):
         """Create recipe-only rune dropdowns for mandatory approval of every propagation scan."""
         self._clear_manual_propagation()
+        result.setdefault("_chain_accept_request", uuid4().hex)
         self._manual_propagation_context = dict(result)
         self._propagation_manual_requested = manual
         self._propagation_choices = [dict(choice) for choice in result.get("choices") or []]
@@ -3983,6 +3980,70 @@ class LoggerWindow(QMainWindow):
         """
         self._append_propagation(result, preserve_remnant_review=True, auto_save=True)
 
+    def _confirm_chain_continuity(self, result, *, retain_typed_part=False):
+        """Ask about a persisted entry gap; only an explicit No rebinds this incoming reading."""
+        gap = chain_gap.inspect_gap(result)
+        marker = (gap.expedition_id, gap.last_commit_number)
+        if not gap.needs_prompt or result.get("_chain_gap_confirmed") == marker:
+            return True
+        answer = QMessageBox.question(
+            self, "Remnant chain", "Is this the same chain?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes)
+        if answer == QMessageBox.StandardButton.Yes:
+            result["_chain_gap_confirmed"] = marker
+            return True
+        if answer != QMessageBox.StandardButton.No:
+            return False
+        # This reading has not been accepted. Detach only its own review while
+        # invoking the same completion action as the existing button.
+        manual = self._manual_propagation_context
+        reading = self._propagation_reading
+        kind = self.pending_review_kind
+        draft = [(field.text(), field.property("chainPart"), field.property("chainRecipe"))
+                 for field in self.rune_inputs] if retain_typed_part else None
+
+        def restore_draft():
+            """Keep uncommitted typed parts editable under their explicitly selected chain."""
+            if draft is not None:
+                for field, (text, part, recipe) in zip(self.rune_inputs, draft):
+                    with QSignalBlocker(field):
+                        field.setText(text)
+                        field.setProperty("chainPart", part)
+                        field.setProperty("chainRecipe", recipe)
+                self._chain_fields_changed()
+
+        request_id = result.get("_chain_accept_request")
+        owned = (request_id is not None and manual and
+                 manual.get("_chain_accept_request") == request_id)
+        if owned or manual or kind == "propagation":
+            # Explicit No discards any older unapproved propagation review.
+            # The incoming result is kept locally and rebound only after the
+            # existing completion action has succeeded.
+            self._manual_propagation_context = None
+            self._propagation_reading = None
+            if kind == "propagation":
+                self.pending_review_kind = None
+        if draft is not None:
+            for field in self.rune_inputs:
+                with QSignalBlocker(field):
+                    field.clear()
+        try:
+            self.complete_chain()
+        except Exception:
+            self._manual_propagation_context = manual
+            self._propagation_reading = reading
+            self.pending_review_kind = kind
+            restore_draft()
+            raise
+        rebound = logger.scan_context()
+        result.update(rebound)
+        if result.get("choices"):
+            result["choices"] = [{**choice, **rebound} for choice in result["choices"]]
+        result.pop("_chain_gap_confirmed", None)
+        restore_draft()
+        return True
+
     def _propagation_read(self, result, raw=None):
         """Hold every propagation capture for explicit approval, regardless of OCR confidence or settings."""
         if self._chain_save_pending:
@@ -3998,6 +4059,8 @@ class LoggerWindow(QMainWindow):
         # Replayed callbacks for a manually accepted capture must not reopen or duplicate it.
         result.setdefault("_chain_accept_request", uuid4().hex)
         if result["_chain_accept_request"] in self._accepted_propagation_requests:
+            return
+        if not self._confirm_chain_continuity(result):
             return
         preserve_remnant = (self.pending_review_kind in ("remnant", "seed") or
                             bool(logger.get_state()["ocr_pending"]))
@@ -4026,6 +4089,35 @@ class LoggerWindow(QMainWindow):
         if ((not preserve_remnant_review and self.pending_review_kind != "propagation") or
                 not result or not result.get("can_use")):
             raise ValueError("Scan a selected recipe with one or two clear propagation marks.")
+        captured_expedition = result.get("_capture_expedition")
+        preview = QPixmap(self.preview.pixmap())
+        selections = [[field.currentIndex() for field in fields] if fields else None
+                      for fields in self._propagation_row_inputs]
+        manual_runes = [field.currentText() for field in self.propagation_rune_inputs]
+        manually_entered = self._propagation_manual_requested
+        denied = [bool(choice.get("denied")) for choice in self._propagation_choices]
+        if not self._confirm_chain_continuity(result):
+            return
+        if captured_expedition != result.get("_capture_expedition"):
+            # No starts the next expedition with this same screenshot waiting
+            # for a fresh manual approval; it never accepts the part implicitly.
+            self._propagation_read(result)
+            if not preview.isNull():
+                self.preview.setPixmap(preview)
+                self.preview.show()
+            for fields, selected in zip(self._propagation_row_inputs, selections):
+                for field, index in zip(fields or [], selected or []):
+                    with QSignalBlocker(field):
+                        field.setCurrentIndex(index)
+            for field, text in zip(self.propagation_rune_inputs, manual_runes):
+                with QSignalBlocker(field):
+                    field.setEditText(text)
+            self._propagation_manual_requested = manually_entered
+            for choice, was_denied in zip(self._propagation_choices, denied):
+                if was_denied:
+                    choice["denied"] = True
+            self._manual_propagation_changed()
+            return
         logger.validate_scan_context(result)
         logger.validate_scan_context(self._chain_context)
         runes = result.get("runes", [])
@@ -4112,6 +4204,15 @@ class LoggerWindow(QMainWindow):
                  for step in self._chain_steps()]
         fingerprint = (self._chain_key(self._chain_context),
                        tuple((step["rune1"], step["rune2"]) for step in steps))
+        if not self._chain_gap_draft or self._chain_gap_draft[0] != fingerprint:
+            self._chain_gap_draft = (fingerprint, dict(self._chain_context))
+        continuation = self._chain_gap_draft[1]
+        expedition = continuation.get("_capture_expedition")
+        if not self._confirm_chain_continuity(continuation, retain_typed_part=True):
+            return
+        if expedition != continuation.get("_capture_expedition"):
+            self._chain_gap_draft = None
+            return
         if not self._chain_save_request or self._chain_save_request[0] != fingerprint:
             self._chain_save_request = (fingerprint, uuid4().hex)
         saved = logger.commit_chain_draft(steps, expected_context=self._chain_context,
@@ -4463,13 +4564,18 @@ class LoggerWindow(QMainWindow):
             self.show_overlay()
 
     def _reveal_review_overlay(self, token):
-        """Reveal an opaque held-review window only after scan work finishes and its reveal
-        token still matches.
-        """
+        """Reveal the owned ready review, retaining a retry while an older reader finishes."""
         if (self._overlay_enabled and not self._closed and not self._editing_regions and
                 not self._region_selection_pending and self.tabs.currentIndex() == 0 and
-                all(reading is None for reading in (self._inventory_reading, self._ritual_reading, self._remnant_reading)) and
                 token == self._overlay_review_token and self.pending_review_kind):
+            independent = (self._held_remnant_review is not None and
+                           self.review_kind.property("scanKind") == "propagation")
+            readings = (self._inventory_reading, self._ritual_reading,
+                        None if independent else self._remnant_reading)
+            if any(reading is not None for reading in readings):
+                QTimer.singleShot(SCAN_PRESENTATION_RETRY_MS,
+                                  lambda: self._reveal_review_overlay(token))
+                return
             self.show_overlay(automatic=True)
 
     def refresh_reference_names(self):
@@ -4925,11 +5031,42 @@ class LoggerWindow(QMainWindow):
             result.update(logger.assign_ocr_id(mode, result.get("_target_map_id"),
                                               result.get("_scan_generation"), result.get("_capture_expedition")))
 
+    def _record_remnant_scan_family(self, mode, result):
+        """Require confirmation for a new consecutive scan of one known family in this map."""
+        scope = (result.get("_scan_generation", logger.session_generation()),
+                 result.get("map_id") or result.get("_target_map_id") or result.get("_capture_map_id"))
+        if scope != self._remnant_family_scope:
+            self._remnant_family_scope = scope
+            self._seen_remnant_scan_requests.clear()
+            with logger._connect() as db:
+                previous = db.execute("SELECT details_json FROM commits WHERE kind='Remnant' AND map_id=? "
+                                      "ORDER BY number DESC LIMIT 1", (scope[1],)).fetchone()
+            self._last_remnant_scan_family = logger._load(previous[0]).get("family") if previous else None
+        request = result.setdefault("_remnant_review_request", uuid4().hex)
+        if request in self._seen_remnant_scan_requests:
+            return
+        self._seen_remnant_scan_requests.add(request)
+        readings = result.get("remnants", [result]) if mode == "seed" else [result]
+        families = set()
+        for reading in readings:
+            label = str(reading.get("family") or "").removeprefix("Family ")
+            if not label and len(reading.get("candidates") or []) == 1:
+                label = str(reading["candidates"][0])
+            if not label.isdigit():
+                return
+            families.add(int(label))
+        if len(families) != 1:
+            return
+        family = families.pop()
+        result["_repeat_family_review"] = family == self._last_remnant_scan_family
+        self._last_remnant_scan_family = family
+
     def show_result(self, mode, result, raw=None):
         """Validate remnant ownership, obtain a logger ID when needed and populate the
         corresponding review draft.
         """
         self._prepare_remnant_result(mode, result)
+        self._record_remnant_scan_family(mode, result)
         # A delayed remnant worker may finish while the user is correcting an
         # independent propagation recipe. Update the held remnant without
         # discarding the newer selectors, their values or the displayed scan.
@@ -5023,6 +5160,10 @@ class LoggerWindow(QMainWindow):
             self._seed_commit_enabled()
         if self.mode == "both" and mode == "opened":
             self._link_opened_to_seed(result)
+        if result.get("_repeat_family_review"):
+            set_message(self.scan_status, "Consecutive scans matched the same family. Confirm this remnant before saving.",
+                        "error")
+            set_message(self.review_summary, self.scan_status.text(), "error")
         if independent:
             self._show_independent_propagation_review(propagation_summary)
             if propagation_image is not None:
@@ -5144,6 +5285,8 @@ class LoggerWindow(QMainWindow):
         if self._manual_propagation_context and self.review_kind.property("scanKind") == "propagation":
             # A delayed seed completion must leave a newer correction visible
             # until its owner accepts or abandons it.
+            return
+        if (self.results.get("seed") or {}).get("_repeat_family_review"):
             return
         pending = [r for r in self._seed_readings if not r.get("saved") and not r.get("rejected")]
         if (self.pending_review_kind == "seed" and self.mode != "both" and pending and
@@ -5267,7 +5410,8 @@ class LoggerWindow(QMainWindow):
             return
         self._both_link = matches[0]
         seed = self._seed_readings[self._both_link]
-        duplicate = (self._opened_identity(opened) == self._both_last_opened or
+        duplicate = (opened.get("_repeat_family_review") or
+                     self._opened_identity(opened) == self._both_last_opened or
                      logger.seed_previously_logged(opened.get("map_id"), opened.get("expedition_id"),
                                                    family, sockets))
         self._both_approved = bool(seed.get("can_commit") and not duplicate)
@@ -5422,8 +5566,10 @@ class LoggerWindow(QMainWindow):
             # Do not replace an independently edited propagation review with
             # automatic remnant-save feedback from an older worker.
             return
+        if opened.get("_repeat_family_review"):
+            return
         if self.mode == "both":
-            from PoE2_Data_Logger.core.auto_commit import candidate
+            from PoE2_Data_Logger.core.auto_commit import family_candidate as candidate
             if (self.state["settings"].get("auto_commit") and self._both_link is not None and
                     self._both_approved and candidate(opened)["ready"]):
                 self.commit_remnant()
@@ -5756,6 +5902,11 @@ class LoggerWindow(QMainWindow):
         if self._overlay_auto_review and not self.pending_review_kind:
             self.hide_overlay()
         hotkey = service.HOTKEY.status()
+        failure = hotkey.get("error")
+        if failure != self._latest_hotkey_error:
+            self._latest_hotkey_error = failure
+            if failure:
+                self.statusBar().showMessage(failure, 8000)
         if (self._overlay_enabled and not self._closed and not self.isVisible() and
                 not (hotkey["supported"] and hotkey["registered"] and
                      hotkey["combos"].get("overlay"))):
@@ -5764,29 +5915,126 @@ class LoggerWindow(QMainWindow):
             self.showMinimized()
             self.statusBar().showMessage(
                 "HUD shortcut unavailable. Restore the logger from the taskbar to set it again.", 8000)
-        event = hotkey["latest"]
+        event = service.HOTKEY.next_event(self._latest_hotkey)
+        if event is None:
+            self._hotkey_presentation_retry = None
         if event and event["id"] != self._latest_hotkey:
+            if self._ritual_delivery_waiting(event):
+                return
+            try:
+                if not self._prepare_hotkey_presentation(event):
+                    return
+            except Exception as error:
+                self._hotkey_presentation_retry = None
+                self._latest_hotkey = event["id"]
+                try:
+                    self._restore_overlay_capture_failure()
+                    self.error(str(error))
+                finally:
+                    service.HOTKEY.ack_event(event["id"])
+                return
             self._latest_hotkey = event["id"]
+            try:
+                raw = None if event["mode"] == "kills" else service.HOTKEY.image(event["id"])
+                self._deliver_hotkey_event(event, raw)
+            finally:
+                service.HOTKEY.ack_event(event["id"])
+
+    def _prepare_hotkey_presentation(self, event):
+        """Retain recognized evidence until before-review writes can finish without blocking Qt.
+
+        Retry only admission, before review widgets or automatic saves run.
+        The FIFO owns the result and screenshot; existing cancellation removes
+        that ownership when the user changes or discards its context.
+        """
+        remnant = event["mode"] in ("opened", "seed")
+        item = (event["mode"] == "item" and not event.get("error") and
+                (event.get("result") or {}).get("kind") in ("waystone", "tablet"))
+        if event.get("error") or not (remnant or item):
+            self._hotkey_presentation_retry = None
+            return True
+        pending = self._hotkey_presentation_retry
+        if pending is not None and pending["event"] is not event:
+            pending = self._hotkey_presentation_retry = None
+        try:
+            with store.database_timeout(0):
+                # Check ownership even during backoff so map/session changes
+                # cannot keep an invalid reading waiting behind a busy writer.
+                if remnant:
+                    logger.validate_remnant_context(event["result"])
+                else:
+                    logger.validate_scan_context(event["result"])
+                now = time.monotonic()
+                if pending is not None and now < pending["next_attempt"]:
+                    return False
+                if remnant:
+                    self._prepare_remnant_result(event["mode"], event["result"])
+                else:
+                    self._require_remnant_review_finished()
+                    if event["result"]["kind"] == "waystone":
+                        # Require the existing property shape before teaching
+                        # references; unknown values still remain review holds.
+                        for key in ("tier", "waystone", "map_mods", "item_rarity",
+                                    "monster_rarity", "pack_size", "effectiveness"):
+                            event["result"]["fields"][key]
+                        self._discover_waystone_affixes(event["result"])
+                    else:
+                        # Keep the existing invalid-input and full-capacity
+                        # guards ahead of parsing or additive discovery.
+                        int(value(self.tablet_scan_number))
+                        ocr_sensitivity.validate(event["result"].get("_ocr_strictness", ocr_sensitivity.DEFAULT))
+                        if logger.tablet_next_slot() <= 4:
+                            event["_prepared_tablet_modifiers"] = self._prepare_tablet_modifiers(event["result"])
+        except Exception as error:
+            if not self._database_busy(error):
+                raise
+            attempts = pending["attempts"] + 1 if pending is not None else 1
+            delay = min(1.0, SCAN_PRESENTATION_RETRY_MS / 1000 * 2 ** min(attempts - 1, 4))
+            self._hotkey_presentation_retry = {
+                "event": event, "attempts": attempts,
+                "next_attempt": time.monotonic() + delay,
+            }
+            self._restore_overlay_capture_failure()
+            self.statusBar().showMessage(
+                "Recognition finished; the database is busy. Preparing the review when it becomes available.")
+            return False
+        self._hotkey_presentation_retry = None
+        return True
+
+    def _deliver_hotkey_event(self, event, raw):
+        """Present one retained event before releasing its private screenshot bytes."""
+        if event:
             if event.get("kill_counts"):
                 self._queue_kill_count_reading(event["kill_counts"])
             if not event["error"]:
                 self._overlay_capture_restore = None
             if event["error"]:
                 self._restore_overlay_capture_failure()
+                if event["mode"] == "kills" and self.pending_review_kind is None:
+                    self.review_kind.setText("Map kill counts")
+                    self.review_kind.setProperty("scanKind", "kills")
+                    self._show_image(None)
+                    set_message(self.review_summary, event["error"], "error")
                 self.error(event["error"])
             elif event["mode"] == "kills":
                 # The independent snapshot was handled above. Keep all manual
                 # fields and any unrelated pending review exactly as they are.
                 pass
             elif event["mode"] == "item":
-                self.run(lambda: self._hover_item_read(event["result"], service.HOTKEY.image(event["id"])))
+                prepared = event.pop("_prepared_tablet_modifiers", None)
+                if prepared is None:
+                    self.run(lambda: self._hover_item_read(event["result"], raw))
+                else:
+                    self.run(lambda: self._hover_item_read(event["result"], raw, prepared_tablet=prepared))
             elif event["mode"] == "propagation":
-                self.run(lambda: self._propagation_read(event["result"], service.HOTKEY.image(event["id"])))
+                self.run(lambda: self._propagation_read(event["result"], raw))
             elif event["mode"] in ("currency", "ritual"):
-                raw = service.HOTKEY.image(event["id"])
                 if raw:
                     try:
-                        logger.validate_scan_context(event["result"])
+                        if event["mode"] == "currency":
+                            logger.validate_currency_context(event["result"])
+                        else:
+                            logger.validate_scan_context(event["result"])
                     except ValueError as error:
                         self.error(str(error))
                         return
@@ -5796,19 +6044,33 @@ class LoggerWindow(QMainWindow):
                     if event["mode"] == "currency":
                         self.run(lambda: self._inventory_captured(picture, expected_map_id=event["result"].get("map_id"),
                                                                  expected_phase=event["result"].get("phase"),
+                                                                 expected_context=event["result"],
                                                                  expected_strictness=(event["result"].get("_ocr_strictness_values") or {}).get("currency")))
                     else:
                         self.run(lambda: self._ritual_captured(picture, expected_map_id=event["result"].get("map_id"),
                                                               expected_strictness=(event["result"].get("_ocr_strictness_values") or {}).get("ritual")))
             else:
                 self._remnant_reading = None
-                self.run(lambda: self.show_result(event["mode"], event["result"], service.HOTKEY.image(event["id"])))
+                self.run(lambda: self.show_result(event["mode"], event["result"], raw))
                 if event["mode"] == "opened":
                     self.run(lambda: self.maybe_auto_commit(event["result"]))
                 elif event["mode"] == "seed":
                     self.run(self.maybe_auto_commit_seeds)
 
-    def _hover_item_read(self, result, raw=None):
+    def _discover_waystone_affixes(self, result):
+        """Learn before-review modifier names idempotently, retaining recognized fields."""
+        fields = result["fields"]
+        learned = new_affix_names(result.get("mods", []), self.state["affixes"],
+                                  result.get("ocr_rows", []) if result.get("source") == "screen OCR" else None)
+        if learned:
+            added = logger.add_affixes(learned, record_undo=False)
+            self.state["affixes"].extend(added)
+            for widget in self.tablet_affixes:
+                for name in added:
+                    widget.addItem(name, name)
+        return fields
+
+    def _hover_item_read(self, result, raw=None, *, prepared_tablet=None):
         """Route readings to review or auto-save; additive affix discovery must not consume Undo."""
         logger.validate_scan_context(result)
         self._require_remnant_review_finished()
@@ -5819,19 +6081,12 @@ class LoggerWindow(QMainWindow):
             self._show_image(None)
         if result["kind"] == "tablet":
             number = int(value(self.tablet_scan_number))
-            saved = self._tablet_read(number, result)
+            saved = (self._tablet_read(number, result) if prepared_tablet is None else
+                     self._tablet_read(number, result, prepared=prepared_tablet))
             self.note(f"Tablet {saved} saved." if saved else
                       f"Tablet {number}: review the modifiers, then Approve.", True)
             return
-        fields = result["fields"]
-        learned = new_affix_names(result.get("mods", []), self.state["affixes"],
-                                  result.get("ocr_rows", []) if result.get("source") == "screen OCR" else None)
-        if learned:
-            added = logger.add_affixes(learned, record_undo=False)
-            self.state["affixes"].extend(added)
-            for widget in self.tablet_affixes:
-                for name in added:
-                    widget.addItem(name, name)
+        fields = self._discover_waystone_affixes(result)
         with QSignalBlocker(self.tier):
             unknown_tier = self.tier.findData("")
             if fields["tier"] in (15, 16):
@@ -5936,7 +6191,7 @@ class LoggerWindow(QMainWindow):
                                       resolution=self.scan_regions.game_resolution.currentData())
                 image = ImageGrab.grab(bbox=bounds, all_screens=True).convert("RGB")
                 editor = RegionEditor(selected, parent=self, screenshot=image,
-                                      screen_bounds=(left, top, right - left, bottom - top))
+                                      screen_bounds=(left, top, right - left, bottom - top), region_key=key)
                 self._region_editor = editor
                 if editor.exec() == QDialog.DialogCode.Accepted:
                     region = editor.region()
@@ -5996,26 +6251,8 @@ class LoggerWindow(QMainWindow):
             amount.setProperty("unit", item["unit"] if item else "%")
         self.tablet_raw_mods[number - 1] = list(raw_mods)
 
-    def _tablet_read(self, number, result):
-        """Validate scan context, register candidate affixes, and stage the next tablet slot
-        for review, including empty readings that can be corrected manually. Automatically
-        commit only ready reads whose matched affixes meet the confidence threshold;
-        additive discovery does not create its own Undo command.
-        """
-        logger.validate_scan_context(result)
-        self._require_remnant_review_finished()
-        auto = self.auto_tablet_checkbox.isChecked()
-        strictness = ocr_sensitivity.validate(result.get("_ocr_strictness", ocr_sensitivity.DEFAULT))
-        auto = auto and (result.get("source") != "screen OCR" or strictness != 100)
-        floor = ocr_sensitivity.clear_threshold(.94, strictness, .14)
-        next_slot = logger.tablet_next_slot()
-        if next_slot > 4:
-            self._pending_tablet_slot = None
-            text = "Four tablets are already saved. Clear tablet config before scanning a new set."
-            set_message(self.tablet_scan_status, text)
-            self._review_pending("tablet", text, False)
-            return None
-        number = next_slot
+    def _prepare_tablet_modifiers(self, result):
+        """Parse and learn the existing Tablet modifier evidence before replacing review."""
         ocr_rows = result.get("ocr_rows")
         if ocr_rows is not None:
             ocr_rows = item_ocr.merge_tablet_lines(ocr_rows)
@@ -6044,6 +6281,30 @@ class LoggerWindow(QMainWindow):
                 select(widget, current or "")
         result = {**result, **item_ocr.parse_tablet(ocr_rows if ocr_rows is not None else original_mods,
                                                    self.state["affixes"])}
+        return result, original_mods, ocr_rows, added
+
+    def _tablet_read(self, number, result, *, prepared=None):
+        """Validate scan context, register candidate affixes, and stage the next tablet slot
+        for review, including empty readings that can be corrected manually. Automatically
+        commit only ready reads whose matched affixes meet the confidence threshold;
+        additive discovery does not create its own Undo command.
+        """
+        logger.validate_scan_context(result)
+        self._require_remnant_review_finished()
+        auto = self.auto_tablet_checkbox.isChecked()
+        strictness = ocr_sensitivity.validate(result.get("_ocr_strictness", ocr_sensitivity.DEFAULT))
+        auto = auto and (result.get("source") != "screen OCR" or strictness != 100)
+        floor = ocr_sensitivity.clear_threshold(.94, strictness, .14)
+        next_slot = logger.tablet_next_slot()
+        if next_slot > 4:
+            self._pending_tablet_slot = None
+            text = "Four tablets are already saved. Clear tablet config before scanning a new set."
+            set_message(self.tablet_scan_status, text)
+            self._review_pending("tablet", text, False)
+            return None
+        number = next_slot
+        result, original_mods, ocr_rows, added = (self._prepare_tablet_modifiers(result)
+                                                 if prepared is None else prepared)
         preview_matches = list(result["matches"])
         review_names = new_affix_names(result["uncertain"], self.state["affixes"])
         for raw in result["uncertain"]:
@@ -6122,7 +6383,7 @@ class LoggerWindow(QMainWindow):
                 return
             try:
                 if self._inventory_capture_context is not None:
-                    logger.validate_scan_context(self._inventory_capture_context["context"])
+                    logger.validate_currency_context(self._inventory_capture_context["context"])
                 if logger.currency_target_map(phase) != self._pending_currency_map:
                     raise ValueError("Changing the snapshot would assign it to another map. "
                                      "Reject this reading and scan that map again.")
@@ -6151,17 +6412,21 @@ class LoggerWindow(QMainWindow):
             self.approve_scan_button.setToolTip(f"Save {phase} inventory to {self._pending_currency_map}.")
         self.refresh_currency_summary()
 
-    def _inventory_captured(self, image, live=True, expected_map_id=None, expected_phase=None, expected_strictness=None):
+    def _inventory_captured(self, image, live=True, expected_map_id=None, expected_phase=None, expected_strictness=None,
+                            expected_context=None):
         """Prepare frozen inventory references before replacing review, then recover preview
         or worker admission failures against this map/phase-bound capture.
         """
         self._require_remnant_review_finished()
+        if expected_context is not None:
+            logger.validate_currency_context(expected_context)
         phase = expected_phase or value(self.inventory_phase)
         map_id = logger.currency_target_map(phase)
         if expected_map_id is not None and expected_map_id != map_id:
             raise ValueError(f"The currency scan belongs to {expected_map_id}. Scan {map_id} again.")
         image = item_ocr.inventory_grid(image)
-        capture = {"map_id": map_id, "phase": phase, "image": image, "context": logger.scan_context(),
+        capture = {"map_id": map_id, "phase": phase, "image": image,
+                   "context": dict(expected_context) if expected_context is not None else logger.scan_context(),
                    "strictness": ocr_sensitivity.validate(expected_strictness) if expected_strictness is not None
                    else ocr_sensitivity.saved_values()["currency"]}
         references = logger.inventory_icons()
@@ -6223,7 +6488,7 @@ class LoggerWindow(QMainWindow):
         if capture is not None and capture is not self._inventory_reading:
             return
         if capture is not None:
-            logger.validate_scan_context(capture["context"])
+            logger.validate_currency_context(capture["context"])
         self._require_remnant_review_finished()
         phase = capture["phase"] if capture is not None else value(self.inventory_phase)
         map_id = logger.currency_target_map(phase)
@@ -6494,7 +6759,8 @@ class LoggerWindow(QMainWindow):
         capture = self._inventory_capture_context
         self._inventory_captured(self._inventory_capture, live=False,
                                  expected_map_id=capture["map_id"] if capture else None,
-                                 expected_phase=capture["phase"] if capture else None)
+                                 expected_phase=capture["phase"] if capture else None,
+                                 expected_context=capture["context"] if capture else None)
         self.note(f"Saved {name} icon example #{icon_id} from inventory slot {slot}.", True)
 
     def add_currency_name(self):
@@ -6551,7 +6817,7 @@ class LoggerWindow(QMainWindow):
         if reviewing and self._inventory_reading is not None:
             raise ValueError("Wait for the inventory scan to finish before saving.")
         if reviewing and self._inventory_capture_context is not None:
-            logger.validate_scan_context(self._inventory_capture_context["context"])
+            logger.validate_currency_context(self._inventory_capture_context["context"])
         phase = self._pending_currency_phase if reviewing else value(self.inventory_phase)
         phase = phase or value(self.inventory_phase)
         if reviewing and phase != value(self.inventory_phase):
@@ -6588,6 +6854,8 @@ class LoggerWindow(QMainWindow):
                     examples.append(example)
         saved = logger.save_currency_snapshot(phase, rows,
                                              self._pending_currency_map if reviewing else None,
+                                             expected_context=(self._inventory_capture_context["context"]
+                                                               if reviewing and self._inventory_capture_context else None),
                                              register_names=True, icon_examples=examples)
         self.state = logger.get_state()
         self._set_commit_badge(self.state["scan_commit_count"])
@@ -6645,9 +6913,14 @@ class LoggerWindow(QMainWindow):
             f"{map_id} · start {len(data['start'])} item types · end {len(data['end'])} item types"
             + (" · net: " + ", ".join(parts[:8]) if parts else ""))
 
+    def _ritual_delivery_waiting(self, event):
+        """Keep a captured Ritual page queued until the current page is saved or rejected."""
+        return event.get("mode") == "ritual" and self.pending_review_kind == "ritual"
+
     def _ritual_captured(self, image, live=True, expected_map_id=None, expected_strictness=None):
         """Prepare frozen Ritual references before replacing review, then recover preview
         or worker admission failures against this map/session-bound capture and image hash.
+        Keep completed follow-up captures for subsequent page delivery.
         """
         self._require_remnant_review_finished()
         map_id = logger.get_state()["current_map_id"]
@@ -6662,7 +6935,6 @@ class LoggerWindow(QMainWindow):
                    else ocr_sensitivity.saved_values()["ritual"]}
         names = logger.ritual_names()
         references = logger.ritual_icons()
-        service.HOTKEY.cancel_capture()
         self._ritual_reading = capture
         self._ritual_capture_context = capture
         self._pending_ritual_map = map_id

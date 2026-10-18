@@ -83,6 +83,7 @@ class HundredMapSession(unittest.TestCase):
         self.coverage = Counter()
         self.expected = {}
         self.commit_log = []
+        self.currency_scan_counts = Counter()
         self.frozen = {}
         self.labels = set()
         self.rejected_labels = set()
@@ -415,7 +416,11 @@ class HundredMapSession(unittest.TestCase):
         context = self.expected[f"M{self.current:04}"]["snapshot"]
         context = {**context, "expedition": self.expedition}
         baseline = "Scanned" if phase == "start" or "start" in self.expected[f"M{self.current:04}"]["inventories"] else "Assumed empty"
-        self.record("Currency", {"phase": phase, "items": saved, "start_baseline": baseline}, context,
+        mid = f"M{self.current:04}"
+        self.currency_scan_counts[mid] += 1
+        stage = self.currency_scan_counts[mid]
+        self.record("Currency", {"phase": phase, "items": saved, "start_baseline": baseline,
+                    "currency_scan_number": stage, "currency_scan_id": f"{mid}-C{stage:03d}"}, context,
                     reference=phase.title() + " inventory")
         self.expected[f"M{self.current:04}"]["inventories"][phase] = saved
         self.check(self.w.approve_scan_button.isEnabled(), False, "review:saved-inventory-lock")
@@ -531,23 +536,31 @@ class HundredMapSession(unittest.TestCase):
             if seed:
                 held["remnants"][0]["can_commit"] = False
             else:
-                held["opened_recipes"][0]["ocr_score"] = .2
+                held.update(family=None, candidates=[1, 3])
             before = len(self.commit_log)
             self.w._scan_done(mode, held, self.raw.getvalue())
             self.check(logger.get_state()["scan_commit_count"], before,
-                       "auto:unclear-seed-held" if seed else "auto:unclear-opened-held")
+                       "auto:unclear-seed-held" if seed else "auto:ambiguous-opened-held")
             self.check(self.w.pending_review_kind, "seed" if seed else "remnant", "auto:remnant-review-required")
             self.w.reject_scan_button.click()
             self.coverage["unclear seed held with auto-all enabled" if seed else
-                          "unclear opened remnant held with auto-all enabled"] += 1
+                          "ambiguous opened remnant held with auto-all enabled"] += 1
         self.w._scan_done(mode, result, self.raw.getvalue())
+        if seed:
+            # This is a second consecutive scan of Family 1 on this map.
+            # Its explicit confirmation is now required even with clear OCR.
+            self.check(logger.get_state()["scan_commit_count"], len(self.commit_log),
+                       "duplicate:clear-seed-does-not-auto-save")
+            self.check(self.w.pending_review_kind, "seed", "duplicate:confirmation-required")
+            self.w.approve_scan_button.click()
+            self.coverage["consecutive same-family manual confirmation"] += 1
         details = {"recipes": expected}
         if seed:
             details["visible_seed"] = {"sockets": 5, "slot": "P3", "rune": "Power", "scan_index": 1, "mode": "seed"}
         self.record("Remnant", details, {**self.expected[f"M{n:04}"]["snapshot"], "expedition": self.expedition})
         self.expected[f"M{n:04}"]["recipes"] += copy.deepcopy(expected)
         self.coverage["seed recipe family order" if seed else "opened recipe resolution"] += 1
-        self.coverage["clear live seed automatic commit" if seed else "clear live opened remnant automatic commit"] += 1
+        self.coverage["clear live seed manual confirmation" if seed else "clear live opened remnant automatic commit"] += 1
         self.check(self.w.first_recipe.text(), "", "review:remnant-draft-cleared")
         self.check(self.w.pending_review_kind, None, "review:remnant-pending-cleared")
 
@@ -818,6 +831,20 @@ class HundredMapSession(unittest.TestCase):
             self.check(first.get("Gear Item Rarity %"), str(expected["snapshot"]["gear_item_rarity"]), "exports:gear-rarity")
         history_commits = {int(row["Scan Commit #"]) for row in history if row.get("Scan Commit #")}
         self.check(history_commits, set(range(1, len(self.commit_log) + 1)), "exports:complete-audit-history")
+        last_ends = {}
+        for commit in self.commit_log:
+            if commit["kind"] == "Currency" and commit["details"]["phase"] == "end":
+                last_ends[commit["map_id"]] = commit["number"]
+        for commit in self.commit_log:
+            if commit["kind"] != "Currency":
+                continue
+            stage_rows = [row for row in history if row.get("Scan Commit #") == str(commit["number"])]
+            self.check(bool(stage_rows), True, "exports:currency-stage-retained")
+            for row in stage_rows:
+                self.check(row["Currency Scan ID"], commit["details"]["currency_scan_id"], "exports:currency-stage-id")
+                self.check(row["Currency Scan #"], str(commit["details"]["currency_scan_number"]), "exports:currency-stage-order")
+                self.check(row["Final Currency Scan"], str(last_ends.get(commit["map_id"]) == commit["number"]),
+                           "exports:currency-final-selection")
         self.check(any(row.get("Type") == "Currency" for row in primary), False, "exports:primary-no-inventory-duplicates")
         self.check(any(row.get("Type") == "Ritual" for row in primary), False, "exports:primary-no-ritual-duplicates")
         for label in self.rejected_labels:
@@ -893,7 +920,7 @@ class HundredMapSession(unittest.TestCase):
         for activity in ("Atlas settings", "clear live waystone automatic commit",
                          "clear live tablet automatic commit", "clear live currency automatic commit",
                          "clear live Ritual automatic commit", "clear live opened remnant automatic commit",
-                         "clear live seed automatic commit", "paired chain parts and order", "Map totals"):
+                         "clear live seed manual confirmation", "paired chain parts and order", "Map totals"):
             self.check(self.coverage[activity] >= 100, True, "coverage:at-least-100:" + activity)
         self.check(self.coverage["propagation manual recipe approvals"], 200,
                    "coverage:every-propagation-capture-manually-approved")
@@ -904,7 +931,7 @@ class HundredMapSession(unittest.TestCase):
                        True, f"coverage:propagation-review-at-strictness-{strictness}")
         for activity in ("unclear waystone held with auto-all enabled", "unclear tablet held with auto-all enabled",
                          "unclear currency held with auto-all enabled", "unclear Ritual held with auto-all enabled",
-                         "unclear opened remnant held with auto-all enabled", "unclear seed held with auto-all enabled"):
+                         "ambiguous opened remnant held with auto-all enabled", "unclear seed held with auto-all enabled"):
             self.check(self.coverage[activity] >= 10, True, "coverage:uncertain-reads-stay-held:" + activity)
         # Backup is exported through the File action and opened independently as SQLite.
         backup = self.output / "Session_Backup.sqlite3"

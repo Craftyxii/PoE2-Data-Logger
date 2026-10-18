@@ -26,6 +26,7 @@ from PoE2_Data_Logger.ocr.affix_capture import affix_key, affix_unit, modifier_v
 
 _RITUAL_MATCH_CACHE = OrderedDict()
 _RITUAL_MATCH_LOCK = threading.Lock()
+_INVENTORY_TEXT_CACHE = threading.local()
 
 
 def _key(text):
@@ -334,9 +335,57 @@ def _stack_count(cell, read):
     return 1, True
 
 
+def _inventory_patch_readings(patches):
+    """Reuse exact raw count/tier readings, retaining every caller's crop vote.
+
+    TextRec pads a batch to its widest aspect ratio. Only patches within its
+    configured default width can be reused independently without changing that
+    preprocessing; wider batches retain the original recognition call.
+    """
+    from rapidocr.ch_ppocr_rec.typings import TextRecInput
+
+    with OCR_LOCK:
+        engine = _engine()
+        reader = engine.text_rec
+        shape = getattr(reader, "rec_image_shape", ())
+        if len(shape) != 3 or any(patch.shape[1] / patch.shape[0] > shape[2] / shape[1]
+                                  for patch in patches):
+            result = reader(TextRecInput(img=patches, return_word_box=False))
+            return tuple(zip(result.txts, result.scores))
+        session = getattr(reader, "session", None)
+        owners = (engine, reader, session, getattr(session, "session", None),
+                  getattr(reader, "postprocess_op", None))
+        signature = (tuple(shape), getattr(reader, "rec_batch_num", None),
+                     repr(getattr(reader, "cfg", None)),
+                     getattr(type(reader), "resize_norm_img", None))
+        state = getattr(_INVENTORY_TEXT_CACHE, "state", None)
+        if (state is None or any(old is not new for old, new in zip(state[0], owners))
+                or state[1] != signature):
+            state = (owners, signature, OrderedDict())
+            _INVENTORY_TEXT_CACHE.state = state
+        cache = state[2]
+        keys = [(patch.shape, patch.dtype.str, hashlib.sha256(patch.tobytes()).digest())
+                for patch in patches]
+        missing = OrderedDict((key, patch) for key, patch in zip(keys, patches) if key not in cache)
+        readings = {key: cache[key] for key in keys if key in cache}
+        if missing:
+            result = reader(TextRecInput(img=list(missing.values()), return_word_box=False))
+            fresh = tuple(zip(result.txts, result.scores))
+            if len(fresh) != len(missing):
+                # Preserve the recognizer's original incomplete-output behavior.
+                result = reader(TextRecInput(img=patches, return_word_box=False))
+                return tuple(zip(result.txts, result.scores))
+            readings.update(zip(missing, fresh))
+        for key in keys:
+            cache[key] = readings[key]
+            cache.move_to_end(key)
+            if len(cache) > 512:
+                cache.popitem(last=False)
+        return tuple(readings[key] for key in keys)
+
+
 def _inventory_labels(image):
     """Read full count and tier labels, holding clipped counts for review."""
-    from rapidocr.ch_ppocr_rec.typings import TextRecInput
     from PoE2_Data_Logger.ocr.inventory_labels import count_crops, tier_crops, fallback_crops
 
     labels = {slot: {} for slot in range(1, 61)}
@@ -357,9 +406,8 @@ def _inventory_labels(image):
             labels[slot]["count"] = 1
     if not patches:
         return labels
-    with OCR_LOCK:
-        result = _engine().text_rec(TextRecInput(img=patches, return_word_box=False))
-    for (slot, kind), raw, score in zip(positions, result.txts, result.scores):
+    readings = _inventory_patch_readings(patches)
+    for (slot, kind), (raw, score) in zip(positions, readings):
         text = raw.strip().replace(" ", "").rstrip(".,:;")
         if kind == "count" and re.fullmatch(r"\d{1,6}", text) and float(score) >= .85:
             if 0 < int(text) <= 1000000:
@@ -385,10 +433,9 @@ def _inventory_labels(image):
                 fallback_images.append(np.asarray(patch))
                 fallback_positions.append((slot, kind))
     if fallback_images:
-        with OCR_LOCK:
-            result = _engine().text_rec(TextRecInput(img=fallback_images, return_word_box=False))
+        readings = _inventory_patch_readings(fallback_images)
         alternatives = {}
-        for (slot, kind), raw, score in zip(fallback_positions, result.txts, result.scores):
+        for (slot, kind), (raw, score) in zip(fallback_positions, readings):
             text = raw.strip().replace(" ", "").rstrip(".,:;")
             if re.fullmatch(r"\d{1,6}", text) and float(score) >= .85 and 0 < int(text) <= 1000000:
                 alternatives.setdefault(slot, {"mask": [], "raw": []})[kind].append(int(text))

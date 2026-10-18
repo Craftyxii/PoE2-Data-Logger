@@ -47,7 +47,7 @@ class ManualPropagationSelectionTests(unittest.TestCase):
 
     def capture(self, *, family=None, candidates=None, extra=None):
         """Deliver the reported OCR shape, which has no top-level selected recipe."""
-        unresolved = {"selected_recipe": None, "reward_text": "10x Chaos Orb",
+        unresolved = {"selected_recipe": None, "reward_text": "10x Manual Selection Test Orb",
                       "runes": [], "can_use": False,
                       "status": "Reward was unclear — enter its propagated runes manually.",
                       "family": family, "candidates": candidates or []}
@@ -77,11 +77,11 @@ class ManualPropagationSelectionTests(unittest.TestCase):
 
     def register_quantity_reward(self):
         """Represent a user-added quantity recipe using the public reference editors."""
-        # The bundled catalog has x1/x2/x3 Chaos rewards; the screenshot's x10
-        # is deliberately added rather than borrowing a different recipe's ID.
-        logger.save_recipe({"name": "Chaos Orb x10", "sockets": 3,
+        # A unique synthetic reward keeps this custom-family fixture independent
+        # of game patch corrections to the real Family 19 Chaos reward.
+        logger.save_recipe({"name": "Manual Selection Test Orb x10", "sockets": 3,
                             "combo": "Wisdom + Vision + Time"})
-        logger.save_family({"family": 8001, "top_socket": 3, "recipes": ["Chaos Orb x10"]})
+        logger.save_family({"family": 8001, "top_socket": 3, "recipes": ["Manual Selection Test Orb x10"]})
 
     def test_manual_save_selects_sole_unknown_reward_and_counts_one_approval(self):
         """Opening fallback chooses the only unresolved row before any rune editing."""
@@ -91,7 +91,7 @@ class ManualPropagationSelectionTests(unittest.TestCase):
         before = logger.get_state()
         self.window.manual_propagation_button.click()
         self.assertEqual(table.currentRow(), 2)
-        self.assertIn("10x Chaos Orb", self.window.propagation_manual_label.text())
+        self.assertIn("10x Manual Selection Test Orb", self.window.propagation_manual_label.text())
         self.enter_runes()
         self.assertTrue(self.window.propagation_add_button.isEnabled())
         self.assertTrue(self.approve(2).isEnabled())
@@ -121,7 +121,7 @@ class ManualPropagationSelectionTests(unittest.TestCase):
                 saved = logger.get_state()
                 origin = saved["chain_provenance"][-1]
                 self.assertEqual((origin["recipe"], origin["family"], origin["family_candidates"]),
-                                 ("Chaos Orb x10", 8001, [8001]))
+                                 ("Manual Selection Test Orb x10", 8001, [8001]))
                 self.assertEqual(origin["family_source"], "supplied")
                 self.assertTrue(origin["recipe_id"])
                 self.assertEqual((len(saved["chain"]), saved["detonated"]), (index, index))
@@ -158,7 +158,7 @@ class ManualPropagationSelectionTests(unittest.TestCase):
 
     def test_multiple_unknown_rewards_require_an_explicit_row_and_denials_stay_blocked(self):
         """Ambiguous fallback cannot attach runes to an arbitrary or denied reward."""
-        self.capture(extra="11x Chaos Orb")
+        self.capture(extra="11x Manual Selection Test Orb")
         table = self.window.propagation_recipe_table
         self.window.manual_propagation_button.click()
         self.enter_runes()

@@ -122,22 +122,26 @@ class OpenedSocketReviewUITests(unittest.TestCase):
         self.assertEqual([json.loads(row["row_json"])[1:3] for row in exports],
                          [["Transcendent Alloy", 7]])
 
-    def test_real_seven_sockets_with_database_conflict_stays_pending_with_auto_enabled(self):
-        """Automatic saving keeps the screenshot pending when its seven visible sockets contradict the catalog."""
+    def test_unique_real_family_auto_saves_without_rewriting_conflicting_socket_evidence(self):
+        """The selected family policy uses catalog rows while retaining the scanner's actual warning."""
         with logger._connect() as db:
             db.execute("UPDATE recipes SET sockets=4 WHERE name=?", ("Transcendent Alloy",))
         self.window.set_auto_commit(True)
         before = logger.get_state()
-        records = self.logged_records()
-        reading, pending = self.show_capture()
+        reading = {**opened_scan.scan_opened(CAPTURE), **logger.scan_context()}
+        self.window._scan_done("opened", reading, CAPTURE.read_bytes())
         self.assertFalse(reading["can_use"], reading)
         self.assertEqual(reading["recipe_sockets"], 4, reading)
         self.assertIn("Opened icons show 7 sockets, but Recipe DB says 4", reading["status"])
-        self.assertIn(reading["status"], self.window.review_summary.text())
-        self.assertEqual(self.window.results["opened"], reading)
-        self.assertEqual(logger.get_state()["ocr_pending"], pending)
-        self.assertEqual(logger.get_state()["scan_commit_count"], before["scan_commit_count"])
-        self.assertEqual(self.logged_records(), records)
+        self.assertEqual((reading["family"], reading["candidates"], reading["sockets"]), ("Family 28", [28], 7))
+        self.assertIsNone(logger.get_state()["ocr_pending"])
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertEqual(logger.get_state()["scan_commit_count"], before["scan_commit_count"] + 1)
+        with logger._connect() as db:
+            stored = json.loads(db.execute("SELECT details_json FROM commits WHERE kind='Remnant'").fetchone()[0])
+        self.assertEqual(stored["family"], 28)
+        self.assertEqual(stored["recipes"][0]["sockets"], 4)
+        self.assertEqual(stored["recipes"][0]["recipe"], "Transcendent Alloy")
 
     def approve_recovered_top(self, capture, first, family, sockets):
         """Review original recovered pixels and save the correct family once through existing Approve."""

@@ -1,7 +1,8 @@
-"""Gate automatic remnant logging on opened OCR evidence and pending scan context.
+"""Gate automatic remnant logging on matched families and pending scan context.
 
-Candidate checks resolve the observed reward order against the recipe catalog;
-the final write receives the pending, opened and optional seed context guards.
+The original candidate evaluator retains strict evidence checks for diagnostics.
+The selected family-only save policy uses family_candidate; its final write
+receives the pending, opened and optional seed context guards.
 """
 
 from __future__ import annotations
@@ -123,6 +124,42 @@ def candidate(opened, seed=None, resolver=logger.resolve):
     return {"ready": True, "first": first, "next": second, "family": family}
 
 
+def family_candidate(opened, seed=None, resolver=logger.resolve):
+    """Accept one recognized family using its catalog suffix, irrespective of OCR certainty.
+
+    Family ambiguity and conflicting family identities still need a selection.
+    Ownership and the auto-save switch are checked again by commit(). This
+    eligibility check does not rewrite raw confidence, geometry or sockets.
+    """
+    def review(reason):
+        return {"ready": False, "reason": reason}
+
+    if not isinstance(opened, dict):
+        return review("Scan an opened remnant to save it automatically.")
+    family = _family(opened.get("family"))
+    if family is None or opened.get("candidates") != [family]:
+        return review("The opened remnant needs a unique family match.")
+    if opened.get("_repeat_family_review"):
+        return review("The same family was scanned twice; confirm this remnant.")
+    if isinstance(seed, dict):
+        seed_family = _family(seed.get("family"))
+        if (seed_family is not None and seed.get("candidates") == [seed_family]
+                and seed_family != family):
+            return review("The two scans identify different families; review this remnant.")
+    first = opened.get("first_recipe")
+    if not isinstance(first, str) or not first.strip():
+        return review("The family needs a recognized first recipe to select its catalog stage.")
+    try:
+        resolved = resolver(first, None, family)
+    except (ValueError, TypeError):
+        return review("The recipe could not be resolved automatically.")
+    rows = resolved.get("rows") or []
+    if (resolved.get("status") != "ready" or resolved.get("family") != family
+            or not rows or rows[0].get("recipe") != first):
+        return review("The first recipe does not belong to the matched family.")
+    return {"ready": True, "first": first, "next": None, "family": family}
+
+
 def commit(opened, seed=None, scan_id=None):
     """Check the auto-commit toggle and pending IDs before a guarded remnant write.
 
@@ -142,7 +179,7 @@ def commit(opened, seed=None, scan_id=None):
         seed.get(key) != pending[key] for key in ("remnant_id", "map_id", "expedition_id")
     ):
         return {"committed": False, "reason": "The two scans belong to different remnants."}
-    result = candidate(opened, seed)
+    result = family_candidate(opened, seed)
     if not result["ready"]:
         return {"committed": False, "reason": result["reason"]}
     try:

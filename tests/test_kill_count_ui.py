@@ -54,9 +54,9 @@ class KillCountRegionsUITests(unittest.TestCase):
 
     def enabled(self):
         with logger._connect() as db:
-            return logger._meta(db, "kill_count_scan_enabled", False)
+            return logger._meta(db, "kill_count_scan_enabled", True)
 
-    def test_separate_region_uses_own_real_example_and_starts_disabled(self):
+    def test_separate_region_uses_own_real_example_and_starts_enabled(self):
         title, group, box, _ = REGIONS["kill_count_region"]
         self.assertIn("four skulls", title)
         self.assertEqual(group, "kills")
@@ -67,16 +67,21 @@ class KillCountRegionsUITests(unittest.TestCase):
         with Image.open(self.page.root / "kills.jpg") as example:
             self.assertEqual((self.page.canvas.picture.width(), self.page.canvas.picture.height()), example.size)
         self.assertNotEqual(group, REGIONS["live_region"][1])
-        self.assertFalse(self.page.kill_count_capture.isChecked())
-        self.assertFalse(self.enabled())
+        self.assertTrue(self.page.kill_count_capture.isChecked())
+        self.assertTrue(self.enabled())
 
-    def test_saving_unrelated_region_does_not_opt_in_to_capture(self):
+    def test_saving_unrelated_region_preserves_an_explicitly_disabled_preference(self):
+        self.page.kill_count_capture.setChecked(False)
+        self.page.save_regions()
         self.page.calibrate_region("ritual_region", [.1, .15, .4, .7])
         self.page.save_regions()
         self.assertFalse(self.enabled())
         self.assertFalse(self.make_page().kill_count_capture.isChecked())
 
     def test_calibration_enables_only_draft_until_explicit_save_and_can_be_disabled(self):
+        with logger._connect() as db:
+            logger._set_meta(db, "kill_count_scan_enabled", False)
+        self.page = self.make_page()
         calibrated = [.82, .21, .18, .15]
         self.page.calibrate_region("kill_count_region", calibrated)
         self.assertTrue(self.page.kill_count_capture.isChecked())
@@ -118,7 +123,7 @@ class KillCountRegionsUITests(unittest.TestCase):
         self.assertTrue((self.page.custom / "kills.jpg").is_file())
         self.assertFalse((self.page.custom / "opened.jpg").exists())
         self.assertEqual(self.page.canvas.boxes, original_boxes)
-        self.assertFalse(self.enabled())
+        self.assertTrue(self.enabled())
         self.page.select_region("live_region")
         self.assertEqual(self.page.canvas.picture.toImage(), opened_image)
 
@@ -179,7 +184,8 @@ class KillCountSnapshotUITests(unittest.TestCase):
 
     def poll_event(self, event):
         status = service.HOTKEY.status()
-        with patch.object(service.HOTKEY, "status", return_value={**status, "latest": event}):
+        with patch.object(service.HOTKEY, "status", return_value={**status, "latest": event}), \
+                patch.object(service.HOTKEY, "next_event", return_value=event):
             self.window.poll()
 
     def propagation_review(self):

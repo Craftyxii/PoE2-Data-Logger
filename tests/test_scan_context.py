@@ -400,6 +400,7 @@ class ScanContextTests(unittest.TestCase):
         select(self.window.inventory_phase, "end")
         status = {**service.HOTKEY.status(), "latest": event}
         with patch.object(service.HOTKEY, "status", return_value=status), patch.object(
+                service.HOTKEY, "next_event", return_value=event), patch.object(
                 service.HOTKEY, "image", return_value=buffer.getvalue()):
             self.window.poll()
         self.callbacks[-1](self.inventory_result())
@@ -445,13 +446,13 @@ class ScanContextTests(unittest.TestCase):
         latest(self.opened_result())
         self.assertEqual(logger.get_state()["ocr_pending"]["remnant_id"], "R0001")
 
-    def test_review_approval_rejects_expedition_changed_after_scan(self):
-        """Verify review approval rejects expedition changed after scan."""
+    def test_currency_review_stays_on_its_map_after_expedition_change(self):
+        """Currency stages have map ownership without an expedition dependency."""
         self.capture_inventory()(self.inventory_result())
         logger.save_settings({"expedition": 2})
-        with self.assertRaisesRegex(ValueError, "expedition changed"):
-            self.window.save_inventory()
-        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+        saved = self.window.save_inventory()
+        self.assertEqual(saved["map_id"], "M0001")
+        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
 
     def test_both_mode_links_partial_opened_list_and_logs_once(self):
         """Verify both mode links partial opened list and logs once."""

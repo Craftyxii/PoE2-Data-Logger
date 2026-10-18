@@ -66,10 +66,12 @@ class UniquePropagationExportTests(unittest.TestCase):
         self.assertTrue(all(row["Unique Kills (Map)"] == "" for row in rows[1:]))
         main_headers = next(csv.reader(io.StringIO(logger.export_all_csv().decode("utf-8-sig"))))
         self.assertEqual(main_headers.index("Type"), 127)
+        self.assertEqual(main_headers[-len(logger.CURRENCY_STAGE_HEADERS):], list(logger.CURRENCY_STAGE_HEADERS))
+        previous_headers = main_headers[:-len(logger.CURRENCY_STAGE_HEADERS)]
         map_context_count = len(logger.MAP_CONTEXT_HEADERS)
-        legacy_headers = main_headers[:-map_context_count]
+        legacy_headers = previous_headers[:-map_context_count]
         self.assertEqual(legacy_headers[-len(logger.HISTORY_APPEND_HEADERS):], list(logger.HISTORY_APPEND_HEADERS))
-        self.assertEqual(main_headers[-map_context_count:], ["Activity Type", "Map Scanned", "Atlas Effects JSON"])
+        self.assertEqual(previous_headers[-map_context_count:], ["Activity Type", "Map Scanned", "Atlas Effects JSON"])
 
     def test_propagation_scan_rows_preserve_pair_order_ids_and_one_per_scan_delta(self):
         """Verify propagation scan rows preserve pair order IDs and one per scan delta."""

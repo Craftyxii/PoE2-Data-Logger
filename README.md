@@ -4,9 +4,9 @@ A Windows desktop logger for Path of Exile 2. Record Expedition remnants and run
 
 ## Download and source status
 
-This source targets [1.3.2.19 Beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.19-beta). Its [installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.19-beta/PoE2-Data-Logger-Setup-v1.3.2.19-beta.exe) becomes available after the required release checks pass. See the [release notes](docs/RELEASE_1.3.2.19.md). The [previous beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.18-beta) and [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2) remain available.
+This source targets [1.3.2.20 Beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.20-beta). Its [installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.20-beta/PoE2-Data-Logger-Setup-v1.3.2.20-beta.exe) becomes available after the required release checks pass. See the [release notes](docs/RELEASE_1.3.2.20.md). The [previous beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.19-beta) and [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2) remain available.
 
-This beta adds opt-in screenshot kill-count stages and final readings, fixes OCR thread-setting consistency, and improves source-traced opened-reward recognition and propagation capture encoding. Manual end-map entries, full-family autofill, screenshot evidence and explicit propagation approval remain intact. See the [changelog](CHANGELOG.md#13219-beta). Installer, executable and window version labels identify 1.3.2.19 Beta.
+This beta retains immediate Remnant-to-Propagation requests, caches exact OCR evidence, saves unique opened-family matches, and preserves Ritual pages and recognized readings during database contention. Currency and kill readings keep cumulative scan history per map; only their dedicated keys trigger those OCR modes. Manual end-map entries, full-family autofill, screenshot evidence and explicit propagation approval remain intact. See the [changelog](CHANGELOG.md#13220-beta). Installer, executable and window version labels identify 1.3.2.20 Beta.
 
 ## What you can record
 

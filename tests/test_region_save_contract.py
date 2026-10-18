@@ -150,6 +150,43 @@ class RegionSaveContractTests(unittest.TestCase):
         self.assertNotEqual(editor.result(), QDialog.DialogCode.Accepted)
         self.assertIn("400×200", editor.hint)
 
+    def test_kill_region_defaults_enabled_and_tight_calibration_saves_explicitly(self):
+        """A narrow counter strip saves without lowering other activities' region minimums."""
+        self.assertTrue(self.page.kill_count_capture.isChecked())
+        box = [.7, .2, 280 / 1920, 24 / 1080]
+        self.page.kill_count_capture.setChecked(False)
+        self.page.save_regions()
+        self.page.calibrate_region("kill_count_region", box)
+        with logger._connect() as db:
+            self.assertFalse(logger._meta(db, "kill_count_scan_enabled"))
+        self.assertTrue(self.page.kill_count_capture.isChecked())
+        with patch.object(region_select.QMessageBox, "warning") as warning:
+            self.page.save_regions()
+        warning.assert_not_called()
+        with logger._connect() as db:
+            self.assertTrue(logger._meta(db, "kill_count_scan_enabled"))
+            self.assertEqual(logger._meta(db, "scan_region_boxes")["kill_count_region"], box)
+        reopened = region_select.ScanRegionsPage()
+        self.addCleanup(reopened.close)
+        self.assertTrue(reopened.kill_count_capture.isChecked())
+        self.assertEqual(reopened.canvas.boxes["kill_count_region"], box)
+        self.page.calibrate_region("inventory_region", box)
+        with patch.object(region_select.QMessageBox, "warning") as warning:
+            self.page.save_regions()
+        self.assertIn("200×100", warning.call_args.args[-1])
+
+    def test_kill_picker_uses_only_its_scaled_20_pixel_minimum(self):
+        """Kill calibration accepts the compact skull strip while generic selections remain large."""
+        for width, height, minimum in ((1920, 1080, (20, 20)), (3840, 2160, (40, 40))):
+            with self.subTest(size=(width, height)):
+                with patch.object(region_select, "_logical_capture_bounds", return_value=QRect(0, 0, width, height)):
+                    editor = region_select.RegionEditor(
+                        {"x": 100, "y": 100, "w": minimum[0], "h": minimum[1]},
+                        screen_bounds=(0, 0, width, height), region_key="kill_count_region")
+                self.addCleanup(editor.close)
+                editor.confirm()
+                self.assertEqual(editor.result(), QDialog.DialogCode.Accepted)
+
     def test_accepted_picker_minimum_saves_at_1080p_1440p_4k_and_ultrawide(self):
         """The smallest accepted crop at each supported aspect and resolution persists unchanged."""
         for width, height, minimum in ((1920, 1080, (200, 100)),
