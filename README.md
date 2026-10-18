@@ -13,7 +13,7 @@ This beta retains immediate Remnant-to-Propagation requests, caches exact OCR ev
 - **Maps:** Biome, City Type, area level, map options, waystone and tablet modifiers, Atlas Master/perks, Atlas allocations, gear item rarity, and Normal/Magic/Rare/Unique kills. Map IDs connect records to saved settings.
 - **Remnants:** visible seed bars, opened reward panels, or both stages linked through one Remnant ID.
 - **Propagation:** recipe/family identity and marked runes in socket order. Every propagation scan requires manual approval. Existing rune dropdowns remain available for corrections. Shared family sockets can recover missing crowns from a complete mark or corroborating fragments.
-- **Inventory:** one approved Start and End snapshot per map. Rescans replace that phase rather than adding it again. Session totals sum positive End-minus-Start gains; a missing Start is treated as empty. Inventory gains do not prove individual ground drops.
+- **Inventory:** approved scans retain map-local IDs and history. The latest approved Start and End snapshots determine map totals; rescans replace that phase rather than adding it again. Session totals sum positive End-minus-Start gains; a missing Start is treated as empty. Inventory gains do not prove individual ground drops.
 - **Ritual:** offered rewards, quantities, deferred state, tribute and rerolls. Offers do not add to acquired inventory totals.
 
 Screenshot previews remain part of scan review. Possible Currency matches offer editable suggestions; approving or rejecting rows preserves the scroll position. Accepted corrections can teach local icon references. OCR Strictness is set separately for each scan type; it never enables automatic propagation approval.
@@ -26,7 +26,7 @@ See the [user guide](docs/USER_GUIDE.md) for the full scan, review, chain and ma
 
 ## Exports and analysis
 
-The working-source Excel export contains eight worksheets:
+The working-source Excel export contains nine worksheets:
 
 | Worksheet | Contents |
 | --- | --- |
@@ -38,10 +38,11 @@ The working-source Excel export contains eight worksheets:
 | Recipe Database | Current recipe definitions and retained identities for retired recipes |
 | Seed Database | Reference seed sockets, rune labels and reward mappings |
 | Reference Aliases | Reference aliases and their recipe targets |
+| Kill Count Readings | Cumulative OCR observations, screenshot evidence and latest-reading status per map |
 
-The first four sheet positions remain unchanged. All eight read one database snapshot. Reference rows explain the data; they are not logged loot. The Context explains how earlier propagated marks combine with a current recipe's full rune combination, as well as missing values, percentage units and limits on attributing loot to individual chain steps. Editable recipe catalogs cannot reconstruct deleted historical combinations or unrecorded outcomes.
+The first four sheet positions remain unchanged. All nine read one database snapshot. Reference rows explain the data; they are not logged loot. The Context explains how earlier propagated marks combine with a current recipe's full rune combination, as well as missing values, percentage units and limits on attributing loot to individual chain steps. Editable recipe catalogs cannot reconstruct deleted historical combinations or unrecorded outcomes.
 
-CSV folder exports contain the three data files: Export, Atlas Character Settings and Scan History. A raw SQLite backup includes logs, reference tables, stored image bytes, and the SQL-readable Context table and views. Images stored as external files need a separate copy. Export filenames are timestamped to preserve earlier exports.
+CSV folder exports contain four data files: Export, Atlas Character Settings, Scan History and Kill Counts. A raw SQLite backup includes logs, reference tables, stored image bytes, and the SQL-readable Context table and views. Images stored as external files need a separate copy. Export filenames are timestamped to preserve earlier exports.
 
 ## Local data and game interaction
 
