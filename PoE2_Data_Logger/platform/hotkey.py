@@ -826,12 +826,14 @@ class HotkeyManager:
         if payload.get("error") or "_image" not in payload:
             return result
         try:
+            from PoE2_Data_Logger.ocr.kill_counts import scan as scan_kills
             reader = self.readers.get("kills")
             if reader is None:
-                from PoE2_Data_Logger.ocr.kill_counts import scan as reader
+                reader = scan_kills
+            options = {"is_crop": True} if reader is scan_kills else {}
             result["result"] = self._ocr_capture_call(
                 revision, reader, payload["_image"], strictness=strictness,
-                _timeout=KILL_COUNT_TIMEOUT_SECONDS)
+                _timeout=KILL_COUNT_TIMEOUT_SECONDS, **options)
         except Exception as exc:
             result["error"] = f"Kill count scan failed: {exc}"
         return result

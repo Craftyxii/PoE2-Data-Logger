@@ -719,6 +719,7 @@ def import_pack(path, replace_existing=False):
                 counts["scans"] += 1
     except Exception:
         for file in created:
-            file.unlink(missing_ok=True)
+            # Another writer may have accepted the shared image after rollback.
+            store._remove_failed_scan_image(file)
         raise
     return counts

@@ -41,7 +41,7 @@ def _references():
     return references
 
 
-def _source(image):
+def _source(image, *, is_crop=False):
     """Bound inputs and map optional full-screen normalization back to original pixels."""
     if isinstance(image, (str, Path)):
         with Image.open(image) as source:
@@ -54,7 +54,7 @@ def _source(image):
     image = image.convert("RGB")
     # Full screen captures have the reference's 16:9 game composition. Selected
     # regions remain unconstrained in position and are searched at bounded scales.
-    if image.height >= 450 and 1.65 <= image.width / image.height <= 1.9:
+    if not is_crop and image.height >= 450 and 1.65 <= image.width / image.height <= 1.9:
         scale = (image.width / 1919, image.height / 1079)
         frame = image.resize((1919, 1079), Image.Resampling.LANCZOS)
         box = (1631, 259, 1919, 389)
@@ -193,16 +193,17 @@ def _read_numbers(crops):
     return list(zip(read.txts, read.scores))
 
 
-def scan(image, strictness=ocr_sensitivity.DEFAULT):
+def scan(image, strictness=ocr_sensitivity.DEFAULT, *, is_crop=False):
     """Return four verified screenshot counts or an incomplete reviewable result.
 
     Only plain decimal digits are established by the supplied example. Grouped,
-    abbreviated, clipped and contradictory values remain incomplete.
+    abbreviated, clipped and contradictory values remain incomplete. Selected
+    capture regions use their original pixels when is_crop is explicitly set.
     """
     strictness = ocr_sensitivity.validate(strictness)
     result = {key: None for key in CATEGORIES}
     result.update(complete=False, status="The four kill counters need review.", readings=[])
-    frame, offset, scale, scales = _source(image)
+    frame, offset, scale, scales = _source(image, is_crop=is_crop)
     skulls = _locate(frame, scales, strictness)
     if skulls is None:
         result["status"] = "Could not verify one complete row of Normal, Magic, Rare and Unique skulls."

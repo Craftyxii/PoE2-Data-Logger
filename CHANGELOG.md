@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.2.21 Beta
+
+- Recognize grayscale Ritual Omen shapes and offer their complete supported names in editable dropdowns; retain manual approval, screenshot evidence, separate Deferred detection and ambiguity after learning a sibling.
+- Preserve visual Waystone modifier rows after tooltip isolation, so OCR fragments do not become extra saved modifiers; retain supported Normal rarity headers at larger text scales.
+- Protect screenshots accepted by another writer or retained by Undo when a failed reference import cleans up its new files.
+- Restore auto-save and HUD preference controls after failed settings writes without clearing review or manual-entry drafts.
+- Use exact recipe identities for propagation rune choices, retaining distinct imported case variants and holding ambiguous names for review.
+- Read selected kill-count regions as crops and restore a previously visible HUD after an explicit kill-scan failure; preserve full-screen reading and unobtrusive successful snapshots.
+
+Version labels identify 1.3.2.21 Beta, and update/uninstall guards retain running 1.3.2.20 Beta clients alongside older versions. The HUD layout, manual entries, historical records and mandatory propagation approval are preserved. Runefather/Runebinder alloy corrections remain unapplied. See [release notes](docs/RELEASE_1.3.2.21.md) for validation scope and pending exact-source Windows publication gates.
+
 ## 1.3.2.20 Beta
 
 - Preserve completed Ritual pages in capture order while the previous Ritual page is being read or reviewed; retain existing Currency replacement and map/Undo clearing behavior.

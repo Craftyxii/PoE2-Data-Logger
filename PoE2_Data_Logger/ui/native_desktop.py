@@ -50,7 +50,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.20 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.21 Beta"
 SCAN_TIMEOUT_MS = 90000
 SCAN_PRESENTATION_RETRY_MS = 100
 SCAN_PRESENTATION_WAIT_SECONDS = 10
@@ -1380,10 +1380,10 @@ class LoggerWindow(QMainWindow):
             for action in actions:
                 action.setEnabled(editable)
             for row in range(table.rowCount()):
+                name_editor = table.cellWidget(row, 1)
+                if name_editor:
+                    name_editor.setEnabled(editable)
                 if review_kind == "currency":
-                    name_editor = table.cellWidget(row, 1)
-                    if name_editor:
-                        name_editor.setEnabled(editable)
                     controls = table.cellWidget(row, 3)
                     if controls:
                         controls.setEnabled(editable)
@@ -2676,16 +2676,8 @@ class LoggerWindow(QMainWindow):
         self.atlas_settings_page.set_settings(config.get("atlas_settings"),
             status=f"Saved settings apply to {target}." if target else
                    "Saved atlas settings carry forward to your next map.")
-        all_scans = bool(config.get("ocr_auto_commit"))
-        with QSignalBlocker(self.auto_all_checkbox):
-            self.auto_all_checkbox.setChecked(all_scans)
-        with QSignalBlocker(self.auto_commit_checkbox):
-            self.auto_commit_checkbox.setChecked(bool(config.get("auto_commit")))
-        self.auto_commit_checkbox.setEnabled(not all_scans)
+        self._sync_auto_commit_controls(config)
         auto_tablets = bool(config.get("tablet_auto_commit"))
-        with QSignalBlocker(self.auto_tablet_checkbox):
-            self.auto_tablet_checkbox.setChecked(auto_tablets)
-        self.auto_tablet_checkbox.setEnabled(not all_scans)
         next_tablet = logger.tablet_next_slot()
         self.auto_tablet_next.setText(
             f"Next tablet: {next_tablet} of 4" if next_tablet <= 4 else
@@ -3672,8 +3664,14 @@ class LoggerWindow(QMainWindow):
     def _build_propagation_recipe_inputs(self, row, choice):
         """Build recipe-ordered choices with local rune PNGs, preserving labels and numeric slot IDs."""
         with logger._connect() as db:
-            recipe = db.execute("SELECT sockets,combo FROM recipes WHERE name=? COLLATE NOCASE",
-                                (choice.get("selected_recipe") or "",)).fetchone()
+            try:
+                name = logger._recipe_catalog_name(db, choice.get("selected_recipe") or "")
+            except logger._RecipeNameAmbiguity:
+                # Leave ambiguous identities on the existing manual-review path;
+                # approval still validates their catalog identity before saving.
+                return None
+            recipe = db.execute("SELECT sockets,combo FROM recipes WHERE name=? COLLATE BINARY",
+                                (name,)).fetchone() if name is not None else None
         names = [rune.strip() for rune in (recipe["combo"] or "").split("+")] if recipe else []
         if (not recipe or len(names) != recipe["sockets"] or
                 any(not rune or rune.casefold() == "unresolved" for rune in names)):
@@ -4410,15 +4408,15 @@ class LoggerWindow(QMainWindow):
 
     def set_overlay_enabled(self, enabled):
         """Configure overlay behavior without making normal pages transparent."""
-        if enabled and service.HOTKEY.status()["supported"] and not service.HOTKEY.status()["combos"].get("overlay"):
-            try:
+        try:
+            if enabled and service.HOTKEY.status()["supported"] and not service.HOTKEY.status()["combos"].get("overlay"):
                 service.HOTKEY.configure_for("overlay", "Ctrl+Shift+H")
-            except ValueError:
-                with QSignalBlocker(self.overlay_checkbox):
-                    self.overlay_checkbox.setChecked(self._overlay_enabled)
-                raise
-        with logger._connect() as db:
-            logger._set_meta(db, "hud_overlay", bool(enabled))
+            with logger._connect() as db:
+                logger._set_meta(db, "hud_overlay", bool(enabled))
+        except Exception:
+            with QSignalBlocker(self.overlay_checkbox):
+                self.overlay_checkbox.setChecked(self._overlay_enabled)
+            raise
         self._overlay_enabled = bool(enabled)
         self._overlay_auto_review = False
         self._overlay_revealed = False
@@ -4770,9 +4768,24 @@ class LoggerWindow(QMainWindow):
                     "success")
         self.note("OCR references reset to defaults.", True)
 
+    def _sync_auto_commit_controls(self, config):
+        """Restore saved auto-save choices without emitting new preference writes."""
+        all_scans = bool(config.get("ocr_auto_commit"))
+        for field, key in ((self.auto_all_checkbox, "ocr_auto_commit"),
+                           (self.auto_commit_checkbox, "auto_commit"),
+                           (self.auto_tablet_checkbox, "tablet_auto_commit")):
+            with QSignalBlocker(field):
+                field.setChecked(bool(config.get(key)))
+        self.auto_commit_checkbox.setEnabled(not all_scans)
+        self.auto_tablet_checkbox.setEnabled(not all_scans)
+
     def set_auto_commit(self, enabled):
         """Persist the remnant auto-save preference without changing other activity settings."""
-        self.state = logger.save_settings({"auto_commit": enabled})
+        try:
+            self.state = logger.save_settings({"auto_commit": enabled})
+        except Exception:
+            self._sync_auto_commit_controls(self.state["settings"])
+            raise
         self.note("Clear opened scans will save automatically." if enabled else
                   "Opened scans will wait for manual review before saving.", True)
 
@@ -4780,16 +4793,24 @@ class LoggerWindow(QMainWindow):
         """Persist the all-activity auto-save choice together with remnant and tablet
         preferences.
         """
-        self.state = logger.save_settings({"ocr_auto_commit": enabled,
-                                           "auto_commit": enabled,
-                                           "tablet_auto_commit": enabled})
+        try:
+            self.state = logger.save_settings({"ocr_auto_commit": enabled,
+                                               "auto_commit": enabled,
+                                               "tablet_auto_commit": enabled})
+        except Exception:
+            self._sync_auto_commit_controls(self.state["settings"])
+            raise
         self.refresh()
         self.note("Clear OCR scans will save across all activities." if enabled else
                   "Map, currency and Ritual scans will wait for review.", True)
 
     def set_auto_tablets(self, enabled):
         """Persist ordered tablet auto-save and refresh its slot and review controls."""
-        self.state = logger.save_settings({"tablet_auto_commit": enabled})
+        try:
+            self.state = logger.save_settings({"tablet_auto_commit": enabled})
+        except Exception:
+            self._sync_auto_commit_controls(self.state["settings"])
+            raise
         self.refresh()
         self.note("Clear tablet scans will save in order from Tablet 1 to 4." if enabled else
                   "Tablet scans will wait for manual review before saving.", True)
@@ -6006,10 +6027,13 @@ class LoggerWindow(QMainWindow):
         if event:
             if event.get("kill_counts"):
                 self._queue_kill_count_reading(event["kill_counts"])
-            if not event["error"]:
+            kill_error = ((event.get("kill_counts") or {}).get("error")
+                          if event["mode"] == "kills" else None)
+            if event["error"] or kill_error:
+                self._restore_overlay_capture_failure()
+            else:
                 self._overlay_capture_restore = None
             if event["error"]:
-                self._restore_overlay_capture_failure()
                 if event["mode"] == "kills" and self.pending_review_kind is None:
                     self.review_kind.setText("Map kill counts")
                     self.review_kind.setProperty("scanKind", "kills")
@@ -7056,23 +7080,79 @@ class LoggerWindow(QMainWindow):
                 deferred.setCheckState(Qt.CheckState.Checked if item.get("deferred") else Qt.CheckState.Unchecked)
                 deferred.setToolTip(evidence)
             self.ritual_table.setItem(row, 5, deferred)
+            self._add_ritual_name_selector(row, item.get("candidate_names"))
         self.ritual_table.show()
         self._refresh_ritual_row_review(row)
 
+    def _add_ritual_name_selector(self, row, candidates):
+        """Offer captured reward alternatives without prefilling or approving a guess."""
+        names, seen = [], set()
+        for candidate in [candidates] if isinstance(candidates, str) else candidates or []:
+            if not isinstance(candidate, str):
+                continue
+            for name in candidate.split(" / "):
+                name = name.strip()
+                if (name.casefold() in seen or unresolved_ritual_name(name) or
+                        name.casefold() == "unrecognized item"):
+                    continue
+                seen.add(name.casefold())
+                names.append(name)
+        if not names:
+            return
+        cell = self.ritual_table.item(row, 1)
+        selector = QComboBox()
+        selector.setObjectName("ritualNameSuggestion")
+        selector.setAccessibleName(f"Omen or item name for Ritual reward {row + 1}")
+        selector.setEditable(True)
+        selector.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        selector.setCompleter(None)
+        selector.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        selector.setMinimumContentsLength(12)
+        selector.setToolTip(cell.toolTip())
+        selector.lineEdit().setPlaceholderText("Possible match: " + " / ".join(names))
+        for name in names:
+            selector.addItem(name, name)
+        selector.setCurrentIndex(-1)
+        selector.setEditText(cell.text())
+        selector.setEnabled(self.pending_review_kind == "ritual" and self.approve_scan_button.isEnabled())
+        self.ritual_table.setCellWidget(row, 1, selector)
+        selector.currentTextChanged.connect(lambda text, editor=selector:
+                                            self._ritual_suggestion_changed(editor, text))
+
+    def _ritual_suggestion_changed(self, selector, text):
+        """Update the current reward item by widget identity after row removals or rescans."""
+        row = next((row for row in range(self.ritual_table.rowCount())
+                    if self.ritual_table.cellWidget(row, 1) is selector), None)
+        if row is not None:
+            cell = self.ritual_table.item(row, 1)
+            if cell.text() != text:
+                cell.setText(text)
+
     def _ritual_row_changed(self, item):
-        """Infer a missing reward type after a name edit, clear its rejected flag, and
-        recompute the row's review status.
+        """Synchronize name selectors, infer a missing type, and refresh review status.
         """
+        selector = self.ritual_table.cellWidget(item.row(), 1)
+        if item.column() == 0 and selector is not None:
+            selector.setProperty("inferredType", None)
+        if item.column() == 1:
+            if selector is not None and selector.currentText() != item.text():
+                with QSignalBlocker(selector):
+                    selector.setEditText(item.text())
         if item.column() == 1 and item.text().strip():
             category = self.ritual_table.item(item.row(), 0)
             if category:
                 with QSignalBlocker(self.ritual_table):
                     category.setData(Qt.ItemDataRole.UserRole + 2, False)
-            if category and not category.text().strip():
+            if category and (not category.text().strip() or
+                             selector is not None and selector.property("inferredType") == category.text()):
                 name = item.text().strip().casefold()
                 kind = "Omen" if name in {entry.casefold() for entry in logger.ritual_names()} or name.startswith("omen of ") else "Item"
                 with QSignalBlocker(self.ritual_table):
                     category.setText(kind)
+                if selector is not None:
+                    # An inferred Item from a partial typed name may become an
+                    # Omen; a user's explicit type edit always ends inference.
+                    selector.setProperty("inferredType", kind)
         if item.column() < 6:
             self._refresh_ritual_row_review(item.row())
 

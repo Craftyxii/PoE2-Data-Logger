@@ -5,6 +5,7 @@ percentage rows; returned fields still require review."""
 
 from __future__ import annotations
 
+import math
 import re
 from PoE2_Data_Logger.core import ocr_sensitivity
 from PoE2_Data_Logger.ocr.affix_capture import looks_like_modifier, numeric_token_complete
@@ -186,7 +187,7 @@ def parse_item_text(text, affixes=()):
     return result
 
 
-def parse_screen_tooltip(ocr_rows, affixes=()):
+def parse_screen_tooltip(ocr_rows, affixes=(), *, normal_header_start=None):
     """Find a waystone/tablet title and parse its bounded tooltip body.
 
     Waystones need a drop-chance boundary or a complete explicitly Normal tooltip;
@@ -203,13 +204,15 @@ def parse_screen_tooltip(ocr_rows, affixes=()):
         return None
     index, kind = anchor
     if kind == "waystone":
-        rarity = [line for line in lines[max(0, index - 2):index]
-                  if re.match(r"^Rarity\s*:", line, re.I)]
+        header_start = max(0, index - 2)
+        if type(normal_header_start) is int and 0 <= normal_header_start < index:
+            header_start = min(header_start, normal_header_start)
+        rarity = [line for line in lines[header_start:index] if re.match(r"^Rarity\s*:", line, re.I)]
         usage = next((i for i in range(index + 1, len(lines)) if _WAYSTONE_USAGE.match(lines[i])), None)
         if (rarity and usage is not None and
                 not any(re.fullmatch(r"Unidentified", line, re.I) for line in lines)):
             normal = parse_item_text("\n".join(["Item Class: Waystones",
-                                                *lines[max(0, index - 2):usage + 1]]), affixes)
+                                                *lines[header_start:usage + 1]]), affixes)
             if normal and normal.get("_normal_unmodified"):
                 normal["source"] = "screen OCR"
                 return normal
@@ -265,6 +268,59 @@ def parse_screen_tooltip(ocr_rows, affixes=()):
     return parsed
 
 
+def _tooltip_visual_row(row, parts):
+    """Rebuild one original visual row from its retained component boxes."""
+    retained = sorted((dict(part) for part in parts), key=lambda part: part.get("x", 0))
+    if "parts" not in row:
+        return retained[0]
+    visible = {**row, "parts": retained,
+               "text": " ".join(part["text"] for part in retained),
+               "score": min(float(part.get("score", row.get("score", 1))) for part in retained)}
+    for key, aggregate in (("x", min), ("y", min), ("right", max), ("bottom", max)):
+        if all(key in part for part in retained):
+            visible[key] = aggregate(part[key] for part in retained)
+    return visible
+
+
+def _scaled_rarity_headers(rows, anchor, center):
+    """Find title-aligned rarity witnesses within three observed text heights.
+
+    This supplements the existing pixel margin only for coherent Waystone
+    headers; another item's intervening text cannot supply a Normal rarity.
+    """
+    if ("bottom" not in anchor or
+            not re.search(r"Waystone\s*\(Tier\s*\d+\)", anchor["text"], re.I)):
+        return []
+    height = anchor["bottom"] - anchor["y"]
+    if not math.isfinite(height) or height <= 0:
+        return []
+    alignment = max(height, (anchor["right"] - anchor["x"]) * .15)
+    radius = max(160, anchor["right"] - anchor["x"])
+
+    def aligned(part):
+        return (all(key in part and math.isfinite(part[key]) for key in ("x", "y", "right", "bottom")) and
+                abs((part["x"] + part["right"]) / 2 - center) <= alignment)
+
+    visual_rows = []
+    for row in rows:
+        retained = [part for part in row.get("parts", [row])
+                    if abs((part.get("x", center) + part.get("right", center)) / 2 - center) <= radius]
+        if retained:
+            visual_rows.append(_tooltip_visual_row(row, retained))
+    headers = []
+    for row in visual_rows:
+        if (not aligned(row) or not re.match(r"^Rarity\s*:", row["text"], re.I) or
+                not .5 * height <= row["bottom"] - row["y"] <= 1.5 * height or
+                row["bottom"] > anchor["y"] or anchor["y"] - row["y"] > 3 * height):
+            continue
+        if any(aligned(other) and row["y"] < other["y"] < anchor["y"] and
+               not re.match(r"^Rarity\s*:", other["text"], re.I) and
+               not _SEPARATOR.fullmatch(other["text"].strip()) for other in visual_rows):
+            continue
+        headers.extend(row.get("parts", [row]))
+    return headers
+
+
 def read_screen_tooltip(image, affixes=(), ocr_rows=None, strictness=ocr_sensitivity.DEFAULT):
     """Read or reuse OCR rows, isolate the tooltip and retry unclear tablet percentages.
 
@@ -275,15 +331,31 @@ def read_screen_tooltip(image, affixes=(), ocr_rows=None, strictness=ocr_sensiti
     from PoE2_Data_Logger.ocr.item_ocr import ocr_lines
     rows = [dict(row) for row in ocr_rows] if ocr_rows is not None else ocr_lines(image)
     parts = [dict(part) for row in rows for part in row.get("parts", [row])]
+    normal_header_start = None
     anchor = next((row for row in parts if _TABLET_TITLE.fullmatch(row["text"].strip()) or
                    re.search(r"Waystone\s*\(Tier\s*\d+\)", row["text"], re.I)), None)
     if anchor and all(key in anchor for key in ("x", "right", "y")):
         center = (anchor["x"] + anchor["right"]) / 2
         radius = max(160, anchor["right"] - anchor["x"])
-        rows = [row for row in parts if row.get("y", anchor["y"]) >= anchor["y"] - 60 and
-                abs((row.get("x", center) + row.get("right", center)) / 2 - center) <= radius]
+        headers = _scaled_rarity_headers(rows, anchor, center)
+        isolated = []
+        for row in rows:
+            retained = [part for part in row.get("parts", [row])
+                        if (part.get("y", anchor["y"]) >= anchor["y"] - 60 or part in headers) and
+                        abs((part.get("x", center) + part.get("right", center)) / 2 - center) <= radius]
+            if not retained:
+                continue
+            # Parts exclude unrelated UI; their original visual row remains
+            # the modifier boundary, even when OCR emitted the right half first.
+            isolated.append(_tooltip_visual_row(row, retained))
+        rows = isolated
         rows.sort(key=lambda row: (row.get("y", 0), row.get("x", 0)))
-    parsed = parse_screen_tooltip(rows, affixes)
+        # Only geometry-verified header context may extend Normal proof past
+        # its existing two rows; retain every coherent conflict before separators.
+        normal_header_start = next((i for i, row in enumerate(rows)
+                                    if re.match(r"^Rarity\s*:", row["text"], re.I) and
+                                    any(part in headers for part in row.get("parts", [row]))), None)
+    parsed = parse_screen_tooltip(rows, affixes, normal_header_start=normal_header_start)
     level = ocr_sensitivity.validate(strictness.get(parsed["kind"], ocr_sensitivity.DEFAULT)
                                     if isinstance(strictness, dict) and parsed else
                                     ocr_sensitivity.DEFAULT if isinstance(strictness, dict) else strictness)
@@ -316,7 +388,7 @@ def read_screen_tooltip(image, affixes=(), ocr_rows=None, strictness=ocr_sensiti
                 row["text"] = normalized
                 changed = True
         if changed:
-            parsed = parse_screen_tooltip(rows, affixes)
+            parsed = parse_screen_tooltip(rows, affixes, normal_header_start=normal_header_start)
         if parsed and any(float(row.get("score", 1)) < review_floor for row in parsed.get("ocr_rows", [])):
             parsed["uncertain"] = list(dict.fromkeys(parsed.get("uncertain", []) +
                                         [row["text"] for row in parsed["ocr_rows"] if float(row.get("score", 1)) < review_floor]))

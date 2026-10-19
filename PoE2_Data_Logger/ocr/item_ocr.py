@@ -7,11 +7,13 @@ references and review flags separately describe identity and count evidence."""
 from __future__ import annotations
 
 import io
+import json
 import re
 import hashlib
 import threading
 from collections import OrderedDict
 from difflib import SequenceMatcher
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +29,7 @@ from PoE2_Data_Logger.ocr.affix_capture import affix_key, affix_unit, modifier_v
 _RITUAL_MATCH_CACHE = OrderedDict()
 _RITUAL_MATCH_LOCK = threading.Lock()
 _INVENTORY_TEXT_CACHE = threading.local()
+_RITUAL_OMEN_CACHE = threading.local()
 
 
 def _key(text):
@@ -90,14 +93,13 @@ def _reviewed_bank(reader, references, shape=(1, 1)):
 def _reviewed_match(reader, image, bank, catalog=None, strictness=ocr_sensitivity.DEFAULT):
     """Accept a reviewed-reference override only for an unambiguous score > -450 and lead > 250.
 
-    Shared catalog artwork still uses tier resolution, so a reviewed label cannot
-    replace the badge check for multiple currency variants. Strictness adjusts
-    the score and lead around their existing defaults without bypassing tiers.
+    Shared catalog artwork retains tier or grayscale ambiguity, so a reviewed
+    label cannot replace badge checks or distinguish siblings after color loss.
+    Strictness adjusts the score and lead without bypassing those guards.
     """
     examples, kinds, shape = bank
     if not examples or (catalog and (catalog.get("shared_icon") or len(catalog.get("members") or []) > 1)):
-        # A labelled Chaos/Exalted/etc. picture cannot replace the existing
-        # badge resolver: several tiers deliberately share that artwork.
+        # A labelled picture cannot separate shared currency tiers or gray Omens.
         return None
     ranked = reader.examples(_reviewed_pixels(image) if shape == (1, 1) else image, examples)
     if not ranked:
@@ -1075,6 +1077,94 @@ def _ritual_cell_labels(cells):
     return labels
 
 
+@lru_cache(maxsize=2)
+def _ritual_omen_shapes(path, modified, size):
+    """Prepare immutable grayscale art, grouping only source-backed Omen siblings.
+
+    All other catalog items remain independent competitors. Catalog metadata
+    invalidates the bounded bank without sharing a worker's CurrencyReader.
+    """
+    entries = json.loads(Path(path).read_text(encoding="utf-8"))["icons"]
+    groups, members, candidates, owners = {}, [], [], []
+    for entry in entries:
+        names = entry["members"]
+        omen = not entry.get("ignored") and names and all(name.startswith("Omen of ") for name in names)
+        source = re.search(r"/(VoodooOmens\d+)(?:Blue|Green|Dark|Purple|Red|Yellow)\.png$",
+                           entry.get("url", "")) if omen else None
+        key = ("omen", source[1]) if source else ("catalog", entry["family"])
+        if key not in groups:
+            groups[key] = len(members)
+            members.append([])
+        group = groups[key]
+        if omen:
+            members[group].extend(name for name in names if name not in members[group])
+        for scale in (1.0, .9, 1.12, 1.25):
+            pixels = currency_ocr._inventory_candidate(entry["rgba"], scale)
+            candidates.append(cv2.cvtColor(pixels, cv2.COLOR_RGB2GRAY))
+            owners.append(group)
+    atlas = np.concatenate(candidates, axis=0)
+    atlas.flags.writeable = False
+    owners = np.asarray(owners)
+    owners.flags.writeable = False
+    return tuple(tuple(names) for names in members), owners, atlas
+
+
+def _ritual_gray_omen_icon(cell, strictness=ocr_sensitivity.DEFAULT):
+    """Suggest complete Omen shape members from gray Ritual art, never an identity.
+
+    Exclude the frame, count and deferred badge uniformly. Gray artwork still
+    needs strong normalized structure and a lead over every other catalog shape;
+    color loss alone supplies neither an Omen category nor a deferred state.
+    """
+    if min(cell.size) < 16:
+        return None
+    rgb = np.asarray(cell.convert("RGB").resize((40, 40), Image.Resampling.LANCZOS),
+                     dtype=np.float32).copy()
+    background = ((rgb.max(axis=2) < 28) |
+                  ((rgb[:, :, 0] < 28) & (rgb[:, :, 1] < 28) & (rgb[:, :, 2] <= 45) &
+                   (rgb[:, :, 2] >= rgb[:, :, 0]) & (rgb[:, :, 2] >= rgb[:, :, 1])))
+    rgb[background] = [26, 26, 40]
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    mask = np.zeros((40, 40), dtype=np.uint8)
+    mask[4:-4, 4:-4] = 1
+    mask[:15, :26] = 0
+    mask[25:, 25:] = 0
+    artwork = (gray > 35) & mask.astype(bool)
+    if (int(artwork.sum()) < 64 or float(gray[mask.astype(bool)].std()) < 4 or
+            float(np.percentile((rgb.max(axis=2) - rgb.min(axis=2))[artwork], 90)) > 12):
+        return None
+    path = currency_ocr.ROOT / "inventory-icons.json"
+    if not path.exists():
+        return None
+    stat = path.stat()
+    signature = (str(path), stat.st_mtime_ns, stat.st_size)
+    members, owners, atlas = _ritual_omen_shapes(*signature)
+    cache = getattr(_RITUAL_OMEN_CACHE, "ranks", None)
+    if cache is None:
+        cache = _RITUAL_OMEN_CACHE.ranks = OrderedDict()
+    key = signature, gray.tobytes()
+    if key in cache:
+        cache.move_to_end(key)
+        group, score, margin = cache[key]
+    else:
+        scores = cv2.matchTemplate(atlas, gray, cv2.TM_CCOEFF_NORMED, mask=mask)
+        rows = np.arange(len(owners))[:, None] * 48 + np.arange(9)
+        scores = np.nan_to_num(scores[rows], nan=-1, posinf=-1, neginf=-1).max(axis=(1, 2))
+        best = np.full(len(members), -1, dtype=np.float32)
+        np.maximum.at(best, owners, scores)
+        group = int(best.argmax())
+        score = float(best[group])
+        margin = score - float(np.max(np.delete(best, group))) if len(best) > 1 else score
+        cache[key] = group, score, margin
+        if len(cache) > 128:
+            cache.popitem(last=False)
+    if (not members[group] or score < ocr_sensitivity.review_threshold(.80, strictness, .04) or
+            margin < ocr_sensitivity.review_threshold(.15, strictness, .03)):
+        return None
+    return {"family": None, "members": list(members[group]), "shared_icon": True,
+            "score": min(1.0, score), "margin": margin, "method": "Ritual grayscale Omen shape"}
+
+
 def _ritual_reward_icon(reader, cell, label, examples, icon=None, strictness=ocr_sensitivity.DEFAULT):
     """Resolve one-cell Ritual artwork with count masking, tier checks and local reference margins.
 
@@ -1087,6 +1177,10 @@ def _ritual_reward_icon(reader, cell, label, examples, icon=None, strictness=ocr
     if icon is None:
         icon = (reader.icon(cell, count_digits=count_digits) if strictness == ocr_sensitivity.DEFAULT else
                 reader.icon(cell, count_digits=count_digits, strictness=strictness))
+    if icon.get("method") == "Ritual grayscale Omen shape":
+        # Even one learned sibling or one catalog-present member cannot supply
+        # identity from grayscale artwork; independent anchored text still can.
+        return None, float(icon["score"]), list(icon["members"])
     candidates = []
     # Maps, tablets and runes are excluded from currency inventories, but they
     # are legitimate Ritual rewards. Keep the same weighted match thresholds.
@@ -1181,8 +1275,11 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
         if not multiple:
             count = label.get("count") or label.get("count_candidate")
             digits = len(str(count)) if count is not None else None
-            catalog_icon = (reader.icon(cells[index], count_digits=digits) if strictness == ocr_sensitivity.DEFAULT else
-                            reader.icon(cells[index], count_digits=digits, strictness=strictness))
+            # Establish shared gray artwork before a reviewed sibling can win.
+            catalog_icon = _ritual_gray_omen_icon(cells[index], strictness=strictness)
+            if catalog_icon is None:
+                catalog_icon = (reader.icon(cells[index], count_digits=digits) if strictness == ocr_sensitivity.DEFAULT else
+                                reader.icon(cells[index], count_digits=digits, strictness=strictness))
         if shape is not None:
             if shape not in reviewed:
                 reviewed[shape] = _reviewed_bank(reader, references, shape)
@@ -1196,7 +1293,8 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
         else:
             name, score, candidates = (None, 0.0, []) if multiple else _ritual_reward_icon(
                 reader, cells[index], label, examples, icon=catalog_icon, strictness=strictness)
-            kind = "omen" if name in omen_names else "item"
+            kind = "omen" if (name in omen_names or
+                              catalog_icon and catalog_icon.get("method") == "Ritual grayscale Omen shape") else "item"
         quantity = 1 if multiple else label.get("count") or label.get("count_candidate") or 1
         deferred = index in deferred_rewards
         item = {"category": "Omen" if kind == "omen" else "Item", "name": name or "",
@@ -1204,7 +1302,7 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
                 "source": "icon reference: Ritual reward grid" if name else "Occupied Ritual reward; name unresolved",
                 "score": round(score, 3), "name_match": 1.0 if name in omen_names else 0.0,
                 "needs_review": True, "name_needs_review": not bool(name), "unresolved": not bool(name),
-                "category_verified": bool(name) or multiple,
+                "category_verified": bool(name) or multiple or kind == "omen",
                 "count_needs_review": False if multiple else not label.get("count_verified", False),
                 "deferred": deferred, "box": box, "grid_slots": list(reward["slots"])}
         if not name and candidates:
