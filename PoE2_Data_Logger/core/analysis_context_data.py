@@ -9,7 +9,7 @@ today's character settings to old maps or inventing a combined game multiplier.
 VIEWS = {
     "analysis_context_atlas_references": """
         SELECT json_extract(snapshot_json,'$.atlas_setup_id') AS setup_id,map_id FROM maps
-        UNION SELECT json_extract(snapshot_json,'$.atlas_setup_id'),map_id FROM commits
+        UNION SELECT json_extract(snapshot_json,'$.atlas_setup_id'),map_id FROM commits WHERE map_id<>''
         UNION SELECT json_extract(snapshot_json,'$.atlas_setup_id'),map_id FROM currency_snapshots
         UNION SELECT json_extract(snapshot_json,'$.atlas_setup_id'),map_id FROM ritual_pages
         UNION SELECT s.setup_id,'' FROM atlas_setups s JOIN meta m ON m.key='settings'
@@ -96,6 +96,22 @@ VIEWS = {
         SELECT map_id,affix,unit,SUM(amount) AS total,COUNT(*) AS contribution_count
         FROM analysis_context_tablet_values GROUP BY map_id,affix,unit
     """,
+    "analysis_context_ritual_counters": """
+        WITH boundaries AS (
+            SELECT map_id,COUNT(*) AS reading_count,MIN(number) AS first_commit_number,
+                   MAX(number) AS final_commit_number
+            FROM commits WHERE kind='Ritual' AND map_id<>'' GROUP BY map_id
+        )
+        SELECT b.map_id,json_object(
+            'reading_count',b.reading_count,
+            'first_commit_number',b.first_commit_number,'final_commit_number',b.final_commit_number,
+            'first_tribute_available',json_extract(first.details_json,'$.tribute_available'),
+            'first_rerolls_remaining',json_extract(first.details_json,'$.rerolls_remaining'),
+            'final_tribute_available',json_extract(final.details_json,'$.tribute_available'),
+            'final_rerolls_remaining',json_extract(final.details_json,'$.rerolls_remaining')) AS guidance
+        FROM boundaries b JOIN commits first ON first.number=b.first_commit_number
+        JOIN commits final ON final.number=b.final_commit_number
+    """,
     "analysis_context_map_values": """
         SELECT m.map_id,json_object(
             'map_id',m.map_id,'source','maps.snapshot_json; one created map',
@@ -114,6 +130,20 @@ VIEWS = {
             'total_mods',json_extract(m.snapshot_json,'$.total_mods'),
             'tablets_used',json_extract(m.snapshot_json,'$.tablets_used'),
             'tablet_capacity',json_extract(m.snapshot_json,'$.tablet_capacity'),
+            'tablet_set_id',json_extract(m.snapshot_json,'$.tablet_set_id'),
+            'tablet_set_name',json_extract(m.snapshot_json,'$.tablet_set_name'),
+            'ritual_rite_id',json_extract(m.snapshot_json,'$.ritual_rite_id'),
+            'ritual_rite_name',json_extract(m.snapshot_json,'$.ritual_rite_name'),
+            'ritual_rite_map_ordinal',json_extract(m.snapshot_json,'$.ritual_rite_map_ordinal'),
+            'ritual_rite_affixes',json(CASE WHEN json_type(m.snapshot_json,'$.ritual_rite_affixes')='array'
+                THEN json_extract(m.snapshot_json,'$.ritual_rite_affixes') ELSE 'null' END),
+            'ritual_rite_inherited_sources',json(CASE
+                WHEN json_type(m.snapshot_json,'$.ritual_rite_inherited_sources')='array'
+                THEN json_extract(m.snapshot_json,'$.ritual_rite_inherited_sources') ELSE 'null' END),
+            'ritual_counters',json(COALESCE((SELECT r.guidance FROM analysis_context_ritual_counters r
+                WHERE r.map_id=m.map_id),'{"reading_count":0,"first_commit_number":null,"final_commit_number":null,
+                "first_tribute_available":null,"first_rerolls_remaining":null,
+                "final_tribute_available":null,"final_rerolls_remaining":null}')),
             'master',json_extract(m.snapshot_json,'$.master'),
             'perks',json(COALESCE(json_extract(m.snapshot_json,'$.perks'),'[]')),
             'biome',json_extract(m.snapshot_json,'$.biome'),'city_type',json_extract(m.snapshot_json,'$.city_type'),

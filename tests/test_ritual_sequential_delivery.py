@@ -1,4 +1,4 @@
-"""Retain completed Ritual pages through ordered Qt delivery and real persistence.
+"""Save sequential Ritual pages while ordinary captures keep latest-only delivery.
 
 Recognition is injected through Futures; these tests do not measure OCR accuracy.
 """
@@ -33,7 +33,7 @@ class RetainedFuture(Future):
 
 
 class RitualSequentialDeliveryTests(unittest.TestCase):
-    """Keep accepted page history and manual review ownership across subsequent scans."""
+    """Keep accepted history while later captures replace unsaved ordinary reviews."""
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
@@ -120,26 +120,21 @@ class RitualSequentialDeliveryTests(unittest.TestCase):
         QTest.mouseClick(self.window.approve_scan_button, Qt.MouseButton.LeftButton)
         self.app.processEvents()
 
-    def test_fifty_five_distinct_pages_survive_two_ahead_delivery_and_auto_save(self):
+    def test_fifty_five_sequential_pages_auto_save_and_export(self):
         for field, text in zip((self.window.normal, self.window.magic, self.window.rare, self.window.unique),
                                ("11", "22", "33", "44")):
             field.setText(text)
-        count = 0
-        for first in range(1, 56, 2):
-            indices = list(range(first, min(first + 2, 56)))
-            events = [self.publish(index) for index in indices]
-            for offset, index in enumerate(indices):
-                self.window.poll()
-                self.assertEqual(len(self.futures), count + 1)
-                self.assertEqual(self.window._latest_hotkey, events[offset]["id"])
-                self.assertEqual(self.window._ritual_capture_context["scan_hash"],
-                                 hashlib.sha256(Image.open(io.BytesIO(self.png(index))).tobytes()).hexdigest())
-                # Polling while this page reads must not replace it with the next completed capture.
-                self.window.poll()
-                self.assertEqual(len(self.futures), count + 1)
-                self.complete(count, index)
-                count += 1
-                self.assertIsNone(self.window.pending_review_kind)
+        for index in range(1, 56):
+            event = self.publish(index)
+            self.window.poll()
+            self.assertEqual(len(self.futures), index)
+            self.assertEqual(self.window._latest_hotkey, event["id"])
+            self.assertEqual(self.window._ritual_capture_context["scan_hash"],
+                             hashlib.sha256(Image.open(io.BytesIO(self.png(index))).tobytes()).hexdigest())
+            self.window.poll()
+            self.assertEqual(len(self.futures), index)
+            self.complete(index - 1, index)
+            self.assertIsNone(self.window.pending_review_kind)
         pages = logger.ritual_pages_for_map("M0001")
         self.assertEqual([page["page_number"] for page in pages], list(range(1, 56)))
         self.assertEqual([page["items"][0]["quantity"] for page in pages], list(range(1, 56)))
@@ -153,43 +148,85 @@ class RitualSequentialDeliveryTests(unittest.TestCase):
                          ("11", "22", "33", "44"))
         self.assertIsNone(self.manager.next_event(self.window._latest_hotkey))
 
-    def test_manual_page_retains_followup_until_real_approve(self):
-        first, second = self.publish(1), self.publish(2)
+    def test_burst_before_poll_delivers_only_latest_ritual(self):
+        first, second, latest = self.publish(1), self.publish(2), self.publish(3)
+        self.assertIsNone(self.manager.image(first["id"]))
+        self.assertIsNone(self.manager.image(second["id"]))
+        self.assertEqual(self.manager.next_event()["id"], latest["id"])
+        self.window.poll()
+        self.assertEqual(len(self.futures), 1)
+        self.assertEqual(self.window._latest_hotkey, latest["id"])
+        self.assertEqual(self.window._ritual_capture_context["scan_hash"],
+                         hashlib.sha256(Image.open(io.BytesIO(self.png(3))).tobytes()).hexdigest())
+        self.complete(0, 3)
+        self.window.poll()
+        self.assertEqual(len(self.futures), 1)
+        self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [3])
+        self.assertIsNone(self.manager.next_event(self.window._latest_hotkey))
+
+    def test_later_ritual_replaces_held_page_before_real_approve(self):
+        self.publish(1)
         self.window.poll()
         self.complete(0, 1, needs_review=True)
         self.window.ritual_table.item(0, 2).setText("7")
+        latest = self.publish(2)
+        self.window.poll()
+        self.assertEqual(len(self.futures), 2)
+        self.assertEqual(self.window._latest_hotkey, latest["id"])
+        self.assertEqual(self.window.ritual_table.rowCount(), 0)
+        self.complete(1, 2, needs_review=True)
         for _ in range(3):
             self.window.poll()
-        self.assertEqual(len(self.futures), 1)
-        self.assertEqual(self.window._latest_hotkey, first["id"])
-        self.assertEqual(self.manager.next_event(first["id"])["id"], second["id"])
-        self.assertEqual(self.window.ritual_table.item(0, 2).text(), "7")
+        self.assertEqual(len(self.futures), 2)
+        self.assertEqual(self.window.ritual_table.item(0, 2).text(), "2")
         self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
         self.click_approve()
         self.window.poll()
-        self.complete(1, 2)
-        self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [7, 2])
-
-    def test_reject_current_page_preserves_followup_completed_capture(self):
-        self.publish(1)
-        self.publish(2)
-        self.window.poll()
-        self.complete(0, 1, needs_review=True)
-        self.assertEqual(self.window.pending_review_kind, "ritual")
-        QTest.mouseClick(self.window.reject_scan_button, Qt.MouseButton.LeftButton)
-        self.app.processEvents()
-        self.window.poll()
-        self.assertEqual(len(self.futures), 2)
-        self.complete(1, 2)
         self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [2])
         self.assertEqual(len(self.ritual_commits()), 1)
+
+    def test_later_ritual_replaces_inflight_page_and_ignores_late_future(self):
+        self.publish(1)
+        self.window.poll()
+        original = self.futures[0]
+        latest = self.publish(2)
+        self.window.poll()
+        self.assertEqual(len(self.futures), 2)
+        self.assertEqual(self.window._latest_hotkey, latest["id"])
+        self.assertFalse(original.done())
+        self.complete(1, 2)
+        self.complete(0, 999, needs_review=True)
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertEqual(self.window.ritual_table.item(0, 2).text(), "2")
+        self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [2])
+        self.assertEqual([c["items"][0]["quantity"] for c in self.ritual_commits()], [2])
+
+    def test_reject_latest_page_discards_unpolled_burst(self):
+        self.publish(1)
+        self.publish(2)
+        latest = self.publish(3)
+        self.window.poll()
+        self.assertEqual(self.window._latest_hotkey, latest["id"])
+        self.complete(0, 3, needs_review=True)
+        self.assertEqual(self.window.pending_review_kind, "ritual")
+        self.publish(4)
+        self.publish(5)
+        QTest.mouseClick(self.window.reject_scan_button, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        for _ in range(3):
+            self.window.poll()
+        self.assertEqual(len(self.futures), 1)
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertIsNone(self.manager.next_event(self.window._latest_hotkey))
+        self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
+        self.assertEqual(self.ritual_commits(), [])
 
     def test_same_image_updates_one_page_but_retains_both_approval_commits(self):
         raw = self.png(1)
         self.publish(1, raw=raw)
-        self.publish(2, raw=raw)
         self.window.poll()
         self.complete(0, 1)
+        self.publish(2, raw=raw)
         self.window.poll()
         self.complete(1, 2)
         self.assertEqual(len(logger.ritual_pages_for_map("M0001")), 1)
@@ -197,7 +234,7 @@ class RitualSequentialDeliveryTests(unittest.TestCase):
         self.assertEqual([c["page"] for c in self.ritual_commits()], [1, 1])
         self.assertEqual([c["items"][0]["quantity"] for c in self.ritual_commits()], [1, 2])
 
-    def test_currency_followup_is_still_intentionally_discarded(self):
+    def test_currency_burst_is_also_latest_only(self):
         ui.select(self.window.inventory_phase, "end")
         self.publish(1, mode="currency")
         self.publish(2, mode="currency")
@@ -209,6 +246,29 @@ class RitualSequentialDeliveryTests(unittest.TestCase):
         self.window.poll()
         self.assertEqual(len(self.futures), 1)
         self.assertEqual(logger.currency_for_map("M0001")["end"], {"Divine Orb": 3})
+
+    def test_other_mode_replaces_held_ritual_without_waiting_on_ritual_burst(self):
+        self.publish(1)
+        self.window.poll()
+        self.complete(0, 1, needs_review=True)
+        self.window.ritual_table.item(0, 2).setText("7")
+        self.publish(2)
+        ui.select(self.window.inventory_phase, "end")
+        latest = self.publish(3, mode="currency")
+        self.window.poll()
+        self.assertEqual(len(self.futures), 2)
+        self.assertEqual(self.window._latest_hotkey, latest["id"])
+        self.assertEqual(self.window.pending_review_kind, "currency")
+        self.futures[1].set_result({"items": [{"slot": 1, "name": "Divine Orb", "quantity": 3}], "unknown": []})
+        self.app.processEvents()
+        for _ in range(3):
+            self.window.poll()
+        self.assertEqual(len(self.futures), 2)
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertEqual(logger.currency_for_map("M0001")["end"], {"Divine Orb": 3})
+        self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
+        self.assertEqual(self.ritual_commits(), [])
+        self.assertIsNone(self.manager.next_event(self.window._latest_hotkey))
 
     def test_frozen_context_and_strictness_survive_later_preferences(self):
         event = self.publish(1, strictness=37)
@@ -222,7 +282,7 @@ class RitualSequentialDeliveryTests(unittest.TestCase):
         self.complete(0, 1)
         self.assertEqual(len(logger.ritual_pages_for_map("M0001")), 1)
 
-    def test_new_map_retires_waiting_capture_and_late_inflight_result(self):
+    def test_new_map_retires_latest_capture_and_late_inflight_result(self):
         self.publish(1)
         self.publish(2)
         self.window.poll()

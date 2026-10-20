@@ -10,6 +10,8 @@ Each scan needs a hotkey press. Scanning pauses when PoE2 is not the active wind
 
 **CPU OCR threads** in Scan settings offers 1, 2, 4 or 6 threads. Restart the app to apply a changed value. Two is the default; higher counts can help large scans but use more CPU.
 
+**Use GPU for Currency / Ritual** beside that selector is off by default and also requires a restart. It accelerates count/tier label recognition where DirectML is available, with CPU fallback.
+
 **OCR Sensitivity** provides a separate **OCR Strictness** slider for each scan type. **0** accepts more tentative recognized matches, **50** keeps the previous behavior, and **100** requires manual confirmation before OCR results save. Higher values require stronger evidence. Each scan keeps its captured settings; quantity, level, family, marked-position and capture-context checks still apply.
 
 ## Map / Tablet Setup
@@ -17,6 +19,8 @@ Each scan needs a hotkey press. Scanning pauses when PoE2 is not the active wind
 Choose Biome and City Type, or toggle Ocean, Irradiated, Deli and Wisp, from the top row. These changes save immediately.
 
 Tablets save to slots **1–4** in order. **Clear tablet config** clears them and restarts at slot 1.
+
+Named tablet sets retain separate configurations and scan progress. Select the set to use for the map; only that selected saved set is attached when completing the map.
 
 New maps clear waystone settings. Tablets, Atlas Master settings and map tags—including Irradiated and Ocean Map—carry over until changed.
 
@@ -43,6 +47,8 @@ Currency review lists confident items first, possible matches next, then unknown
 Double-click an item name in Currency or Ritual review to correct it. Committing an accepted name correction saves its captured artwork as a local recognition example for later scans and adds its item-count column to exports. Rows left unnamed are rejected. Confirm other critical fields before approval. Local recognition examples can be exported in an OCR reference pack.
 
 **Ritual:** deferred rewards are marked **Deferred** and contribute zero new finds. Available tribute and remaining rerolls are saved with the scan.
+
+The optional **Ritual** tab records Rite affixes without requiring them for scans. Proliferating affixes carry from completed earlier maps of the same selected Rite. The first and final approved Tribute/reroll readings are saved per map, including readable counters on an empty reward page.
 
 Finish pending reviews and chains before clicking **+ New map**.
 

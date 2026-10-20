@@ -149,6 +149,22 @@ class AnalysisContextDetailTests(unittest.TestCase):
         self.assertNotIn("context_choice_bonus_+%", totals)
         self.assertFalse(any(key.startswith("dummy_display_") for key in totals))
 
+    def test_library_only_history_does_not_mark_an_old_atlas_setup_current(self):
+        """Blank-map tablet edits stay library history rather than saved map/setup references."""
+        old_id, _ = self.setup()
+        commit = logger.record_commit("Tablet config")
+        current_id, _ = self.setup(self.catalog(revision="current"))
+        with logger._connect() as db:
+            saved = db.execute("SELECT map_id,snapshot_json FROM commits WHERE number=?",
+                               (commit,)).fetchone()
+            self.assertEqual(saved["map_id"], "")
+            self.assertEqual(json.loads(saved["snapshot_json"])["atlas_setup_id"], old_id)
+        setups = self.facts("Atlas setup")
+        self.assertEqual([row["setup_id"] for row in setups], [current_id])
+        self.assertIs(setups[0]["is_current"], True)
+        self.assertEqual(setups[0]["referenced_map_count"], 0)
+        self.assertEqual(self.facts("Atlas map reference"), [])
+
     def test_frozen_catalog_names_stats_and_option_order_survive_current_catalog_changes(self):
         """Use each saved catalog's definitions rather than current names, values or choice ordinals."""
         old_id, old_catalog = self.setup(allocated=("context-common", "context-choice"),

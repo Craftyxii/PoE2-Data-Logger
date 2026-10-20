@@ -15,8 +15,11 @@
 | [auto_commit.py](PoE2_Data_Logger/core/auto_commit.py) | Accepting clear remnant readings |
 | [reference_pack.py](PoE2_Data_Logger/core/reference_pack.py) | Reference database import and export |
 | [ritual_catalog.py](PoE2_Data_Logger/core/ritual_catalog.py) | Ritual reward catalog helpers |
+| [ritual_rites_catalog.py](PoE2_Data_Logger/core/ritual_rites_catalog.py) | Source-traced optional Rite affix catalog |
+| [ritual_rite_store.py](PoE2_Data_Logger/core/ritual_rite_store.py) | Explicit Rite membership, saved affixes and completed-map proliferation |
+| [ritual_counters.py](PoE2_Data_Logger/core/ritual_counters.py) | First/final approved map Tribute and reroll observations |
 | [catalog_repairs.py](PoE2_Data_Logger/core/catalog_repairs.py) | Guarded repairs for known legacy remnant family data |
-| [ocr_runtime.py](PoE2_Data_Logger/core/ocr_runtime.py) | OCR CPU thread preference and runtime configuration |
+| [ocr_runtime.py](PoE2_Data_Logger/core/ocr_runtime.py) | Frozen CPU thread and optional GPU label preferences |
 | [ocr_workers.py](PoE2_Data_Logger/core/ocr_workers.py) | Bounded child recognition workers, cancellation, deadlines and recovery |
 | [ocr_sensitivity.py](PoE2_Data_Logger/core/ocr_sensitivity.py) | Per-scan strictness preferences and acceptance thresholds |
 | [review_learning.py](PoE2_Data_Logger/core/review_learning.py) | Validated local icon examples learned from accepted review corrections |
@@ -38,6 +41,9 @@
 | --- | --- |
 | [affix_capture.py](PoE2_Data_Logger/ocr/affix_capture.py) | Waystone and tablet affix capture |
 | [currency_ocr.py](PoE2_Data_Logger/ocr/currency_ocr.py) | Currency and inventory OCR |
+| [digit_kernels.py](PoE2_Data_Logger/ocr/digit_kernels.py) | Exact native arithmetic for the pinned upstream digit reader |
+| [label_gpu.py](PoE2_Data_Logger/ocr/label_gpu.py) | Optional isolated GPU label inference and complete CPU retry |
+| [gpu_label_protocol.py](PoE2_Data_Logger/ocr/gpu_label_protocol.py) | Pure protocol/model limits shared with the GPU helper |
 | [inventory_labels.py](PoE2_Data_Logger/ocr/inventory_labels.py) | Inventory item-label helpers |
 | [item_ocr.py](PoE2_Data_Logger/ocr/item_ocr.py) | Item and Ritual reward readings |
 | [item_text.py](PoE2_Data_Logger/ocr/item_text.py) | Tooltip text parsing |
@@ -84,6 +90,7 @@
 - [packaging/PoE2-Data-Logger.spec](packaging/PoE2-Data-Logger.spec) packages the app and libraries.
 - [packaging/installer.nsi](packaging/installer.nsi) defines the Windows installer.
 - [tools/verify_build.py](tools/verify_build.py) checks the packaged Windows runtime.
+- [gpu_worker/](gpu_worker/README.md), [tools/build_label_gpu.py](tools/build_label_gpu.py) and [tools/verify_label_gpu.py](tools/verify_label_gpu.py) build and verify the separate optional DirectML runtime.
 - [tools/build_atlas_catalog.py](tools/build_atlas_catalog.py) rebuilds the bundled atlas from its versioned source data.
 - [tools/run_tests.py](tools/run_tests.py) runs targeted tests or full discovery in isolated batches.
 - [tools/audit_propagation_crowns.py](tools/audit_propagation_crowns.py) and [tools/audit_propagation_prefill.py](tools/audit_propagation_prefill.py) measure captured-image mark recognition and family filling.

@@ -120,6 +120,10 @@ def _numeric_column(name):
         "Scan Commit #", "Family ID", "Propagation Family ID", "Quantity", "Ritual Page", "Tribute", "Tablet Slot Capacity",
         "Start Count", "End Count", "Net Change", "Normal Kills", "Magic Kills", "Rare Kills", "Unique Kills", "Total Kills",
         "Currency Scan #", "Start Currency Scan #", "End Currency Scan #",
+        "Ritual Rite Map Ordinal",
+        "Ritual Reading Count", "Ritual First Tribute Available", "Ritual First Rerolls Remaining",
+        "Ritual Final Tribute Available", "Ritual Final Rerolls Remaining",
+        "Ritual First Commit #", "Ritual Final Commit #",
         "New Find Quantity", "Session Found Quantity", "Ritual Tribute Available", "Ritual Rerolls Remaining", "Visible Seed Sockets",
         "Page", "Currency Commit #", "Ritual Commit #", "Start Scan Commit #", "End Scan Commit #",
         "Gear Item Rarity %", "Points", "Normal Kills (Observed)", "Magic Kills (Observed)",
@@ -159,14 +163,57 @@ def _atlas_setup_hyperlinks(data, atlas_data, target_sheet):
     return hyperlinks
 
 
+def _rite_json_table(data):
+    """Append lossless Rite JSON fragments only when their new fields exceed an Excel cell.
+
+    Leave SQL/CSV data and the established worksheet columns intact. Item names
+    can be arbitrary column labels, so choose a distinct continuation namespace
+    for the entire appended block when an existing label would collide.
+    """
+    source = io.StringIO(data.decode("utf-8-sig"))
+    rows = csv.reader(source)
+    headers = next(rows)
+    fields = ("Ritual Rite Affixes JSON", "Ritual Rite Inherited Sources JSON")
+    columns = [(headers.index(name), name) for name in fields if name in headers]
+    if not columns:
+        return headers, rows
+    parts = {column: 0 for column, _ in columns}
+    for number, values in enumerate(rows, 2):
+        if len(values) != len(headers):
+            raise ValueError(f"Export row {number} has an invalid width.")
+        for column, _ in columns:
+            parts[column] = max(parts[column], max(0, (len(values[column]) - 1) // 32767))
+    source.seek(0)
+    rows = csv.reader(source)
+    next(rows)
+    plan = [(column, name, part) for column, name in columns
+            for part in range(1, parts[column] + 1)]
+    if not plan:
+        return headers, rows
+    prefix = ""
+    labels = [f"{name} continuation {part}" for _, name, part in plan]
+    while any(prefix + label in headers for label in labels):
+        prefix = "Rite metadata | " + prefix
+
+    def expanded_rows():
+        for values in rows:
+            fragments = [values[column][part * 32767:(part + 1) * 32767]
+                         for column, _, part in plan]
+            for column, _ in columns:
+                if parts[column]:
+                    values[column] = values[column][:32767]
+            yield [*values, *fragments]
+
+    return [*headers, *(prefix + label for label in labels)], expanded_rows()
+
+
 def _data_sheet(data, *, hyperlinks=None, numeric_columns=()):
     """Turn a CSV table into a filtered worksheet with a frozen header and optional setup links.
 
     Recognized numeric columns become numbers only for matching decimal text;
     other values remain inline strings and each row must match the header width.
     """
-    rows = csv.reader(io.StringIO(data.decode("utf-8-sig")))
-    headers = next(rows)
+    headers, rows = _rite_json_table(data)
     root = ET.Element(f"{{{NS}}}worksheet")
     ET.SubElement(root, f"{{{NS}}}dimension")
     views = ET.SubElement(root, f"{{{NS}}}sheetViews")

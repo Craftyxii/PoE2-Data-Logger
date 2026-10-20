@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.2.22 Beta
+
+- Limit deferred scan holding to Remnant followed by Propagation; keep Currency/Ritual replacement reads latest-only without a queued review burst.
+- Group multi-slot Ritual equipment into one review row, including grayscale artwork, while preserving adjacent Omens and editable suggestions.
+- Save independent tablet sets and their scan progress; attach only the selected saved set when completing a map, preserving finalized maps and Undo.
+- Add optional Ritual Rite affixes, proliferation from completed earlier maps of the same explicit Rite, and first/final approved map Tribute and remaining-reroll counters, including counter-only pages.
+- Cache bounded prepared Currency/Ritual references and exact raw evidence; accelerate pinned digit-reader arithmetic with unchanged count decisions.
+- Add an off-by-default, restart-applied GPU label setting beside the CPU selector, using a separate vendor-neutral Windows DirectML helper with CPU fallback.
+- Extend export/context guidance for tablet sets, Rite settings and Ritual counters. Preserve historical observations, manual end-map entries, screenshot evidence and mandatory propagation approval.
+
+See [release notes](docs/RELEASE_1.3.2.22.md) for measured CPU results and validation limits. Physical GPU speed/accuracy and sub-second scans remain unverified. Alloy reference corrections remain unapplied.
+
 ## 1.3.2.21 Beta
 
 - Recognize grayscale Ritual Omen shapes and offer their complete supported names in editable dropdowns; retain manual approval, screenshot evidence, separate Deferred detection and ambiguity after learning a sibling.

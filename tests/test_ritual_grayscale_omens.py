@@ -108,6 +108,26 @@ class RitualGrayscaleOmenTests(unittest.TestCase):
             self.assertIn(tuple(expected), members)
         self.assertFalse(owners.flags.writeable or atlas.flags.writeable)
 
+    def test_shape_cache_ignores_only_pixels_excluded_from_correlation(self):
+        """Frame-only changes reuse exact masked math; artwork changes rerun matching."""
+        cell = self.cells[1].convert("RGB").resize((40, 40), Image.Resampling.LANCZOS)
+        cache = getattr(item_ocr._RITUAL_OMEN_CACHE, "ranks", None)
+        if cache is not None:
+            cache.clear()
+        with patch.object(item_ocr.cv2, "matchTemplate", wraps=item_ocr.cv2.matchTemplate) as matching:
+            original = item_ocr._ritual_gray_omen_icon(cell)
+            self.assertIsNotNone(original)
+            self.assertEqual(matching.call_count, 1)
+            frame_changed = cell.copy()
+            frame_changed.putpixel((0, 0), (220, 220, 220))
+            self.assertEqual(item_ocr._ritual_gray_omen_icon(frame_changed), original)
+            self.assertEqual(matching.call_count, 1)
+            artwork_changed = cell.copy()
+            pixel = cell.getpixel((18, 18))
+            artwork_changed.putpixel((18, 18), tuple(255 - value for value in pixel))
+            item_ocr._ritual_gray_omen_icon(artwork_changed)
+            self.assertEqual(matching.call_count, 2)
+
     def test_reviewed_and_local_single_siblings_cannot_resolve_gray_art_at_any_strictness(self):
         """Learning one identical captured sibling preserves the complete ambiguity on repeat scans."""
         for reviewed in (False, True):

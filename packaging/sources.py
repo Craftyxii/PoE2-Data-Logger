@@ -19,6 +19,9 @@ CORE_SOURCES = (
     "core/reference_pack.py",
     "core/reference_updates.py",
     "core/ritual_catalog.py",
+    "core/ritual_rites_catalog.py",
+    "core/ritual_rite_store.py",
+    "core/ritual_counters.py",
     "core/workbook_export.py",
     "core/workbook_references.py",
     "core/atlas_catalog.py",
@@ -34,6 +37,9 @@ CORE_SOURCES = (
 OCR_SOURCES = (
     "ocr/affix_capture.py",
     "ocr/currency_ocr.py",
+    "ocr/digit_kernels.py",
+    "ocr/label_gpu.py",
+    "ocr/gpu_label_protocol.py",
     "ocr/inventory_labels.py",
     "ocr/item_ocr.py",
     "ocr/item_text.py",
@@ -78,6 +84,7 @@ DATABASE_RESOURCES = (
     "bootstrap.json.gz",
     "catalog.json",
     "affix_catalog.json",
+    "ritual_rites_catalog.json",
 )
 
 SCANNER_RESOURCES = (
@@ -94,6 +101,7 @@ DESKTOP_RESOURCES = (
     "IN_APP_README.md",
     "CRAFTYXII_ASSETS_LICENSE.txt",
     "AFFIX_CATALOG_NOTICE.txt",
+    "RITUAL_RITES_CATALOG_NOTICE.txt",
 )
 
 FILE_RESOURCES = DATABASE_RESOURCES + SCANNER_RESOURCES + DESKTOP_RESOURCES

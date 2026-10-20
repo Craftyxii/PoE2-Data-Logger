@@ -6,6 +6,10 @@ License: GNU GPL version 3 (see LICENSE)
 currency-reader.js, icon-matcher.js, digit-reader.js, currency-icons.json,
 and digit-templates.json are copied from renderer/stash at this revision.
 currency_ocr.py executes their original JavaScript in embedded QuickJS.
+For the pinned digit reader, digit_kernels.py accelerates binary IoU window
+matching, candidate collection and reflected grayscale opening with native arithmetic. The
+original JavaScript retains threshold sweeps, digit assembly and confidence
+decisions, and remains the fallback for changed source or unsupported inputs.
 The catalog detects currency artwork without requiring user training images.
 Items with shared artwork need a separately readable tier; uncertain results
 are presented for manual correction. The upstream price/network features and

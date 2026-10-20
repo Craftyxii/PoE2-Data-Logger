@@ -13,13 +13,16 @@ TABLES = (
     "currency_snapshots", "ritual_pages", "currency_items", "item_names", "ritual_names",
     "currency_icons", "item_icons", "omen_icons", "review_icon_examples", "affixes",
     "recipes", "families", "aliases", "alias_keys", "alias_conflicts", "seed_states",
-    "master_perks", "reviewed_glyphs", "scans",
+    "master_perks", "reviewed_glyphs", "scans", "tablet_sets",
+    "ritual_rites", "ritual_rite_map_settings", "ritual_rite_completions",
 )
 META_KEYS = frozenset((
     "settings", "current_map_number", "next_remnant_number", "pending_new_map",
     "previous_expedition", "previous_waystone_settings", "previous_biome", "prepared_waystone_setup",
     "reopened_map_id",
-    "scan_commit_count", "tablet_auto_next", "active_retired_currency_names",
+    "scan_commit_count", "tablet_auto_next", "selected_tablet_set_id", "finalized_tablet_map_id",
+    "active_retired_currency_names",
+    "selected_ritual_rite_id",
 ))
 HISTORY_LIMIT = 100
 _LOCAL = threading.local()

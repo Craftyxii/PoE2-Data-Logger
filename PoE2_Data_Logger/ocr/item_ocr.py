@@ -15,6 +15,7 @@ from collections import OrderedDict
 from difflib import SequenceMatcher
 from functools import lru_cache
 from pathlib import Path
+from types import MappingProxyType
 
 import numpy as np
 import cv2
@@ -69,25 +70,84 @@ def _reviewed_pixels(image):
     return Image.fromarray(pixels)
 
 
+class _ReferenceSnapshot:
+    """Freeze one capture's reference inputs and hash every identity-bearing field."""
+    def __init__(self, references):
+        self.references = []
+        digest = hashlib.sha256()
+        for source in references:
+            reference = {key: source.get(key, default) for key, default in (
+                ("id", None), ("name", None), ("kind", "item"),
+                ("columns", 1), ("rows", 1), ("reviewed", False))}
+            raw = source.get("image")
+            if isinstance(raw, Image.Image):
+                # PIL inputs are mutable; matching must see the pixels whose
+                # identity we hashed even if the caller edits its image later.
+                if (min(raw.size) >= 1 and max(raw.size) <= 8192 and
+                        raw.width * raw.height <= 12_000_000):
+                    raw = raw.copy()
+                    pixels = raw.convert("RGB")
+                    image_key = ("pixels", pixels.size,
+                                 hashlib.sha256(pixels.tobytes()).hexdigest())
+                else:
+                    image_key = ("oversized", raw.size)
+                    raw = None
+            elif isinstance(raw, bytes):
+                image_key = ("bytes", len(raw), hashlib.sha256(raw).hexdigest())
+            else:
+                image_key = ("unsupported", type(raw).__name__)
+            # Length-delimited metadata also preserves ordering and duplicate
+            # labels, which affect stable ties and the last reviewed item kind.
+            identity = repr((tuple(reference.items()), image_key)).encode("utf-8", "surrogatepass")
+            digest.update(len(identity).to_bytes(8, "little"))
+            digest.update(identity)
+            reference["image"] = raw
+            self.references.append(MappingProxyType(reference))
+        self.references = tuple(self.references)
+        self.signature = digest.digest()
+
+    def __iter__(self):
+        """Iterate the frozen metadata in the capture's original reference order."""
+        return iter(self.references)
+
+
+def _reference_snapshot(references):
+    """Hash a reference snapshot once, including when several footprints share it."""
+    return references if isinstance(references, _ReferenceSnapshot) else _ReferenceSnapshot(references)
+
+
+def _prepared_reference_bank(reader, references, shape, reviewed):
+    """Reuse preparation for exact local reference content without caching a match."""
+    references = _reference_snapshot(references)
+
+    def build():
+        """Decode and normalize the selected footprint only on a content cache miss."""
+        examples, kinds = [], {}
+        for reference in references:
+            if (bool(reference.get("reviewed")) != reviewed or
+                    (reference.get("columns", 1), reference.get("rows", 1)) != shape):
+                continue
+            name = reference.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            sample = _reference_image(reference.get("image"), 384 if reviewed else 96)
+            if sample is not None:
+                if reviewed and shape == (1, 1):
+                    sample = _reviewed_pixels(sample)
+                examples.append({"name": name, "image": sample})
+                kinds[name] = reference.get("kind", "item")
+        if examples and hasattr(reader, "prepare_examples"):
+            examples = reader.prepare_examples(examples)
+        return examples or (), MappingProxyType(kinds), shape
+
+    if isinstance(reader, currency_ocr.CurrencyReader):
+        return reader.reference_bank((references.signature, shape, reviewed), build)
+    return build()
+
+
 def _reviewed_bank(reader, references, shape=(1, 1)):
     """Prepare only reviewed references with the requested footprint and retain their item kinds."""
-    examples, kinds = [], {}
-    for reference in references:
-        if (not reference.get("reviewed") or
-                (reference.get("columns", 1), reference.get("rows", 1)) != shape):
-            continue
-        name = reference.get("name")
-        if not isinstance(name, str) or not name:
-            continue
-        sample = _reference_image(reference.get("image"), 384)
-        if sample is not None:
-            if shape == (1, 1):
-                sample = _reviewed_pixels(sample)
-            examples.append({"name": name, "image": sample})
-            kinds[name] = reference.get("kind", "item")
-    if examples and hasattr(reader, "prepare_examples"):
-        examples = reader.prepare_examples(examples)
-    return examples, kinds, shape
+    return _prepared_reference_bank(reader, references, shape, reviewed=True)
 
 
 def _reviewed_match(reader, image, bank, catalog=None, strictness=ocr_sensitivity.DEFAULT):
@@ -338,7 +398,27 @@ def _stack_count(cell, read):
 
 
 def _inventory_patch_readings(patches):
-    """Reuse exact raw count/tier readings, retaining every caller's crop vote.
+    """Read labels with an optional isolated GPU, retrying complete requests on failure."""
+    from PoE2_Data_Logger.ocr import label_gpu
+
+    with OCR_LOCK:
+        engine = _engine()
+        reader = label_gpu.reader_for(engine.text_rec)
+        shape = getattr(reader, "rec_image_shape", ())
+        if (reader is not engine.text_rec and len(shape) == 3
+                and any(patch.shape[1] / patch.shape[0] > shape[2] / shape[1] for patch in patches)):
+            reader = engine.text_rec
+        try:
+            return _cached_inventory_patch_readings(patches, engine, reader)
+        except label_gpu.GPUFallback:
+            # Discard all earlier GPU evidence before retrying, including cache
+            # hits from prior scans. A request never mixes providers' readings.
+            _INVENTORY_TEXT_CACHE.state = None
+            return _cached_inventory_patch_readings(patches, engine, engine.text_rec)
+
+
+def _cached_inventory_patch_readings(patches, engine, reader):
+    """Reuse exact raw Inventory/Ritual label readings, retaining every crop vote.
 
     TextRec pads a batch to its widest aspect ratio. Only patches within its
     configured default width can be reused independently without changing that
@@ -346,44 +426,41 @@ def _inventory_patch_readings(patches):
     """
     from rapidocr.ch_ppocr_rec.typings import TextRecInput
 
-    with OCR_LOCK:
-        engine = _engine()
-        reader = engine.text_rec
-        shape = getattr(reader, "rec_image_shape", ())
-        if len(shape) != 3 or any(patch.shape[1] / patch.shape[0] > shape[2] / shape[1]
-                                  for patch in patches):
+    shape = getattr(reader, "rec_image_shape", ())
+    if len(shape) != 3 or any(patch.shape[1] / patch.shape[0] > shape[2] / shape[1]
+                              for patch in patches):
+        result = reader(TextRecInput(img=patches, return_word_box=False))
+        return tuple(zip(result.txts, result.scores))
+    session = getattr(reader, "session", None)
+    owners = (engine, reader, session, getattr(session, "session", None),
+              getattr(reader, "postprocess_op", None))
+    signature = (tuple(shape), getattr(reader, "rec_batch_num", None),
+                 repr(getattr(reader, "cfg", None)),
+                 getattr(type(reader), "resize_norm_img", None))
+    state = getattr(_INVENTORY_TEXT_CACHE, "state", None)
+    if (state is None or any(old is not new for old, new in zip(state[0], owners))
+            or state[1] != signature):
+        state = (owners, signature, OrderedDict())
+        _INVENTORY_TEXT_CACHE.state = state
+    cache = state[2]
+    keys = [(patch.shape, patch.dtype.str, hashlib.sha256(patch.tobytes()).digest())
+            for patch in patches]
+    missing = OrderedDict((key, patch) for key, patch in zip(keys, patches) if key not in cache)
+    readings = {key: cache[key] for key in keys if key in cache}
+    if missing:
+        result = reader(TextRecInput(img=list(missing.values()), return_word_box=False))
+        fresh = tuple(zip(result.txts, result.scores))
+        if len(fresh) != len(missing):
+            # Preserve the recognizer's original incomplete-output behavior.
             result = reader(TextRecInput(img=patches, return_word_box=False))
             return tuple(zip(result.txts, result.scores))
-        session = getattr(reader, "session", None)
-        owners = (engine, reader, session, getattr(session, "session", None),
-                  getattr(reader, "postprocess_op", None))
-        signature = (tuple(shape), getattr(reader, "rec_batch_num", None),
-                     repr(getattr(reader, "cfg", None)),
-                     getattr(type(reader), "resize_norm_img", None))
-        state = getattr(_INVENTORY_TEXT_CACHE, "state", None)
-        if (state is None or any(old is not new for old, new in zip(state[0], owners))
-                or state[1] != signature):
-            state = (owners, signature, OrderedDict())
-            _INVENTORY_TEXT_CACHE.state = state
-        cache = state[2]
-        keys = [(patch.shape, patch.dtype.str, hashlib.sha256(patch.tobytes()).digest())
-                for patch in patches]
-        missing = OrderedDict((key, patch) for key, patch in zip(keys, patches) if key not in cache)
-        readings = {key: cache[key] for key in keys if key in cache}
-        if missing:
-            result = reader(TextRecInput(img=list(missing.values()), return_word_box=False))
-            fresh = tuple(zip(result.txts, result.scores))
-            if len(fresh) != len(missing):
-                # Preserve the recognizer's original incomplete-output behavior.
-                result = reader(TextRecInput(img=patches, return_word_box=False))
-                return tuple(zip(result.txts, result.scores))
-            readings.update(zip(missing, fresh))
-        for key in keys:
-            cache[key] = readings[key]
-            cache.move_to_end(key)
-            if len(cache) > 512:
-                cache.popitem(last=False)
-        return tuple(readings[key] for key in keys)
+        readings.update(zip(missing, fresh))
+    for key in keys:
+        cache[key] = readings[key]
+        cache.move_to_end(key)
+        if len(cache) > 512:
+            cache.popitem(last=False)
+    return tuple(readings[key] for key in keys)
 
 
 def _inventory_labels(image):
@@ -533,6 +610,7 @@ def _inventory_equipment_slots(image):
 def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitivity.DEFAULT):
     """Match stacks using a frozen strictness while retaining count, tier and occupied-slot review."""
     strictness = ocr_sensitivity.validate(strictness)
+    references = _reference_snapshot(references)
     if not isinstance(image, Image.Image):
         with Image.open(image) as source:
             image = source.convert("RGB")
@@ -547,18 +625,8 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
         equipment.difference_update(slot for slot, label in labels.items() if label["count_present"])
     read = read or ocr_lines
     reader = currency_ocr.get_reader()
-    references = list(references)
     reviewed = _reviewed_bank(reader, references)
-    examples = []
-    for reference in references:
-        if (reference.get("reviewed") or
-                (reference.get("columns", 1), reference.get("rows", 1)) != (1, 1)):
-            continue
-        raw = _reference_image(reference.get("image"), 96)
-        if raw is not None:
-            examples.append({"name": reference["name"], "image": raw})
-    if examples and hasattr(reader, "prepare_examples"):
-        examples = reader.prepare_examples(examples)
+    examples = _prepared_reference_bank(reader, references, (1, 1), reviewed=False)[0]
     found, unknown = [], []
     for slot in range(1, 61):
         cell = inventory_cell(image, slot)
@@ -856,7 +924,6 @@ def _ritual_grid_rerolls(image, grid):
     adjacent numeral outlines from the button art, including the grey disabled
     counter, then require the raw and isolated readings to agree.
     """
-    from rapidocr.ch_ppocr_rec.typings import TextRecInput
     left, top, right, _ = grid["bounds"]
     pitch = (right - left) / 12
     box = (round(left + pitch * 1.02), round(top - pitch * .90),
@@ -900,9 +967,8 @@ def _ritual_grid_rerolls(image, grid):
     patches = [np.asarray(ImageOps.expand(patch.resize((patch.width * 3, patch.height * 3)),
                                           border=15, fill="black"))
                for patch in (crop.crop(glyph_box), mask.crop(glyph_box))]
-    with OCR_LOCK:
-        read = _engine().text_rec(TextRecInput(img=patches, return_word_box=False))
-    numbers = [int(text) for text, score in zip(read.txts, read.scores)
+    readings = _inventory_patch_readings(patches)
+    numbers = [int(text) for text, score in readings
                if re.fullmatch(r"\d{1,2}", text) and score >= .97]
     if len(numbers) == 2 and numbers[0] == numbers[1]:
         return numbers[0]
@@ -912,9 +978,8 @@ def _ritual_grid_rerolls(image, grid):
     raw_crop = image.crop((box[0], round(top - pitch * .85), box[2], box[3])).convert("RGB")
     patches = [np.asarray(ImageOps.expand(raw_crop.resize((raw_crop.width * factor, raw_crop.height * factor)),
                                           border=15, fill="black")) for factor in (3, 6)]
-    with OCR_LOCK:
-        read = _engine().text_rec(TextRecInput(img=patches, return_word_box=False))
-    numbers = [int(text) for text, score in zip(read.txts, read.scores)
+    readings = _inventory_patch_readings(patches)
+    numbers = [int(text) for text, score in readings
                if re.fullmatch(r"\d{1,2}", text) and score >= .97]
     return numbers[0] if len(numbers) == 2 and numbers[0] == numbers[1] else None
 
@@ -1038,7 +1103,6 @@ def _ritual_icon_matches(shown, icon, scale, page_key):
 
 def _ritual_cell_labels(cells):
     """Read complete count/tier crops for occupied Ritual cells."""
-    from rapidocr.ch_ppocr_rec.typings import TextRecInput
     from PoE2_Data_Logger.ocr.inventory_labels import count_crops, tier_crops
 
     labels, patches, positions = {}, [], []
@@ -1052,10 +1116,9 @@ def _ritual_cell_labels(cells):
                 patches.append(np.asarray(patch)); positions.append((index, kind))
     if not patches:
         return labels
-    with OCR_LOCK:
-        read = _engine().text_rec(TextRecInput(img=patches, return_word_box=False))
+    readings = _inventory_patch_readings(patches)
     counts, tiers = {}, {}
-    for (index, kind), raw, score in zip(positions, read.txts, read.scores):
+    for (index, kind), (raw, score) in zip(positions, readings):
         text = raw.strip().replace(" ", "").rstrip(".,:;")
         if kind == "count" and re.fullmatch(r"\d{1,6}", text) and float(score) >= .85:
             if 0 < int(text) <= 1000000:
@@ -1142,7 +1205,10 @@ def _ritual_gray_omen_icon(cell, strictness=ocr_sensitivity.DEFAULT):
     cache = getattr(_RITUAL_OMEN_CACHE, "ranks", None)
     if cache is None:
         cache = _RITUAL_OMEN_CACHE.ranks = OrderedDict()
-    key = signature, gray.tobytes()
+    # The correlation kernel ignores frame/count/badge pixels under this mask.
+    # Reuse its arithmetic only when every effective query pixel is identical;
+    # strictness and category/deferred checks still run for this capture.
+    key = signature, gray[mask.astype(bool)].tobytes()
     if key in cache:
         cache.move_to_end(key)
         group, score, margin = cache[key]
@@ -1231,7 +1297,7 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
     """
     from PoE2_Data_Logger.core.review_learning import footprint
     reader = currency_ocr.get_reader()
-    references = list(references)
+    references = _reference_snapshot(references)
     reviewed = {}
     cells = {}
     frame_inset = max(1, round(grid["pitch"] * .02))
@@ -1241,17 +1307,7 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
             # Keep the game icon's cell proportions, excluding the frame line.
             cells[index] = image.crop((left + frame_inset, top + frame_inset, right, bottom)).convert("RGB")
     labels = _ritual_cell_labels(cells)
-    examples = []
-    for reference in references:
-        if (reference.get("reviewed") or
-                (reference.get("columns", 1), reference.get("rows", 1)) != (1, 1) or
-                not reference.get("name")):
-            continue
-        sample = _reference_image(reference.get("image"), 96)
-        if sample is not None:
-            examples.append({"name": reference["name"], "image": sample})
-    if examples and hasattr(reader, "prepare_examples"):
-        examples = reader.prepare_examples(examples)
+    examples = _prepared_reference_bank(reader, references, (1, 1), reviewed=False)[0]
     deferred_rewards = set()
     for marker in markers:
         nearby = []
@@ -1333,6 +1389,7 @@ def scan_ritual_page(image, omen_names, references=(), strictness=ocr_sensitivit
     and unreadable quantities, prices or deferred states remain reviewable.
     """
     strictness = ocr_sensitivity.validate(strictness)
+    references = _reference_snapshot(references)
     if not isinstance(image, Image.Image):
         with Image.open(image) as source:
             image = source.convert("RGB")

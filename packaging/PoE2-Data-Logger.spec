@@ -17,6 +17,13 @@ if expected != actual:
     raise ValueError(f"Update packaging/sources.py for added or removed modules: {expected ^ actual}")
 datas = [(str(app / name), "PoE2_Data_Logger") for name in sources["FILE_RESOURCES"]]
 datas += [(str(app / name), "PoE2_Data_Logger/" + name) for name in sources["DIRECTORY_RESOURCES"]]
+gpu_helper = run_path(str(project / "packaging" / "gpu_helper.py"))
+helper_data = gpu_helper["helper_bundle_data"](project)
+datas += helper_data
+# Preserve the separately verified helper and its native runtime byte-for-byte,
+# including when PyInstaller reclassifies DLL data as binaries.
+helper_upx_exclude = [str(path) for path in Path(helper_data[0][0]).rglob("*")
+                      if path.is_file() and path.suffix.casefold() in (".exe", ".dll", ".pyd")]
 for source in sources["APP_SOURCES"]:
     if not (app / source).is_file():
         raise FileNotFoundError(app / source)
@@ -52,4 +59,4 @@ exe = EXE(
 # Emit a directory build so the installer can replace runtime files independently
 # of the user-managed Databases directory.
 coll = COLLECT(exe, analysis.binaries, analysis.datas, strip=False, upx=True,
-               upx_exclude=[], name="PoE2-Data-Logger")
+               upx_exclude=helper_upx_exclude, name="PoE2-Data-Logger")

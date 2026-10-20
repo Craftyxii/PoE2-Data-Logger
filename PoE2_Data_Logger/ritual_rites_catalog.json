@@ -1,0 +1,1783 @@
+{
+  "schema_version": 1,
+  "catalog_version": "2026-10-19",
+  "source_verified": "2026-10-19",
+  "id_namespace_notice": "rite:* catalog IDs and logger:rite:* stat IDs are internal application identifiers derived from published content; they are not game IDs.",
+  "coverage": "All 73 published rows in PoE2DB's Rite of the Nameless table: 60 Foretold Bounty variants, 6 Foretold Proliferation variants, 6 local effects, and 1 raw very-rare-unique flag. Published membership does not establish live league eligibility or roll weights.",
+  "proliferation_rule": "After completing its map, a Foretold Proliferation modifier applies its specified effect to other remaining maps in the same Rite of the Nameless. Local effects and Foretold Bounty do not proliferate.",
+  "untranslated_notice": "Three source rows are raw stat labels. Their original wording and numeric values are preserved without claiming a translated game effect or a game stat ID.",
+  "sources": [
+    {
+      "url": "https://poe2db.tw/us/Rite_of_the_Nameless",
+      "title": "PoE2DB — Rite of the Nameless",
+      "scope": "73-row Foretold Proliferation Mods table and proliferation rule",
+      "verified": "2026-10-19"
+    },
+    {
+      "url": "https://www.vaal.tools/mechanics/foretold_proliferation/",
+      "title": "vaal.tools — Foretold Proliferation",
+      "scope": "Six Foretold Proliferation effect templates and scope",
+      "reported_game_version": "0.5.5d",
+      "verified": "2026-10-19"
+    },
+    {
+      "url": "https://poe2ref.com/mechanics/ritual",
+      "title": "PoE 2 Ref — Ritual",
+      "scope": "Rite of the Nameless modifier pool corroborates 60 bounty and six proliferation variants",
+      "verified": "2026-10-19"
+    }
+  ],
+  "affixes": [
+    {
+      "id": "rite:local:53344b12d6fd5a6487eb3862",
+      "type": "rite_affix",
+      "text": "map ritual additional wildwood packs [1]",
+      "kind": "local",
+      "inherited_text": "",
+      "stat_id": "logger:rite:raw:a840ffa23d600e18ac38ec39",
+      "value": 1,
+      "unit": "packs",
+      "custom": false,
+      "translation_status": "raw_untranslated",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 66,
+        "source_raw_description": "map ritual additional wildwood packs [1]",
+        "source_raw_stat": "map ritual additional wildwood packs"
+      }
+    },
+    {
+      "id": "rite:local:f7a28b6e47a86c45c141cae8",
+      "type": "rite_affix",
+      "text": "Ritual Altars in Area allow rerolling Favours 1 additional time",
+      "kind": "local",
+      "inherited_text": "",
+      "stat_id": "logger:rite:additional_rerolls",
+      "value": 1,
+      "unit": "rerolls",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 67,
+        "source_raw_description": "Ritual Altars in Area allow rerolling Favours 1 additional times",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:c51538ad4cb71a7d5399c721",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Alpha's Howl",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:8afca85bc8f27daba9df8919",
+      "value": 1,
+      "unit": "Alpha's Howl",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 68,
+        "source_raw_description": "Foretold Bounty: Alpha's Howl",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:741b854145530d95d592ad0b",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Astramentis",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:f571db77bb22bce771f8cf7a",
+      "value": 1,
+      "unit": "Astramentis",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 69,
+        "source_raw_description": "Foretold Bounty: Astramentis",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:912cc128b7c39d9e98c840a9",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 2 Exalted Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:e950731d99af1a42206215c7",
+      "value": 2,
+      "unit": "Exalted Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 70,
+        "source_raw_description": "Foretold Bounty: 2 Exalted Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:97e18b4cd8ba1bc437e71625",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 4 Exalted Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:e950731d99af1a42206215c7",
+      "value": 4,
+      "unit": "Exalted Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 71,
+        "source_raw_description": "Foretold Bounty: 4 Exalted Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:3b1dda429c8c0eec9571e731",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 8 Exalted Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:e950731d99af1a42206215c7",
+      "value": 8,
+      "unit": "Exalted Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 72,
+        "source_raw_description": "Foretold Bounty: 8 Exalted Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:2dfdaf828116dbfb168546a4",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Defiance of Destiny",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:7b63032b63a2fd5ff821ae6a",
+      "value": 1,
+      "unit": "Defiance of Destiny",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 73,
+        "source_raw_description": "Foretold Bounty: Defiance of Destiny",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:227360fb57c3e07eeaee2905",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 1 Divine Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:56129341def51199d213fd21",
+      "value": 1,
+      "unit": "Divine Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 74,
+        "source_raw_description": "Foretold Bounty: 1 Divine Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:13ef6286abec98a1e43e961a",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 2 Divine Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:56129341def51199d213fd21",
+      "value": 2,
+      "unit": "Divine Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 75,
+        "source_raw_description": "Foretold Bounty: 2 Divine Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:b1f790a84481b791820bc45f",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 5 Divine Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:56129341def51199d213fd21",
+      "value": 5,
+      "unit": "Divine Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 76,
+        "source_raw_description": "Foretold Bounty: 5 Divine Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:a300f6dd4752adea34453457",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Dream Fragments",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:0f3f268bfff02907ea687477",
+      "value": 1,
+      "unit": "Dream Fragments",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 77,
+        "source_raw_description": "Foretold Bounty: Dream Fragments",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:ced00cde0fd221cc2e63754e",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 2 Chaos Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:19740ca56ef84703969b05f1",
+      "value": 2,
+      "unit": "Chaos Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 78,
+        "source_raw_description": "Foretold Bounty: 2 Chaos Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:03a7d924ded5954c2e789d9f",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 4 Chaos Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:19740ca56ef84703969b05f1",
+      "value": 4,
+      "unit": "Chaos Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 79,
+        "source_raw_description": "Foretold Bounty: 4 Chaos Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:fc079c22a8c1833ce9e925c8",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 8 Chaos Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:19740ca56ef84703969b05f1",
+      "value": 8,
+      "unit": "Chaos Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 80,
+        "source_raw_description": "Foretold Bounty: 8 Chaos Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:43d5815443ac41cbf9f675e1",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 2 Greater Orbs of Augmentation",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:abe605497badce74e965d56a",
+      "value": 2,
+      "unit": "Greater Orbs of Augmentation",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 81,
+        "source_raw_description": "Foretold Bounty: 2 Greater Orbs of Augmentation",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:fae39b8d303fd13919827327",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 4 Greater Orbs of Augmentation",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:abe605497badce74e965d56a",
+      "value": 4,
+      "unit": "Greater Orbs of Augmentation",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 82,
+        "source_raw_description": "Foretold Bounty: 4 Greater Orbs of Augmentation",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:5997667d6683bf73dd545be4",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 8 Greater Orbs of Augmentation",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:abe605497badce74e965d56a",
+      "value": 8,
+      "unit": "Greater Orbs of Augmentation",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 83,
+        "source_raw_description": "Foretold Bounty: 8 Greater Orbs of Augmentation",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:d1ff9ec5971004786a2c1692",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 1 Greater Chaos Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:77d0df39137184a6b149e245",
+      "value": 1,
+      "unit": "Greater Chaos Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 84,
+        "source_raw_description": "Foretold Bounty: 1 Greater Chaos Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:5c833d37c49c92d50d0b0354",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 2 Greater Chaos Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:77d0df39137184a6b149e245",
+      "value": 2,
+      "unit": "Greater Chaos Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 85,
+        "source_raw_description": "Foretold Bounty: 2 Greater Chaos Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:d2c9ef54ea37f1ac6f816c81",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 5 Greater Chaos Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:77d0df39137184a6b149e245",
+      "value": 5,
+      "unit": "Greater Chaos Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 86,
+        "source_raw_description": "Foretold Bounty: 5 Greater Chaos Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:58cef5bb969b9693f9e52f81",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 1 Greater Exalted Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:83a826c540bc8a4e4d78340a",
+      "value": 1,
+      "unit": "Greater Exalted Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 87,
+        "source_raw_description": "Foretold Bounty: 1 Greater Exalted Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:f75d870bf3bffb55b4dcd176",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 2 Greater Exalted Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:83a826c540bc8a4e4d78340a",
+      "value": 2,
+      "unit": "Greater Exalted Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 88,
+        "source_raw_description": "Foretold Bounty: 2 Greater Exalted Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:c352f662ea8cf962b99f16af",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 5 Greater Exalted Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:83a826c540bc8a4e4d78340a",
+      "value": 5,
+      "unit": "Greater Exalted Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 89,
+        "source_raw_description": "Foretold Bounty: 5 Greater Exalted Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:a65b401df7da5358464070a8",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 1 Greater Regal Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:f49ace4d215ebb9c2762d5e3",
+      "value": 1,
+      "unit": "Greater Regal Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 90,
+        "source_raw_description": "Foretold Bounty: 1 Greater Regal Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:c68cb62e42cf6e9326fe736f",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 2 Greater Regal Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:f49ace4d215ebb9c2762d5e3",
+      "value": 2,
+      "unit": "Greater Regal Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 91,
+        "source_raw_description": "Foretold Bounty: 2 Greater Regal Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:ddd1d4230e297e5f8f3b0479",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 5 Greater Regal Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:f49ace4d215ebb9c2762d5e3",
+      "value": 5,
+      "unit": "Greater Regal Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 92,
+        "source_raw_description": "Foretold Bounty: 5 Greater Regal Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:bc36739a6abe6b38ebec9012",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 2 Greater Orbs of Transmutation",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:b2fd525464dd80f1275a1759",
+      "value": 2,
+      "unit": "Greater Orbs of Transmutation",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 93,
+        "source_raw_description": "Foretold Bounty: 2 Greater Orbs of Transmutation",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:9cf423017b5094111c7aff69",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 4 Greater Orbs of Transmutation",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:b2fd525464dd80f1275a1759",
+      "value": 4,
+      "unit": "Greater Orbs of Transmutation",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 94,
+        "source_raw_description": "Foretold Bounty: 4 Greater Orbs of Transmutation",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:c189753f9a681d179321073f",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 8 Greater Orbs of Transmutation",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:b2fd525464dd80f1275a1759",
+      "value": 8,
+      "unit": "Greater Orbs of Transmutation",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 95,
+        "source_raw_description": "Foretold Bounty: 8 Greater Orbs of Transmutation",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:5e14e8a206179906bb3e6635",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Headhunter",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:7f6475cc08272202ad9cf84a",
+      "value": 1,
+      "unit": "Headhunter",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 96,
+        "source_raw_description": "Foretold Bounty: Headhunter",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:b8a12f48108a60080d659980",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Kalandra's Touch",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:5778fa4d944bac9cc89f4e09",
+      "value": 1,
+      "unit": "Kalandra's Touch",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 97,
+        "source_raw_description": "Foretold Bounty: Kalandra's Touch",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:302bcb1233e33978bddd56df",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Mageblood",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:f3d6740477cd494bd02dd076",
+      "value": 1,
+      "unit": "Mageblood",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 98,
+        "source_raw_description": "Foretold Bounty: Mageblood",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:6ae840e601af75b126ec967e",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Omen of Amelioration",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:198261d00a9c2451aeb327e7",
+      "value": 1,
+      "unit": "Omen of Amelioration",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 99,
+        "source_raw_description": "Foretold Bounty: Omen of Amelioration",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:56394ca712ccb9a66c016ec3",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Omen of the Blessed",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:2a96dd84762bf89ebfc27f72",
+      "value": 1,
+      "unit": "Omen of the Blessed",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 100,
+        "source_raw_description": "Foretold Bounty: Omen of the Blessed",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:864d15d03b7bed24a0234157",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Omen of Chance",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:61e2fe2a9df4cba0b41d0f89",
+      "value": 1,
+      "unit": "Omen of Chance",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 101,
+        "source_raw_description": "Foretold Bounty: Omen of Chance",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:0fb830ab6dd2a97bdc2a8dfa",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Omen of Corruption",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:b272d72df7206cb81de765cb",
+      "value": 1,
+      "unit": "Omen of Corruption",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 102,
+        "source_raw_description": "Foretold Bounty: Omen of Corruption",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:77467ccdc89c698bdba2e760",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Omen of Dextral Annulment",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:4c4fce89075480399c6bab77",
+      "value": 1,
+      "unit": "Omen of Dextral Annulment",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 103,
+        "source_raw_description": "Foretold Bounty: Omen of Dextral Annulment",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:0deceec3f6d2b74ae4102bbc",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Omen of Dextral Crystallisation",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:801ebf0f28aa77b58b587ea8",
+      "value": 1,
+      "unit": "Omen of Dextral Crystallisation",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 104,
+        "source_raw_description": "Foretold Bounty: Omen of Dextral Crystallisation",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:93eb8a1498b796c78d58c4b7",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Omen of Dextral Erasure",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:c7f6a8f8a634e13f6c1845f1",
+      "value": 1,
+      "unit": "Omen of Dextral Erasure",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 105,
+        "source_raw_description": "Foretold Bounty: Omen of Dextral Erasure",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:c283fff930a901393325bb87",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Omen of Dextral Exaltation",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:ca00e7c0871650c2aa73a169",
+      "value": 1,
+      "unit": "Omen of Dextral Exaltation",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 106,
+        "source_raw_description": "Foretold Bounty: Omen of Dextral Exaltation",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:259c700d33add8eacbe7524a",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Omen of Greater Annulment",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:28a46dc280e87be7b959150a",
+      "value": 1,
+      "unit": "Omen of Greater Annulment",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 107,
+        "source_raw_description": "Foretold Bounty: Omen of Greater Annulment",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:dde2642184847da7933cc421",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Omen of Sanctification",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:df5f98f77fa2480c4cdf7857",
+      "value": 1,
+      "unit": "Omen of Sanctification",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 108,
+        "source_raw_description": "Foretold Bounty: Omen of Sanctification",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:9705a1b90e2f9d256ed7ba95",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Omen of Sinistral Annulment",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:d1bd1313a99c7321c93fce57",
+      "value": 1,
+      "unit": "Omen of Sinistral Annulment",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 109,
+        "source_raw_description": "Foretold Bounty: Omen of Sinistral Annulment",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:f9dfc692842d885992e23d41",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Omen of Sinistral Crystallisation",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:5cc491cba99738565b88642b",
+      "value": 1,
+      "unit": "Omen of Sinistral Crystallisation",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 110,
+        "source_raw_description": "Foretold Bounty: Omen of Sinistral Crystallisation",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:98922b717e79f2ebe47cfcd5",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Omen of Sinistral Erasure",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:08b87d8dd81738ad7f13cc90",
+      "value": 1,
+      "unit": "Omen of Sinistral Erasure",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 111,
+        "source_raw_description": "Foretold Bounty: Omen of Sinistral Erasure",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:5e102f0cee65d9c783d8fac0",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Omen of Sinistral Exaltation",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:ded4d36a9f2364023ff07744",
+      "value": 1,
+      "unit": "Omen of Sinistral Exaltation",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 112,
+        "source_raw_description": "Foretold Bounty: Omen of Sinistral Exaltation",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:503dfbffcfc39562237dee0e",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Omen of Whittling",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:2672a4dc7951d78d8328c169",
+      "value": 1,
+      "unit": "Omen of Whittling",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 113,
+        "source_raw_description": "Foretold Bounty: Omen of Whittling",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:7b189633ebca57823601d993",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 1 Orbs of Annulment",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:c123a747450538cfdb354b01",
+      "value": 1,
+      "unit": "Orbs of Annulment",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 114,
+        "source_raw_description": "Foretold Bounty: 1 Orbs of Annulment",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:b804a769aefc838f2fa6c6a0",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 2 Orbs of Annulment",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:c123a747450538cfdb354b01",
+      "value": 2,
+      "unit": "Orbs of Annulment",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 115,
+        "source_raw_description": "Foretold Bounty: 2 Orbs of Annulment",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:01741ec919d1860db0f08688",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 1 Orbs of Chance",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:1f1ef3a85c56c4fc460f2d70",
+      "value": 1,
+      "unit": "Orbs of Chance",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 116,
+        "source_raw_description": "Foretold Bounty: 1 Orbs of Chance",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:870580b58683423916139d05",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 2 Orbs of Chance",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:1f1ef3a85c56c4fc460f2d70",
+      "value": 2,
+      "unit": "Orbs of Chance",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 117,
+        "source_raw_description": "Foretold Bounty: 2 Orbs of Chance",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:40e6eadcb7636c275013769d",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Original Sin",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:fc178949943d4164a97b37f2",
+      "value": 1,
+      "unit": "Original Sin",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 118,
+        "source_raw_description": "Foretold Bounty: Original Sin",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:be2b70a9c148d58e3ca8b5fc",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 1 Perfect Orbs of Augmentation",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:fa8ab04b2aa77c78ea42cc1c",
+      "value": 1,
+      "unit": "Perfect Orbs of Augmentation",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 119,
+        "source_raw_description": "Foretold Bounty: 1 Perfect Orbs of Augmentation",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:5cc20d314b7a9e7fed5f4adf",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 2 Perfect Orbs of Augmentation",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:fa8ab04b2aa77c78ea42cc1c",
+      "value": 2,
+      "unit": "Perfect Orbs of Augmentation",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 120,
+        "source_raw_description": "Foretold Bounty: 2 Perfect Orbs of Augmentation",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:57660131e7633329575c24d9",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 1 Perfect Chaos Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:18689012b72e63c58d73a07f",
+      "value": 1,
+      "unit": "Perfect Chaos Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 121,
+        "source_raw_description": "Foretold Bounty: 1 Perfect Chaos Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:7d7790f60c6765d701078e2b",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 1 Perfect Exalted Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:8d93ce61237475195605a6a8",
+      "value": 1,
+      "unit": "Perfect Exalted Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 122,
+        "source_raw_description": "Foretold Bounty: 1 Perfect Exalted Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:24b9cee961216d800ca08feb",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 1 Perfect Regal Orbs",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:5df80a38facc47b983d22450",
+      "value": 1,
+      "unit": "Perfect Regal Orbs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 123,
+        "source_raw_description": "Foretold Bounty: 1 Perfect Regal Orbs",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:6c3d74ecbeff04c569cad93b",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 1 Perfect Orbs of Transmutation",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:0f54be8a0017bbe88f583318",
+      "value": 1,
+      "unit": "Perfect Orbs of Transmutation",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 124,
+        "source_raw_description": "Foretold Bounty: 1 Perfect Orbs of Transmutation",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:4f2746a57be3509066121124",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: 2 Perfect Orbs of Transmutation",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:0f54be8a0017bbe88f583318",
+      "value": 2,
+      "unit": "Perfect Orbs of Transmutation",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 125,
+        "source_raw_description": "Foretold Bounty: 2 Perfect Orbs of Transmutation",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:bounty:4d0bd275b5bda05607bbb1e9",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Queen of the Forest",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:ff26ee7391c2cf9962b58989",
+      "value": 1,
+      "unit": "Queen of the Forest",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 126,
+        "source_raw_description": "Foretold Bounty: Queen of the Forest",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:local:77d5dc85eee641c25e291338",
+      "type": "rite_affix",
+      "text": "map ritual contains very rare unique [1]",
+      "kind": "local",
+      "inherited_text": "",
+      "stat_id": "logger:rite:raw:039cd945fa3cb54912f0f000",
+      "value": 1,
+      "unit": "flag",
+      "custom": false,
+      "translation_status": "raw_untranslated",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 127,
+        "source_raw_description": "map ritual contains very rare unique [1]",
+        "source_raw_stat": "map ritual contains very rare unique"
+      }
+    },
+    {
+      "id": "rite:bounty:312a1d05703eb97dc30cb802",
+      "type": "rite_affix",
+      "text": "Foretold Bounty: Yoke of Suffering",
+      "kind": "bounty",
+      "inherited_text": "",
+      "stat_id": "logger:rite:bounty:a4084e314082d1001a2a5600",
+      "value": 1,
+      "unit": "Yoke of Suffering",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 128,
+        "source_raw_description": "Foretold Bounty: Yoke of Suffering",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:local:7fc5e0ec7a55fe9af8da8db6",
+      "type": "rite_affix",
+      "text": "Rerolling Favours at Ritual Altars has no Cost the first time",
+      "kind": "local",
+      "inherited_text": "",
+      "stat_id": "logger:rite:first_free_rerolls",
+      "value": 1,
+      "unit": "free_rerolls",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 129,
+        "source_raw_description": "Rerolling Favours at Ritual Altars has no Cost the first 1 times",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:local:6086704fdfa8765e95fc2c55",
+      "type": "rite_affix",
+      "text": "map ritual offered rewards amount +% [20]",
+      "kind": "local",
+      "inherited_text": "",
+      "stat_id": "logger:rite:raw:cd645803deb5bb6f591a29bb",
+      "value": 20,
+      "unit": "percent",
+      "custom": false,
+      "translation_status": "raw_untranslated",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 130,
+        "source_raw_description": "map ritual offered rewards amount +% [20]",
+        "source_raw_stat": "map ritual offered rewards amount +%"
+      }
+    },
+    {
+      "id": "rite:local:92be215ee8dc5057bff7b981",
+      "type": "rite_affix",
+      "text": "Monsters Sacrificed at Ritual Altars in Area grant 25% increased Tribute",
+      "kind": "local",
+      "inherited_text": "",
+      "stat_id": "logger:rite:tribute_increased",
+      "value": 25,
+      "unit": "percent_increased",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 131,
+        "source_raw_description": "Monsters Sacrificed at Ritual Altars in Area grant 25% increased Tribute",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:proliferation:48ef291e3ffebf0c0aaf4138",
+      "type": "rite_affix",
+      "text": "Foretold Proliferation: Rituals contain 1 additional pack of Wildwood Monsters",
+      "kind": "proliferation",
+      "inherited_text": "Rituals contain 1 additional pack of Wildwood Monsters",
+      "stat_id": "logger:rite:additional_wildwood_packs",
+      "value": 1,
+      "unit": "packs",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://www.vaal.tools/mechanics/foretold_proliferation/",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": "vaal.tools PoE2 v0.5.5d",
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 132,
+        "source_raw_description": "Foretold Proliferation: Rituals contain 1 additional packs of Wildwood Monsters",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:proliferation:369e3cc299d9884954071632",
+      "type": "rite_affix",
+      "text": "Foretold Proliferation: Ritual Altars in Area allow rerolling Favours 1 additional time",
+      "kind": "proliferation",
+      "inherited_text": "Ritual Altars in Area allow rerolling Favours 1 additional time",
+      "stat_id": "logger:rite:additional_rerolls",
+      "value": 1,
+      "unit": "rerolls",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://www.vaal.tools/mechanics/foretold_proliferation/",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": "vaal.tools PoE2 v0.5.5d",
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 133,
+        "source_raw_description": "Foretold Proliferation: Ritual Altars in Area allow rerolling Favours 1 additional times",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:proliferation:2043d6df13835e9729a1ef3a",
+      "type": "rite_affix",
+      "text": "Foretold Proliferation: Rerolling Favours at Ritual Altars has no Cost the first time",
+      "kind": "proliferation",
+      "inherited_text": "Rerolling Favours at Ritual Altars has no Cost the first time",
+      "stat_id": "logger:rite:first_free_rerolls",
+      "value": 1,
+      "unit": "free_rerolls",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://www.vaal.tools/mechanics/foretold_proliferation/",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": "vaal.tools PoE2 v0.5.5d",
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 134,
+        "source_raw_description": "Foretold Proliferation: Rerolling Favours at Ritual Altars has no Cost the first 1 times",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:proliferation:8e1392c6e80d9ff5eb886cc3",
+      "type": "rite_affix",
+      "text": "Foretold Proliferation: Monsters Sacrificed at Ritual Altars grant 25% increased Tribute",
+      "kind": "proliferation",
+      "inherited_text": "Monsters Sacrificed at Ritual Altars grant 25% increased Tribute",
+      "stat_id": "logger:rite:tribute_increased",
+      "value": 25,
+      "unit": "percent_increased",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://www.vaal.tools/mechanics/foretold_proliferation/",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": "vaal.tools PoE2 v0.5.5d",
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 135,
+        "source_raw_description": "Foretold Proliferation: Monsters Sacrificed at Ritual Altars grant 25% increased Tribute",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:proliferation:a32b12f02914bd53b9217363",
+      "type": "rite_affix",
+      "text": "Foretold Proliferation: Rerolling Favours at Ritual Altars in your Maps costs 20% reduced Tribute",
+      "kind": "proliferation",
+      "inherited_text": "Rerolling Favours at Ritual Altars in your Maps costs 20% reduced Tribute",
+      "stat_id": "logger:rite:reroll_cost_reduced",
+      "value": 20,
+      "unit": "percent_reduced",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://www.vaal.tools/mechanics/foretold_proliferation/",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": "vaal.tools PoE2 v0.5.5d",
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 136,
+        "source_raw_description": "Foretold Proliferation: Rerolling Favours at Ritual Altars in your Maps costs 20% reduced Tribute",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:proliferation:39f2f151e0eb6775bede591a",
+      "type": "rite_affix",
+      "text": "Foretold Proliferation: Ritual Altars offer 20% increased number of Favours",
+      "kind": "proliferation",
+      "inherited_text": "Ritual Altars offer 20% increased number of Favours",
+      "stat_id": "logger:rite:favour_count_increased",
+      "value": 20,
+      "unit": "percent_increased",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless",
+          "https://www.vaal.tools/mechanics/foretold_proliferation/",
+          "https://poe2ref.com/mechanics/ritual"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": "vaal.tools PoE2 v0.5.5d",
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 137,
+        "source_raw_description": "Foretold Proliferation: Ritual Altars offer 20% increased number of Favours",
+        "source_raw_stat": null
+      }
+    },
+    {
+      "id": "rite:local:3c8283489c4d8b55bfe8e7c3",
+      "type": "rite_affix",
+      "text": "Rerolling Favours at Ritual Altars in Area costs 20% reduced Tribute",
+      "kind": "local",
+      "inherited_text": "",
+      "stat_id": "logger:rite:reroll_cost_reduced",
+      "value": 20,
+      "unit": "percent_reduced",
+      "custom": false,
+      "translation_status": "published_description",
+      "provenance": {
+        "source_urls": [
+          "https://poe2db.tw/us/Rite_of_the_Nameless"
+        ],
+        "source_verified": "2026-10-19",
+        "source_version": null,
+        "source_table": "Foretold Proliferation Mods /73",
+        "source_line": 138,
+        "source_raw_description": "Rerolling Favours at Ritual Altars in Area costs 20% reduced Tribute",
+        "source_raw_stat": null
+      }
+    }
+  ]
+}

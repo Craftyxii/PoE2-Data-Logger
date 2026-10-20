@@ -80,9 +80,9 @@ class HotkeyPresentationRetryTests(unittest.TestCase):
         return {"mode": "propagation", "can_use": True, "runes": [combo.split("+")[0].strip()],
                 "positions": [1], "selected_recipe": "Medved's Saga", **logger.scan_context()}
 
-    def publish(self, result):
+    def publish(self, result, *, paired=False):
         event = {"mode": result["mode"], "result": result, "error": ""}
-        self.manager._publish_event(event, self.raw)
+        self.manager._publish_event(event, self.raw, paired=paired)
         return event
 
     def hold_for_writer(self, result=None):
@@ -183,26 +183,30 @@ class HotkeyPresentationRetryTests(unittest.TestCase):
         with logger._connect() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM commits WHERE kind='Remnant'").fetchone()[0], 1)
 
-    def test_two_recognized_remnants_keep_fifo_and_each_save_once(self):
+    def test_newer_recognized_remnant_replaces_old_result_without_a_fifo(self):
         self.window.set_auto_all(True)
         first, second = self.opened(50), self.opened(55)
-        event1, event2 = self.publish(first), self.publish(second)
+        event1 = self.publish(first)
         with logger._connect() as writer:
             writer.execute("BEGIN IMMEDIATE")
             self.window.poll()
+            self.assertIs(self.window._hotkey_presentation_retry["event"], event1)
+            event2 = self.publish(second)
             self.now += 30
             self.window.poll()
+            self.assertIs(self.window._hotkey_presentation_retry["event"], event2)
+            self.assertEqual(self.manager._events, {})
+            self.assertIsNone(self.manager.image(event1["id"]))
         self.now += 1
         self.window.poll()
-        self.assertEqual(self.window._latest_hotkey, event1["id"])
-        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
-        self.assertIs(self.manager.next_event(), event2)
-        self.window.poll()
-        self.window.poll()
-        self.assertEqual(logger.get_state()["scan_commit_count"], 2)
         self.assertEqual(self.window._latest_hotkey, event2["id"])
+        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
+        self.window.poll()
+        self.window.poll()
+        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
         self.assertIsNone(self.manager.next_event())
-        self.assertNotEqual(first["remnant_id"], second["remnant_id"])
+        self.assertNotIn("remnant_id", first)
+        self.assertEqual(second["remnant_id"], "R0001")
 
     def test_writer_arriving_after_admission_keeps_review_without_replaying_autosave(self):
         self.window.set_auto_all(True)
@@ -232,8 +236,8 @@ class HotkeyPresentationRetryTests(unittest.TestCase):
 
     def test_queued_propagation_remains_manually_approved_after_remnant_retry(self):
         opened, prop = self.opened(), self.propagation()
-        self.publish(opened)
-        self.publish(prop)
+        self.publish(opened, paired=True)
+        self.publish(prop, paired=True)
         with logger._connect() as writer:
             writer.execute("BEGIN IMMEDIATE")
             self.window.poll()

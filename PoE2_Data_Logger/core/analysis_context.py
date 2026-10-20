@@ -162,11 +162,22 @@ ENTRIES = (
      "Obtained rewards count only when present in approved inventory gains."),
     ("ritual_history", "Ritual", "Page replacements and repeated offers",
      "ritual_pages stores the latest saved page for (Map ID, page_number), while commits retain surviving earlier "
-     "Ritual approvals. A map can contain more than 50 saved pages. Completed Ritual captures wait in order "
-     "while the current Ritual page is being read or awaiting approval/rejection; clear pages can still save "
-     "automatically when enabled. Rescanning the same capture hash updates its page while retaining approval "
+     "Ritual approvals. A map can contain more than 50 saved pages. Ritual and Currency do not maintain a "
+     "waiting-capture backlog; waiting requests are not saved observations. Clear Ritual pages can still "
+     "save automatically when enabled. Rescanning the same capture hash updates "
+     "its page while retaining approval "
      "history. The same reward can appear on multiple pages or rescans. Do not sum every history offer "
      "as a unique reward. Deferred status is a recorded offer attribute, not an acquisition flag."),
+    ("ritual_boundaries", "Ritual", "First and final map resources",
+     "First/final Tribute Available and Rerolls Remaining are the earliest/latest surviving approved Ritual "
+     "scan for the same Map ID, ordered by commit number. Pages means remaining rerolls, not the number of "
+     "saved reward pages. Rejected or waiting reviews do not contribute. Reusing a page or capture hash does "
+     "not erase its earlier approval. Each boundary retains its own unread fields as blank/NULL; do not "
+     "substitute an interior reading, add readings together or infer spending from their difference. "
+     "Ritual Reading Count counts approved readings, including rescans. Map settings Context JSON exposes "
+     "the same boundaries and commit links in ritual_counters, derived from immutable Ritual commit details. "
+     "An approved page with no saved rewards still records readable Tribute or rerolls, including zero. "
+     "It contributes no item counts or learned icons; an empty page with neither counter known is not saved."),
     ("missing_values", "Interpretation", "Blank, zero and Unknown",
      "Blank can mean unrecorded, inapplicable, legacy data without metadata, or a repeated map-level field "
      "suppressed on a later Export row. Zero is an explicit saved value or a computed zero gain; it is not a missing "
@@ -477,6 +488,21 @@ ENTRIES = (
      "recorded_at and snapshot_json. ritual_pages has id and unique (map_id,page_number), items_json (offer list), "
      "raw_text, scan_hash, recorded_at and snapshot_json. These hold current approved inventories/pages. "
      "Earlier surviving approvals and item-category evidence are in commits.details_json."),
+    ("sql_tablet_sets", "SQLite schema", "tablet_sets and selected map settings",
+     "tablet_sets is a reusable library keyed by set_id, with name, config_json and next_slot. Each named set "
+     "keeps its own tablet slots, capacity, raw text, affix values and next scan slot. meta.selected_tablet_set_id "
+     "selects the editor's set; it is not evidence that every saved set was used. Only the selected saved set's "
+     "tablet_set_id, tablet_set_name and tablet configuration are frozen into the completed map snapshot. "
+     "Library-only Tablet config commits have blank Map ID/Expedition ID and details.scope=tablet_library; "
+     "do not count those edits as maps, map observations or uses of a tablet."),
+    ("sql_ritual_rites", "SQLite schema", "ritual_rites / ritual_rite_map_settings / ritual_rite_completions",
+     "ritual_rites stores named Rite identities; meta.selected_ritual_rite_id is an optional selection. "
+     "ritual_rite_map_settings stores each map's editable affixes_json. ritual_rite_completions records "
+     "completed map_id, map_number, rite_id, ordinal, snapshot_json and completed_at. Saved map/event "
+     "snapshots retain ritual_rite_id, ritual_rite_name, ritual_rite_map_ordinal, ritual_rite_affixes and "
+     "ritual_rite_inherited_sources. Read their frozen values rather than substituting the current editor. "
+     "Each inherited source retains origin_map_id, origin_rite_id, origin_map_ordinal, origin_affix_position "
+     "and affix_id, plus the source affix and occurrence count."),
     ("sql_scans", "SQLite schema", "scans / scan_links / seed_states",
      "scans stores reviewed seed screenshot metadata by id, including sockets, seed_slot, seed_rune, "
      "family text, rewards_json and mapping_status. scan_links maps remnant_id to scan_id; join scan_id to scans.id. "
@@ -896,6 +922,34 @@ COLUMN_GUIDANCE = (
 
 # These additive notes describe saved map metadata without changing earlier rune definitions.
 ENTRIES += (
+    ("tablet_set_context", "Map analysis", "Independent named tablet sets",
+     "A saved tablet set is a reusable configuration with a stable ID and editable name. Compare maps using "
+     "the selected set and tablet values frozen in that map's snapshot; later set selection, renaming or "
+     "editing does not revise a completed map. The library can contain unused sets. Never merge all saved "
+     "sets into one map or assign blank-Map-ID library history to a nearby gameplay event. A set ID or "
+     "name alone does not establish the exact affix revision; retain the saved slot values and units."),
+    ("ritual_rite_context", "Ritual", "Optional Rite metadata and proliferation origins",
+     "Rite metadata records the selected Rite, map ordinal, that map's chosen affixes and inherited source "
+     "observations. A missing historical Rite selection remains unknown. Only Foretold Proliferation on "
+     "completed earlier maps in the same selected Rite supplies effects to remaining maps in that Rite; "
+     "ordinary local affixes and Foretold Bounty do not proliferate. Each source's own proliferation choices "
+     "are carried once with origin map/Rite/affix IDs; inherited entries do not become new origins. Keep "
+     "separate occurrences and source IDs instead of inventing a combined bonus, monster density or "
+     "stacking formula. The bundled catalog is the published 73-row pool verified 2026-10-19, including "
+     "three explicitly untranslated raw rows; it does not prove live eligibility or roll weights. "
+     "rite:* and logger:rite:* are internal application identifiers, and custom:rite:* denotes unverified "
+     "typed wording. Sources: https://poe2db.tw/us/Rite_of_the_Nameless ; "
+     "https://www.vaal.tools/mechanics/foretold_proliferation/ ; https://poe2ref.com/mechanics/ritual"),
+    ("prepared_reference_cache", "Recognition", "Prepared references are a performance cache",
+     "Prepared recognition references reuse work for an unchanged reference revision. Cache reuse is a "
+     "performance optimization; it does not change matching thresholds, confidence gates, accepted labels "
+     "or scan ownership. Reference edits require refreshed prepared data. A cache hit is not a saved scan, "
+     "an approval, an accuracy measurement or an additional observation."),
+    ("scan_hold_scope", "Recognition", "One waiting remnant-to-propagation request",
+     "Hold/defer applies only to the accepted remnant-to-propagation sequence, with at most one waiting "
+     "request bound to its original capture and map/expedition context. It does not approve that request "
+     "or create a general scan queue. Ritual and Currency do not accumulate a waiting-capture backlog. "
+     "Use saved approval commits for recorded observations rather than counting held requests."),
     ("map_activity_context", "Map analysis", "One selected activity per map",
      "Activity Type is one user-selected category: None, Breach, Expedition, Grand Expedition, Abyss or Ritual. "
      "It is not an automatically detected encounter, an encounter count or proof that other mechanics were absent. "
@@ -947,6 +1001,20 @@ ENTRIES += (
 )
 
 COLUMN_GUIDANCE += (
+    ("field_ritual_boundary_count", r"Ritual Reading Count", "Approved Ritual readings per map",
+     "Number of surviving approved Ritual commits for this Map ID, including rescans of the same reward page. "
+     "Zero means no saved Ritual reading; waiting or rejected reviews are excluded. This is not a count of "
+     "remaining rerolls, unique pages, purchased rewards or Ritual encounters."),
+    ("field_ritual_boundary_resources", r"Ritual (?:First|Final) (?:Tribute Available|Rerolls Remaining)",
+     "First and final approved Ritual resource readings",
+     "First uses the earliest approved Ritual commit for this Map ID; Final uses the latest, ordered by "
+     "commit number rather than page number. Values are displayed resource snapshots, not cumulative gains. "
+     "Zero is an explicit reading; blank means this boundary's field was unread or no reading was saved. "
+     "Keep both fields from the same boundary even when an interior reading has a known value."),
+    ("field_ritual_boundary_commits", r"Ritual (?:First|Final) Commit #", "Ritual boundary audit links",
+     "The saved commit number supplying the first/final approved Ritual resource reading for this Map ID. "
+     "Join commits.number or Scan History's Scan Commit #; a blank link means no saved Ritual reading. "
+     "These are not reward-page numbers and page replacements do not change their chronological meaning."),
     ("field_activity_type", r"Activity Type", "Selected map activity",
      "One saved activity category per map: None, Breach, Expedition, Grand Expedition, Abyss or Ritual. "
      "This is a user selection, not an encounter count or detection. Group outcomes by Map ID and activity "
@@ -1012,6 +1080,35 @@ ENTRIES += (
      "it neither replaces manual totals nor stores per-interval gains."),
 )
 COLUMN_GUIDANCE += (
+    ("field_tablet_set", r"Tablet Set ID|Tablet Set Name", "Saved tablet set identity",
+     "The selected saved tablet set's ID and name are frozen with this map/event's tablet configuration. "
+     "They do not refer to every reusable set in the library. Compare frozen slot values and units as well "
+     "as IDs; a later rename/edit does not revise a completed map. Library-only history has blank Map ID "
+     "and is not a map use. Missing legacy set identity stays blank rather than using the current selection."),
+    ("field_ritual_rite_identity", r"Ritual Rite ID|Ritual Rite Name|Ritual Rite Map Ordinal",
+     "Optional saved Rite identity and map order",
+     "These fields retain the selected Rite's internal ID, saved name and map ordinal within that Rite. "
+     "They are identifiers/order, not modifier strength or encounter counts. Use the saved observation's "
+     "selection, and keep missing historical metadata unknown rather than substituting today's Rite."),
+    ("field_ritual_rite_affixes", r"Ritual Rite Affixes JSON", "This map's Rite affix selections",
+     "This JSON list records the map's own choices with id, text, kind, occurrence count, value/unit and "
+     "source provenance. kind distinguishes local, bounty and proliferation; only proliferation choices "
+     "can supply inherited effects after this map is completed. The catalog's IDs/stat IDs are explicitly "
+     "internal, raw untranslated rows stay raw, and typed custom wording remains unverified. No general "
+     "bonus or monster-density formula is calculated."),
+    ("field_ritual_rite_inheritance", r"Ritual Rite Inherited Sources JSON", "Rite proliferation source observations",
+     "This JSON list contains effects from completed previous maps in the same selected Rite, retaining "
+     "origin_map_id, origin_rite_id, origin_map_ordinal, origin_affix_position and affix_id. Only the origin "
+     "map's own proliferation affixes are carried; ordinary affixes, bounties and previously inherited "
+     "entries do not create new sources. Retain counts and provenance without assuming an additive or "
+     "multiplicative combined game bonus. Missing metadata is unknown rather than a zero bonus."),
+    ("field_ritual_rite_continuations",
+     r"(?:Rite metadata \| )*(?:Ritual Rite Affixes JSON|Ritual Rite Inherited Sources JSON) continuation [1-9]\d*",
+     "Long Rite JSON in Excel",
+     "When a Rite JSON field exceeds Excel's cell limit, concatenate the original field and its numbered "
+     "continuation columns in order without separators before parsing. Continuations are appended only "
+     "when needed. A repeated Rite metadata | prefix distinguishes generated continuation headers from "
+     "an existing item column with the same name. SQL and CSV retain the complete JSON in one field."),
     ("field_kill_observation_current", r"Current Map Kill Reading", "Latest cumulative map reading",
      "True marks the latest surviving approved kill snapshot for its Map ID by Scan Commit #. "
      "Its four categories and Total Kills (Observed) are the current OCR counts; earlier rows remain "

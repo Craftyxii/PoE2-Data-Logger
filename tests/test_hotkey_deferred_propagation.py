@@ -148,10 +148,61 @@ class DeferredPropagationTests(unittest.TestCase):
         self.manager.readers["propagation"].assert_called_once()
         self.manager.grabber.assert_called_once()
 
-    def test_completed_remnant_cache_is_one_shot_then_prop_captures_independently(self):
+    def test_event_callback_can_consume_pair_once_with_each_original_image(self):
+        delivered = []
+        completed = threading.Event()
+        def consume():
+            with self.manager._lock:
+                while (event := self.manager.next_event()) is not None:
+                    delivered.append((event, self.manager.image(event["id"])))
+                    self.manager.ack_event(event["id"])
+                if len(delivered) == 2:
+                    completed.set()
+        self.manager.on_event = consume
+        self.start_remnant()
+        self.manager.capture("propagation", background=True)
+        self.release.set()
+        self.wait_finished()
+        self.assertTrue(completed.wait(2))
+        self.assertEqual([event["mode"] for event, _ in delivered], ["opened", "propagation"])
+        self.assertEqual(len({event["id"] for event, _ in delivered}), 2)
+        self.assertTrue(all(raw for _, raw in delivered))
+        self.assertEqual(Image.open(io.BytesIO(delivered[1][1])).getpixel((0, 0)), (20, 40, 60))
+        self.assertEqual(self.manager._events, {})
+        self.assertIsNone(self.manager.next_event())
+
+    def test_general_scan_resolving_to_ritual_or_item_does_not_form_a_pair(self):
+        for mode in ("ritual", "item"):
+            with self.subTest(mode=mode):
+                def finish(kind, selected_mode, revision, strictness_values):
+                    self.manager.capture("propagation", background=True)
+                    self.assertIsNotNone(self.manager._deferred_propagation)
+                    self.manager._finish_capture(
+                        {"mode": mode, "result": {"captured": True}, "error": ""},
+                        mode.encode(), revision, adapter_complete=True)
+                with patch.object(self.manager, "_capture", side_effect=finish):
+                    self.manager.capture("default")
+                self.assertEqual(self.manager.next_event()["mode"], mode)
+                self.assertEqual(self.manager._events, {})
+                self.assertIsNone(self.manager._deferred_propagation)
+                self.manager.readers["propagation"].assert_not_called()
+                self.manager.cancel_capture()
+
+    def test_completed_remnant_pair_blocks_new_captures_until_delivered_then_prop_is_independent(self):
         self.manager.capture("remnant")
         self.manager.capture("propagation")
         self.assertEqual(self.manager.grabber.call_count, 1)
+        self.assertEqual(len(self.manager._events), 2)
+        for kind in ("propagation", "currency", "ritual", "waystone", "tablet", "kills", "remnant"):
+            self.manager.capture(kind)
+        self.assertEqual(self.manager.grabber.call_count, 1)
+        self.assertEqual(self.manager._sequence, 2)
+        self.assertIsNone(self.manager._deferred_propagation)
+        first = self.manager.next_event()
+        self.manager.ack_event(first["id"])
+        self.manager.capture("propagation")
+        self.assertEqual(self.manager.grabber.call_count, 1)
+        self.manager.ack_event(self.manager.next_event()["id"])
         self.manager.capture("propagation")
         self.assertEqual(self.manager.grabber.call_count, 2)
         self.assertEqual(self.manager.readers["propagation"].call_count, 2)
@@ -269,6 +320,21 @@ class DeferredPropagationTests(unittest.TestCase):
         self.wait_finished()
         self.manager.readers["propagation"].assert_not_called()
 
+    def test_expired_waiting_prop_cannot_admit_another_while_its_result_is_undelivered(self):
+        self.start_remnant()
+        self.manager.capture("propagation", background=True)
+        self.manager._expire_deferred_propagation(self.manager._deferred_propagation)
+        failed = self.manager.next_event()
+        for kind in ("propagation", "ritual", "currency", "remnant"):
+            self.manager.capture(kind, background=True)
+        self.assertIsNone(self.manager._deferred_propagation)
+        self.assertEqual(self.manager._sequence, failed["id"])
+        self.assertEqual(len(self.manager._events), 1)
+        self.release.set()
+        self.wait_finished()
+        self.manager.readers["propagation"].assert_not_called()
+        self.assertIs(self.manager.next_event(), failed)
+
     def test_queued_fresh_capture_reports_focus_loss_after_overlay_preparation(self):
         active = [True]
         self.manager.focused = lambda: active[0]
@@ -307,15 +373,16 @@ class DeferredPropagationTests(unittest.TestCase):
         self.assertEqual(self.manager.status()["latest"]["error"], "")
         self.assertEqual(self.manager.grabber.call_count, 2)
 
-    def test_repeated_deferred_errors_reserve_capacity_for_the_active_result(self):
+    def test_repeated_rejected_prop_requests_never_retain_a_result_backlog(self):
         self.start_remnant()
         with patch.object(logger, "scan_context", side_effect=RuntimeError("context unavailable")):
             for _ in range(20):
                 self.manager.capture("propagation", background=True)
-        self.assertLessEqual(len(self.manager._events), hotkey.MAX_PENDING_SCAN_EVENTS - 2)
+        self.assertEqual(self.manager._events, {})
+        self.assertIsNone(self.manager._deferred_propagation)
         self.release.set()
         self.wait_finished()
-        self.assertLessEqual(len(self.manager._events), hotkey.MAX_PENDING_SCAN_EVENTS)
+        self.assertEqual(self.manager._events, {})
         self.assertEqual(self.manager.status()["latest"]["mode"], "opened")
 
     def test_legacy_latest_consumer_does_not_fill_the_ordered_queue(self):
@@ -342,25 +409,59 @@ class DeferredPropagationTests(unittest.TestCase):
         self.assertEqual(result["_ocr_strictness_values"]["propagation"], 74)
         self.assertEqual(result["_ocr_strictness"], 74)
 
-    def test_pending_result_capacity_rejects_new_work_without_dropping_old_events(self):
+    def test_ordinary_completed_remnant_is_replaced_by_next_capture(self):
         self.manager.capture("remnant")
         first = self.manager.next_event()
-        image = self.manager.image(first["id"])
-        with patch.object(hotkey, "MAX_PENDING_SCAN_EVENTS", 2):
-            self.manager.capture("remnant")
-        self.manager.grabber.assert_called_once()
-        self.assertIn("Pending scan results are full", self.manager.status()["error"])
-        self.assertIs(self.manager.next_event(), first)
-        self.assertEqual(self.manager.image(first["id"]), image)
+        self.manager.capture("remnant")
+        latest = self.manager.next_event()
+        self.assertGreater(latest["id"], first["id"])
+        self.assertEqual(self.manager.grabber.call_count, 2)
+        self.assertIsNone(self.manager.image(first["id"]))
+        self.assertTrue(self.manager.image(latest["id"]))
+        self.assertEqual(self.manager._events, {})
 
-    def test_pending_evidence_byte_budget_rejects_before_capture_without_eviction(self):
+    def test_currency_replaces_unconsumed_remnant_without_a_hold(self):
+        with logger._connect() as db:
+            logger._set_meta(db, "inventory_region", {"x": 0, "y": 0, "w": 400, "h": 300})
         self.manager.capture("remnant")
         first = self.manager.next_event()
-        with patch.object(hotkey, "MAX_PENDING_SCAN_BYTES", hotkey.MAX_SCAN_EVIDENCE_BYTES):
-            self.manager.capture("currency")
-        self.manager.grabber.assert_called_once()
-        self.assertIs(self.manager.next_event(), first)
-        self.assertIn("Pending scan results are full", self.manager.status()["error"])
+        self.manager.capture("currency")
+        self.assertEqual(self.manager.grabber.call_count, 2)
+        self.assertEqual(self.manager.next_event()["mode"], "currency")
+        self.assertIsNone(self.manager.image(first["id"]))
+        self.assertEqual(self.manager._events, {})
+
+    def test_all_ordinary_admissions_publish_only_latest_result_and_image(self):
+        def finish(kind, mode, revision, strictness_values):
+            self.manager._finish_capture(
+                {"mode": mode, "result": {"kind": kind}, "error": ""},
+                kind.encode(), revision, adapter_complete=True)
+        with patch.object(self.manager, "_capture", side_effect=finish):
+            previous = None
+            for kind in ("remnant", "currency", "ritual", "waystone", "tablet", "kills", "propagation"):
+                with self.subTest(kind=kind):
+                    self.manager.capture(kind)
+                    latest = self.manager.next_event()
+                    self.assertEqual(latest["result"]["kind"], kind)
+                    self.assertEqual(self.manager.image(latest["id"]), kind.encode())
+                    self.assertEqual(self.manager._events, {})
+                    if previous is not None:
+                        self.assertGreater(latest["id"], previous["id"])
+                        self.assertIsNone(self.manager.image(previous["id"]))
+                    previous = latest
+
+    def test_cancel_pair_releases_its_evidence_and_admission_without_late_delivery(self):
+        self.manager.capture("remnant")
+        self.manager.capture("propagation")
+        retained = list(self.manager._events)
+        self.assertEqual(len(retained), 2)
+        self.manager.cancel_capture()
+        self.assertEqual(self.manager._events, {})
+        self.assertIsNone(self.manager.next_event())
+        self.assertTrue(all(self.manager.image(ident) is None for ident in retained))
+        self.manager.capture("propagation")
+        self.assertEqual(self.manager.grabber.call_count, 2)
+        self.assertEqual(self.manager.next_event()["mode"], "propagation")
 
     def test_general_scan_never_uses_currency_inventory_fallback(self):
         self.manager.supported = True

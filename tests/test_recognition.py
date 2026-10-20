@@ -355,6 +355,32 @@ class RecognitionTests(unittest.TestCase):
         self.assertEqual(reader.inventory_ranked(cell, calibrated=True, count_digits=2), second)
         self.assertEqual(reader.inventory_ranked(cell, calibrated=True, count_digits=1), first)
 
+    def test_rank_cache_reuses_only_identical_effective_masked_pixels(self):
+        """Masked background/count changes reuse math; an artwork change is evaluated afresh."""
+        reader = currency_ocr.CurrencyReader()
+        entry = next(row for row in json.loads((currency_ocr.ROOT / "inventory-icons.json").read_text())["icons"]
+                     if "Chaos Orb" in row["members"])
+        art = Image.fromarray(np.asarray(entry["rgba"], dtype=np.uint8).reshape(40, 40, 4), "RGBA")
+        cell = Image.new("RGBA", art.size, (26, 26, 40, 255))
+        cell.alpha_composite(art)
+        cell = cell.convert("RGB")
+        cell.paste((26, 26, 40), (0, 0, 40, 15))
+        cell.putpixel((30, 20), (30, 30, 40))
+        original = reader.inventory_ranked(cell, calibrated=True, count_digits=1)
+        background_changed = cell.copy()
+        background_changed.putpixel((30, 20), (31, 30, 40))
+        with patch.object(currency_ocr.cv2, "matchTemplate", side_effect=AssertionError("masked math repeated")):
+            self.assertEqual(reader.inventory_ranked(background_changed, calibrated=True, count_digits=2), original)
+        reader._rank_cache.clear()
+        self.assertEqual(reader.inventory_ranked(background_changed, calibrated=True, count_digits=2), original)
+        artwork_changed = background_changed.copy()
+        artwork_changed.putpixel((20, 20), (250, 250, 250))
+        with patch.object(currency_ocr.cv2, "matchTemplate", wraps=currency_ocr.cv2.matchTemplate) as matching:
+            changed = reader.inventory_ranked(artwork_changed, calibrated=True, count_digits=2)
+            self.assertGreater(matching.call_count, 0)
+        reader._rank_cache.clear()
+        self.assertEqual(reader.inventory_ranked(artwork_changed, calibrated=True, count_digits=2), changed)
+
     def test_reader_reuse_is_confined_to_each_worker_thread(self):
         """Verify readers are reused within a thread and isolated across workers."""
         first = currency_ocr.get_reader()

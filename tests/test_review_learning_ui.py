@@ -353,13 +353,19 @@ class ReviewLearningUITests(unittest.TestCase):
         self.assertIn("Rejected", self.window.ritual_table.item(1, 6).text())
         self.assertFalse(self.window.ritual_table.item(1, 0).data(Qt.ItemDataRole.UserRole + 1))
 
-    def test_all_unnamed_ritual_rewards_reject_the_scan_without_a_commit(self):
-        """Verify an entirely unnamed Ritual page is rejected without creating a commit."""
+    def test_all_unnamed_ritual_rewards_save_only_readable_counters(self):
+        """Reject unidentified rewards while retaining explicitly approved page resources."""
         self.ritual([self.unknown_reward()])
         self.window.approve_review()
-        self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
+        self.assertEqual(logger.ritual_pages_for_map("M0001")[0]["items"], [])
         self.assertEqual(logger.review_icons(), [])
-        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
+        self.assertIn("Rejected", self.window.ritual_table.item(0, 6).text())
+        self.assertFalse(self.window.ritual_table.item(0, 0).data(Qt.ItemDataRole.UserRole + 1))
+        exported = self.export_rows()[-1]
+        self.assertEqual((exported["Ritual Tribute Available"], exported["Ritual Rerolls Remaining"]),
+                         ("18956", "0"))
+        self.assertEqual(exported["Reward Name"], "")
         self.assertIsNone(self.window.pending_review_kind)
 
     def test_ritual_blank_rejection_recovers_when_named_after_another_row_validation_error(self):

@@ -21,6 +21,8 @@ Runtime dependencies are declared in [requirements.txt](requirements.txt); build
 
 The application also uses Python 3.12's standard library, including SQLite, CSV, JSON, XML and ZIP support. Excel export is written by [workbook_export.py](PoE2_Data_Logger/core/workbook_export.py); it does not require openpyxl at runtime.
 
+Optional GPU label acceleration uses a separate executable with `onnxruntime-directml==1.22.0` and `numpy==1.26.4`, declared in [gpu_worker/requirements.txt](gpu_worker/requirements.txt). Its runtime stays separate from the main application's ONNX Runtime. DirectML supports compatible AMD, NVIDIA and Intel GPUs on Windows; GPU use is off by default with CPU fallback. See [helper build and notices](gpu_worker/README.md).
+
 ## Build tools
 
 | Tool | Requirement | Used for |

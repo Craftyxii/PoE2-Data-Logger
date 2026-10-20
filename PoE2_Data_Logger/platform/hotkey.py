@@ -34,12 +34,6 @@ WM_QUIT = 0x0012
 HOTKEY_ID = 0x4A31
 CAPTURE_TIMEOUT_SECONDS = 90
 KILL_COUNT_TIMEOUT_SECONDS = 5
-MAX_PENDING_SCAN_EVENTS = 8
-MAX_PENDING_SCAN_BYTES = 128 * 1024 * 1024
-# RGB PNG bytes (or their kill-evidence base64) fit under four bytes per
-# source pixel plus encoder overhead. Reserve before capture, never evict an
-# unconsumed result after its expensive recognition has completed.
-MAX_SCAN_EVIDENCE_BYTES = store.MAX_IMAGE_PIXELS * 4 + 1024 * 1024
 DEDICATED = ("remnant", "waystone", "tablet", "currency", "ritual", "propagation", "overlay", "kills")
 GENERAL_MODES = ("seed", "opened", "both")
 KEY_CODES = {
@@ -127,7 +121,7 @@ def parse_combo(value):
 
 
 class HotkeyManager:
-    """Own shortcut registration, serialized scans and ordered result publication with
+    """Own shortcut registration, latest results and one Remnant/Propagation pair with
     cancellation revisions and bounded physical capture adapters.
     """
     def __init__(self, grabber=None, readers=None, supported=None, hover_reader=None,
@@ -169,8 +163,12 @@ class HotkeyManager:
         self._active_strictness_values = None
         self._remnant_capture = None
         self._deferred_propagation = None
+        self._active_pair_capture = False
+        # Only an accepted Remnant -> Propagation pair retains two results.
+        # All ordinary scans retain the previous latest-result replacement rule.
         self._events = {}
         self._ordered_delivery = ordered_delivery
+        self._acknowledged_event = 0
         self._latest = None
         self._image = None
         self._sequence = 0
@@ -445,6 +443,10 @@ class HotkeyManager:
             mode = self.mode if kind in ("default", "remnant") else kind
             if kind in ("default", "remnant") and mode not in GENERAL_MODES:
                 mode = "opened"
+            if _cached_capture is None and self._events:
+                # The accepted pair must finish delivery before another key
+                # can replace either result or reserve another request.
+                return
             if not self._capture_lock.acquire(blocking=False):
                 if (kind == "propagation" and self._active_capture_kind in ("default", "remnant")
                         and self._active_capture_mode in GENERAL_MODES):
@@ -472,15 +474,6 @@ class HotkeyManager:
                             self._deferred_error(f"Screen scan failed: {exc}")
                             self._notify_event()
                 return
-            reserved = 1 if _cached_capture is not None else 2
-            retained_bytes = sum(len(raw or b"") + len((event.get("kill_counts") or {}).get("image_base64", ""))
-                                 for event, raw in self._events.values())
-            if (len(self._events) >= MAX_PENDING_SCAN_EVENTS - int(_cached_capture is None) or
-                    retained_bytes + reserved * MAX_SCAN_EVIDENCE_BYTES > MAX_PENDING_SCAN_BYTES):
-                self._capture_lock.release()
-                self.error = "Pending scan results are full. Review them before scanning again."
-                self._notify_event()
-                return
             if (kind == "propagation" and _cached_capture is None and self._remnant_capture is not None
                     and self._capture_adapter_owner is None):
                 captured, self._remnant_capture = self._remnant_capture, None
@@ -497,6 +490,11 @@ class HotkeyManager:
                     self._notify_event()
                     return
                 else:
+                    captured["_paired"] = True
+                    if (self._ordered_delivery and self._latest is not None and
+                            self._latest["id"] == captured.get("event_id") and
+                            self._latest["id"] > self._acknowledged_event):
+                        self._events[self._latest["id"]] = (self._latest, self._image)
                     _cached_capture = captured
             if self._capture_adapter_owner is not None:
                 self._capture_lock.release()
@@ -514,6 +512,7 @@ class HotkeyManager:
                 self._active_capture_mode = mode
                 self._active_capture_kind = kind
                 self._active_strictness_values = None
+                self._active_pair_capture = bool(_cached_capture and _cached_capture.get("_paired"))
                 if kind != "propagation":
                     self._remnant_capture = None
                 self._capture_deadline = time.monotonic() + CAPTURE_TIMEOUT_SECONDS
@@ -593,7 +592,7 @@ class HotkeyManager:
             pending["timer"].cancel()
             self._deferred_propagation = self._remnant_capture = None
             self._publish_event({"mode": "propagation", "result": None,
-                                 "error": "Queued propagation scan timed out. Scan again."}, None)
+                                 "error": "Queued propagation scan timed out. Scan again."}, None, paired=True)
         self._notify_event()
 
     def _run_deferred_propagation(self):
@@ -614,6 +613,7 @@ class HotkeyManager:
             # retaining the queued request's original destination and settings.
             captured = {"image": None, "context": pending["context"],
                         "strictness_values": dict(pending["strictness_values"] or {})}
+        captured["_paired"] = True
         self.capture("propagation", background=True, _cached_capture=captured)
 
     def _read_cached_propagation(self, revision, captured):
@@ -1143,6 +1143,12 @@ class HotkeyManager:
                     self._remnant_capture = None
             elif event is not None and event.get("mode") not in GENERAL_MODES:
                 self._remnant_capture = None
+                # The general shortcut may identify a Ritual page or item.
+                # A request made during that recognition is not a Remnant pair.
+                if (self._deferred_propagation is not None and
+                        self._deferred_propagation["revision"] == revision):
+                    self._deferred_propagation["timer"].cancel()
+                    self._deferred_propagation = None
             self._capture_owner = None
             self._active_capture_mode = None
             self._active_capture_kind = None
@@ -1152,7 +1158,13 @@ class HotkeyManager:
                 self._capture_watchdog.cancel()
                 self._capture_watchdog = None
             if event is not None:
-                self._publish_event(event, raw)
+                paired = (self._active_pair_capture or
+                          (self._deferred_propagation is not None and
+                           self._deferred_propagation["revision"] == revision))
+                self._publish_event(event, raw, paired=paired)
+                if captured is not None and captured.get("revision") == revision:
+                    captured["event_id"] = event["id"]
+            self._active_pair_capture = False
             self._capture_lock.release()
             # Reserve a retained propagation request before another key can
             # claim the slot. Physical ownership still prevents overlap after
@@ -1162,37 +1174,37 @@ class HotkeyManager:
             self._notify_event()
 
     def _deferred_error(self, message):
-        """Reserve room for the active remnant and its accepted propagation result."""
-        if len(self._events) < MAX_PENDING_SCAN_EVENTS - 2:
-            self._publish_event({"mode": "propagation", "result": None, "error": message}, None)
-        else:
-            self.error = message
+        """Report a rejected request without building a queue of repeated errors."""
+        self._publish_event({"mode": "propagation", "result": None, "error": message}, None)
 
     def enable_ordered_delivery(self):
-        """Subscribe the native consumer without changing the legacy latest-only API."""
+        """Preserve an accepted Remnant/Propagation pair for the native consumer."""
         with self._lock:
             self._ordered_delivery = True
-            if self._latest:
-                self._events.setdefault(self._latest["id"], (self._latest, self._image))
 
-    def _publish_event(self, event, raw):
-        """Retain each completed result and screenshot until the UI acknowledges it."""
+    def _publish_event(self, event, raw, *, paired=False):
+        """Replace ordinary results; retain only the two members of an accepted pair."""
         self._sequence += 1
         event["id"] = self._sequence
         self._latest, self._image = event, raw
-        if self._ordered_delivery:
+        if self._ordered_delivery and paired:
             self._events[self._sequence] = (event, raw)
 
     def next_event(self, after_id=0):
-        """Return the oldest unacknowledged scan after the UI's consumed sequence."""
+        """Deliver an accepted pair in order, otherwise return only the latest result."""
         with self._lock:
-            return next((event for ident, (event, _) in self._events.items()
-                         if ident > after_id), None)
+            consumed = max(after_id, self._acknowledged_event)
+            paired = next((event for ident, (event, _) in self._events.items()
+                           if ident > consumed), None)
+            if paired is not None:
+                return paired
+            return self._latest if self._latest and self._latest["id"] > consumed else None
 
     def ack_event(self, event_id):
         """Release retained result evidence after the UI copied it into its review state."""
         with self._lock:
             self._events.pop(event_id, None)
+            self._acknowledged_event = max(self._acknowledged_event, event_id)
 
     def image(self, event_id):
         """Return an unconsumed event's own evidence, retaining the legacy latest lookup."""

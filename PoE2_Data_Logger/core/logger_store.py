@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
-from PoE2_Data_Logger.core import analysis_context, store, undo_store
+from PoE2_Data_Logger.core import analysis_context, ritual_counters, ritual_rite_store, store, undo_store
 from PoE2_Data_Logger.ocr.affix_capture import affix_catalog, affix_key, affix_unit, modifier_value, tablet_random_mod_counts
 
 
@@ -48,6 +48,8 @@ WAYSTONE_DEFAULTS = {"tier": 15, "waystone": 0, "map_mods": 0, "waystone_name": 
 WAYSTONE_SETUP_FIELDS = frozenset(("tier", "waystone", "map_mods"))
 MAP_SETUP_FIELDS = frozenset(WAYSTONE_DEFAULTS) | frozenset((
     "aldur", "irradiated", "ocean", "deli", "wisp", "biome", "city_type"))
+TABLET_SETTINGS_FIELDS = frozenset(("tablets_used", "plus_two_tablets", "tablet_affixes",
+                                   "tablet_raw_mods", "tablet_random_mods_derived"))
 MAX_RITUAL_REWARDS = 120
 BASE_EXTRA_HEADERS = ("Item Rarity %", "Monster Rarity %", "Pack Size %",
                         "Effectiveness %", "Waystone Name", "Biome", "City Type", "Ocean Map",
@@ -58,7 +60,17 @@ TABLET_DETAIL_HEADERS = (*(label for tablet in range(1, 5) for slot in range(1, 
                         *(f"Tablet {tablet} Random Modifiers" for tablet in range(1, 5)))
 EXPORT_EXTRA_HEADERS = (*BASE_EXTRA_HEADERS, *TABLET_DETAIL_HEADERS, "Deli", "Wisp")
 ATLAS_EXPORT_HEADERS = ("Atlas Setup ID", "Gear Item Rarity %")
-MAP_CONTEXT_HEADERS = ("Activity Type", "Map Scanned", "Atlas Effects JSON")
+MAP_CONTEXT_HEADERS = ("Activity Type", "Map Scanned", "Atlas Effects JSON", "Tablet Set ID", "Tablet Set Name",
+                       "Ritual Rite ID", "Ritual Rite Name", "Ritual Rite Map Ordinal",
+                       "Ritual Rite Affixes JSON", "Ritual Rite Inherited Sources JSON")
+RITUAL_COUNTER_COLUMNS = (("Ritual Reading Count", "reading_count"),
+                          ("Ritual First Tribute Available", "first_tribute_available"),
+                          ("Ritual First Rerolls Remaining", "first_rerolls_remaining"),
+                          ("Ritual Final Tribute Available", "final_tribute_available"),
+                          ("Ritual Final Rerolls Remaining", "final_rerolls_remaining"),
+                          ("Ritual First Commit #", "first_commit_number"),
+                          ("Ritual Final Commit #", "final_commit_number"))
+RITUAL_COUNTER_HEADERS = tuple(header for header, _ in RITUAL_COUNTER_COLUMNS)
 TABLET_EXPORT_HEADERS = tuple(label for tablet in range(1, 5) for slot in range(1, 5)
                              for label in (f"Tablet {tablet} Mod {slot} Affix", f"Tablet {tablet} Mod {slot} %"))
 CONFIG_EXPORT_HEADERS = ("Tier", "Area Level", "Base Map Mods", "Map Mods", "# +2 Mod Tablets",
@@ -106,7 +118,13 @@ def _map_context_export_values(context):
     snapshot = context.get("atlas_effect_snapshot")
     return [context.get("activity_type", ""),
             "Yes" if saved is True else "No" if saved is False else "",
-            _dump(snapshot) if isinstance(snapshot, dict) else ""]
+            _dump(snapshot) if isinstance(snapshot, dict) else "",
+            context.get("tablet_set_id", ""), context.get("tablet_set_name", ""),
+            context.get("ritual_rite_id") or "", context.get("ritual_rite_name") or "",
+            context.get("ritual_rite_map_ordinal") or "",
+            _dump(context["ritual_rite_affixes"]) if context.get("ritual_rite_affixes") is not None else "",
+            _dump(context["ritual_rite_inherited_sources"])
+            if context.get("ritual_rite_inherited_sources") is not None else ""]
 
 
 def _extra_export_values(context):
@@ -296,7 +314,7 @@ def _bind_atlas_context(db, map_id, context):
         result["waystone_setup_fields"] = sorted(fields)
         result["waystone_setup_saved"] = WAYSTONE_SETUP_FIELDS <= fields
     _register_atlas_snapshot(db, result)
-    return _with_atlas_effect_snapshot(db, result)
+    return ritual_rite_store.attach_context(db, map_id, _with_atlas_effect_snapshot(db, result))
 
 
 def _with_atlas_effect_snapshot(db, context):
@@ -539,6 +557,9 @@ def initialize():
                     catalog_id TEXT PRIMARY KEY,version TEXT NOT NULL,catalog_json TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS atlas_setups(
                     setup_id TEXT PRIMARY KEY,catalog_id TEXT NOT NULL,settings_json TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS tablet_sets(
+                    set_id TEXT PRIMARY KEY,name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                    config_json TEXT NOT NULL,next_slot INTEGER NOT NULL CHECK(next_slot BETWEEN 1 AND 5));
             """)
             for table in ("currency_snapshots", "ritual_pages"):
                 columns = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
@@ -549,6 +570,7 @@ def initialize():
                 if column not in columns:
                     db.execute(f"ALTER TABLE commits ADD COLUMN {column} TEXT NOT NULL DEFAULT '{{}}'")
             db.execute("CREATE INDEX IF NOT EXISTS commits_map_kind_idx ON commits(map_id,kind)")
+            ritual_rite_store.initialize(db)
             undo_store.initialize(db)
             analysis_context.initialize(db)
             if not _meta(db, "bootstrapped"):
@@ -642,7 +664,134 @@ def initialize():
                 config["activity_type"] = "None"
                 _set_meta(db, "settings", config)
             _register_atlas_snapshot(db, _atlas_snapshot(config))
+            _initialize_tablet_sets(db)
         _READY = True
+
+
+def _tablet_set_settings(config):
+    """Copy only a tablet set's editable fields into its durable library row."""
+    settings = {key: config[key] for key in TABLET_SETTINGS_FIELDS if key in config}
+    settings["tablet_random_mods_derived"] = bool(config.get("tablet_random_mods_derived", False))
+    return _load(_dump(settings))
+
+
+def ritual_rite_state():
+    """Read optional map-local Rite metadata and completed-map source provenance."""
+    return ritual_rite_store.ritual_rite_state()
+
+
+def new_ritual_rite(name=None):
+    """Create and select an explicitly named Rite with an optional default name."""
+    return ritual_rite_store.new_ritual_rite(name)
+
+
+def select_ritual_rite(rite_id):
+    """Choose a declared Rite or None without changing earlier map observations."""
+    return ritual_rite_store.select_ritual_rite(rite_id)
+
+
+def save_ritual_rite_affixes(values, *, expected_map_id=None, expected_generation=None):
+    """Save optional local metadata for the map shown in the Rite editor."""
+    return ritual_rite_store.save_ritual_rite_affixes(values, expected_map_id=expected_map_id,
+                                                   expected_generation=expected_generation)
+
+
+def _initialize_tablet_sets(db):
+    """Adopt the existing tablet configuration as Set 1 without altering saved maps."""
+    config = _meta(db, "settings")
+    selected = _meta(db, "selected_tablet_set_id")
+    row = db.execute("SELECT * FROM tablet_sets WHERE set_id=?", (selected,)).fetchone()
+    if row is None:
+        row = db.execute("SELECT * FROM tablet_sets ORDER BY rowid LIMIT 1").fetchone()
+    if row is None:
+        selected = "TSET-" + uuid.uuid4().hex
+        next_slot = max(1, min(5, int(_meta(db, "tablet_auto_next", 1))))
+        db.execute("INSERT INTO tablet_sets VALUES(?,?,?,?)",
+                   (selected, "Set 1", _dump(_tablet_set_settings(config)), next_slot))
+        row = db.execute("SELECT * FROM tablet_sets WHERE set_id=?", (selected,)).fetchone()
+    _activate_tablet_set(db, row)
+
+
+def _activate_tablet_set(db, row):
+    """Mirror the selected library row into the existing tablet editor settings."""
+    config = _meta(db, "settings")
+    config["tablet_random_mods_derived"] = False
+    config.update(_load(row["config_json"]))
+    config.update(tablet_set_id=row["set_id"], tablet_set_name=row["name"])
+    _set_meta(db, "settings", config)
+    _set_meta(db, "selected_tablet_set_id", row["set_id"])
+    _set_meta(db, "tablet_auto_next", row["next_slot"])
+
+
+def _persist_tablet_set(db, config):
+    """Keep the selected set and its legacy settings mirror in one transaction."""
+    selected = _meta(db, "selected_tablet_set_id")
+    db.execute("UPDATE tablet_sets SET config_json=? WHERE set_id=?",
+               (_dump(_tablet_set_settings(config)), selected))
+
+
+def _set_tablet_next_slot(db, number):
+    """Persist sequential scan position in the selected set and its legacy mirror."""
+    _set_meta(db, "tablet_auto_next", number)
+    db.execute("UPDATE tablet_sets SET next_slot=? WHERE set_id=?",
+               (number, _meta(db, "selected_tablet_set_id")))
+
+
+def _validate_tablet_set_context(db, expected_tablet_set_id):
+    """Refuse a tablet review captured for a different selected library set."""
+    if (expected_tablet_set_id is not None and
+            expected_tablet_set_id != _meta(db, "selected_tablet_set_id")):
+        raise ValueError("The selected tablet set changed. Scan or review this tablet again.")
+
+
+def _tablet_set_name(name):
+    """Require a short, visible library name without silently changing its identity."""
+    if not isinstance(name, str) or not name.strip() or len(name.strip()) > 80:
+        raise ValueError("Enter a tablet set name between 1 and 80 characters.")
+    return name.strip()
+
+
+def create_tablet_set(name):
+    """Create and select an empty four-tablet library set without recording map activity."""
+    name = _tablet_set_name(name)
+    with _connect(undo_label="New tablet set") as db:
+        db.execute("BEGIN IMMEDIATE")
+        if db.execute("SELECT 1 FROM tablet_sets WHERE name=? COLLATE NOCASE", (name,)).fetchone():
+            raise ValueError("A tablet set with that name already exists.")
+        selected = "TSET-" + uuid.uuid4().hex
+        config = {"tablets_used": 4, "plus_two_tablets": 0,
+                  "tablet_affixes": [{"affix": "", "value": None} for _ in range(16)],
+                  "tablet_raw_mods": [[] for _ in range(4)], "tablet_random_mods_derived": True}
+        db.execute("INSERT INTO tablet_sets VALUES(?,?,?,?)", (selected, name, _dump(config), 1))
+        _activate_tablet_set(db, db.execute("SELECT * FROM tablet_sets WHERE set_id=?", (selected,)).fetchone())
+    return get_state()
+
+
+def select_tablet_set(set_id):
+    """Load one library set without changing any other set or a recorded map context."""
+    with _connect(undo_label="Select tablet set") as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT * FROM tablet_sets WHERE set_id=?", (set_id,)).fetchone()
+        if row is None:
+            raise ValueError("Choose an existing tablet set.")
+        _activate_tablet_set(db, row)
+    return get_state()
+
+
+def rename_tablet_set(set_id, name):
+    """Rename a saved library set while retaining historical map and commit names."""
+    name = _tablet_set_name(name)
+    with _connect(undo_label="Rename tablet set") as db:
+        db.execute("BEGIN IMMEDIATE")
+        if db.execute("SELECT 1 FROM tablet_sets WHERE set_id=?", (set_id,)).fetchone() is None:
+            raise ValueError("Choose an existing tablet set.")
+        if db.execute("SELECT 1 FROM tablet_sets WHERE name=? COLLATE NOCASE AND set_id!=?",
+                      (name, set_id)).fetchone():
+            raise ValueError("A tablet set with that name already exists.")
+        db.execute("UPDATE tablet_sets SET name=? WHERE set_id=?", (name, set_id))
+        if set_id == _meta(db, "selected_tablet_set_id"):
+            _activate_tablet_set(db, db.execute("SELECT * FROM tablet_sets WHERE set_id=?", (set_id,)).fetchone())
+    return get_state()
 
 
 def _migrate_recipe_id_column(db):
@@ -883,6 +1032,28 @@ def undo_action():
         return undo_store.latest(db)
 
 
+def _reconcile_tablet_set_after_undo(db):
+    """Keep migrated legacy Undo settings and scan position in the selected set.
+
+    Older journals predate the library and restore only the legacy metadata.
+    Modern journals already restore both mirrors; reconciliation is idempotent
+    and never changes another saved set or an observation snapshot.
+    """
+    selected = _meta(db, "selected_tablet_set_id")
+    row = db.execute("SELECT name,config_json,next_slot FROM tablet_sets WHERE set_id=?", (selected,)).fetchone()
+    if row is None:
+        raise ValueError("The selected tablet set is missing. Undo could not be completed.")
+    config = _meta(db, "settings")
+    if config.get("tablet_set_id") != selected or config.get("tablet_set_name") != row["name"]:
+        config.update(tablet_set_id=selected, tablet_set_name=row["name"])
+        _set_meta(db, "settings", config)
+    if _load(row["config_json"]) != _tablet_set_settings(config):
+        _persist_tablet_set(db, config)
+    next_slot = _meta(db, "tablet_auto_next", 1)
+    if row["next_slot"] != next_slot:
+        _set_tablet_next_slot(db, next_slot)
+
+
 def undo_last_action():
     """Undo saved logging rows atomically, reopen map transitions and retire stale captures.
 
@@ -895,6 +1066,7 @@ def undo_last_action():
         generation = _meta(db, "session_generation", 0)
         previous_waystone = _meta(db, "previous_waystone_settings")
         action = undo_store.restore(db)
+        _reconcile_tablet_set_after_undo(db)
         if action == "New map":
             _set_meta(db, "pending_new_map", False)
             _set_meta(db, "prepared_waystone_setup", None)
@@ -1109,7 +1281,11 @@ def _save_settings(db, data, *, confirmed_affixes=()):
             "previous_settings": previous["previous_settings"] if previous else _waystone_settings(source),
         })
     _set_meta(db, "settings", c)
+    _persist_tablet_set(db, c)
     _register_atlas_snapshot(db, _atlas_snapshot(c))
+    if data and data.keys() <= TABLET_SETTINGS_FIELDS:
+        # A library edit is attached to a map only by its finalization step.
+        return
     if current and not next_map:
         mid = _map_id(current)
         saved = db.execute("SELECT snapshot_json FROM maps WHERE map_id=?", (mid,)).fetchone()
@@ -1139,10 +1315,11 @@ def _save_settings(db, data, *, confirmed_affixes=()):
             db.execute("UPDATE maps SET snapshot_json=? WHERE map_id=?", (_dump(context), mid))
 
 
-def save_settings(data, *, confirmed_affixes=()):
+def save_settings(data, *, confirmed_affixes=(), expected_tablet_set_id=None):
     """Apply settings and confirmed affixes in one immediate transaction, then return refreshed state. Saved changes remain undoable."""
     with _connect(undo_label='Settings') as db:
         db.execute("BEGIN IMMEDIATE")
+        _validate_tablet_set_context(db, expected_tablet_set_id)
         _save_settings(db, data, confirmed_affixes=confirmed_affixes)
     return get_state()
 
@@ -1323,7 +1500,7 @@ def clear_tablets():
         _save_settings(db, {"tablets_used": 4, "plus_two_tablets": 0,
                             "tablet_affixes": [{"affix": "", "value": None} for _ in range(16)],
                             "tablet_raw_mods": [[] for _ in range(4)]})
-        _set_meta(db, "tablet_auto_next", 1)
+        _set_tablet_next_slot(db, 1)
     return get_state()
 
 
@@ -1333,20 +1510,22 @@ def tablet_next_slot():
         return _meta(db, "tablet_auto_next", 1)
 
 
-def advance_tablet_slot(number):
+def advance_tablet_slot(number, *, expected_tablet_set_id=None):
     """Advance the scan slot only when it still equals the supplied slot from one through four. Saved changes remain undoable."""
     with _connect(undo_label='Tablet slot') as db:
         db.execute("BEGIN IMMEDIATE")
+        _validate_tablet_set_context(db, expected_tablet_set_id)
         if _meta(db, "tablet_auto_next", 1) == number and 1 <= number <= 4:
-            _set_meta(db, "tablet_auto_next", number + 1)
+            _set_tablet_next_slot(db, number + 1)
 
 
-def save_scanned_tablet(matches, raw_mods):
+def save_scanned_tablet(matches, raw_mods, *, expected_tablet_set_id=None):
     """Save the next tablet and its configuration commit atomically, clearing the set at slot one. Saved changes remain undoable."""
     if not matches or len(matches) > 4 or not isinstance(raw_mods, list):
         raise ValueError("Review the tablet modifiers before saving.")
     with _connect(undo_label='Tablet scan') as db:
         db.execute("BEGIN IMMEDIATE")
+        _validate_tablet_set_context(db, expected_tablet_set_id)
         number = _meta(db, "tablet_auto_next", 1)
         if number > 4:
             raise ValueError("Four tablets are already saved. Clear tablet config before scanning a new set.")
@@ -1362,14 +1541,8 @@ def save_scanned_tablet(matches, raw_mods):
         _save_settings(db, {"tablets_used": max(state["tablets_used"], number),
                             "plus_two_tablets": 0 if number == 1 else state["plus_two_tablets"],
                             "tablet_affixes": slots, "tablet_raw_mods": raw})
-        _set_meta(db, "tablet_auto_next", number + 1)
-        mid_number = _meta(db, "current_map_number", 0)
-        pending = not mid_number or _meta(db, "pending_new_map", False)
-        if pending:
-            mid_number += 1
-        mid = _map_id(mid_number)
-        eid = _exp_id(mid, 1 if pending else _meta(db, "settings")["expedition"])
-        _record_commit(db, "Tablet config", mid, eid, f"Tablet {number}")
+        _set_tablet_next_slot(db, number + 1)
+        _record_tablet_library_commit(db, f"Tablet {number}")
     return number
 
 
@@ -1534,6 +1707,7 @@ def _snapshot(config):
         "wisp": "Yes" if config.get("wisp", False) else "No",
         "waystone": config["waystone"], "expedition": config["expedition"],
         "tablets_used": tablet_count, "tablet_capacity": config["tablets_used"], "tablet_values": tablet_values,
+        **{key: config[key] for key in ("tablet_set_id", "tablet_set_name") if key in config},
         "tablet_affixes": pairs, "tablet_random_mods": random_mods,
         "item_rarity": config.get("item_rarity"), "monster_rarity": config.get("monster_rarity"),
         "pack_size": config.get("pack_size"), "effectiveness": config.get("effectiveness"),
@@ -1575,6 +1749,7 @@ def _record_commit(db, kind, map_id="", expedition_id="", reference="", *, conte
             if saved:
                 context = _load(saved[0])
         context = _bind_atlas_context(db, map_id, context)
+    context = ritual_rite_store.attach_context(db, map_id, context)
     _register_atlas_snapshot(db, context)
     db.execute("INSERT INTO commits(number,kind,map_id,expedition_id,reference,recorded_at,snapshot_json,details_json) "
                "VALUES(?,?,?,?,?,?,?,?)",
@@ -1584,12 +1759,24 @@ def _record_commit(db, kind, map_id="", expedition_id="", reference="", *, conte
     return number
 
 
+def _record_tablet_library_commit(db, reference=""):
+    """Audit library edits without treating an unused tablet set as map activity."""
+    config = _meta(db, "settings")
+    return _record_commit(db, "Tablet config", reference=reference, context=_snapshot(config),
+                          details={"scope": "tablet_library", "tablet_set_id": config["tablet_set_id"],
+                                   "tablet_set_name": config["tablet_set_name"],
+                                   "configuration": _tablet_set_settings(config),
+                                   "next_slot": _meta(db, "tablet_auto_next", 1)})
+
+
 def record_commit(kind, reference=""):
     """Record an allowed configuration event against the active or upcoming map and expedition. Saved changes remain undoable."""
     if kind not in ("Map settings", "Tablet config", "Atlas Master", "Master perks"):
         raise ValueError("Unknown configuration commit.")
     with _connect(undo_label=str(kind)) as db:
         db.execute("BEGIN IMMEDIATE")
+        if kind == "Tablet config":
+            return _record_tablet_library_commit(db, reference)
         number = _meta(db, "current_map_number", 0)
         pending = not number or _meta(db, "pending_new_map", False)
         if pending:
@@ -1614,6 +1801,7 @@ def scan_context():
         return {"_scan_generation": _meta(db, "session_generation", 0),
                 "_capture_map_id": _map_id(number) if number else None,
                 "_capture_map_pending": bool(_meta(db, "pending_new_map", False)),
+                "_capture_tablet_set_id": _meta(db, "selected_tablet_set_id"),
                 "_capture_expedition": 1 if not number or _meta(db, "pending_new_map", False)
                                        else _meta(db, "settings")["expedition"],
                 "_capture_chain_revision": _chain_revision(db, _exp_id(_map_id(number),
@@ -1976,6 +2164,7 @@ def commit_seed_batch(result, selections, automatic=False):
                 "context": {"_scan_generation": _meta(db, "session_generation", 0),
                             "_capture_map_id": _map_id(number),
                             "_capture_map_pending": bool(_meta(db, "pending_new_map", False)),
+                            "_capture_tablet_set_id": _meta(db, "selected_tablet_set_id"),
                             "_capture_expedition": expedition,
                             "_capture_chain_revision": _chain_revision(db, _exp_id(_map_id(number), expedition))},
                 "scan_commit_number": saved[-1]["scan_commit_number"]}
@@ -2420,6 +2609,9 @@ def discard_current_map_logs(expected_context=None):
         for table in ("legacy_export", "new_export", "expeditions", "map_unique_kills", "kill_count_snapshots",
                       "currency_snapshots", "ritual_pages", "commits"):
             db.execute(f"DELETE FROM {table} WHERE map_id=?", (mid,))
+        ritual_rite_store.discard_completion(db, mid)
+        if _meta(db, "finalized_tablet_map_id") == mid:
+            _set_meta(db, "finalized_tablet_map_id", None)
         db.execute("UPDATE maps SET kills_json=? WHERE map_id=?", (_dump([None, None, None]), mid))
         _set_meta(db, "pending_new_map", False)
         _set_meta(db, "prepared_waystone_setup", None)
@@ -2655,6 +2847,38 @@ def save_counts(normal, magic, rare, detonated=_UNSET, *, unique=_UNSET):
                 "detonated": count, "scan_commit_number": commit_number}
 
 
+def _finalize_selected_tablets(db, map_id):
+    """Attach exactly the selected set while preserving the map's recorded setup."""
+    row = db.execute("SELECT snapshot_json FROM maps WHERE map_id=?", (map_id,)).fetchone()
+    context = _load(row[0]) if row else {}
+    if (_meta(db, "pending_new_map", False) and
+            _meta(db, "finalized_tablet_map_id") == map_id):
+        # Repeated end-map count corrections still refer to the completed map;
+        # the selected library set now belongs to its upcoming successor.
+        return
+    if not context:
+        # Imported maps rely on their first remnant for setup fields in Maps CSV.
+        # Retain that same evidence before adding a nonempty tablet context.
+        for table in ("legacy_export", "new_export"):
+            prior = db.execute(f"SELECT row_json FROM {table} WHERE map_id=? AND remnant_id IS NOT NULL "
+                               "AND remnant_id!='' ORDER BY position LIMIT 1", (map_id,)).fetchone()
+            if prior:
+                values = _load(prior[0])
+                context = {"tier": values[4], "area": values[5], "waystone": values[23],
+                           "map_mods": values[6], "irradiated": values[17], "master": values[11],
+                           "aldur": values[10], "perks": values[12:16], "master_adds_mod": values[16]}
+                break
+    selected = _snapshot(_meta(db, "settings"))
+    for key in ("tablets", "tablet_mods", "tablets_used", "tablet_capacity", "tablet_values",
+                "tablet_affixes", "tablet_random_mods", "tablet_raw_mods", "tablet_set_id", "tablet_set_name"):
+        context[key] = selected[key]
+    # Use the map's own master/map totals, which may differ from queued editor fields.
+    context["total_mods"] = context.get("map_mods", 0) + context["tablet_mods"]
+    _set_meta(db, "finalized_tablet_map_id", map_id)
+    context = _with_atlas_effect_snapshot(db, context)
+    db.execute("UPDATE maps SET snapshot_json=? WHERE map_id=?", (_dump(context), map_id))
+
+
 def finish_map(normal, magic, rare, detonated=_UNSET, *, unique=_UNSET):
     """Save final counts, discard pending OCR review and mark the next map in one immediate transaction. Saved changes remain undoable."""
     values = [_integer(v, label, 0, blank=True) for v, label in
@@ -2667,6 +2891,8 @@ def finish_map(normal, magic, rare, detonated=_UNSET, *, unique=_UNSET):
         if not number:
             raise ValueError("Start a map before finishing it.")
         mid = _map_id(number)
+        _finalize_selected_tablets(db, mid)
+        ritual_rite_store.finalize_map(db, mid)
         expedition = _meta(db, "settings")["expedition"]
         eid = _exp_id(mid, expedition)
         count = _detonated_value(db, eid, detonated)
@@ -2789,6 +3015,8 @@ def clear_export_and_reset_ids():
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
         db.execute("DELETE FROM undo_actions")
+        ritual_rite_store.clear_session(db)
+        _set_meta(db, "finalized_tablet_map_id", None)
         _set_meta(db, "session_generation", _meta(db, "session_generation", 0) + 1)
         _set_meta(db, "chain_revisions", {})
         _set_meta(db, "retired_chain_requests", {})
@@ -3387,7 +3615,8 @@ def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
     """Save reviewed Ritual offers and a commit atomically for an active map.
 
     A repeated capture hash replaces its page; otherwise append a page.
-    Optionally register accepted labels and teach their icons.
+    Readable page counters can be saved without any reward rows. Optionally
+    register accepted labels and teach their icons.
      Saved changes remain undoable."""
     if not isinstance(items, list) or len(items) > MAX_RITUAL_REWARDS:
         raise ValueError(f"Review up to {MAX_RITUAL_REWARDS} Ritual rewards on a page.")
@@ -3417,7 +3646,7 @@ def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
             raise ValueError("Deferred must be checked or unchecked.")
         cleaned.append({"category": category, "name": name, "quantity": quantity,
                         "tribute": tribute, "source": source, "deferred": deferred})
-    if not cleaned:
+    if not cleaned and tribute_available is None and rerolls_remaining is None:
         raise ValueError("Add or review at least one Ritual reward before saving a page.")
     with _connect(undo_label='Ritual approval') as db:
         db.execute("BEGIN IMMEDIATE")
@@ -3475,7 +3704,14 @@ def export_ritual_csv():
         for page in db.execute("SELECT map_id,page_number,items_json,raw_text,recorded_at,snapshot_json "
                                "FROM ritual_pages ORDER BY map_id,page_number"):
             number, details = commits.get((page["map_id"], f"Page {page['page_number']}"), ("", {}))
-            for index, item in enumerate(_load(page["items_json"])):
+            items = _load(page["items_json"])
+            if not items:
+                writer.writerow(_csv_row([page["map_id"], page["page_number"], "", "", "", "", "",
+                                         page["raw_text"], page["recorded_at"], number, "", "",
+                                         details.get("tribute_available"), details.get("rerolls_remaining"),
+                                         *_config_export_values(_load(page["snapshot_json"]))]))
+                continue
+            for index, item in enumerate(items):
                 writer.writerow(_csv_row([page["map_id"], page["page_number"],
                                          item["category"], item["name"], item["quantity"],
                                          item["tribute"] if item["tribute"] is not None else "",
@@ -3492,6 +3728,12 @@ def _total_kills(kills, unique=None):
     """Sum known kill counts, leaving the result blank when all counts are absent."""
     known = [value for value in [*(kills or []), unique] if value is not None and value != ""]
     return sum(known) if known else ""
+
+
+def _ritual_counter_export_values(db, map_id):
+    """Project approved boundary readings without summing pages or replacing unknowns."""
+    values = ritual_counters.summary(db, map_id)
+    return [values[key] if values[key] is not None else "" for _, key in RITUAL_COUNTER_COLUMNS]
 
 
 def export_maps_csv(*, _db=None):
@@ -3519,7 +3761,7 @@ def export_maps_csv(*, _db=None):
         extra_expeditions = [row[0] for row in db.execute(
             "SELECT DISTINCT number FROM expeditions WHERE number>2 ORDER BY number")]
         writer.writerow([*headers, *(f"Expedition {number} Detonated" for number in extra_expeditions),
-                         "Unique Kills", "Total Kills", *MAP_CONTEXT_HEADERS])
+                         "Unique Kills", "Total Kills", *MAP_CONTEXT_HEADERS, *RITUAL_COUNTER_HEADERS])
         commits = {row["map_id"]: row["number"] for row in db.execute(
             "SELECT number,map_id FROM commits WHERE map_id!='' ORDER BY number")}
         for row in db.execute("SELECT map_id,snapshot_json,kills_json,recorded_at FROM maps ORDER BY map_id"):
@@ -3575,7 +3817,7 @@ def export_maps_csv(*, _db=None):
                                      *(detonated.get(number) if detonated.get(number) is not None else ""
                                        for number in extra_expeditions),
                                      unique if unique is not None else "", _total_kills(kills, unique),
-                                     *_map_context_export_values(context)]
+                                     *_map_context_export_values(context), *_ritual_counter_export_values(db, row["map_id"])]
             writer.writerow(_csv_row([int(v) if isinstance(v, float) and v.is_integer() else v
                                      for v in values]))
     return output.getvalue().encode("utf-8-sig")
@@ -3745,6 +3987,8 @@ def export_map_summary_csv(*, _db=None):
         writer = csv.DictWriter(output, fieldnames=headers, extrasaction="ignore")
         writer.writeheader()
         for map_id, row in sorted(rows.items()):
+            if "Ritual Reading Count" not in row:
+                row.update(zip(RITUAL_COUNTER_HEADERS, _ritual_counter_export_values(db, map_id)))
             phases = inventories.get(map_id, {})
             start, end = phases.get("start"), phases.get("end")
             row.update({"Start Baseline": "Scanned" if start is not None else "Assumed empty" if end is not None else "",
@@ -3834,6 +4078,10 @@ def get_state():
         chain.sort(key=lambda item: item["step"])
         return {
             "settings": config, "area_level": area_level(config),
+            "ritual_rite": ritual_rite_store.state(db),
+            "tablet_sets": [{"id": row["set_id"], "name": row["name"], "next_slot": row["next_slot"]}
+                            for row in db.execute("SELECT * FROM tablet_sets ORDER BY rowid")],
+            "selected_tablet_set_id": _meta(db, "selected_tablet_set_id"),
             "atlas_settings_target_map_id": _map_id(_atlas_settings_target(db)),
             "current_map_id": mid, "current_expedition_id": eid,
             "current_map_setup_saved": bool(k and _load(k[1]).get("waystone_setup_saved") is True),
@@ -4316,6 +4564,7 @@ def export_primary_csv(*, _db=None):
                              "Rare Kills (Map)", "Unique Kills (Map)", "Total Kills", "Scan Commit #",
                              "Map Recorded UTC", *MAP_SUMMARY_SCAN_HEADERS, *item_headers})
         once_per_map.update(MAP_CONTEXT_HEADERS)
+        once_per_map.update(RITUAL_COUNTER_HEADERS)
         rows, counted = [], set()
         for original in legacy:
             row = dict(original)

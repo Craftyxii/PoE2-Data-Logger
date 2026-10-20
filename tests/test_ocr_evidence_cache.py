@@ -65,6 +65,31 @@ class InventoryEvidenceCacheTests(unittest.TestCase):
         self.assertEqual(labels[1]["count_candidate"], 14)
         self.assertEqual(len(self.reader.calls[0]), 1)
 
+    def test_ritual_repeated_crops_keep_agreement_and_conflicting_counts_separate(self):
+        """A reused read retains both votes; another cell's conflicting digits stay unverified."""
+        a, b, c = (Image.fromarray(self.pixels(value)) for value in (14, 3, 4))
+        cells = {0: a, 1: b}
+
+        def read_labels():
+            with patch("PoE2_Data_Logger.ocr.inventory_labels.count_crops", side_effect=[
+                    ([a, a.copy()], True), ([b, c], True)]), \
+                    patch("PoE2_Data_Logger.ocr.inventory_labels.tier_crops", return_value=([], False)):
+                return item_ocr._ritual_cell_labels(cells)
+
+        first = read_labels()
+        self.assertEqual(first[0]["count"], 14)
+        self.assertTrue(first[0]["count_verified"])
+        self.assertEqual(first[1]["count_candidate"], 3)
+        self.assertFalse(first[1]["count_verified"])
+        self.assertNotIn("count", first[1])
+        self.assertEqual(read_labels(), first)
+        self.assertEqual([len(call) for call in self.reader.calls], [3])
+        a.paste((7, 7, 7), (0, 0, a.width, a.height))
+        changed = read_labels()
+        self.assertEqual(changed[0]["count"], 7)
+        self.assertEqual(changed[1], first[1])
+        self.assertEqual([len(call) for call in self.reader.calls], [3, 1])
+
     def test_changed_count_tier_crop_dimensions_and_dtype_miss(self):
         a = self.pixels(14)
         variants = [a, self.pixels(3), self.pixels(14, (13, 18, 3)), a.astype(np.int16)]

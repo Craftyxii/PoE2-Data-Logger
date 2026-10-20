@@ -1,0 +1,35 @@
+Rite of the Nameless Modifier Catalog
+
+Verified: 19 October 2026.
+
+Sources:
+- PoE2DB, https://poe2db.tw/us/Rite_of_the_Nameless
+  The complete published "Foretold Proliferation Mods /73" table supplies the
+  73 source rows: 60 bounty variants, six proliferation effects, six local
+  effects, and one untranslated very-rare-unique flag.
+- vaal.tools, https://www.vaal.tools/mechanics/foretold_proliferation/
+  Corroborates the six proliferation templates and their scope. The site
+  reported PoE2 v0.5.5d when verified.
+- PoE 2 Ref, https://poe2ref.com/mechanics/ritual
+  Its Rite of the Nameless modifier pool corroborates the 60 bounty variants
+  and six proliferation templates. Its probabilities are not bundled here.
+
+This catalog records factual game modifier data and source attribution. It does
+not reproduce guide prose, site assets, or artwork. Original modifier wording is
+retained in each row's provenance; display wording only normalizes singular
+grammar. Three untranslated raw stat labels remain explicitly untranslated.
+
+Game modifier text and data remain the property of Grinding Gear Games. PoE2DB
+states that its wiki content is available under Creative Commons
+Attribution-NonCommercial-ShareAlike 3.0 unless otherwise noted:
+https://creativecommons.org/licenses/by-nc-sa/3.0/
+This notice does not override third-party rights or the site's license terms.
+
+The catalog is an offline snapshot of published membership. It does not establish
+live league eligibility, probabilities, numerical stacking formulas, or a monster
+density estimate. The rarity flag is not assigned an invented unique-item name.
+
+Identifiers beginning "rite:", "custom:rite:", and "logger:rite:" belong to this
+application. They are not official or datamined game IDs. Content-derived IDs
+remain stable while the corresponding source wording is unchanged. Typed custom
+entries are explicitly unverified user data and cannot change bundled defaults.

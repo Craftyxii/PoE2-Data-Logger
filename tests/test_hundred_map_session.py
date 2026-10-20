@@ -186,14 +186,17 @@ class HundredMapSession(unittest.TestCase):
         if not row or count != expected_count:
             raise RuntimeError(f"UI did not create expected {kind} commit: {self.w.statusBar().currentMessage()}")
         saved = dict(row)
-        mid = map_id or f"M{self.current:04}"
+        library_edit = kind == "Tablet config"
+        mid = "" if library_edit else map_id or f"M{self.current:04}"
         eid = expedition if expedition is not None else self.expedition
         for key, expected in (("number", number), ("kind", kind), ("map_id", mid),
-                              ("expedition_id", f"{mid}-E{eid:02}" if kind not in ("Currency", "Ritual") else "")):
+                              ("expedition_id", f"{mid}-E{eid:02}" if kind not in ("Currency", "Ritual", "Tablet config") else "")):
             self.check(saved[key], expected, f"commits:{kind}:{key}")
         if reference is not None:
             self.check(saved["reference"], reference, f"commits:{kind}:reference")
         actual_details = json.loads(saved["details_json"])
+        if library_edit:
+            self.check(actual_details.get("scope"), "tablet_library", "commits:Tablet config:details:scope")
         for key, val in (details or {}).items():
             self.check(actual_details.get(key), val, f"commits:{kind}:details:{key}")
         if snapshot:
@@ -829,6 +832,15 @@ class HundredMapSession(unittest.TestCase):
             self.check(first.get("Atlas Setup ID"), expected["snapshot"]["atlas_setup_id"], "exports:atlas-map-link")
             self.check(first.get("Atlas Setup ID") in atlas_ids, True, "exports:atlas-link-resolves")
             self.check(first.get("Gear Item Rarity %"), str(expected["snapshot"]["gear_item_rarity"]), "exports:gear-rarity")
+            map_number = int(mid[1:])
+            self.check(first.get("Ritual Reading Count"), "2", "exports:ritual-reading-count")
+            self.check(first.get("Ritual First Tribute Available"), str(20000 + map_number), "exports:ritual-first-tribute")
+            self.check(first.get("Ritual Final Tribute Available"), str(30000 + map_number), "exports:ritual-final-tribute")
+            for boundary in ("First", "Final"):
+                self.check(first.get(f"Ritual {boundary} Rerolls Remaining"), str(map_number % 4),
+                           "exports:ritual-boundary-rerolls")
+            self.check(all(row.get(key) == "" for row in rows[1:] for key in logger.RITUAL_COUNTER_HEADERS),
+                       True, "exports:ritual-counters-once-per-map")
         history_commits = {int(row["Scan Commit #"]) for row in history if row.get("Scan Commit #")}
         self.check(history_commits, set(range(1, len(self.commit_log) + 1)), "exports:complete-audit-history")
         last_ends = {}
@@ -836,6 +848,12 @@ class HundredMapSession(unittest.TestCase):
             if commit["kind"] == "Currency" and commit["details"]["phase"] == "end":
                 last_ends[commit["map_id"]] = commit["number"]
         for commit in self.commit_log:
+            if commit["kind"] == "Tablet config":
+                stage_rows = [row for row in history if row.get("Scan Commit #") == str(commit["number"])]
+                self.check(bool(stage_rows), True, "exports:tablet-library-audit-retained")
+                for row in stage_rows:
+                    self.check(row["Map ID"], "", "exports:tablet-library-no-map-claim")
+                    self.check(row["Expedition ID"], "", "exports:tablet-library-no-expedition-claim")
             if commit["kind"] != "Currency":
                 continue
             stage_rows = [row for row in history if row.get("Scan Commit #") == str(commit["number"])]

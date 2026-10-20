@@ -39,6 +39,7 @@ class Request:
     data_dir: str = field(default_factory=_data_directory)
     cpu_threads: int = field(default_factory=ocr_runtime.active_threads)
     deadline: float | None = None
+    gpu_labels: bool = field(default_factory=ocr_runtime.active_gpu_labels)
 
     def __call__(self):
         """Support captured test/UI work callbacks through the same bounded child transport."""
@@ -58,7 +59,8 @@ def request(function, *args, **kwargs):
     if not _application_callable(function):
         return partial(function, *args, **kwargs)
     return Request(function, tuple(args), dict(kwargs), _data_directory(),
-                   ocr_runtime.active_threads(), time.monotonic() + SCAN_TIMEOUT_SECONDS)
+                   ocr_runtime.active_threads(), time.monotonic() + SCAN_TIMEOUT_SECONDS,
+                   gpu_labels=ocr_runtime.active_gpu_labels())
 
 
 def run(function, *args, **kwargs):
@@ -67,13 +69,14 @@ def run(function, *args, **kwargs):
     return submit(work).result() if isinstance(work, Request) else work()
 
 
-def _child_loop(connection, data_dir, cpu_threads):
+def _child_loop(connection, data_dir, cpu_threads, gpu_labels=False):
     """Own recognition models in one profile-bound child and exchange only small control messages."""
     from PoE2_Data_Logger.core import logger_store as logger
 
     store.DATA_DIR = Path(data_dir)
     logger._READY = False
     ocr_runtime._ACTIVE_THREADS = cpu_threads
+    ocr_runtime._ACTIVE_GPU_LABELS = gpu_labels
     try:
         while True:
             job_id, directory = connection.recv()
@@ -242,7 +245,7 @@ class _Broker:
                     if time.monotonic() >= deadline:
                         _complete(future, error=TimeoutError("OCR timed out before recognition could start."))
                         continue
-                    next_context = (work.data_dir, work.cpu_threads)
+                    next_context = (work.data_dir, work.cpu_threads, work.gpu_labels)
                     if process is not None and (context != next_context or not process.is_alive()):
                         _stop_child(process, connection)
                         process = connection = None

@@ -71,7 +71,7 @@ class UniquePropagationExportTests(unittest.TestCase):
         map_context_count = len(logger.MAP_CONTEXT_HEADERS)
         legacy_headers = previous_headers[:-map_context_count]
         self.assertEqual(legacy_headers[-len(logger.HISTORY_APPEND_HEADERS):], list(logger.HISTORY_APPEND_HEADERS))
-        self.assertEqual(previous_headers[-map_context_count:], ["Activity Type", "Map Scanned", "Atlas Effects JSON"])
+        self.assertEqual(previous_headers[-map_context_count:], list(logger.MAP_CONTEXT_HEADERS))
 
     def test_propagation_scan_rows_preserve_pair_order_ids_and_one_per_scan_delta(self):
         """Verify propagation scan rows preserve pair order IDs and one per scan delta."""

@@ -189,9 +189,17 @@ class WorkflowTests(unittest.TestCase):
             with self.subTest(exporter=exporter.__name__):
                 rows = self.export_rows(exporter())
                 self.assertTrue(rows)
-                for row in rows:
+                map_rows = [row for row in rows if row["Map ID"]]
+                self.assertEqual({row["Map ID"] for row in map_rows}, {"M0001", "M0002"})
+                for row in map_rows:
                     self.assertEqual((row["Deli"], row["Wisp"]),
                                      ("Yes" if row["Map ID"] == "M0001" else "No", "Yes"))
+                for row in rows:
+                    if not row["Map ID"]:
+                        self.assertEqual(row["Type"], "Tablet config")
+                        self.assertFalse(row["Expedition ID"])
+                if exporter in (logger.export_record_history_csv, logger.export_all_csv):
+                    self.assertEqual(len([row for row in rows if not row["Map ID"]]), 2)
         for row in self.export_rows(logger.export_currency_csv()):
             expected = ("Yes" if row["Map ID"] == "M0001" else "No", "Yes")
             self.assertEqual((row["Start Deli"], row["Start Wisp"]), expected)

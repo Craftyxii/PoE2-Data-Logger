@@ -86,7 +86,8 @@ class MapContextExportTests(unittest.TestCase):
         with logger._connect() as db:
             before = [tuple(row) for row in db.execute("SELECT * FROM maps")]
         headers, maps = self.rows(logger.export_maps_csv())
-        self.assertEqual(headers[-3:], list(logger.MAP_CONTEXT_HEADERS))
+        suffix = [*logger.MAP_CONTEXT_HEADERS, *logger.RITUAL_COUNTER_HEADERS]
+        self.assertEqual(headers[-len(suffix):], suffix)
         self.assertEqual(headers[13:15], ["Expedition 1 Detonated", "Expedition 2 Detonated"])
         self.assertEqual(headers[26:28], ["Biome", "City Type"])
         self.assertEqual([maps[0][name] for name in logger.MAP_CONTEXT_HEADERS[:2]], ["Ritual", "Yes"])
@@ -113,7 +114,8 @@ class MapContextExportTests(unittest.TestCase):
             self.replace_snapshot(context, commit=number)
         for producer in (logger.export_record_history_csv, logger.export_all_csv):
             headers, rows = self.rows(producer())
-            self.assertEqual(headers[-6:], [*logger.MAP_CONTEXT_HEADERS, *logger.CURRENCY_STAGE_HEADERS])
+            suffix = [*logger.MAP_CONTEXT_HEADERS, *logger.CURRENCY_STAGE_HEADERS]
+            self.assertEqual(headers[-len(suffix):], suffix)
             if producer == logger.export_all_csv:
                 self.assertEqual(headers.index("Type"), 127)
                 self.assertEqual(headers.index("Scan Commit #"), 90)
@@ -132,8 +134,10 @@ class MapContextExportTests(unittest.TestCase):
         logger.start_map()
         number = logger.record_commit("Map settings")
         context = self.context()
-        for key in ("activity_type", "waystone_setup_saved", "atlas_effect_snapshot"):
-            context.pop(key)
+        for key in ("activity_type", "waystone_setup_saved", "atlas_effect_snapshot", "tablet_set_id",
+                    "tablet_set_name", "ritual_rite_id", "ritual_rite_name", "ritual_rite_map_ordinal",
+                    "ritual_rite_affixes", "ritual_rite_inherited_sources"):
+            context.pop(key, None)
         self.replace_snapshot(context)
         self.replace_snapshot(context, commit=number)
         for producer in (logger.export_maps_csv, logger.export_map_summary_csv,
@@ -216,15 +220,19 @@ class MapContextExportTests(unittest.TestCase):
         snapshot_text = primary[0]["Atlas Effects JSON"]
         self.assertGreater(len(snapshot_text), 25000, "Stress the actual large compact aggregate")
         self.assertLessEqual(len(snapshot_text), 32767)
-        self.assertLessEqual(len(guidance), 32767)
         self.assertEqual(json.loads(snapshot_text), original["atlas_effect_snapshot"])
         data = workbook_export.export_xlsx()
         excel = self.workbook_rows(data, 1)
         self.assertEqual(excel[0]["Atlas Effects JSON"], snapshot_text)
         self.assertEqual(json.loads(excel[0]["Atlas Effects JSON"]), original["atlas_effect_snapshot"])
         context_rows = self.workbook_rows(data, 4)
-        map_guidance = next(row["Guidance"] for row in context_rows
-                            if row["Section"] == "Map settings" and row["Topic"] == "M0001")
+        exported = next(row for row in context_rows
+                        if row["Section"] == "Map settings" and row["Topic"] == "M0001")
+        self.assertTrue(all(len(value) <= 32767 for row in context_rows for value in row.values()))
+        map_guidance = exported["Guidance"] + "".join(
+            exported[key] for key in sorted(
+                (key for key in exported if key.startswith("Guidance continuation ")),
+                key=lambda key: int(key.rsplit(" ", 1)[1])))
         self.assertEqual(map_guidance, guidance)
         self.assertEqual(json.loads(map_guidance)["atlas_effect_snapshot"], original["atlas_effect_snapshot"])
 

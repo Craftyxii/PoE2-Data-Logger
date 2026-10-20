@@ -314,7 +314,7 @@ class DiscussedScanUITests(unittest.TestCase):
         self.window.set_auto_commit(False)
         opened, prop = self.opened(), self.propagation()
         for mode, result in (("opened", opened), ("propagation", prop)):
-            self.manager._publish_event({"mode": mode, "result": result, "error": ""}, self.raw)
+            self.manager._publish_event({"mode": mode, "result": result, "error": ""}, self.raw, paired=True)
         self.window.poll()
         self.assertIs(self.window.results["opened"], opened)
         self.window.poll()
@@ -327,7 +327,7 @@ class DiscussedScanUITests(unittest.TestCase):
     def test_ordered_delivery_retains_propagation_after_remnant_auto_save(self):
         opened, prop = self.opened(), self.propagation()
         for mode, result in (("opened", opened), ("propagation", prop)):
-            self.manager._publish_event({"mode": mode, "result": result, "error": ""}, self.raw)
+            self.manager._publish_event({"mode": mode, "result": result, "error": ""}, self.raw, paired=True)
         self.window.poll()
         self.assertEqual(logger.get_state()["scan_commit_count"], 1)
         self.assertIsNone(self.window.pending_review_kind)

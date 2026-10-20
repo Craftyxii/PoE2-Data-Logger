@@ -266,7 +266,7 @@ def _occupied(pixels, box, pitch):
 
 
 def _equipment_backing(pixels, box, pitch):
-    """Verify a dark cell's substantial blue item backing for use inside a paired ornate frame."""
+    """Keep dark backing cells eligible only inside independently paired item corners."""
     left, top, right, bottom = box
     inset = max(2, round(pitch * .15))
     cell = pixels[top + inset:bottom - inset, left + inset:right - inset]
@@ -275,7 +275,13 @@ def _equipment_backing(pixels, box, pitch):
     red, green, blue = cell.astype(np.float32).transpose(2, 0, 1)
     backing = ((red < 20) & (green < 20) & (blue >= 16) & (blue <= 35) &
                (blue > red * 1.5) & (blue > green * 1.5))
-    return bool(backing.mean() >= .5)
+    # Unaffordable rewards can lose their colour.  Their dark neutral backing
+    # cannot establish occupancy on its own; it only fills a rectangle whose
+    # opposite ornate corners independently establish one complete item.
+    neutral = ((np.maximum.reduce((red, green, blue)) -
+                np.minimum.reduce((red, green, blue)) <= 3) &
+               (np.maximum.reduce((red, green, blue)) <= 35))
+    return bool(backing.mean() >= .5 or neutral.mean() >= .5)
 
 
 @lru_cache(maxsize=2)
@@ -287,7 +293,7 @@ def _corner_template(bottom_right):
 
 
 def _corner_strength(pixels, box, pitch, bottom_right=False):
-    """Return binary corner support from local correlation and brown ornament color.
+    """Return corner support from the ornate shape and coloured or neutral frame evidence.
 
     Orientation and pitch accommodate resampling; mild JPEG blur needs stronger color support.
     """
@@ -312,7 +318,33 @@ def _corner_strength(pixels, box, pitch, bottom_right=False):
     ornate = ((red > green * 1.17) & (green > blue * 1.15) &
               (red > 65) & (blue < red * .65))
     if float(ornate.mean()) < .35:
-        return 0.
+        # A grayscale frame cannot pass the brown-colour gate.  Match its
+        # luminance shape independently, requiring neutral pixels, visible
+        # frame contrast and placement at the grid corner. The caller still
+        # requires the opposite corner and a complete, non-overlapping frame.
+        gray_template = cv2.cvtColor(template, cv2.COLOR_RGB2GRAY)
+        gray_search = cv2.cvtColor(search, cv2.COLOR_RGB2GRAY)
+        _, gray_score, _, gray_at = cv2.minMaxLoc(cv2.matchTemplate(
+            gray_search, gray_template, cv2.TM_CCOEFF_NORMED))
+        gray_patch = search[gray_at[1]:gray_at[1] + template_size,
+                            gray_at[0]:gray_at[0] + template_size].astype(np.float32)
+        spread = gray_patch.max(axis=2) - gray_patch.min(axis=2)
+        neutral = spread <= np.maximum(3, gray_patch.max(axis=2) * .10)
+        threshold = .62 if bottom_right else .72
+        if not bottom_right and gray_at[1] == min(radius, y):
+            # Resampling and overlapping artwork can weaken the upper curl;
+            # retain it only when it sits exactly on the proposed top edge.
+            threshold = .68
+        if max(abs(gray_at[0] - min(radius, x)),
+               abs(gray_at[1] - min(radius, y))) > 1:
+            # A partly covered curl can have weaker correlation only at the
+            # frame's expected corner. Artwork farther inside a cell needs
+            # much stronger shape evidence before it can split a frame.
+            threshold = .82
+        luminance = cv2.cvtColor(gray_patch.astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        return float(gray_score >= threshold and float(neutral.mean()) >= .70
+                     and float(luminance.mean()) >= 22
+                     and float(np.percentile(luminance, 90)) >= 35)
     # Icon artwork sometimes overlaps the lower ornament.  At small capture
     # scales the upper eight-pixel ornament also loses detail to resampling.
     threshold = .60 if bottom_right else (.65 if pitch < 35 else .72)

@@ -13,27 +13,29 @@ import re
 import weakref
 import threading
 from collections import OrderedDict
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from types import MappingProxyType
 
 import numpy as np
 import cv2
 import quickjs
 from PIL import Image
 from PoE2_Data_Logger.core import ocr_sensitivity
+from PoE2_Data_Logger.ocr import digit_kernels
 
 ROOT = Path(__file__).resolve().parent.parent / "third_party" / "currency_overlay"
 _READERS = threading.local()
 
 
+@dataclass(frozen=True)
 class _ExampleBank:
     """Keep prepared reference pixels, stable name order and the owning reader’s identity."""
-    def __init__(self, owner, signature, references, order):
-        """Store reference-bank metadata without retaining the reader object."""
-        self.owner = id(owner)
-        self.signature = signature
-        self.references = references
-        self.order = order
+    owner: object
+    signature: bytes
+    references: tuple
+    order: object
 
     def __bool__(self):
         """Report whether the prepared bank contains any pixel references."""
@@ -151,8 +153,13 @@ class CurrencyReader:
         self._scaled_candidates = {}
         self._example_atlases = OrderedDict()
         self._example_rank_cache = OrderedDict()
+        # These banks contain only normalized local references, never a scan's
+        # recognition or review decisions. A replaced worker starts empty.
+        self._learned_reference_banks = OrderedDict()
+        self._learned_reference_bytes = 0
         self._count_caches = threading.local()
         self._example_thread = threading.get_ident()
+        self._example_owner = object()
         self.context = quickjs.Context()
         self.context.set_memory_limit(128 * 1024 * 1024)
         self.context.eval("var module = {exports:{}};")
@@ -187,7 +194,8 @@ class CurrencyReader:
                           "return JSON.stringify(distinct.slice(0,3)); }")
         self.match_examples = self.context.get("examplesJSON")
         self.context.eval("module = {exports:{}};")
-        self.context.eval((ROOT / "digit-reader.js").read_text(encoding="utf-8"))
+        digit_source = (ROOT / "digit-reader.js").read_text(encoding="utf-8")
+        self.context.eval(digit_kernels.source_with_native_kernels(self.context, digit_source))
         self.context.eval("var DigitReader = module.exports;")
         self.context.eval("var DIGITS = DigitReader.templatesFromJSON(" +
                           (ROOT / "digit-templates.json").read_text(encoding="utf-8") + ");")
@@ -306,17 +314,20 @@ class CurrencyReader:
         else:
             rgb[:13, :13] = [26, 26, 40]
         rgb[27:, 27:] = [26, 26, 40]
-        cache_key = (calibrated, count_width, rgb.tobytes())
-        cached = self._rank_cache.get(cache_key)
-        if cached is not None:
-            self._rank_cache.move_to_end(cache_key)
-            return [dict(row) for row in cached]
         distances = np.square(rgb - [26, 26, 40]).sum(axis=2)
         weights = np.where(distances > 900, 1, np.where(distances > 144, .2, 0)).astype(np.float32)
         if calibrated:
             weights[:15, :count_width] = 0
         else:
             weights[:13, :13] = 0
+        # Masked SSD depends only on the weights and pixels with nonzero weight.
+        # Count-width changes or background noise under zero weights cannot
+        # change any candidate score; preserve every effective query pixel.
+        cache_key = (calibrated, weights.tobytes(), rgb[weights > 0].tobytes())
+        cached = self._rank_cache.get(cache_key)
+        if cached is not None:
+            self._rank_cache.move_to_end(cache_key)
+            return [dict(row) for row in cached]
         total = float(weights.sum())
         if total <= 0:
             return []
@@ -357,7 +368,7 @@ class CurrencyReader:
         if threading.get_ident() != self._example_thread:
             raise ValueError("Icon reference readers belong to their worker thread.")
         if isinstance(references, _ExampleBank):
-            if references.owner != id(self):
+            if references.owner is not self._example_owner:
                 raise ValueError("Prepared icon references belong to a different reader.")
             return references
         grouped = {}
@@ -377,8 +388,43 @@ class CurrencyReader:
                 signature.update(len(encoded).to_bytes(8, "little"))
                 signature.update(encoded)
                 signature.update(raw)
-        return _ExampleBank(self, signature.digest(),
-                            tuple((raw, tuple(names)) for raw, names in grouped.items()), order)
+        return _ExampleBank(self._example_owner, signature.digest(),
+                            tuple((raw, tuple(names)) for raw, names in grouped.items()),
+                            MappingProxyType(order))
+
+    def reference_bank(self, key, build):
+        """Reuse an immutable prepared local bank within bounded worker memory.
+
+        The adapter supplies a complete content/metadata key and a builder that
+        returns (prepared examples, kinds, footprint). Different readers and
+        threads cannot share a bank, even when their reference content matches.
+        """
+        if threading.get_ident() != self._example_thread:
+            raise ValueError("Icon reference readers belong to their worker thread.")
+        cached = self._learned_reference_banks.get(key)
+        if cached is not None:
+            self._learned_reference_banks.move_to_end(key)
+            return cached[0]
+        value = build()
+        examples, kinds, _ = value
+        size = 256 + sum(128 + len(name.encode("utf-8", "surrogatepass")) +
+                         len(str(kind).encode("utf-8", "surrogatepass"))
+                         for name, kind in kinds.items())
+        if isinstance(examples, _ExampleBank):
+            size += sum(len(raw) + 128 + sum(
+                128 + len(name.encode("utf-8", "surrogatepass")) for name in names)
+                        for raw, names in examples.references)
+        # An unusually large import remains usable without retaining its bank.
+        maximum = 16 * 1024 * 1024
+        if size <= maximum:
+            while self._learned_reference_banks and (
+                    len(self._learned_reference_banks) >= 24 or
+                    self._learned_reference_bytes + size > maximum):
+                _, (_, removed) = self._learned_reference_banks.popitem(last=False)
+                self._learned_reference_bytes -= removed
+            self._learned_reference_banks[key] = value, size
+            self._learned_reference_bytes += size
+        return value
 
     def _example_atlas(self, references):
         """Cache a padded vertical atlas of example pixels for batched alignment searches."""

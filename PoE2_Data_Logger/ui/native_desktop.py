@@ -27,7 +27,7 @@ from PySide6.QtCore import QEvent, QLockFile, QObject, QPointF, QRect, QSignalBl
 from PySide6.QtGui import QColor, QDesktopServices, QFontDatabase, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut, QWheelEvent
 from PySide6.QtWidgets import (
     QApplication, QAbstractScrollArea, QAbstractSpinBox, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGridLayout,
-    QFrame, QGroupBox, QHeaderView, QHBoxLayout, QLabel, QLineEdit, QListWidget, QMainWindow,
+    QFrame, QGroupBox, QHeaderView, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QMainWindow,
     QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox, QTabWidget, QTableWidget,
     QTableWidgetItem, QTextBrowser, QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
@@ -41,6 +41,7 @@ from PoE2_Data_Logger.ocr import item_ocr
 from PoE2_Data_Logger.core import service
 from PoE2_Data_Logger.core import store
 from PoE2_Data_Logger.core import kill_counts, chain_gap
+from PoE2_Data_Logger.core import ritual_rites_catalog
 from PoE2_Data_Logger.ui.region_select import RegionEditor, ScanRegionsPage
 from PoE2_Data_Logger.ui.atlas_settings import AtlasSettingsPage
 from PoE2_Data_Logger.ui.currency_counter import SessionCurrencyCounter
@@ -50,7 +51,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.21 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.22 Beta"
 SCAN_TIMEOUT_MS = 90000
 SCAN_PRESENTATION_RETRY_MS = 100
 SCAN_PRESENTATION_WAIT_SECONDS = 10
@@ -372,6 +373,7 @@ class LoggerWindow(QMainWindow):
         if not self.state["current_map_id"]:
             self.state = logger.start_map()
         self._ocr_active_threads = ocr_runtime.active_threads()
+        self._ocr_active_gpu_labels = ocr_runtime.active_gpu_labels()
         self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="runeshape-ui")
         self.tasks = Tasks(self)
         self.tasks.completed.connect(self._task_done)
@@ -455,6 +457,14 @@ class LoggerWindow(QMainWindow):
         self._held_remnant_review = None
         self._failed_review = False
         self._pending_tablet_slot = None
+        self._pending_tablet_set_id = None
+        self._tablet_form_set_id = None
+        self._tablet_set_drafts = {}
+        self._ritual_rite_form_context = None
+        self._ritual_rite_form_baseline = None
+        self._ritual_rite_saved_affixes = None
+        self._ritual_rite_rows = []
+        self._ritual_rite_catalog = ritual_rites_catalog.affixes()
         self._pending_currency_map = None
         self._pending_currency_phase = None
         self._pending_ritual_map = None
@@ -872,19 +882,26 @@ class LoggerWindow(QMainWindow):
             item = button(label, lambda checked=False, index=i: self.tabs.setCurrentIndex(index), "nav")
             self.nav_buttons.append(item)
             nav.addWidget(item)
+        ritual_nav = button("Ritual", lambda: self.tabs.setCurrentIndex(self.ritual_rite_page_index), "nav")
+        ritual_nav.setProperty("page_index", 14)
+        nav.addWidget(ritual_nav)
         nav.addStretch()
         preferences = QLabel("SETTINGS")
         preferences.setProperty("role", "eyebrow")
         nav.addWidget(preferences)
         scan_nav = button("Scan settings", lambda: self.tabs.setCurrentIndex(6), "nav")
+        scan_nav.setProperty("page_index", 6)
         self.nav_buttons.append(scan_nav)
         nav.addWidget(scan_nav)
         regions_nav = button("Scan regions", lambda: self.tabs.setCurrentIndex(7), "nav")
+        regions_nav.setProperty("page_index", 7)
         self.nav_buttons.append(regions_nav)
         nav.addWidget(regions_nav)
         database_nav = button("Database Import/Export", lambda: self.tabs.setCurrentIndex(8), "nav")
+        database_nav.setProperty("page_index", 8)
         self.nav_buttons.append(database_nav)
         nav.addWidget(database_nav)
+        self.nav_buttons.append(ritual_nav)
         ocr_nav = button("OCR Sensitivity", lambda: self.tabs.setCurrentIndex(13), "nav")
         ocr_nav.setProperty("page_index", 13)
         self.nav_buttons.append(ocr_nav)
@@ -1055,6 +1072,8 @@ class LoggerWindow(QMainWindow):
         self.atlas_settings_page.saved.connect(lambda data: self.run(lambda: self.save_atlas_settings(data)))
         self.tabs.addTab(self.atlas_settings_page, "Atlas / Character Settings")
         self._build_ocr_sensitivity()
+        self._build_ritual_rite()
+        ritual_nav.setProperty("page_index", self.ritual_rite_page_index)
         self.header_expedition.currentIndexChanged.connect(
             lambda: self.run(lambda: self.set_expedition(self.header_expedition)))
         for key, widgets in self._map_tag_controls().items():
@@ -1196,7 +1215,7 @@ class LoggerWindow(QMainWindow):
                 service.HOTKEY.start()
         titles = ("Review", "Expedition", "Map / Tablets", "Atlas Masters", "Currency",
                   "Data export", "Scan settings", "Scan regions", "Database Import/Export", "README", "Licenses", "Disclaimer",
-                  "Atlas / Character Settings", "OCR Sensitivity")
+                  "Atlas / Character Settings", "OCR Sensitivity", "Ritual")
         subtitles = ("Check the latest scan, then Approve to save it.",
                      "Set the expedition and log its propagation chain.",
                      "Read a waystone or tablet, then review and save the map setup.",
@@ -1207,7 +1226,7 @@ class LoggerWindow(QMainWindow):
                      "Adjust the labelled capture boxes on a game screenshot.",
                      "Label examples and share your OCR reference database.",
                      "", "", "", "Set atlas passives, choose their effects and enter gear item rarity.",
-                     "Adjust OCR Strictness separately for each scan type.")
+                     "Adjust OCR Strictness separately for each scan type.", "")
         self.page_title.setText(titles[index])
         self.page_subtitle.setText(subtitles[index])
         self.page_subtitle.setVisible(bool(subtitles[index]))
@@ -1303,6 +1322,7 @@ class LoggerWindow(QMainWindow):
             self._remnant_reading = None
         if kind != "tablet":
             self._pending_tablet_slot = None
+            self._pending_tablet_set_id = None
         if kind != "currency":
             self._inventory_reading = None
             self._pending_currency_map = self._pending_currency_phase = None
@@ -1411,6 +1431,7 @@ class LoggerWindow(QMainWindow):
             self.hide_overlay()
         if kind == "tablet":
             self._pending_tablet_slot = None
+            self._pending_tablet_set_id = None
         elif kind == "currency":
             self._inventory_reading = None
             self._pending_currency_map = self._pending_currency_phase = None
@@ -1435,8 +1456,7 @@ class LoggerWindow(QMainWindow):
 
     def reject_review(self):
         """Cancel and clear the active non-remnant review, restoring saved form state without
-        committing it or retaining its isolated recognition worker. Later captured Ritual
-        pages remain queued for their own review.
+        committing it or retaining its isolated recognition worker.
         """
         kind = self.pending_review_kind
         if kind == "propagation":
@@ -1445,14 +1465,15 @@ class LoggerWindow(QMainWindow):
             return self.reject_remnant_scan()
         if kind is None:
             return
-        if kind != "ritual":
-            service.HOTKEY.cancel_capture(modes=("propagation",) if kind == "propagation" else None)
+        service.HOTKEY.cancel_capture(modes=("propagation",) if kind == "propagation" else None)
         self._failed_review = False
         self._remnant_reading = None
         if kind == "waystone":
             self._waystone_form_baseline = None
         elif kind == "tablet":
-            self._clear_tablet_form_dirty(self._pending_tablet_slot, clear_capacity=True)
+            self._clear_tablet_form_dirty(self._pending_tablet_slot, clear_capacity=True,
+                                          set_id=self._pending_tablet_set_id)
+            self._pending_tablet_set_id = None
         self.pending_review_kind = None
         self._pending_currency_map = self._pending_ritual_map = self._pending_tablet_slot = None
         self._pending_currency_phase = None
@@ -1492,6 +1513,7 @@ class LoggerWindow(QMainWindow):
             logger._integer(value(self.map_mods), "Map Mods", 0, 100)
             return self.save_map_settings()
         if kind == "tablet":
+            self._validate_tablet_set_context({"_capture_tablet_set_id": self._pending_tablet_set_id})
             number = self._pending_tablet_slot or int(value(self.tablet_scan_number))
             start = (number - 1) * 4
             if not any(value(field) for field in self.tablet_affixes[start:start + 4]):
@@ -1751,6 +1773,13 @@ class LoggerWindow(QMainWindow):
         self.ocr_threads_select.setAccessibleName("CPU OCR threads")
         self.ocr_threads_select.currentIndexChanged.connect(lambda: self.run(self.save_ocr_threads))
         thread_row.addWidget(self.ocr_threads_select)
+        self._ocr_saved_gpu_labels = ocr_runtime.saved_gpu_labels()
+        self.ocr_gpu_labels_checkbox = QCheckBox("Use GPU for Currency / Ritual")
+        self.ocr_gpu_labels_checkbox.setAccessibleName("Use GPU for Currency / Ritual")
+        self.ocr_gpu_labels_checkbox.setToolTip("Optional count/tier label acceleration. Restart to apply. Falls back to CPU if unavailable.")
+        self.ocr_gpu_labels_checkbox.setChecked(self._ocr_saved_gpu_labels)
+        self.ocr_gpu_labels_checkbox.toggled.connect(lambda _checked: self.run(self.save_ocr_gpu_labels))
+        thread_row.addWidget(self.ocr_gpu_labels_checkbox)
         thread_row.addStretch()
         performance.addLayout(thread_row)
         self.ocr_threads_status = QLabel()
@@ -1932,6 +1961,11 @@ class LoggerWindow(QMainWindow):
             text += f"Saved: {saved} threads; restart the app to apply."
         else:
             text += "Changes take effect after restarting the app."
+        text += (" GPU for Currency / Ritual: on." if self._ocr_active_gpu_labels else
+                 " GPU for Currency / Ritual: off (default).")
+        if self._ocr_saved_gpu_labels != self._ocr_active_gpu_labels:
+            state = "on" if self._ocr_saved_gpu_labels else "off"
+            text += f" Saved GPU: {state}; restart the app to apply."
         self.ocr_threads_status.setText(text)
 
     def save_ocr_threads(self):
@@ -1940,6 +1974,17 @@ class LoggerWindow(QMainWindow):
             self._ocr_saved_threads = ocr_runtime.save_threads(value(self.ocr_threads_select))
         except Exception:
             select(self.ocr_threads_select, self._ocr_saved_threads)
+            self._update_ocr_threads_status()
+            raise
+        self._update_ocr_threads_status()
+
+    def save_ocr_gpu_labels(self):
+        """Save the optional GPU choice, restoring its checkbox when persistence fails."""
+        try:
+            self._ocr_saved_gpu_labels = ocr_runtime.save_gpu_labels(self.ocr_gpu_labels_checkbox.isChecked())
+        except Exception:
+            with QSignalBlocker(self.ocr_gpu_labels_checkbox):
+                self.ocr_gpu_labels_checkbox.setChecked(self._ocr_saved_gpu_labels)
             self._update_ocr_threads_status()
             raise
         self._update_ocr_threads_status()
@@ -2088,6 +2133,13 @@ class LoggerWindow(QMainWindow):
         map_actions.addStretch()
         traits.addLayout(map_actions)
         tablets = self._group("Tablet config", content)
+        sets = QHBoxLayout()
+        self.tablet_set = QComboBox()
+        self.tablet_set.currentIndexChanged.connect(lambda: self.run(self.select_tablet_set))
+        sets.addWidget(self.tablet_set, 1)
+        sets.addWidget(button("New set", lambda: self.run(self.new_tablet_set)))
+        sets.addWidget(button("Rename", lambda: self.run(self.rename_tablet_set)))
+        tablets.addLayout(sets)
         head = QHBoxLayout()
         self.tablets_used = combo([1, 2, 3, 4])
         head.addWidget(QLabel("Tablets used"))
@@ -2306,6 +2358,172 @@ class LoggerWindow(QMainWindow):
                                 "Approved name corrections teach future icon scans."))
         self.ritual_saved = message("")
         review.addWidget(self.ritual_saved)
+
+    def _build_ritual_rite(self):
+        """Append optional Rite metadata without moving existing pages or reward reviews."""
+        page, content = self._page()
+        self.ritual_rite_page_index = self.tabs.addTab(page, "Ritual")
+        choices = QHBoxLayout()
+        choices.addWidget(QLabel("Rite"))
+        self.ritual_rite_select = QComboBox()
+        self.ritual_rite_select.currentIndexChanged.connect(lambda: self.run(self.select_ritual_rite))
+        choices.addWidget(self.ritual_rite_select, 1)
+        choices.addWidget(button("New Rite", lambda: self.run(self.new_ritual_rite)))
+        content.addLayout(choices)
+        local = self._group("Current map affixes", content)
+        self.ritual_rite_affix_table = QTableWidget(0, 3)
+        self.ritual_rite_affix_table.setHorizontalHeaderLabels(["Affix", "Count", "Kind"])
+        self.ritual_rite_affix_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.ritual_rite_affix_table.setColumnWidth(1, 80)
+        self.ritual_rite_affix_table.setColumnWidth(2, 140)
+        self.ritual_rite_affix_table.verticalHeader().setDefaultSectionSize(44)
+        self.ritual_rite_affix_table.setMinimumHeight(240)
+        local.addWidget(self.ritual_rite_affix_table)
+        actions = QHBoxLayout()
+        actions.addWidget(button("Add affix", lambda: self.add_ritual_rite_affix()))
+        actions.addWidget(button("Remove selected affix", self.remove_ritual_rite_affix))
+        actions.addStretch()
+        actions.addWidget(button("Save", lambda: self.run(self.save_ritual_rite_affixes), "primary"))
+        local.addLayout(actions)
+        inherited = self._group("Inherited effects", content)
+        self.ritual_rite_inherited_table = QTableWidget(0, 4)
+        self.ritual_rite_inherited_table.setHorizontalHeaderLabels(["Effect", "Count", "Map", "Rite"])
+        self.ritual_rite_inherited_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in (1, 2, 3):
+            self.ritual_rite_inherited_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        self.ritual_rite_inherited_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.ritual_rite_inherited_table.setMinimumHeight(180)
+        inherited.addWidget(self.ritual_rite_inherited_table)
+        content.addStretch()
+
+    def _ritual_rite_choice(self, field):
+        """Resolve exact catalog wording while leaving typeable future modifiers custom."""
+        text = field.currentText().strip()
+        return next((row for row in self._ritual_rite_catalog if row["text"] == text), None)
+
+    def _ritual_rite_kind_changed(self, field, kind):
+        selected = self._ritual_rite_choice(field)
+        if selected is not None:
+            select(kind, selected["kind"])
+        kind.setEnabled(selected is None)
+        field.setToolTip(field.currentText())
+
+    def add_ritual_rite_affix(self, entry=None):
+        """Add a full-text catalog choice or a typeable custom modifier row."""
+        entry = entry or {}
+        table = self.ritual_rite_affix_table
+        row = table.rowCount()
+        table.insertRow(row)
+        field = QComboBox()
+        field.setEditable(True)
+        field.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        field.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        field.setMinimumContentsLength(28)
+        field.addItem("", None)
+        for selected in self._ritual_rite_catalog:
+            field.addItem(selected["text"], selected["id"])
+            field.setItemData(field.count() - 1, selected["text"], Qt.ItemDataRole.ToolTipRole)
+        field.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        field.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        field.view().setMinimumWidth(640)
+        field.lineEdit().setPlaceholderText("Select or type an affix")
+        count = line("Count")
+        count.setText(str(entry.get("count", 1)))
+        kind = combo([("local", "Local"), ("proliferation", "Proliferation"), ("bounty", "Bounty")])
+        select(kind, entry.get("kind", "local"))
+        selected = next((choice for choice in self._ritual_rite_catalog if choice["id"] == entry.get("id")), None)
+        text = selected["text"] if selected else entry.get("text", entry.get("description", ""))
+        field.setCurrentText(text)
+        field.setProperty("original_affix", dict(entry))
+        field.currentTextChanged.connect(lambda: self._ritual_rite_kind_changed(field, kind))
+        self._ritual_rite_kind_changed(field, kind)
+        self._ritual_rite_rows.append((field, count, kind))
+        for column, widget in enumerate((field, count, kind)):
+            table.setCellWidget(row, column, widget)
+
+    def remove_ritual_rite_affix(self):
+        """Remove only the selected local modifier draft row."""
+        row = self.ritual_rite_affix_table.currentRow()
+        if row >= 0:
+            self.ritual_rite_affix_table.removeRow(row)
+            self._ritual_rite_rows.pop(row)
+
+    def _ritual_rite_form(self):
+        """Read local drafts without validating incomplete text until explicit Save."""
+        rows = []
+        for field, count, kind in self._ritual_rite_rows:
+            selected = self._ritual_rite_choice(field)
+            if selected is not None:
+                entry = {"id": selected["id"], "count": value(count)}
+            else:
+                entry = {"text": field.currentText().strip(), "kind": value(kind), "count": value(count)}
+                original = field.property("original_affix") or {}
+                if (entry["text"] == original.get("text") and entry["kind"] == original.get("kind") and
+                        original.get("inherited_text")):
+                    entry["inherited_text"] = original["inherited_text"]
+            rows.append(entry)
+        return rows
+
+    def _refresh_ritual_rite(self, state, generation):
+        """Retain one map-local draft through refreshes and explicit Rite selection changes."""
+        context = (state.get("session_generation", generation), state["map_id"])
+        dirty = (self._ritual_rite_form_baseline is not None and
+                 self._ritual_rite_form() != self._ritual_rite_form_baseline)
+        if (context != self._ritual_rite_form_context or self._ritual_rite_form_baseline is None or
+                not dirty and state["current_affixes"] != self._ritual_rite_saved_affixes):
+            self.ritual_rite_affix_table.setRowCount(0)
+            self._ritual_rite_rows.clear()
+            for entry in state["current_affixes"] or [{}]:
+                self.add_ritual_rite_affix(entry)
+            self._ritual_rite_form_baseline = self._ritual_rite_form()
+        self._ritual_rite_form_context = context
+        self._ritual_rite_saved_affixes = state["current_affixes"]
+        with QSignalBlocker(self.ritual_rite_select):
+            self.ritual_rite_select.clear()
+            self.ritual_rite_select.addItem("None", None)
+            for rite in state["available_rites"]:
+                self.ritual_rite_select.addItem(rite["name"], rite["id"])
+            select(self.ritual_rite_select, state["selected_rite_id"])
+        table = self.ritual_rite_inherited_table
+        table.setRowCount(len(state["inherited_sources"]))
+        names = {rite["id"]: rite["name"] for rite in state["available_rites"]}
+        for row, source in enumerate(state["inherited_sources"]):
+            texts = (source["text"], source.get("count", 1), source["origin_map_id"],
+                     names.get(source["origin_rite_id"], source["origin_rite_id"]))
+            for column, text in enumerate(texts):
+                item = QTableWidgetItem(str(text))
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                item.setToolTip(str(text))
+                table.setItem(row, column, item)
+        table.resizeRowsToContents()
+
+    def select_ritual_rite(self):
+        """Change explicit Rite membership without saving or replacing the local draft."""
+        try:
+            logger.select_ritual_rite(self.ritual_rite_select.currentData())
+        except Exception:
+            with QSignalBlocker(self.ritual_rite_select):
+                select(self.ritual_rite_select, self.state["ritual_rite"]["selected_rite_id"])
+            raise
+        self.refresh()
+
+    def new_ritual_rite(self):
+        """Create a user-named Rite; no automatic map count or ending is implied."""
+        name, accepted = QInputDialog.getText(self, "New Rite", "Name")
+        if accepted:
+            logger.new_ritual_rite(name.strip() or None)
+            self.refresh()
+
+    def save_ritual_rite_affixes(self):
+        """Save local modifier metadata only after the existing map ownership check succeeds."""
+        context = self._ritual_rite_form_context
+        if context is None or context[0] != logger.session_generation():
+            raise ValueError("The session changed. Review Rite modifiers for the current map again.")
+        rows = [entry for entry in self._ritual_rite_form() if entry.get("id") or entry.get("text")]
+        logger.save_ritual_rite_affixes(rows, expected_map_id=context[1], expected_generation=context[0])
+        self._ritual_rite_form_baseline = None
+        self.refresh()
+        self.note("Ritual affixes saved.", True)
 
     def _build_chain_controls(self, content):
         """Build expedition selection, reversible saved-step corrections/discards and rune drafts.
@@ -2603,10 +2821,78 @@ class LoggerWindow(QMainWindow):
             slots.append((entries, tuple(self.tablet_raw_mods[number])))
         return value(self.tablets_used), tuple(slots)
 
-    def _clear_tablet_form_dirty(self, number=None, clear_capacity=False):
+    def _remember_tablet_set_draft(self):
+        """Keep unsaved tablet edits with the set whose controls produced them."""
+        set_id = self._tablet_form_set_id
+        if set_id is None:
+            return
+        baseline = self._tablet_form_baseline
+        if baseline is None:
+            self._tablet_set_drafts.pop(set_id, None)
+            return
+        capacity, slots = self._tablet_form()
+        changed = {number: slot for number, slot in enumerate(slots, 1)
+                   if baseline[1][number - 1] is not None and slot != baseline[1][number - 1]}
+        capacity = capacity if baseline[0] is not None and capacity != baseline[0] else None
+        if changed or capacity is not None:
+            self._tablet_set_drafts[set_id] = (capacity, changed)
+        else:
+            self._tablet_set_drafts.pop(set_id, None)
+
+    def _validate_tablet_set_context(self, result):
+        """Reject a delayed reading before it changes another set's form or catalog."""
+        selected = logger.scan_context()["_capture_tablet_set_id"]
+        if result.get("_capture_tablet_set_id", selected) != selected:
+            raise ValueError("The selected tablet set changed after capture. Select the original set or scan again.")
+        return selected
+
+    def select_tablet_set(self):
+        """Select saved tablets while retaining each set's unsaved form changes."""
+        set_id = self.tablet_set.currentData()
+        if set_id is None or set_id == logger.get_state()["selected_tablet_set_id"]:
+            return
+        self._remember_tablet_set_draft()
+        try:
+            logger.select_tablet_set(set_id)
+        except Exception:
+            with QSignalBlocker(self.tablet_set):
+                select(self.tablet_set, self._tablet_form_set_id)
+            raise
+        self.refresh()
+
+    def new_tablet_set(self):
+        """Create another empty four-tablet configuration."""
+        self._remember_tablet_set_draft()
+        names = {item["name"].casefold() for item in logger.get_state()["tablet_sets"]}
+        number = 1
+        while f"set {number}" in names:
+            number += 1
+        logger.create_tablet_set(f"Set {number}")
+        self.refresh()
+
+    def rename_tablet_set(self):
+        """Rename the selected saved configuration without saving its form draft."""
+        state = logger.get_state()
+        set_id = state["selected_tablet_set_id"]
+        name = next(item["name"] for item in state["tablet_sets"] if item["id"] == set_id)
+        renamed, accepted = QInputDialog.getText(self, "Rename tablet set", "Name", text=name)
+        if accepted and renamed.strip():
+            logger.rename_tablet_set(set_id, renamed.strip())
+            self.refresh()
+
+    def _clear_tablet_form_dirty(self, number=None, clear_capacity=False, *, set_id=None):
         """Retire dirty tracking for all tablets or the reviewed slot so refresh can restore
         saved values.
         """
+        set_id = self._tablet_form_set_id if set_id is None else set_id
+        if set_id != self._tablet_form_set_id:
+            if number is None:
+                self._tablet_set_drafts.pop(set_id, None)
+            elif set_id in self._tablet_set_drafts:
+                capacity, slots = self._tablet_set_drafts[set_id]
+                slots.pop(number, None)
+                self._tablet_set_drafts[set_id] = (None if clear_capacity else capacity, slots)
+            return
         if number is None or self._tablet_form_baseline is None:
             self._tablet_form_baseline = None
         else:
@@ -2631,13 +2917,14 @@ class LoggerWindow(QMainWindow):
                                        folder_text != self._export_folder_baseline) else None
         waystone_values = self._waystone_form()
         count_values = tuple(field.text() for field in (self.normal, self.magic, self.rare, self.unique))
-        tablet_values = self._tablet_form()
+        self._remember_tablet_set_draft()
         active_master_value = value(self.master)
         perk_values = (value(self.perk_master), tuple(value(field) for field in self.perk_boxes))
         state = logger.get_state()
         map_context = (logger.session_generation(), state["current_map_id"])
         same_map = map_context == self._form_map_context
         if not same_map:
+            self._tablet_set_drafts.clear()
             self._perk_drafts.clear()
             self._perk_form_baseline = None
             self._saved_chain_correction_drafts.clear()
@@ -2649,29 +2936,22 @@ class LoggerWindow(QMainWindow):
         count_drafts = {index: text for index, text in enumerate(count_values)
                         if same_map and self._counts_form_baseline is not None and
                         text != self._counts_form_baseline[index]}
-        tablet_drafts = {number: slot for number, slot in enumerate(tablet_values[1], 1)
-                         if same_map and self._tablet_form_baseline is not None and
-                         self._tablet_form_baseline[1][number - 1] is not None and
-                         slot != self._tablet_form_baseline[1][number - 1]}
-        tablet_capacity_draft = tablet_values[0] if (
-            same_map and self._tablet_form_baseline is not None and
-            self._tablet_form_baseline[0] is not None and
-            tablet_values[0] != self._tablet_form_baseline[0]) else None
         active_master_draft = active_master_value if (
             same_map and self._active_master_baseline is not None and
             active_master_value != self._active_master_baseline) else None
         perk_draft = perk_values if (same_map and self._perk_form_baseline is not None and
                                     perk_values != self._perk_form_baseline) else None
-        tablet_draft = None
-        if self.pending_review_kind == "tablet" and self._pending_tablet_slot is not None:
-            number = self._pending_tablet_slot
-            start = (number - 1) * 4
-            entries = [{"affix": value(a), "value": value(v),
-                        "unit": v.property("unit") if v.property("affix") == value(a) else affix_unit(value(a))}
-                       for a, v in zip(self.tablet_affixes[start:start + 4], self.tablet_values[start:start + 4])]
-            tablet_draft = (number, entries, list(self.tablet_raw_mods[number - 1]), int(value(self.tablets_used)))
         self.state = state
         config = state["settings"]
+        self._refresh_ritual_rite(state["ritual_rite"], map_context[0])
+        self._tablet_form_set_id = state["selected_tablet_set_id"]
+        with QSignalBlocker(self.tablet_set):
+            self.tablet_set.clear()
+            for item in state["tablet_sets"]:
+                self.tablet_set.addItem(item["name"], item["id"])
+            select(self.tablet_set, self._tablet_form_set_id)
+        tablet_capacity_draft, tablet_drafts = self._tablet_set_drafts.get(
+            self._tablet_form_set_id, (None, {}))
         target = state.get("atlas_settings_target_map_id", "")
         self.atlas_settings_page.set_settings(config.get("atlas_settings"),
             status=f"Saved settings apply to {target}." if target else
@@ -2745,12 +3025,12 @@ class LoggerWindow(QMainWindow):
                 [{"affix": affix, "value": amount, "unit": unit} for affix, amount, unit in slot], raw)
         if tablet_capacity_draft is not None:
             select(self.tablets_used, tablet_capacity_draft)
-        if tablet_draft is not None:
-            number, entries, raw, capacity = tablet_draft
-            self._fill_tablet_slot(number, entries, raw)
-            select(self.tablets_used, max(capacity, number))
         self.tablet_active()
         self.show_tablet_raw()
+        if self.pending_review_kind == "tablet":
+            self.approve_scan_button.setEnabled(False)
+            if self._pending_tablet_set_id == self._tablet_form_set_id and self._pending_tablet_slot is not None:
+                self._tablet_review_edit_changed(self._pending_tablet_slot)
         self._sync_header_ids(state)
         self._load_chain_context()
         kill_values = (*state["kills"], state.get("unique_kills"))
@@ -2967,6 +3247,7 @@ class LoggerWindow(QMainWindow):
     def _tablet_review_edit_changed(self, number):
         """Allow approval after the user enters affixes for the scan's bound tablet slot."""
         if (self.pending_review_kind != "tablet" or self._pending_tablet_slot != number or
+                self._pending_tablet_set_id != self._tablet_form_set_id or
                 self._failed_review):
             return
         start = (number - 1) * 4
@@ -3070,13 +3351,16 @@ class LoggerWindow(QMainWindow):
     def save_tablets(self):
         """Save tablet settings, audit and scan progression as one undo action, merging only a reviewed slot.
         """
-        if self.pending_review_kind == "tablet" and self._pending_tablet_slot is None:
+        set_id = self._tablet_form_set_id
+        self._validate_tablet_set_context({"_capture_tablet_set_id": set_id})
+        reviewing = self.pending_review_kind == "tablet" and self._pending_tablet_set_id == set_id
+        if reviewing and self._pending_tablet_slot is None:
             raise ValueError("No tablet affixes were read. Scan the tablet again before saving this reading.")
         entries = [{"affix": value(a), "value": value(v),
                     "unit": v.property("unit") if v.property("affix") == value(a) else affix_unit(value(a))}
                    for a, v in zip(self.tablet_affixes, self.tablet_values)]
         next_slot = logger.tablet_next_slot()
-        reviewed = self._pending_tablet_slot if self.pending_review_kind == "tablet" else None
+        reviewed = self._pending_tablet_slot if reviewing else None
         if reviewed is not None:
             if next_slot > 4:
                 raise ValueError("Four tablets are already saved. Clear tablet config before scanning a new set.")
@@ -3098,12 +3382,14 @@ class LoggerWindow(QMainWindow):
                                   "tablet_affixes": entries,
                                   "tablet_raw_mods": raw_mods},
                                  confirmed_affixes=sorted({item["affix"] for item in entries
-                                                           if item["affix"] and item["affix"] not in self.state["affixes"]}))
+                                                           if item["affix"] and item["affix"] not in self.state["affixes"]}),
+                                 expected_tablet_set_id=set_id)
             commit_number = logger.record_commit("Tablet config")
             if reviewed == next_slot:
-                logger.advance_tablet_slot(next_slot)
+                logger.advance_tablet_slot(next_slot, expected_tablet_set_id=set_id)
         self._clear_tablet_form_dirty(reviewed)
-        self._review_saved("tablet", commit_number)
+        if reviewing:
+            self._review_saved("tablet", commit_number)
         self.refresh()
         self._set_commit_badge(commit_number)
         self.note(f"Tablet {reviewed} saved." if reviewed is not None else "Tablet config saved.")
@@ -3116,10 +3402,14 @@ class LoggerWindow(QMainWindow):
         service.HOTKEY.cancel_capture()
         logger.clear_tablets()
         self._clear_tablet_form_dirty()
-        self._pending_tablet_slot = None
+        clearing_review = (self.pending_review_kind == "tablet" and
+                           self._pending_tablet_set_id == self._tablet_form_set_id)
+        if clearing_review:
+            self._pending_tablet_slot = None
         self.refresh()
-        if self.pending_review_kind == "tablet":
+        if clearing_review:
             self.pending_review_kind = None
+            self._pending_tablet_set_id = None
             self.approve_scan_button.setEnabled(False)
             self._review_controls(None)
             self.review_edit_button.hide()
@@ -3166,6 +3456,9 @@ class LoggerWindow(QMainWindow):
         """Discard map-specific drafts and cancel their stale recognition work when the map context changes."""
         self._waystone_form_baseline = self._counts_form_baseline = None
         self._tablet_form_baseline = self._active_master_baseline = self._perk_form_baseline = None
+        self._tablet_set_drafts.clear()
+        self._pending_tablet_set_id = None
+        self._ritual_rite_form_baseline = None
         self._perk_drafts.clear()
         self._saved_chain_correction_drafts.clear()
         self._saved_chain_view_key = None
@@ -5940,8 +6233,6 @@ class LoggerWindow(QMainWindow):
         if event is None:
             self._hotkey_presentation_retry = None
         if event and event["id"] != self._latest_hotkey:
-            if self._ritual_delivery_waiting(event):
-                return
             try:
                 if not self._prepare_hotkey_presentation(event):
                     return
@@ -5965,8 +6256,9 @@ class LoggerWindow(QMainWindow):
         """Retain recognized evidence until before-review writes can finish without blocking Qt.
 
         Retry only admission, before review widgets or automatic saves run.
-        The FIFO owns the result and screenshot; existing cancellation removes
-        that ownership when the user changes or discards its context.
+        The current result owns its screenshot while admission retries. A newer
+        ordinary capture replaces it; only an accepted Remnant/Propagation pair
+        retains both results. Cancellation removes the matching ownership.
         """
         remnant = event["mode"] in ("opened", "seed")
         item = (event["mode"] == "item" and not event.get("error") and
@@ -6002,6 +6294,7 @@ class LoggerWindow(QMainWindow):
                     else:
                         # Keep the existing invalid-input and full-capacity
                         # guards ahead of parsing or additive discovery.
+                        self._validate_tablet_set_context(event["result"])
                         int(value(self.tablet_scan_number))
                         ocr_sensitivity.validate(event["result"].get("_ocr_strictness", ocr_sensitivity.DEFAULT))
                         if logger.tablet_next_slot() <= 4:
@@ -6097,6 +6390,8 @@ class LoggerWindow(QMainWindow):
     def _hover_item_read(self, result, raw=None, *, prepared_tablet=None):
         """Route readings to review or auto-save; additive affix discovery must not consume Undo."""
         logger.validate_scan_context(result)
+        if result["kind"] == "tablet":
+            self._validate_tablet_set_context(result)
         self._require_remnant_review_finished()
         self.tabs.setCurrentIndex(2)
         if raw:
@@ -6314,6 +6609,7 @@ class LoggerWindow(QMainWindow):
         additive discovery does not create its own Undo command.
         """
         logger.validate_scan_context(result)
+        set_id = self._validate_tablet_set_context(result)
         self._require_remnant_review_finished()
         auto = self.auto_tablet_checkbox.isChecked()
         strictness = ocr_sensitivity.validate(result.get("_ocr_strictness", ocr_sensitivity.DEFAULT))
@@ -6322,6 +6618,7 @@ class LoggerWindow(QMainWindow):
         next_slot = logger.tablet_next_slot()
         if next_slot > 4:
             self._pending_tablet_slot = None
+            self._pending_tablet_set_id = set_id
             text = "Four tablets are already saved. Clear tablet config before scanning a new set."
             set_message(self.tablet_scan_status, text)
             self._review_pending("tablet", text, False)
@@ -6357,10 +6654,12 @@ class LoggerWindow(QMainWindow):
                    "No tablet affixes read. Use Edit activity settings to enter modifiers, "
                    "or check the captured tooltip and scan again.")
         self._pending_tablet_slot = number
+        self._pending_tablet_set_id = set_id
         self._review_pending("tablet", summary, bool(preview_matches), rows)
         if auto and result["status"] == "ready" and all(
                 item["score"] >= floor for item in result["matches"]):
-            saved_number = logger.save_scanned_tablet(result["matches"], original_mods)
+            saved_number = logger.save_scanned_tablet(result["matches"], original_mods,
+                                                      expected_tablet_set_id=set_id)
             self._clear_tablet_form_dirty(saved_number)
             self.state = logger.get_state()
             self._set_commit_badge(self.state["scan_commit_count"])
@@ -6937,14 +7236,9 @@ class LoggerWindow(QMainWindow):
             f"{map_id} · start {len(data['start'])} item types · end {len(data['end'])} item types"
             + (" · net: " + ", ".join(parts[:8]) if parts else ""))
 
-    def _ritual_delivery_waiting(self, event):
-        """Keep a captured Ritual page queued until the current page is saved or rejected."""
-        return event.get("mode") == "ritual" and self.pending_review_kind == "ritual"
-
     def _ritual_captured(self, image, live=True, expected_map_id=None, expected_strictness=None):
         """Prepare frozen Ritual references before replacing review, then recover preview
         or worker admission failures against this map/session-bound capture and image hash.
-        Keep completed follow-up captures for subsequent page delivery.
         """
         self._require_remnant_review_finished()
         map_id = logger.get_state()["current_map_id"]
@@ -6959,6 +7253,7 @@ class LoggerWindow(QMainWindow):
                    else ocr_sensitivity.saved_values()["ritual"]}
         names = logger.ritual_names()
         references = logger.ritual_icons()
+        service.HOTKEY.cancel_capture()
         self._ritual_reading = capture
         self._ritual_capture_context = capture
         self._pending_ritual_map = map_id
@@ -7208,8 +7503,8 @@ class LoggerWindow(QMainWindow):
 
     def save_ritual(self):
         """Validate held context and named rewards, then commit their map-owned page using the
-        capture hash with registered names and learned icons. Reject unnamed rows and an
-        empty held reading; mark saved rows after a successful commit.
+        capture hash with registered names and learned icons. Reject unnamed rows and
+        retain readable counters even when no rewards remain; mark saved rows after a successful commit.
         """
         if self.pending_review_kind == "ritual" and self._failed_review:
             raise ValueError("This scan failed. Scan again or reject this reading before saving.")
@@ -7248,7 +7543,8 @@ class LoggerWindow(QMainWindow):
                 example = review_learning.make_example(capture["image"], original, field(1), field(0).title(), "ritual")
                 if example:
                     examples.append(example)
-        if not rows and self.pending_review_kind == "ritual":
+        if (not rows and self.pending_review_kind == "ritual" and
+                not value(self.ritual_tribute) and not value(self.ritual_rerolls)):
             self.reject_review()
             return None
         saved = logger.save_ritual_page(rows, self.ritual_raw.toPlainText(), self._ritual_hash,
