@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.2.23 Beta
+
+- Include the unpublished 1.3.2.22 tablet, Ritual, review-delivery and optional GPU changes below.
+- Cache exact Currency and grayscale Ritual artwork transforms with bounded memory and baseline fallback.
+- Prepare independent Currency artwork rankings using the selected CPU count, preserving exact scores, slot order and scan admission behavior.
+- Accelerate count-window arithmetic with exact integer operations; reuse the GPU helper's first validated batch after provider proof.
+- Repair Windows path-alias and standalone test-reader cleanup fixtures without changing application database behavior.
+- Synchronize release labels and retain update/uninstall guards for earlier running clients.
+
+See [release notes](docs/RELEASE_1.3.2.23.md) for measured results and release gates. Currency remains above the sub-second goal on the test host; physical GPU performance remains unverified.
+
 ## 1.3.2.22 Beta
 
 - Limit deferred scan holding to Remnant followed by Propagation; keep Currency/Ritual replacement reads latest-only without a queued review burst.
