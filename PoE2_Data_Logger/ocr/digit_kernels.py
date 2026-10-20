@@ -14,6 +14,7 @@ from functools import lru_cache
 
 import cv2
 import numpy as np
+from scipy import ndimage
 
 
 SOURCE_SHA256 = "9ade6207266aae5bac0f14c46a154694ed33e8f4ddd543c802218badca5ce5f0"
@@ -94,11 +95,21 @@ def _slide_arrays(source, glyph, dy_low, dy_high, minimum_ink):
     offsets, starts = offsets[valid], starts[valid]
     if not len(offsets):
         return []
-    windows = np.lib.stride_tricks.sliding_window_view(
-        source, (glyph_height, glyph_width))[starts]
-    ink = windows.sum(axis=(-2, -1), dtype=np.int64)
+    # Validated binary pixels keep the integral below 8192 and each window
+    # sum/intersection at most 1024. Integer-valued products and sums are also
+    # exact in ndimage's double accumulator; int32 output avoids uint8 overflow.
+    # Unlike FFT correlation this needs no rounding tolerance or score changes.
+    integral = cv2.integral(source, sdepth=cv2.CV_32S)
+    ys = starts[:, None]
+    xs = np.arange(width - glyph_width + 1)[None, :]
+    ink = (integral[ys + glyph_height, xs + glyph_width] -
+           integral[ys, xs + glyph_width] - integral[ys + glyph_height, xs] +
+           integral[ys, xs])
     glyph_ink = int(glyph.sum())
-    intersection = (windows * glyph).sum(axis=(-2, -1), dtype=np.int64)
+    correlated = ndimage.correlate(source, glyph, output=np.int32)
+    # The default center is floor(size/2), including even-sized glyphs. Only
+    # complete windows are sampled, so correlate's boundary mode has no effect.
+    intersection = correlated[ys + glyph_height // 2, xs + glyph_width // 2]
     union = ink + glyph_ink - intersection
     scores = np.divide(intersection, union, out=np.zeros_like(intersection, dtype=np.float64),
                        where=union > 0)

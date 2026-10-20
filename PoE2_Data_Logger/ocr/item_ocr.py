@@ -627,12 +627,19 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
     reader = currency_ocr.get_reader()
     reviewed = _reviewed_bank(reader, references)
     examples = _prepared_reference_bank(reader, references, (1, 1), reviewed=False)[0]
-    found, unknown = [], []
+    cells = {}
     for slot in range(1, 61):
         cell = inventory_cell(image, slot)
         if float(np.asarray(cell, dtype=np.uint8).std(axis=(0, 1)).mean()) < 8:
             continue
-        count_hint = labels[slot].get("count") if labels is not None and labels[slot]["count_present"] else None
+        cells[slot] = cell
+    hints = {slot: (labels[slot].get("count") if labels is not None and
+                    labels[slot]["count_present"] else None) for slot in cells}
+    currency_ocr.prefetch_catalog_ranks(reader, ((cell, len(str(hints[slot])) if
+        hints[slot] is not None else None) for slot, cell in cells.items() if slot not in equipment))
+    found, unknown = [], []
+    for slot, cell in cells.items():
+        count_hint = hints[slot]
         icon = (reader.icon(cell, count_digits=len(str(count_hint)) if count_hint is not None else None)
                 if strictness == ocr_sensitivity.DEFAULT else
                 reader.icon(cell, count_digits=len(str(count_hint)) if count_hint is not None else None,

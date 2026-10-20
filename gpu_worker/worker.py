@@ -328,13 +328,13 @@ class LabelWorker:
     def _infer_tensor(self, tensor, target, batch_size):
         temporary = None
         try:
-            if not self.gpu_nodes:
-                self._run(tensor[:batch_size])  # Unreturned warmup/proof; never timed as useful inference.
-                self._finish_profile()
             indices, probabilities = [], []
             steps = None
             for start in range(0, tensor.shape[0], batch_size):
                 output = self._run(tensor[start:start + batch_size])
+                if not self.gpu_nodes:
+                    # Reuse the first batch only after DirectML execution is proven.
+                    self._finish_profile()
                 if steps is not None and output.shape[1] != steps:
                     raise WorkerError("The label model changed sequence length between batches.")
                 steps = output.shape[1]

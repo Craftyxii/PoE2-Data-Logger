@@ -186,33 +186,44 @@ class GpuLabelWorkerTests(unittest.TestCase):
             self.make_worker(actual_providers=[worker.protocol.CPU_PROVIDER])
 
     def test_first_inference_proves_gpu_then_preserves_batches_and_numpy_reduction(self):
-        helper, runtime, _ = self.make_worker()
-        request = self.request()
-        expected = FakeSession.output(np.load(request["input_path"]))
-        response = helper.dispatch(request)
-        self.assertEqual(response, {"ok": True, "protocol": 1, "rows": 7, "steps": 3, "gpu_nodes": 1})
-        with np.load(request["output_path"], allow_pickle=False) as saved:
-            self.assertEqual(set(saved.files), {"indices", "probabilities"})
-            np.testing.assert_array_equal(saved["indices"], expected.argmax(axis=2))
-            np.testing.assert_array_equal(saved["probabilities"], expected.max(axis=2))
-            self.assertEqual(saved["indices"].dtype, np.int64)
-            self.assertEqual(saved["probabilities"].dtype, np.float32)
-        session = runtime.sessions[0]
-        self.assertEqual([len(batch) for batch in session.calls], [6, 6, 1])
-        self.assertEqual(session.profile_calls, 1)
-        self.assertFalse(list(self.root.glob("label-dml*.json")))
-        request["output_path"] = str(self.root / "next.npz")
-        helper.dispatch(request)
-        self.assertEqual([len(batch) for batch in session.calls], [6, 6, 1, 6, 1])
-        self.assertEqual(session.profile_calls, 1)
+        for rows in (1, 6, 7, 12, 13):
+            with self.subTest(rows=rows):
+                helper, runtime, _ = self.make_worker()
+                tensor = np.zeros((rows, *worker.protocol.LABEL_SHAPE), dtype=np.float32)
+                tensor[:, 0, 0, 0] = np.arange(rows)
+                request = self.request(tensor, output_path=str(self.root / f"output-{rows}.npz"))
+                expected = FakeSession.output(tensor)
+                expected_batches = [tensor[start:start + 6] for start in range(0, rows, 6)]
+                session = runtime.sessions[0]
+                for attempt in range(2):
+                    request["output_path"] = str(self.root / f"output-{rows}-{attempt}.npz")
+                    response = helper.dispatch(request)
+                    self.assertEqual(response, {"ok": True, "protocol": 1, "rows": rows, "steps": 3, "gpu_nodes": 1})
+                    with np.load(request["output_path"], allow_pickle=False) as saved:
+                        self.assertEqual(set(saved.files), {"indices", "probabilities"})
+                        np.testing.assert_array_equal(saved["indices"], expected.argmax(axis=2))
+                        np.testing.assert_array_equal(saved["probabilities"], expected.max(axis=2))
+                        self.assertEqual(saved["indices"].dtype, np.int64)
+                        self.assertEqual(saved["probabilities"].dtype, np.float32)
+                    self.assertEqual(len(session.calls), len(expected_batches) * (attempt + 1))
+                    for actual, expected_batch in zip(session.calls, expected_batches * (attempt + 1)):
+                        np.testing.assert_array_equal(actual, expected_batch)
+                    self.assertEqual(session.profile_calls, 1)
+                    self.assertFalse(list(self.root.glob("label-dml*.json")))
 
     def test_no_actual_dml_node_execution_fails_before_output(self):
         helper, runtime, _ = self.make_worker(gpu=False)
         request = self.request()
-        with self.assertRaisesRegex(worker.WorkerError, "did not execute any DirectML"):
-            helper.dispatch(request)
+        with patch.object(worker.tempfile, "NamedTemporaryFile") as create_output, \
+                patch.object(np, "savez") as save_output:
+            with self.assertRaisesRegex(worker.WorkerError, "did not execute any DirectML"):
+                helper.dispatch(request)
+        create_output.assert_not_called()
+        save_output.assert_not_called()
         self.assertFalse(Path(request["output_path"]).exists())
+        self.assertFalse(list(self.root.glob("label-dml*.json")))
         self.assertEqual(len(runtime.sessions[0].calls), 1)
+        self.assertEqual(runtime.sessions[0].profile_calls, 1)
         with self.assertRaisesRegex(worker.WorkerError, "unavailable"):
             helper.dispatch(request)
 
@@ -293,6 +304,29 @@ class GpuLabelWorkerTests(unittest.TestCase):
                 self.assertFalse(Path(request["output_path"]).exists())
                 self.assertFalse(list(self.root.glob("label-result-*.tmp")))
 
+    def test_invalid_later_batch_outputs_fail_the_whole_request(self):
+        transforms = [lambda output: output[:, :, :-1], lambda output: output.astype(np.float64),
+                      lambda output: output[0], lambda output: output[:0],
+                      lambda output: np.full_like(output, np.nan), lambda output: np.full_like(output, np.inf)]
+        for transform in transforms:
+            with self.subTest(transform=transform):
+                helper, runtime, _ = self.make_worker()
+                session = runtime.sessions[0]
+                original_run = session.run
+                def invalid_later_output(names, inputs):
+                    outputs = original_run(names, inputs)
+                    return [transform(outputs[0])] if len(session.calls) > 1 else outputs
+                session.run = invalid_later_output
+                request = self.request()
+                with self.assertRaisesRegex(worker.WorkerError, "output contract"):
+                    helper.dispatch(request)
+                self.assertEqual([len(batch) for batch in session.calls], [6, 1])
+                self.assertEqual(session.profile_calls, 1)
+                self.assertFalse(Path(request["output_path"]).exists())
+                self.assertFalse(list(self.root.glob("label-result-*.tmp")))
+                with self.assertRaisesRegex(worker.WorkerError, "unavailable"):
+                    helper.dispatch(request)
+
     def test_malformed_profile_and_inconsistent_batch_output_fail_closed(self):
         helper, runtime, _ = self.make_worker()
         session = runtime.sessions[0]
@@ -313,7 +347,7 @@ class GpuLabelWorkerTests(unittest.TestCase):
         original_run = session.run
         def changing_output(names, inputs):
             outputs = original_run(names, inputs)
-            return [outputs[0][:, :2]] if len(session.calls) > 2 else outputs
+            return [outputs[0][:, :2]] if len(session.calls) > 1 else outputs
         session.run = changing_output
         with self.assertRaisesRegex(worker.WorkerError, "sequence length"):
             helper.dispatch(self.request())

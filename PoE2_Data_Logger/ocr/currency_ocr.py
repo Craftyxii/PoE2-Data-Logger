@@ -13,6 +13,7 @@ import re
 import weakref
 import threading
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -141,6 +142,89 @@ def _calibrated_inventory_assets(path, modified, size, variants_path, variants_m
     return candidates, {entry["family"]: entry["rgba"] for entry in entries}, atlas
 
 
+def _inventory_query(image, calibrated, count_digits):
+    """Normalize one exact masked artwork query and retain its existing cache identity."""
+    rgb = np.asarray(image.convert("RGB").resize((40, 40), Image.Resampling.LANCZOS),
+                     dtype=np.float32).copy()
+    background = ((rgb.max(axis=2) < 28) |
+                  ((rgb[:, :, 0] < 28) & (rgb[:, :, 1] < 28) & (rgb[:, :, 2] <= 45) &
+                   (rgb[:, :, 2] >= rgb[:, :, 0]) & (rgb[:, :, 2] >= rgb[:, :, 1])))
+    rgb[background] = [26, 26, 40]
+    count_width = min(40, 6 + 7 * count_digits) if type(count_digits) is int and count_digits > 0 else 26
+    if calibrated:
+        rgb[:15, :count_width] = [26, 26, 40]
+    else:
+        rgb[:13, :13] = [26, 26, 40]
+    rgb[27:, 27:] = [26, 26, 40]
+    distances = np.square(rgb - [26, 26, 40]).sum(axis=2)
+    weights = np.where(distances > 900, 1, np.where(distances > 144, .2, 0)).astype(np.float32)
+    if calibrated:
+        weights[:15, :count_width] = 0
+    else:
+        weights[:13, :13] = 0
+    # The masked kernel ignores only zero-weight pixels, not the other colors.
+    cache_key = calibrated, weights.tobytes(), rgb[weights > 0].tobytes()
+    return rgb, weights, cache_key
+
+
+def _inventory_empty(image):
+    """Apply the icon reader's existing dark-cell gate before numerical ranking."""
+    pixels = np.asarray(image.convert("RGB"))
+    dx, dy = max(1, round(image.width * .18)), max(1, round(image.height * .18))
+    inside = pixels[dy:-dy, dx:-dx] if min(image.size) > 12 else pixels
+    return float(np.percentile(inside, 95)) < 32
+
+
+def _rank_inventory(state, rgb, weights, calibrated):
+    """Run unchanged catalog arithmetic using only artwork assets and private scale state."""
+    total = float(weights.sum())
+    if total <= 0:
+        return []
+    mask = np.sqrt(weights)
+    best = {}
+    candidates = state.calibrated_candidates if calibrated else state.inventory_candidates
+    if calibrated:
+        errors = artwork_cache.match(state.calibrated_atlas, rgb, cv2.TM_SQDIFF, mask=mask)
+        indices = np.arange(len(candidates))[:, None] * 48 + np.arange(9)
+        minima = errors[indices].min(axis=(1, 2))
+    else:
+        minima = [cv2.matchTemplate(candidate, rgb, cv2.TM_SQDIFF, mask=mask).min()
+                  for _, candidate in candidates]
+    for (family, _), error in zip(candidates, minima):
+        score = -max(0, float(error)) / total
+        best[family] = max(best.get(family, float("-inf")), score)
+    if calibrated:
+        shortlist = sorted(best, key=best.get, reverse=True)[:8]
+        for family in shortlist:
+            if family not in state._scaled_candidates:
+                state._scaled_candidates[family] = tuple(
+                    _inventory_candidate(state.calibrated_rgba[family], scale) for scale in (.9, 1.12, 1.25))
+            for candidate in state._scaled_candidates[family]:
+                errors = cv2.matchTemplate(candidate, rgb, cv2.TM_SQDIFF, mask=mask)
+                best[family] = max(best[family], -max(0, float(np.min(errors))) / total)
+    return sorted(({"name": family, "score": score} for family, score in best.items()),
+                  key=lambda row: row["score"], reverse=True)[:3]
+
+
+def _cache_inventory_rank(reader, key, ranked):
+    """Publish copied numeric rankings on the owning reader's serial thread only."""
+    reader._rank_cache[key] = tuple(dict(row) for row in ranked)
+    reader._rank_cache.move_to_end(key)
+    if len(reader._rank_cache) > 128:
+        reader._rank_cache.popitem(last=False)
+
+
+class _CatalogRankState:
+    """Own only private scale preparation and shared read-only catalog assets, never JavaScript."""
+
+    def __init__(self, reader):
+        """Keep the numerical ranking inputs without retaining the reader or its context."""
+        self.calibrated_candidates = reader.calibrated_candidates
+        self.calibrated_rgba = reader.calibrated_rgba
+        self.calibrated_atlas = reader.calibrated_atlas
+        self._scaled_candidates = dict(reader._scaled_candidates)
+
+
 class CurrencyReader:
     """Own offline JavaScript recognizers and bounded image-matching caches for one worker.
 
@@ -241,10 +325,7 @@ class CurrencyReader:
         clear = lambda base, spread: ocr_sensitivity.clear_threshold(base, strictness, spread)
         suggestion = ocr_sensitivity.review_threshold(-8000, strictness, 2000)
         pending = None
-        pixels = np.asarray(image.convert("RGB"))
-        dx, dy = max(1, round(image.width * .18)), max(1, round(image.height * .18))
-        inside = pixels[dy:-dy, dx:-dx] if min(image.size) > 12 else pixels
-        if float(np.percentile(inside, 95)) < 32:
+        if _inventory_empty(image):
             return {"family": None, "members": [], "score": 0, "margin": 0, "all": [],
                     "empty": True}
         if self.inventory_match:
@@ -302,62 +383,14 @@ class CurrencyReader:
         Normalize backing, mask the count corner using an optional digit-width hint
         and omit the tier corner; calibrated candidates also refine artwork scale.
         """
-        rgb = np.asarray(image.convert("RGB").resize((40, 40), Image.Resampling.LANCZOS),
-                         dtype=np.float32).copy()
-        background = ((rgb.max(axis=2) < 28) |
-                      ((rgb[:, :, 0] < 28) & (rgb[:, :, 1] < 28) & (rgb[:, :, 2] <= 45) &
-                       (rgb[:, :, 2] >= rgb[:, :, 0]) & (rgb[:, :, 2] >= rgb[:, :, 1])))
-        rgb[background] = [26, 26, 40]
-        count_width = min(40, 6 + 7 * count_digits) if type(count_digits) is int and count_digits > 0 else 26
-        if calibrated:
-            rgb[:15, :count_width] = [26, 26, 40]
-        else:
-            rgb[:13, :13] = [26, 26, 40]
-        rgb[27:, 27:] = [26, 26, 40]
-        distances = np.square(rgb - [26, 26, 40]).sum(axis=2)
-        weights = np.where(distances > 900, 1, np.where(distances > 144, .2, 0)).astype(np.float32)
-        if calibrated:
-            weights[:15, :count_width] = 0
-        else:
-            weights[:13, :13] = 0
-        # Masked SSD depends only on the weights and pixels with nonzero weight.
-        # Count-width changes or background noise under zero weights cannot
-        # change any candidate score; preserve every effective query pixel.
-        cache_key = (calibrated, weights.tobytes(), rgb[weights > 0].tobytes())
+        rgb, weights, cache_key = _inventory_query(image, calibrated, count_digits)
         cached = self._rank_cache.get(cache_key)
         if cached is not None:
             self._rank_cache.move_to_end(cache_key)
             return [dict(row) for row in cached]
-        total = float(weights.sum())
-        if total <= 0:
-            return []
-        mask = np.sqrt(weights)
-        best = {}
-        candidates = self.calibrated_candidates if calibrated else self.inventory_candidates
-        if calibrated:
-            errors = artwork_cache.match(self.calibrated_atlas, rgb, cv2.TM_SQDIFF, mask=mask)
-            indices = np.arange(len(candidates))[:, None] * 48 + np.arange(9)
-            minima = errors[indices].min(axis=(1, 2))
-        else:
-            minima = [cv2.matchTemplate(candidate, rgb, cv2.TM_SQDIFF, mask=mask).min()
-                      for _, candidate in candidates]
-        for (family, _), error in zip(candidates, minima):
-            score = -max(0, float(error)) / total
-            best[family] = max(best.get(family, float("-inf")), score)
-        if calibrated:
-            shortlist = sorted(best, key=best.get, reverse=True)[:8]
-            for family in shortlist:
-                if family not in self._scaled_candidates:
-                    self._scaled_candidates[family] = tuple(
-                        _inventory_candidate(self.calibrated_rgba[family], scale) for scale in (.9, 1.12, 1.25))
-                for candidate in self._scaled_candidates[family]:
-                    errors = cv2.matchTemplate(candidate, rgb, cv2.TM_SQDIFF, mask=mask)
-                    best[family] = max(best[family], -max(0, float(np.min(errors))) / total)
-        ranked = sorted(({"name": family, "score": score} for family, score in best.items()),
-                        key=lambda row: row["score"], reverse=True)[:3]
-        self._rank_cache[cache_key] = tuple(dict(row) for row in ranked)
-        if len(self._rank_cache) > 128:
-            self._rank_cache.popitem(last=False)
+        ranked = _rank_inventory(self, rgb, weights, calibrated)
+        if float(weights.sum()) > 0:
+            _cache_inventory_rank(self, cache_key, ranked)
         return ranked
 
     def prepare_examples(self, references):
@@ -545,6 +578,84 @@ class CurrencyReader:
         if len(cache) > 128:
             cache.popitem(last=False)
         return value
+
+
+_ICON_IMPLEMENTATION = CurrencyReader.icon
+_RANK_IMPLEMENTATION = CurrencyReader.inventory_ranked
+
+
+def prefetch_catalog_ranks(reader, requests, workers=None):
+    """Prepare exact numeric ranks for one inventory, leaving all identity/review work serial.
+
+    Each worker owns its scale dictionary and receives immutable query pixels;
+    it has no QuickJS context, learned references, scan result or shared rank LRU.
+    Results are published in input order only after every task succeeds. This
+    optional preparation never replaces an overridden reader implementation.
+    """
+    if (type(reader) is not CurrencyReader or not reader.inventory_match or
+            getattr(reader.icon, "__func__", None) is not _ICON_IMPLEMENTATION or
+            getattr(reader.inventory_ranked, "__func__", None) is not _RANK_IMPLEMENTATION):
+        return 0
+    if workers is None:
+        from PoE2_Data_Logger.core import ocr_runtime
+        workers = ocr_runtime.active_threads()
+    if type(workers) is not int or workers not in (2, 4, 6):
+        return 0
+    pool = None
+    try:
+        requests = tuple(requests)
+        # The caller supplies one captured 12x5 inventory, never a scan queue.
+        if not 2 <= len(requests) <= 60:
+            return 0
+        pending = OrderedDict()
+        wanted = OrderedDict()
+        for image, count_digits in requests:
+            if _inventory_empty(image):
+                continue
+            rgb, weights, key = _inventory_query(image, True, count_digits)
+            if key in wanted or not np.any(weights):
+                continue
+            cached = reader._rank_cache.get(key)
+            wanted[key] = tuple(dict(row) for row in cached) if cached is not None else None
+            if cached is not None:
+                continue
+            rgb.flags.writeable = weights.flags.writeable = False
+            pending[key] = (key, rgb, weights)
+        if len(pending) < 2:
+            return 0
+        shared = _CatalogRankState(reader)
+        local = threading.local()
+        states = []
+        states_lock = threading.Lock()
+
+        def rank(query):
+            """Use the same numerical kernel with thread-private preparation only."""
+            if not hasattr(local, "state"):
+                local.state = _CatalogRankState(shared)
+                with states_lock:
+                    states.append(local.state)
+            key, rgb, weights = query
+            return key, _rank_inventory(local.state, rgb, weights, True)
+
+        pool = ThreadPoolExecutor(max_workers=min(workers, len(pending)),
+                                  thread_name_prefix="CurrencyArt")
+        results = list(pool.map(rank, pending.values()))
+    except (cv2.error, MemoryError, RuntimeError):
+        # No partial publication: the serial icon path still has this capture
+        # and can perform its ordinary comparisons if preparation fails.
+        return 0
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=True, cancel_futures=True)
+    for state in states:
+        for family, candidates in state._scaled_candidates.items():
+            reader._scaled_candidates.setdefault(family, candidates)
+    prepared = dict(results)
+    # Refresh requested hits alongside new ranks. Otherwise a full prior LRU
+    # could evict a later slot's old hit while publishing this scan's misses.
+    for key, cached in wanted.items():
+        _cache_inventory_rank(reader, key, cached if cached is not None else prepared[key])
+    return len(results)
 
 
 def resolve_tier(members, cell: Image.Image, read_text):
