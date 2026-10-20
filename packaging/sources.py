@@ -36,6 +36,7 @@ CORE_SOURCES = (
 
 OCR_SOURCES = (
     "ocr/affix_capture.py",
+    "ocr/artwork_cache.py",
     "ocr/currency_ocr.py",
     "ocr/digit_kernels.py",
     "ocr/label_gpu.py",

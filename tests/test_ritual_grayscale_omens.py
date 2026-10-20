@@ -114,7 +114,10 @@ class RitualGrayscaleOmenTests(unittest.TestCase):
         cache = getattr(item_ocr._RITUAL_OMEN_CACHE, "ranks", None)
         if cache is not None:
             cache.clear()
-        with patch.object(item_ocr.cv2, "matchTemplate", wraps=item_ocr.cv2.matchTemplate) as matching:
+        # Count fresh query comparisons even when reference FFTs are already
+        # prepared; warming reference arithmetic must not bypass new artwork.
+        with patch.object(currency_ocr.artwork_cache, "match",
+                          wraps=currency_ocr.artwork_cache.match) as matching:
             original = item_ocr._ritual_gray_omen_icon(cell)
             self.assertIsNotNone(original)
             self.assertEqual(matching.call_count, 1)

@@ -1213,7 +1213,7 @@ def _ritual_gray_omen_icon(cell, strictness=ocr_sensitivity.DEFAULT):
         cache.move_to_end(key)
         group, score, margin = cache[key]
     else:
-        scores = cv2.matchTemplate(atlas, gray, cv2.TM_CCOEFF_NORMED, mask=mask)
+        scores = currency_ocr.artwork_cache.match(atlas, gray, cv2.TM_CCOEFF_NORMED, mask=mask)
         rows = np.arange(len(owners))[:, None] * 48 + np.arange(9)
         scores = np.nan_to_num(scores[rows], nan=-1, posinf=-1, neginf=-1).max(axis=(1, 2))
         best = np.full(len(members), -1, dtype=np.float32)

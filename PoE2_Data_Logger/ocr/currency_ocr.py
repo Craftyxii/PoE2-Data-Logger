@@ -23,7 +23,7 @@ import cv2
 import quickjs
 from PIL import Image
 from PoE2_Data_Logger.core import ocr_sensitivity
-from PoE2_Data_Logger.ocr import digit_kernels
+from PoE2_Data_Logger.ocr import artwork_cache, digit_kernels
 
 ROOT = Path(__file__).resolve().parent.parent / "third_party" / "currency_overlay"
 _READERS = threading.local()
@@ -335,7 +335,7 @@ class CurrencyReader:
         best = {}
         candidates = self.calibrated_candidates if calibrated else self.inventory_candidates
         if calibrated:
-            errors = cv2.matchTemplate(self.calibrated_atlas, rgb, cv2.TM_SQDIFF, mask=mask)
+            errors = artwork_cache.match(self.calibrated_atlas, rgb, cv2.TM_SQDIFF, mask=mask)
             indices = np.arange(len(candidates))[:, None] * 48 + np.arange(9)
             minima = errors[indices].min(axis=(1, 2))
         else:

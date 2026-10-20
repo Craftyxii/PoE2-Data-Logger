@@ -41,5 +41,6 @@ Optional GPU label acceleration uses a separate executable with `onnxruntime-dir
 | DejaVu fonts | Regular and bold fonts used by the app | [Font license](PoE2_Data_Logger/fonts/LICENSE.txt) |
 | RePoE / Path of Exile 2 atlas | Exported atlas layout, passive effects, variant choices and game artwork | [Atlas notice](PoE2_Data_Logger/atlas/NOTICE.txt) |
 | Path of Exile 2 Ritual frames | Two small captured reward-frame corners used for item grouping | [Ritual frame notice](PoE2_Data_Logger/ocr/ritual_assets/NOTICE.txt) |
+| OpenCV matching arithmetic | Adapted CPU correlation order for cached artwork transforms | [Provenance](PoE2_Data_Logger/third_party/opencv_matching/README.txt), [original notice](PoE2_Data_Logger/third_party/opencv_matching/LICENSE.txt) |
 
 Each component's README records its source revision.
