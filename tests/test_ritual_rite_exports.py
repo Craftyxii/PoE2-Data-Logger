@@ -1,5 +1,6 @@
 """Transport optional Rite sources and the final selected tablet set without rewriting history."""
 
+from contextlib import closing
 import csv
 import io
 import json
@@ -82,7 +83,7 @@ class RitualRiteExportTests(unittest.TestCase):
 
         backup = Path(self.temporary.name) / "audit.sqlite3"
         backup.write_bytes(logger.backup_bytes())
-        with sqlite3.connect(backup) as db:
+        with closing(sqlite3.connect(backup)) as db:
             saved = {mid: json.loads(raw) for mid, raw in db.execute("SELECT map_id,snapshot_json FROM maps")}
             self.assertEqual(saved, expected)
             context = json.loads(db.execute("SELECT guidance FROM analysis_context_map_values "

@@ -1,6 +1,7 @@
 """Exercise selected tablet sets, Rite origins and resource boundaries together across maps."""
 
 from collections import defaultdict
+from contextlib import closing
 import csv
 import hashlib
 import io
@@ -184,7 +185,7 @@ class TabletRiteMapProjectionTests(unittest.TestCase):
 
         backup = Path(self.temporary.name) / "combined.sqlite3"
         backup.write_bytes(logger.backup_bytes())
-        with sqlite3.connect(backup) as db:
+        with closing(sqlite3.connect(backup)) as db:
             self.assertEqual(list(db.execute("SELECT * FROM maps ORDER BY map_id")), before_maps)
             self.assertEqual(list(db.execute("SELECT * FROM commits ORDER BY number")), before_commits)
         package = workbook_export.export_xlsx()

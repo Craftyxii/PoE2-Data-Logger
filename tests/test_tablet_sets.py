@@ -1,5 +1,6 @@
 """Keep saved tablet libraries independent and attach only the final selected set."""
 
+from contextlib import closing
 import csv
 import io
 import json
@@ -251,7 +252,7 @@ class TabletSetTests(unittest.TestCase):
         self.assertEqual(logger.get_state()["settings"], original)
         backup = Path(self.temporary.name) / "backup.sqlite3"
         backup.write_bytes(logger.backup_bytes())
-        with sqlite3.connect(backup) as db:
+        with closing(sqlite3.connect(backup)) as db:
             rows = list(db.execute("SELECT set_id,name,next_slot FROM tablet_sets ORDER BY rowid"))
         self.assertEqual(rows, [(self.first, "Set 1", 1), (second, "Backup set", 2)])
 

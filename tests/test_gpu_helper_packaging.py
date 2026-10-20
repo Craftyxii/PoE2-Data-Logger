@@ -32,7 +32,7 @@ class GpuHelperPackagingTests(unittest.TestCase):
         """Prepare a tiny synthetic helper and source tree, never the real build directory."""
         self.temporary = tempfile.TemporaryDirectory(prefix="poe2-gpu-packaging-")
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         (self.root / "packaging").mkdir()
         shutil.copyfile(ROOT / "packaging" / "gpu_helper.py", self.root / "packaging" / "gpu_helper.py")
         for name in MANIFEST["SOURCE_FILES"]:

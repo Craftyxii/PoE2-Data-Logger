@@ -1,5 +1,6 @@
 """Persist explicit Rite membership and carry only completed, same-Rite observations."""
 
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -230,7 +231,7 @@ class RitualRiteSettingsTests(unittest.TestCase):
         self.assertEqual(logger.ritual_rite_state(), state)
         path = Path(self.temporary.name) / "rite-backup.sqlite3"
         path.write_bytes(logger.backup_bytes())
-        with sqlite3.connect(path) as db:
+        with closing(sqlite3.connect(path)) as db:
             self.assertEqual(db.execute("SELECT rite_id FROM ritual_rites").fetchone()[0], selected)
             snapshot = json.loads(db.execute("SELECT snapshot_json FROM ritual_rite_completions").fetchone()[0])
         self.assertEqual(snapshot["ritual_rite_affixes"], normalize_affixes([

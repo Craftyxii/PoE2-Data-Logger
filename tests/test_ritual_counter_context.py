@@ -1,5 +1,6 @@
 """Keep first/final Ritual resources intelligible in standalone SQLite Context."""
 
+from contextlib import closing
 import json
 from pathlib import Path
 import re
@@ -60,7 +61,7 @@ class RitualCounterContextTests(unittest.TestCase):
         self.assertEqual(expected["final_tribute_available"], 170)
         target = Path(self.temporary.name) / "standalone.sqlite3"
         target.write_bytes(logger.backup_bytes())
-        with sqlite3.connect(target) as db:
+        with closing(sqlite3.connect(target)) as db:
             self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
             self.assertEqual(self.context(db)["ritual_counters"], expected)
             self.assertEqual(json.loads(db.execute("SELECT guidance FROM analysis_context_ritual_counters "

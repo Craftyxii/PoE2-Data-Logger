@@ -1,5 +1,6 @@
 """Save approved Ritual resources without fabricating reward rows or learned names."""
 
+from contextlib import closing
 import csv
 import io
 import json
@@ -76,7 +77,7 @@ class EmptyRitualCounterStorageTests(unittest.TestCase):
         self.assertEqual(summary_row["Ritual Final Rerolls Remaining"], "0")
         backup = Path(self.temporary.name) / "empty-page-backup.sqlite3"
         backup.write_bytes(logger.backup_bytes())
-        with sqlite3.connect(backup) as db:
+        with closing(sqlite3.connect(backup)) as db:
             details = [json.loads(row[0]) for row in db.execute(
                 "SELECT details_json FROM commits WHERE kind='Ritual' ORDER BY number")]
         self.assertEqual([row["items"] for row in details][::2], [[], []])
