@@ -28,7 +28,9 @@ ASSET_ROOT = Path(__file__).resolve().parents[1] / "unique_item_assets"
 _REVISION = "75885a099f2e9be1619aa3c793fe6ab0754a511f"
 _MANIFEST_SHA256 = "4e71e5f8b74218dfcceab69592ffd7cceb3081fc4665b5d1bc7c7219f6de8a7e"
 _UNIT = 32
-_BANK_BYTES = 32 * 1024 * 1024
+# All eight bundled footprints currently retain about 40 MiB. Keep their
+# existing LRU bounded at 64 MiB so startup preparation survives the first scan.
+_BANK_BYTES = 64 * 1024 * 1024
 _QUERY_LIMIT = 128
 _LOCK = threading.RLock()
 _CATALOG = None
@@ -128,6 +130,25 @@ def is_unique_name(name):
     if not isinstance(name, str):
         return False
     return name.casefold() in {value.casefold() for value in names()}
+
+
+def prepare_artwork():
+    """Populate the existing bounded footprint LRU without producing scan evidence.
+
+    Optional missing or corrupt source artwork keeps the scanner's existing
+    integrity fallback. Valid sibling footprints can still be prepared.
+    """
+    try:
+        shapes = sorted({(row["columns"], row["rows"]) for row in _catalog().items})
+    except (OSError, ValueError, TypeError):
+        return 0
+    prepared = 0
+    for shape in shapes:
+        try:
+            prepared += _bank(shape) is not None
+        except (OSError, ValueError, TypeError, Image.DecompressionBombError):
+            continue
+    return prepared
 
 
 def _bank(shape):

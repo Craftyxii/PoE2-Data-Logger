@@ -150,6 +150,75 @@ def _reviewed_bank(reader, references, shape=(1, 1)):
     return _prepared_reference_bank(reader, references, shape, reviewed=True)
 
 
+def _ritual_fallback_references(references):
+    """Keep supplied-reference priority and the fallback scanner's original order."""
+    supplied = list(references)
+    names = {reference.get("name") for reference in supplied}
+    return supplied + [reference for reference in currency_ocr.omen_references()
+                       if reference["name"] not in names]
+
+
+def _ritual_fallback_bank(reader, references):
+    """Reuse original-size fallback icons in the reader's existing reference LRU."""
+    references = _reference_snapshot(references)
+
+    def build():
+        icons = []
+        for reference in list(references)[:128]:
+            name = reference.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            stored = _reference_image(reference.get("image"), 512)
+            if stored is None:
+                continue
+            icon = np.asarray(stored, dtype=np.uint8)
+            if (min(icon.shape[:2]) < 20 or float(icon.std()) < 12 or
+                    (icon == icon[0, 0]).all()):
+                continue
+            icon.flags.writeable = False
+            icons.append((name, icon))
+        return tuple(icons), MappingProxyType({}), None
+
+    if isinstance(reader, currency_ocr.CurrencyReader):
+        return reader.reference_bank(("ritual-fallback", references.signature), build)[0]
+    return build()[0]
+
+
+def prepare_artwork(inventory_references=(), ritual_references=()):
+    """Warm the exact artwork banks used by this worker's Currency/Ritual scans.
+
+    This prepares reference pixels only: no OCR model, capture, query ranking,
+    database write or network access. The existing LRUs retain ownership and
+    bounds (learned references: 16 MiB/24 keys; example atlases: eight batches;
+    unique footprints: 64 MiB; shared FFTs: 160 MiB/two banks). Unusually large
+    reference imports retain those limits and may evict earlier preparation.
+    """
+    from PoE2_Data_Logger.ocr import unique_items
+
+    reader = currency_ocr.get_reader()
+    reader.prepare_artwork()
+    snapshots = tuple(_reference_snapshot(references) for references in
+                      (inventory_references, ritual_references))
+    for references in snapshots:
+        # Use each full source signature, as scans do, while preparing only
+        # footprints actually present in that source's learned references.
+        footprints = {(reference.get("columns", 1), reference.get("rows", 1),
+                       bool(reference.get("reviewed"))) for reference in references}
+        for columns, rows, reviewed in footprints:
+            examples = _prepared_reference_bank(reader, references, (columns, rows), reviewed)[0]
+            if isinstance(examples, currency_ocr._ExampleBank):
+                for start in range(0, len(examples.references), 128):
+                    reader._example_atlas(examples.references[start:start + 128])
+    _ritual_fallback_bank(reader, _ritual_fallback_references(snapshots[1]))
+    path = currency_ocr.ROOT / "inventory-icons.json"
+    if path.exists():
+        stat = path.stat()
+        _, _, atlas = _ritual_omen_shapes(str(path), stat.st_mtime_ns, stat.st_size)
+        currency_ocr.artwork_cache.prepare(atlas, cv2.TM_CCOEFF_NORMED,
+                                          mask=_ritual_omen_mask())
+    unique_items.prepare_artwork()
+
+
 def _reviewed_match(reader, image, bank, catalog=None, strictness=ocr_sensitivity.DEFAULT):
     """Accept a reviewed-reference override only for an unambiguous score > -450 and lead > 250.
 
@@ -1306,6 +1375,15 @@ def _ritual_omen_shapes(path, modified, size):
     return tuple(tuple(names) for names in members), owners, atlas
 
 
+def _ritual_omen_mask():
+    """Use one definition of the grayscale matcher mask during startup and scans."""
+    mask = np.zeros((40, 40), dtype=np.uint8)
+    mask[4:-4, 4:-4] = 1
+    mask[:15, :26] = 0
+    mask[25:, 25:] = 0
+    return mask
+
+
 def _ritual_gray_omen_icon(cell, strictness=ocr_sensitivity.DEFAULT):
     """Suggest complete Omen shape members from gray Ritual art, never an identity.
 
@@ -1322,10 +1400,7 @@ def _ritual_gray_omen_icon(cell, strictness=ocr_sensitivity.DEFAULT):
                    (rgb[:, :, 2] >= rgb[:, :, 0]) & (rgb[:, :, 2] >= rgb[:, :, 1])))
     rgb[background] = [26, 26, 40]
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    mask = np.zeros((40, 40), dtype=np.uint8)
-    mask[4:-4, 4:-4] = 1
-    mask[:15, :26] = 0
-    mask[25:, 25:] = 0
+    mask = _ritual_omen_mask()
     artwork = (gray > 35) & mask.astype(bool)
     if (int(artwork.sum()) < 64 or float(gray[mask.astype(bool)].std()) < 4 or
             float(np.percentile((rgb.max(axis=2) - rgb.min(axis=2))[artwork], 90)) > 12):
@@ -1564,10 +1639,7 @@ def scan_ritual_page(image, omen_names, references=(), strictness=ocr_sensitivit
         return result
     result.update(grid_detected=False, coverage_uncertain=header is not None or has_grid_structure(image))
     omens = [item for item in result["items"] if item["category"] == "Omen"]
-    supplied = list(references)
-    supplied_names = {reference.get("name") for reference in supplied}
-    references = supplied + [reference for reference in currency_ocr.omen_references()
-                             if reference["name"] not in supplied_names]
+    references = _ritual_fallback_references(references)
     if not isinstance(image, Image.Image):
         with Image.open(image) as source:
             image = source.convert("RGB")
@@ -1579,16 +1651,8 @@ def scan_ritual_page(image, omen_names, references=(), strictness=ocr_sensitivit
         references = []
     page_key = (shown.shape, hashlib.sha256(shown.tobytes()).digest())
     candidates = []
-    for reference in list(references)[:128]:
-        name = reference.get("name")
+    for name, icon in _ritual_fallback_bank(currency_ocr.get_reader(), references):
         if name not in omen_names:
-            continue
-        stored = _reference_image(reference.get("image"), 512)
-        if stored is None:
-            continue
-        icon = np.asarray(stored, dtype=np.uint8)
-        if (min(icon.shape[:2]) < 20 or float(icon.std()) < 12 or
-                (icon == icon[0, 0]).all()):
             continue
         candidates.extend((score, name, location)
                           for score, location in _ritual_icon_matches(shown, icon, scale, page_key))

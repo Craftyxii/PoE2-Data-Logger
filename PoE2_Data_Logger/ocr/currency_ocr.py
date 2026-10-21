@@ -71,11 +71,18 @@ def catalog_names():
     return sorted(names)
 
 
-@lru_cache(maxsize=1)
 def omen_references():
     """Render cached Omen artwork over the inventory background as PNG reference bytes."""
+    path = ROOT / "inventory-icons.json"
+    stat = path.stat()
+    return _omen_references(str(path), stat.st_mtime_ns, stat.st_size)
+
+
+@lru_cache(maxsize=1)
+def _omen_references(path, modified, size):
+    """Invalidate bundled Omen reference pixels with their source catalog."""
     references = []
-    entries = json.loads((ROOT / "inventory-icons.json").read_text(encoding="utf-8"))["icons"]
+    entries = json.loads(Path(path).read_text(encoding="utf-8"))["icons"]
     for entry in entries:
         names = [name for name in entry["members"] if name.startswith("Omen of ")]
         if entry.get("ignored") or not names:
@@ -175,6 +182,14 @@ def _inventory_empty(image):
     return float(np.percentile(inside, 95)) < 32
 
 
+def _scaled_inventory_candidates(state, family):
+    """Build each family's existing scale-refinement bank once on its owning state."""
+    if family not in state._scaled_candidates:
+        state._scaled_candidates[family] = tuple(
+            _inventory_candidate(state.calibrated_rgba[family], scale) for scale in (.9, 1.12, 1.25))
+    return state._scaled_candidates[family]
+
+
 def _rank_inventory(state, rgb, weights, calibrated):
     """Run unchanged catalog arithmetic using only artwork assets and private scale state."""
     total = float(weights.sum())
@@ -196,10 +211,7 @@ def _rank_inventory(state, rgb, weights, calibrated):
     if calibrated:
         shortlist = sorted(best, key=best.get, reverse=True)[:8]
         for family in shortlist:
-            if family not in state._scaled_candidates:
-                state._scaled_candidates[family] = tuple(
-                    _inventory_candidate(state.calibrated_rgba[family], scale) for scale in (.9, 1.12, 1.25))
-            for candidate in state._scaled_candidates[family]:
+            for candidate in _scaled_inventory_candidates(state, family):
                 errors = cv2.matchTemplate(candidate, rgb, cv2.TM_SQDIFF, mask=mask)
                 best[family] = max(best[family], -max(0, float(np.min(errors))) / total)
     return sorted(({"name": family, "score": score} for family, score in best.items()),
@@ -393,6 +405,19 @@ class CurrencyReader:
             _cache_inventory_rank(self, cache_key, ranked)
         return ranked
 
+    def prepare_artwork(self):
+        """Prepare the same reference-only catalog assets used by calibrated scans.
+
+        Query masks remain capture-specific; the RGB spectra depend only on the
+        immutable source atlas. Its first actual query still proves backend parity.
+        """
+        if not getattr(self, "inventory_match", None):
+            return
+        for family in self.calibrated_rgba:
+            _scaled_inventory_candidates(self, family)
+        artwork_cache.prepare(self.calibrated_atlas, cv2.TM_SQDIFF,
+                              mask=np.ones((40, 40), np.float32))
+
     def prepare_examples(self, references):
         """Normalize and deduplicate references into a bank owned by this reader and thread.
 
@@ -447,6 +472,11 @@ class CurrencyReader:
             size += sum(len(raw) + 128 + sum(
                 128 + len(name.encode("utf-8", "surrogatepass")) for name in names)
                         for raw, names in examples.references)
+        else:
+            # Ritual's original-size fallback artwork shares this same bounded
+            # reference LRU rather than retaining a second set of icon banks.
+            size += sum(128 + len(name.encode("utf-8", "surrogatepass")) + image.nbytes
+                        for name, image in examples)
         # An unusually large import remains usable without retaining its bank.
         maximum = 16 * 1024 * 1024
         if size <= maximum:

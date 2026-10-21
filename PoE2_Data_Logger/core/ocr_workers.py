@@ -40,6 +40,7 @@ class Request:
     cpu_threads: int = field(default_factory=ocr_runtime.active_threads)
     deadline: float | None = None
     gpu_labels: bool = field(default_factory=ocr_runtime.active_gpu_labels)
+    prepare_artwork: bool = False
 
     def __call__(self):
         """Support captured test/UI work callbacks through the same bounded child transport."""
@@ -58,9 +59,14 @@ def request(function, *args, **kwargs):
     """Freeze real OCR work without spawning; keep injected callbacks on their caller's normal path."""
     if not _application_callable(function):
         return partial(function, *args, **kwargs)
+    target = function
+    while isinstance(target, partial):
+        target = target.func
+    artwork = (getattr(target, "__module__", "") == "PoE2_Data_Logger.ocr.item_ocr"
+               and getattr(target, "__name__", "") in ("scan_inventory_grid", "scan_ritual_page"))
     return Request(function, tuple(args), dict(kwargs), _data_directory(),
                    ocr_runtime.active_threads(), time.monotonic() + SCAN_TIMEOUT_SECONDS,
-                   gpu_labels=ocr_runtime.active_gpu_labels())
+                   gpu_labels=ocr_runtime.active_gpu_labels(), prepare_artwork=artwork)
 
 
 def run(function, *args, **kwargs):
@@ -69,7 +75,17 @@ def run(function, *args, **kwargs):
     return submit(work).result() if isinstance(work, Request) else work()
 
 
-def _child_loop(connection, data_dir, cpu_threads, gpu_labels=False):
+def _prepare_artwork():
+    """Fill the recognition banks in this child without capturing pixels or loading OCR models."""
+    import os
+    from PoE2_Data_Logger.core import logger_store as logger
+    from PoE2_Data_Logger.ocr import item_ocr
+
+    item_ocr.prepare_artwork(logger.inventory_icons(), logger.ritual_icons())
+    return os.getpid()
+
+
+def _child_loop(connection, data_dir, cpu_threads, gpu_labels=False, artwork_preload=None):
     """Own recognition models in one profile-bound child and exchange only small control messages."""
     from PoE2_Data_Logger.core import logger_store as logger
 
@@ -77,6 +93,9 @@ def _child_loop(connection, data_dir, cpu_threads, gpu_labels=False):
     logger._READY = False
     ocr_runtime._ACTIVE_THREADS = cpu_threads
     ocr_runtime._ACTIVE_GPU_LABELS = gpu_labels
+    artwork_attempted = False
+    artwork_answer = None
+    artwork_error = None
     try:
         while True:
             job_id, directory = connection.recv()
@@ -87,7 +106,19 @@ def _child_loop(connection, data_dir, cpu_threads, gpu_labels=False):
             tempfile.tempdir = str(root)
             try:
                 try:
-                    answer = ("result", work.function(*work.args, **work.kwargs))
+                    preparing = artwork_preload is not None and work.function is artwork_preload.function
+                    if artwork_preload is not None and (preparing or work.prepare_artwork) and not artwork_attempted:
+                        artwork_attempted = True
+                        try:
+                            artwork_answer = artwork_preload.function(*artwork_preload.args, **artwork_preload.kwargs)
+                        except Exception as error:
+                            # A failed optional bulk preparation must not lose a
+                            # captured scan. Its usual on-demand path remains
+                            # available, without retrying the bulk load per scan.
+                            artwork_error = error.with_traceback(None)
+                    if preparing and artwork_error is not None:
+                        raise artwork_error
+                    answer = ("result", artwork_answer if preparing else work.function(*work.args, **work.kwargs))
                 except Exception as error:
                     # Preserve reader validation exceptions when their type is
                     # importable, while retaining useful text for unusual errors.
@@ -181,7 +212,9 @@ class _Broker:
         self.active = {}
         self.closing = False
         self.sequence = 0
-        self.threads = [threading.Thread(target=self._serve, name=f"poe2-ocr-supervisor-{index}",
+        self.preload_work = None
+        self.preload_futures = ()
+        self.threads = [threading.Thread(target=self._serve, args=(index,), name=f"poe2-ocr-supervisor-{index}",
                                          daemon=True) for index in range(MAX_WORKERS)]
         self.threads.append(threading.Thread(target=self._watch_queue, name="poe2-ocr-admission-watchdog",
                                              daemon=True))
@@ -194,7 +227,7 @@ class _Broker:
             self.queue = deque(job for job in self.queue if job[1] is not future)
             self.condition.notify_all()
 
-    def submit(self, work):
+    def submit(self, work, *, affinity=None):
         """Admit at most two running and two waiting requests, rejecting overflow immediately."""
         future = _OCRFuture(self._cancelled)
         with self.condition:
@@ -205,9 +238,25 @@ class _Broker:
             else:
                 self.sequence += 1
                 deadline = work.deadline if work.deadline is not None else time.monotonic() + SCAN_TIMEOUT_SECONDS
-                self.queue.append((self.sequence, future, work, deadline))
+                self.queue.append((self.sequence, future, work, deadline, affinity))
                 self.condition.notify_all()
         return future
+
+    def preload(self, work):
+        """Prepare each owned child once using bounded admissions with explicit supervisor affinity."""
+        with self.condition:
+            context = (work.data_dir, work.cpu_threads, work.gpu_labels)
+            previous = self.preload_work
+            if previous is not None and (previous.data_dir, previous.cpu_threads, previous.gpu_labels) == context:
+                return self.preload_futures
+            if self.closing or len(self.queue) + len(self.active) + MAX_WORKERS > MAX_WORKERS + MAX_QUEUED:
+                futures = tuple(_OCRFuture(self._cancelled) for _ in range(MAX_WORKERS))
+                for future in futures:
+                    _complete(future, error=RuntimeError("OCR artwork preparation could not be admitted."))
+                return futures
+            self.preload_work = work
+            self.preload_futures = tuple(self.submit(work, affinity=index) for index in range(MAX_WORKERS))
+            return self.preload_futures
 
     def _watch_queue(self):
         """Expire queued admissions at their own deadlines even when both native readers remain busy."""
@@ -222,20 +271,26 @@ class _Broker:
                     deadline = min((job[3] for job in self.queue), default=now + SCAN_TIMEOUT_SECONDS)
                     self.condition.wait(max(POLL_INTERVAL, deadline - now))
                     continue
-            for _, future, _, _ in expired:
+            for _, future, _, _, _ in expired:
                 _complete(future, error=TimeoutError("OCR timed out before recognition could start."))
 
-    def _serve(self):
+    def _serve(self, index):
         """Reuse a healthy child, but terminate failed, cancelled or overdue work before accepting more."""
-        process = connection = context = None
+        process = connection = context = process_preload = None
         try:
             while True:
                 with self.condition:
-                    while not self.queue and not self.closing:
+                    selected = None
+                    while not self.closing:
+                        selected = next((offset for offset, job in enumerate(self.queue)
+                                         if job[4] is None or job[4] == index), None)
+                        if selected is not None:
+                            break
                         self.condition.wait()
                     if self.closing:
                         return
-                    job_id, future, work, deadline = self.queue.popleft()
+                    job_id, future, work, deadline, _ = self.queue[selected]
+                    del self.queue[selected]
                     self.active[job_id] = future
                     future._active = True
                 healthy = True
@@ -246,7 +301,12 @@ class _Broker:
                         _complete(future, error=TimeoutError("OCR timed out before recognition could start."))
                         continue
                     next_context = (work.data_dir, work.cpu_threads, work.gpu_labels)
-                    if process is not None and (context != next_context or not process.is_alive()):
+                    with self.condition:
+                        preload = self.preload_work
+                        if preload is not None and (preload.data_dir, preload.cpu_threads, preload.gpu_labels) != next_context:
+                            preload = None
+                    if process is not None and (context != next_context or process_preload is not preload
+                                                or not process.is_alive()):
                         _stop_child(process, connection)
                         process = connection = None
                     with tempfile.TemporaryDirectory(prefix="poe2-ocr-job-") as directory:
@@ -261,13 +321,14 @@ class _Broker:
                             spawn = multiprocessing.get_context("spawn")
                             connection, child_connection = spawn.Pipe()
                             process = spawn.Process(target=_child_loop,
-                                                    args=(child_connection, *next_context), daemon=True,
+                                                    args=(child_connection, *next_context, preload), daemon=True,
                                                     name="poe2-ocr-worker")
                             try:
                                 process.start()
                             finally:
                                 child_connection.close()
                             context = next_context
+                            process_preload = preload
                         healthy = False
                         connection.send((job_id, directory))
                         while True:
@@ -340,6 +401,16 @@ def submit(work):
         if _BROKER is None:
             _BROKER = _Broker()
         return _BROKER.submit(work)
+
+
+def preload_artwork():
+    """Asynchronously fill both Currency/Ritual workers' existing artwork banks at desktop startup."""
+    global _BROKER
+    work = Request(_prepare_artwork, deadline=time.monotonic() + SCAN_TIMEOUT_SECONDS)
+    with _BROKER_LOCK:
+        if _BROKER is None:
+            _BROKER = _Broker()
+        return _BROKER.preload(work)
 
 
 def shutdown(wait=False):

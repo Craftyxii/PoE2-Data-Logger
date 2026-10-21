@@ -125,77 +125,117 @@ class _GrayCorrelation:
         return cv2.divide(result, self.normalizer * np.float32(norm))
 
 
-def _eligible(source, query, mask, method):
-    """Restrict reuse to immutable, finite catalog atlases and the pinned CPU kernel."""
+def _eligible_source(source, mask, method):
+    """Restrict preparation to immutable catalog atlases and the pinned CPU kernel."""
     if (cv2.__version__ != "4.10.0" or not isinstance(source, np.ndarray) or
-            not isinstance(query, np.ndarray) or not isinstance(mask, np.ndarray) or
-            source.ndim not in (2, 3) or source.dtype != np.float32 or source.flags.writeable or
+            not isinstance(mask, np.ndarray) or source.ndim not in (2, 3) or
+            source.dtype != np.float32 or source.flags.writeable or
             not source.flags.c_contiguous or source.shape[0] < 48 or
             source.shape[0] % 48 or source.shape[1] != 48 or
-            query.dtype != np.float32 or mask.shape != (40, 40) or
-            not np.isfinite(query).all() or not np.isfinite(mask).all()):
+            mask.shape != (40, 40) or not np.isfinite(mask).all()):
         return False
     if method == cv2.TM_SQDIFF:
-        return (source.ndim == 3 and source.shape[2] == 3 and query.shape == (40, 40, 3)
-                and mask.dtype == np.float32 and float(mask.min()) >= 0
-                and float(mask.max()) <= 1)
+        return (source.ndim == 3 and source.shape[2] == 3 and
+                mask.dtype == np.float32 and float(mask.min()) >= 0 and
+                float(mask.max()) <= 1)
     return (method == cv2.TM_CCOEFF_NORMED and source.ndim == 2 and
-            mask.dtype in (np.dtype("uint8"), np.dtype("float32")) and
-            query.shape == (40, 40) and bool(np.any(mask)) and
+            mask.dtype in (np.dtype("uint8"), np.dtype("float32")) and bool(np.any(mask)) and
             bool(np.all((mask == 0) | (mask == 1))))
+
+
+def _eligible(source, query, mask, method):
+    """Check query constraints separately so startup never needs a synthetic query."""
+    return (_eligible_source(source, mask, method) and isinstance(query, np.ndarray) and
+            query.dtype == np.float32 and np.isfinite(query).all() and
+            query.shape == ((40, 40, 3) if method == cv2.TM_SQDIFF else (40, 40)))
+
+
+def _key(source, mask, method):
+    """Share source, mask and backend identity between preparation and real matching."""
+    backend = (cv2.useOptimized(), cv2.ipp.useIPP(), cv2.ipp.useIPP_NotExact(),
+               cv2.getNumThreads())
+    return (id(source), method, mask.tobytes() if method == cv2.TM_CCOEFF_NORMED else b"",
+            backend)
+
+
+def _prepared(source, mask, method, key):
+    """Find or build the existing bounded bank while the caller holds _LOCK."""
+    for previous in [old for old, (reference, _) in _CACHE.items() if reference() is None]:
+        del _CACHE[previous]
+    entry = _CACHE.get(key)
+    if entry is not None and entry[0]() is source:
+        _CACHE.move_to_end(key)
+        return entry[1]
+    prepared = None
+    # Reject oversized banks before allocating their FFTs. Include both
+    # squared and RGB channel banks; gray construction temporarily needs
+    # a second bank, discarded after the invariant normalizer is ready.
+    rows = source.shape[0] - 39
+    blocks = (rows + 216) // 217
+    estimate = blocks * 256 * 48 * 8 * (6 if source.ndim == 3 else 2)
+    # Reserve squared pixels, correlation outputs and construction spectra
+    # without evicting the RGB/gray pair for gray's temporary constructor bank.
+    workspace = estimate + 2 * source.nbytes + 5 * rows * 9 * 4
+    while (_CACHE and workspace + sum(bank.nbytes for _, bank in _CACHE.values()
+                                      if bank) > _MAX_BUILD_BYTES):
+        _CACHE.popitem(last=False)
+    if (estimate <= _MAX_BYTES and workspace <= _MAX_BUILD_BYTES and
+            np.isfinite(source).all()):
+        try:
+            prepared = (_SquaredDifference if method == cv2.TM_SQDIFF else
+                        _GrayCorrelation)(source, mask)
+            # A reference-only build cannot prove the query arithmetic. Leave
+            # the original whole-response check for the first actual reading.
+            prepared.verified = False
+        except (cv2.error, MemoryError):
+            prepared = None
+    _CACHE[key] = (weakref.ref(source), prepared)
+    while (len(_CACHE) > _MAX_BANKS or
+           sum(bank.nbytes for _, bank in _CACHE.values() if bank) > _MAX_BYTES):
+        _CACHE.popitem(last=False)
+    return prepared
+
+
+def prepare(source, method, *, mask):
+    """Prepare reference-only arithmetic in the same bounded bank used by match.
+
+    Return whether the bank is available. No query or recognition result is
+    created or retained; the first real match still proves exact backend parity.
+    Mutable/unsupported sources and allocation limits simply leave OpenCV active.
+    """
+    if not _eligible_source(source, mask, method):
+        return False
+    key = _key(source, mask, method)
+    with _LOCK:
+        prepared = _prepared(source, mask, method, key)
+        return prepared is not None and _CACHE.get(key, (None, None))[1] is prepared
 
 
 def match(source, query, method, *, mask):
     """Use bounded shared reference arithmetic, falling back to original OpenCV.
 
     No scan image or recognition decision is retained here. Weak source identity
-    prevents stale reuse after atlas replacement. The first call checks the whole
-    response against OpenCV on this backend, and returns that original response.
+    prevents stale reuse after atlas replacement. The first actual query checks
+    the whole response against OpenCV, even when startup prepared the reference.
     """
     if not _eligible(source, query, mask, method):
         return cv2.matchTemplate(source, query, method, mask=mask)
-    backend = (cv2.useOptimized(), cv2.ipp.useIPP(), cv2.ipp.useIPP_NotExact(),
-               cv2.getNumThreads())
-    key = (id(source), method, mask.tobytes() if method == cv2.TM_CCOEFF_NORMED else b"",
-           backend)
+    key = _key(source, mask, method)
     with _LOCK:
-        for previous in [old for old, (reference, _) in _CACHE.items() if reference() is None]:
-            del _CACHE[previous]
-        entry = _CACHE.get(key)
-        if entry is not None and entry[0]() is source:
-            _CACHE.move_to_end(key)
-            prepared = entry[1]
-        else:
-            prepared = None
+        prepared = _prepared(source, mask, method, key)
+        if prepared is not None and not prepared.verified:
             expected = None
-            # Reject oversized banks before allocating their FFTs. Include both
-            # squared and RGB channel banks; gray construction temporarily needs
-            # a second bank, discarded after the invariant normalizer is ready.
-            rows = source.shape[0] - 39
-            blocks = (rows + 216) // 217
-            estimate = blocks * 256 * 48 * 8 * (6 if source.ndim == 3 else 2)
-            # Reserve squared pixels, correlation outputs and construction
-            # spectra before allocation, without evicting a normal RGB/gray
-            # pair merely because the gray constructor needs a temporary bank.
-            workspace = estimate + 2 * source.nbytes + 5 * rows * 9 * 4
-            while (_CACHE and workspace + sum(bank.nbytes for _, bank in _CACHE.values()
-                                              if bank) > _MAX_BUILD_BYTES):
-                _CACHE.popitem(last=False)
-            if (estimate <= _MAX_BYTES and workspace <= _MAX_BUILD_BYTES and
-                    np.isfinite(source).all()):
-                try:
-                    prepared = (_SquaredDifference if method == cv2.TM_SQDIFF else
-                                _GrayCorrelation)(source, mask)
-                    actual = prepared.run(query, mask)
-                    expected = cv2.matchTemplate(source, query, method, mask=mask)
-                    if not np.array_equal(actual, expected, equal_nan=True):
-                        prepared = None
-                except (cv2.error, MemoryError):
+            try:
+                actual = prepared.run(query, mask)
+                expected = cv2.matchTemplate(source, query, method, mask=mask)
+                if np.array_equal(actual, expected, equal_nan=True):
+                    prepared.verified = True
+                else:
                     prepared = None
-            _CACHE[key] = (weakref.ref(source), prepared)
-            while (len(_CACHE) > _MAX_BANKS or
-                   sum(bank.nbytes for _, bank in _CACHE.values() if bank) > _MAX_BYTES):
-                _CACHE.popitem(last=False)
+            except (cv2.error, MemoryError):
+                prepared = None
+            if prepared is None:
+                _CACHE[key] = (weakref.ref(source), None)
             if expected is not None:
                 return expected
     if prepared is None:
@@ -208,6 +248,5 @@ def match(source, query, method, *, mask):
         with _LOCK:
             if _CACHE.get(key, (None, None))[1] is prepared:
                 _CACHE[key] = (weakref.ref(source), None)
-        entry = None
         del prepared
         return cv2.matchTemplate(source, query, method, mask=mask)

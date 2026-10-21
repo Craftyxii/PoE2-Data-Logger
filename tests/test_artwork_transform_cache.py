@@ -50,6 +50,53 @@ class ArtworkTransformCacheTests(unittest.TestCase):
             actual = artwork_cache.match(source, query, method, mask=mask)
         np.testing.assert_array_equal(actual, expected)
 
+    def test_startup_preparation_reuses_the_bank_and_checks_the_first_real_query(self):
+        """Reference-only startup work leaves the original real-query proof intact."""
+        for gray in (False, True):
+            source = self.source(gray=gray)
+            query, mask = source[4:44, 4:44].copy(), self.mask(gray=gray)
+            method = cv2.TM_CCOEFF_NORMED if gray else cv2.TM_SQDIFF
+            builder = artwork_cache._GrayCorrelation if gray else artwork_cache._SquaredDifference
+            with patch.object(artwork_cache.cv2, "matchTemplate",
+                              side_effect=AssertionError("Startup manufactured a query")), \
+                    patch.object(builder, "run",
+                                 side_effect=AssertionError("Startup ran query arithmetic")):
+                self.assertTrue(artwork_cache.prepare(source, method, mask=mask))
+            prepared = next(value[1] for value in artwork_cache._CACHE.values()
+                            if value[0]() is source)
+            self.assertFalse(prepared.verified)
+            original = cv2.matchTemplate
+            expected = original(source, query, method, mask=mask)
+            with patch.object(builder, "__init__",
+                              side_effect=AssertionError("First scan rebuilt startup artwork")), \
+                    patch.object(artwork_cache.cv2, "matchTemplate", wraps=original) as proof:
+                np.testing.assert_array_equal(artwork_cache.match(source, query, method,
+                                                                mask=mask), expected)
+                self.assertEqual(proof.call_count, 1)
+            self.assertTrue(prepared.verified)
+            self.assertIs(next(value[1] for value in artwork_cache._CACHE.values()
+                               if value[0]() is source), prepared)
+            with patch.object(artwork_cache.cv2, "matchTemplate",
+                              side_effect=AssertionError("Warm scan repeated its proof")):
+                np.testing.assert_array_equal(artwork_cache.match(source, query, method,
+                                                                mask=mask), expected)
+
+    def test_prepared_bank_still_disables_a_backend_that_fails_the_real_query_proof(self):
+        """Prebuilding transforms never enables an unproved numerical backend."""
+        source = self.source()
+        query, mask = source[4:44, 4:44].copy(), self.mask()
+        self.assertTrue(artwork_cache.prepare(source, cv2.TM_SQDIFF, mask=mask))
+        expected = cv2.matchTemplate(source, query, cv2.TM_SQDIFF, mask=mask)
+        with patch.object(artwork_cache._SquaredDifference, "run", return_value=expected + 32):
+            np.testing.assert_array_equal(artwork_cache.match(source, query, cv2.TM_SQDIFF,
+                                                            mask=mask), expected)
+        self.assertIsNone(next(iter(artwork_cache._CACHE.values()))[1])
+        with patch.object(artwork_cache._SquaredDifference, "__init__",
+                          side_effect=AssertionError("Retried a rejected prepared backend")):
+            self.assertFalse(artwork_cache.prepare(source, cv2.TM_SQDIFF, mask=mask))
+            np.testing.assert_array_equal(artwork_cache.match(source, query, cv2.TM_SQDIFF,
+                                                            mask=mask), expected)
+
     def test_rgb_full_responses_match_for_fractional_masks_and_partial_blocks(self):
         """Every placement and channel agrees, including changing query-dependent masks."""
         for height in (48, 240, 288, 576):

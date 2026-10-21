@@ -8017,6 +8017,8 @@ def main(smoke_test=False):
         window.show()
         if smoke_test:
             QTimer.singleShot(300, window.close)
+        else:
+            ocr_workers.preload_artwork()
         return application.exec()
     finally:
         ocr_workers.shutdown(wait=True)
