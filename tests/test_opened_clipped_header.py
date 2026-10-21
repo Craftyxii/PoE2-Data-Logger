@@ -12,7 +12,7 @@ from PoE2_Data_Logger.core import auto_commit, logger_store as logger, store
 from PoE2_Data_Logger.ocr import opened_scan
 
 
-CAPTURE = Path(__file__).resolve().parent / 'fixtures/propagation_prefill/family57-opened.jpg'
+CAPTURE = Path(__file__).resolve().parent / 'fixtures/opened_rewards/Pair61_5socket_Family_57_Thaumaturgic_Verisuim_chain_opened.jpg'
 
 
 class OpenedClippedHeaderTests(unittest.TestCase):

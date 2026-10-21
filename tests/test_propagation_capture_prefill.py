@@ -45,7 +45,7 @@ class PropagationCapturePrefillTests(unittest.TestCase):
 
     def test_family57_glyph_glint_cannot_erase_six_valid_crown_selections(self):
         """A false raw slot-five partial inside the glyph cannot block the actual slot-four crowns."""
-        self.assert_capture("family57-opened.jpg", 57,
+        self.assert_capture("../opened_rewards/Pair61_5socket_Family_57_Thaumaturgic_Verisuim_chain_opened.jpg", 57,
                             ["Thaumaturgic Flux (Level 19)", "Verisium Manifestations (Level 20)",
                              "Powered by Verisium (Level 20)", "Remnants of Kalguur (Level 20)",
                              "Grim Pillars (Level 20)", "Bitter Dead (Level 20)"], [[4]] * 6)

@@ -192,7 +192,7 @@ class PropagationGroupPrefillUITests(unittest.TestCase):
 
     def test_original_family57_capture_fills_existing_controls_before_manual_approval(self):
         """The actual formerly blank capture reaches all six unchanged dropdown rows and saves only on click."""
-        path = Path(__file__).resolve().parent / "fixtures/propagation_prefill/family57-opened.jpg"
+        path = Path(__file__).resolve().parent / "fixtures/opened_rewards/Pair61_5socket_Family_57_Thaumaturgic_Verisuim_chain_opened.jpg"
         reading = {**propagation_scan.scan_propagation(path), **logger.scan_context()}
         before = logger.get_state()
         self.window._propagation_read(reading, path.read_bytes())
