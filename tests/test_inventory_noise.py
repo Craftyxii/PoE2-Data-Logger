@@ -88,14 +88,19 @@ class InventoryNoiseTests(unittest.TestCase):
                     self.reader.icon(image.resize((size, size)))
                     ranked.assert_called_once()
 
-    def test_continuous_body_armour_does_not_create_currency_rows(self):
-        """Verify continuous body armour does not create currency rows."""
+    def test_continuous_body_armour_creates_one_item_with_verified_count(self):
+        """A whole unknown armour needs its name once, with quantity one preserved."""
         image = self.grid()
         image.paste(self.source.crop((1425, 284, 1524, 431)).resize((80, 120)), (200, 40))
         self.assertEqual(item_ocr._inventory_equipment_slots(image), {18, 19, 30, 31, 42, 43})
         with patch.object(currency_ocr, "get_reader", return_value=self.reader):
             result = item_ocr.scan_inventory_grid(image)
-        self.assertEqual(result["items"], [])
+        self.assertEqual(len(result["items"]), 1)
+        item = result["items"][0]
+        self.assertEqual((item["category"], item["quantity"], item["grid_slots"]),
+                         ("Item", 1, [18, 19, 30, 31, 42, 43]))
+        self.assertFalse(item["count_needs_review"])
+        self.assertTrue(item["name_needs_review"])
         self.assertEqual(result["unknown"], [])
 
     def test_unique_belt_spanning_slots_38_and_39_creates_one_complete_item_row(self):

@@ -193,7 +193,10 @@ class UniqueScanIntegrationTests(unittest.TestCase):
                     self.assertEqual(item["grid_slots"], self.slots(shape))
                     self.assertEqual(item["box"], box)
                     self.assertFalse(item["count_needs_review"])
-                    self.assertTrue(item["needs_review"])
+                    if not gray:
+                        self.assertFalse(item["needs_review"])
+                    elif item["name_needs_review"]:
+                        self.assertTrue(item["needs_review"])
                     self.assertTrue(item["deferred"])
                     self.assertIsNone(item["tribute"])
                     self.assertEqual((result["tribute_available"], result["rerolls_remaining"]), (62, 3))

@@ -397,11 +397,18 @@ def inventory_cell(image, slot):
 def inventory_grid(image):
     """Fit the gold/navy divider lattice and crop to an aligned 12×5 grid when supported.
 
-    Require eight horizontal-profile and four vertical-profile hits; insufficient
-    evidence returns the supplied image for the caller’s existing workflow.
+    Require eight horizontal-profile and four vertical-profile hits. Unsupported
+    captures retain their pixels with geometry uncertainty for the count reader.
     """
     if image.info.get("poe2_inventory_aligned"):
         return image
+
+    def uncertain_geometry():
+        """Preserve an unsupported capture without claiming its blindly divided cells are verified."""
+        unaligned = image.copy()
+        unaligned.info["poe2_inventory_geometry_uncertain"] = True
+        return unaligned
+
     pixels = np.asarray(image.convert("RGB"), dtype=np.float32)
     r, g, b = pixels[:, :, 0], pixels[:, :, 1], pixels[:, :, 2]
     gold = (r > g * 1.12) & (g > b * 1.08) & (r > 17) & (r < 170)
@@ -410,17 +417,20 @@ def inventory_grid(image):
     separators = gold | navy
     horizontal, vertical = separators.mean(axis=0), separators.mean(axis=1)
 
-    def fit(profile, count, pitches, required, max_padding=1):
+    def fit(profile, count, pitches, required, max_padding=1, refine_pitch=True):
         """Search pitches and origins for regularly spaced divider hits, weighting interior evidence."""
         smooth = cv2.dilate(profile.astype(np.float32)[None, :],
                             np.ones((1, 3), np.uint8))[0]
         best = None
         for pitch in pitches:
             span = count * pitch
-            if span > len(profile) + 3:
+            # A tight capture may omit a few pixels after the last divider.
+            # Its interior lattice still establishes the complete cell pitch.
+            edge_clip = max(3, pitch * .08)
+            if span > len(profile) + edge_clip * 2:
                 continue
-            starts = np.arange(-2, max(-1.5, min(len(profile) - span + 2,
-                                                len(profile) * max_padding)), .5)
+            starts = np.arange(-2, max(-1.5, min(len(profile) - span + edge_clip,
+                                                len(profile) * max_padding)) + .01, .5)
             places = starts[:, None] + np.arange(count + 1)[None, :] * pitch
             samples = np.interp(places, np.arange(len(smooth)), smooth, left=0, right=0)
             hits = (samples > .15).sum(axis=1)
@@ -429,24 +439,61 @@ def inventory_grid(image):
             index = int(np.argmax(scores))
             if scores[index] >= 0 and (best is None or scores[index] > best[0]):
                 best = float(scores[index]), float(starts[index]), float(pitch)
+        if best is None:
+            return None
+        # Dilation locates the lattice but creates a plateau around each line.
+        # Recover divider centres from strong unsmoothed interior peaks so the
+        # crop origin cannot drift into the count labels at later rows.
+        observed = []
+        for index in range(1, count):
+            predicted = best[1] + index * best[2]
+            left, right = max(0, round(predicted) - 2), min(len(profile), round(predicted) + 3)
+            if right <= left:
+                continue
+            at = left + int(np.argmax(profile[left:right]))
+            if profile[at] > .5:
+                observed.append((index, at))
+        if len(observed) >= required - 1:
+            positions, centres = np.asarray(observed).T
+            if refine_pitch:
+                pitch, origin = np.polyfit(positions, centres, 1)
+            else:
+                pitch = best[2]
+                origin = float(np.median(centres - positions * pitch))
+            if abs(pitch - best[2]) < .75 and abs(origin - best[1]) < 3:
+                best = best[0], float(origin), float(pitch)
         return best
 
     low, high = image.width / 14.5, min(image.width / 11.8, image.height / 4.9)
     if high <= low:
-        return image
+        return uncertain_geometry()
     xfit = fit(horizontal, 12, np.arange(low, high + .25, .25), 8)
     if xfit is None:
-        return image
+        return uncertain_geometry()
     pitch = xfit[2]
-    yfit = fit(vertical, 5, (pitch,), 4, .18)
+    yfit = fit(vertical, 5, (pitch,), 4, .18, refine_pitch=False)
     if yfit is None:
-        return image
+        return uncertain_geometry()
     x, y = xfit[1], yfit[1]
-    box = (max(0, round(x + 1)), max(0, round(y + 1)),
-           min(image.width, round(x + 12 * pitch)),
-           min(image.height, round(y + 5 * yfit[2])))
+    left, top = round(x + 1), round(y + 1)
+    width, height = round(12 * pitch), round(5 * pitch)
+    box = (left, top, left + width, top + height)
+    # Preserve the inferred span even when a narrow border is outside the
+    # capture. Clamping it would change every cell's height/width and move
+    # genuine count labels outside their slot's count field.
     cropped = image.crop(box)
     cropped.info["poe2_inventory_aligned"] = True
+    cropped.info.pop("poe2_inventory_geometry_uncertain", None)
+    cropped.info.pop("poe2_inventory_clipped_count_slots", None)
+    clipped_counts = []
+    for slot in range(1, 61):
+        column, row = (slot - 1) % 12, (slot - 1) // 12
+        x0, y0 = left + round(column * width / 12), top + round(row * height / 5)
+        if (x0 < 0 or y0 < 0 or x0 + round(width / 12 * .85) > image.width or
+                y0 + round(height / 5 * .36) > image.height):
+            clipped_counts.append(slot)
+    if clipped_counts:
+        cropped.info["poe2_inventory_clipped_count_slots"] = clipped_counts
     return cropped
 
 
@@ -534,23 +581,29 @@ def _cached_inventory_patch_readings(patches, engine, reader):
 
 def _inventory_labels(image):
     """Read full count and tier labels, holding clipped counts for review."""
-    from PoE2_Data_Logger.ocr.inventory_labels import count_crops, tier_crops, fallback_crops
+    from PoE2_Data_Logger.ocr.inventory_labels import (
+        count_crops, tier_crops, fallback_crops, complete_count_glyphs)
 
     labels = {slot: {} for slot in range(1, 61)}
+    clipped_slots = set(image.info.get("poe2_inventory_clipped_count_slots") or [])
+    geometry_uncertain = bool(image.info.get("poe2_inventory_geometry_uncertain"))
     patches, positions = [], []
     counts = {slot: [] for slot in labels}
     tiers = {slot: [] for slot in labels}
     for slot in labels:
         cell = inventory_cell(image, slot)
         number_crops, possible_count = count_crops(cell, complete_only=True)
-        labels[slot]["count_present"] = possible_count
+        labels[slot]["count_present"] = possible_count or slot in clipped_slots or geometry_uncertain
+        labels[slot]["count_glyphs"] = complete_count_glyphs(cell)
+        labels[slot]["count_clipped"] = slot in clipped_slots
+        labels[slot]["count_geometry_uncertain"] = geometry_uncertain
         for patch in number_crops:
             patches.append(np.asarray(patch)); positions.append((slot, "count"))
         roman_crops, possible_tier = tier_crops(cell)
         labels[slot]["tier_present"] = possible_tier
         for patch in roman_crops:
             patches.append(np.asarray(patch)); positions.append((slot, "tier"))
-        if not possible_count:
+        if not labels[slot]["count_present"]:
             labels[slot]["count"] = 1
     if not patches:
         return labels
@@ -570,7 +623,8 @@ def _inventory_labels(image):
         if numbers:
             value = max(dict.fromkeys(numbers), key=numbers.count)
             labels[slot]["count_candidate"] = value
-            if len(numbers) >= 2 and len({value for value, _score in readings}) == 1:
+            if (len(numbers) >= 2 and len({value for value, _score in readings}) == 1 and
+                    len(str(value)) >= (labels[slot]["count_glyphs"] or 0)):
                 labels[slot]["count"] = value
         if tiers[slot] and len(set(tiers[slot])) == 1:
             labels[slot]["tier"] = tiers[slot][0]
@@ -613,12 +667,14 @@ def _inventory_labels(image):
     return labels
 
 
-def _inventory_equipment_footprints(image):
-    """Find occupied rectangular multi-cell equipment from missing inventory dividers.
+def inventory_item_footprints(image):
+    """Find complete rectangular items where artwork crosses inventory divider strokes.
 
-    Only rectangles up to two columns by four rows with content across their
-    span are treated as equipment; this helps exclude partial gear icons.
+    Return each proven multi-cell object's slots and full artwork bounds. A
+    footprint is one item to identify, rather than independent currency cells.
     """
+    if image.info.get("poe2_inventory_geometry_uncertain"):
+        return []
     pixels = np.asarray(image.convert("RGB"), dtype=np.float32)
     groups = [{slot} for slot in range(1, 61)]
     occupied = set()
@@ -653,16 +709,93 @@ def _inventory_equipment_footprints(image):
         changes = np.abs(np.diff(strip, axis=axis)).max(axis=(axis, 2))
         return float((changes < 35).mean()) >= .75
 
+    # Learn the thin, raised divider stroke from the visible grid. Background
+    # navy alone is not a divider: large gear retains that same background,
+    # while its artwork covers the actual stroke even across textured edges.
+    pitch = min(image.width / 12, image.height / 5)
+    radius, trim = max(3, round(pitch * .075)), max(2, round(pitch * .08))
+    strips, edges = {0: [], 1: []}, {0: [], 1: []}
     for row in range(5):
         top, bottom = round(row * image.height / 5), round((row + 1) * image.height / 5)
         for column in range(1, 12):
-            if continuous(1, round(column * image.width / 12), top, bottom):
-                join(row * 12 + column, row * 12 + column + 1)
+            at = round(column * image.width / 12)
+            strips[1].append(pixels[top + trim:bottom - trim, at - radius:at + radius + 1])
+            edges[1].append((row * 12 + column, row * 12 + column + 1))
     for row in range(1, 5):
+        at = round(row * image.height / 5)
         for column in range(12):
             left, right = round(column * image.width / 12), round((column + 1) * image.width / 12)
-            if continuous(0, round(row * image.height / 5), left, right):
-                join((row - 1) * 12 + column + 1, row * 12 + column + 1)
+            strips[0].append(pixels[at - radius:at + radius + 1, left + trim:right - trim].transpose(1, 0, 2))
+            edges[0].append(((row - 1) * 12 + column + 1, row * 12 + column + 1))
+    missing, partial, framed_grid = [], [], True
+    for axis in (0, 1):
+        profile = np.median(np.concatenate(strips[axis], axis=0), axis=0)
+        contrasts = (profile[1:-1] - (profile[:-2] + profile[2:]) / 2).max(axis=1)
+        if float(contrasts.max()) < 12:
+            framed_grid = False
+            break
+        offset = 1 + int(np.argmax(contrasts))
+        for edge, strip in zip(edges[axis], strips[axis]):
+            coverage = []
+            # Rounding can place a divider one pixel either side of the
+            # learned position. Require a consistent stroke along the edge.
+            for at in range(max(1, offset - 1), min(strip.shape[1] - 1, offset + 2)):
+                contrast = (strip[:, at] - (strip[:, at - 1] + strip[:, at + 1]) / 2).max(axis=1)
+                coverage.append(float((contrast > 8).mean()))
+            if max(coverage) < .8:
+                missing.append(edge)
+            elif max(coverage) < .95:
+                partial.append(edge)
+    if framed_grid:
+        for first, second in missing:
+            join(first, second)
+        # A narrow weapon handle may cover only a few pixels of the next row's
+        # divider. Extend an already established item across that interruption,
+        # completing its rectangle only through otherwise blank item backing.
+        # Isolated weak edges cannot merge separate one-cell currency stacks.
+        for first, second in partial:
+            if first not in occupied and second not in occupied:
+                continue
+            a = next(group for group in groups if first in group)
+            b = next(group for group in groups if second in group)
+            if a is b or max(len(a), len(b)) < 2:
+                continue
+            combined = a | b
+            columns = [(slot - 1) % 12 for slot in combined]
+            rows = [(slot - 1) // 12 for slot in combined]
+            width, height = max(columns) - min(columns) + 1, max(rows) - min(rows) + 1
+            if width > 2 or height > 4 or width * height > 8:
+                continue
+            rectangle = {row * 12 + column + 1 for row in range(min(rows), max(rows) + 1)
+                         for column in range(min(columns), max(columns) + 1)}
+            blank_backing = True
+            for slot in rectangle - combined:
+                cell = np.asarray(inventory_cell(image, slot), dtype=np.float32)
+                inset = max(2, round(min(cell.shape[:2]) * .08))
+                core = cell[inset:-inset, inset:-inset]
+                r, g, b = core[:, :, 0], core[:, :, 1], core[:, :, 2]
+                navy = ((b >= 20) & (b < 65) & (r < 25) & (g < 25) &
+                        (b > r * 1.4) & (b > g * 1.4))
+                if slot in occupied or float(navy.mean()) < .95:
+                    blank_backing = False
+                    break
+            if blank_backing:
+                anchor = next(iter(combined & occupied))
+                for slot in rectangle:
+                    join(anchor, slot)
+    else:
+        # Existing borderless captures can establish a footprint through smooth
+        # continuous artwork, provided separate navy cells remain separated.
+        for row in range(5):
+            top, bottom = round(row * image.height / 5), round((row + 1) * image.height / 5)
+            for column in range(1, 12):
+                if continuous(1, round(column * image.width / 12), top, bottom):
+                    join(row * 12 + column, row * 12 + column + 1)
+        for row in range(1, 5):
+            for column in range(12):
+                left, right = round(column * image.width / 12), round((column + 1) * image.width / 12)
+                if continuous(0, round(row * image.height / 5), left, right):
+                    join((row - 1) * 12 + column + 1, row * 12 + column + 1)
     equipment = []
     for group in groups:
         columns = [(slot - 1) % 12 for slot in group]
@@ -672,8 +805,15 @@ def _inventory_equipment_footprints(image):
         content_rows = {(slot - 1) // 12 for slot in group & occupied}
         if (2 <= len(group) <= 8 and width <= 2 and height <= 4 and len(group) == width * height
                 and len(content_columns) == width and len(content_rows) == height):
-            equipment.append(tuple(sorted(group)))
-    return equipment
+            equipment.append({"slots": sorted(group), "box": (
+                round(min(columns) * image.width / 12), round(min(rows) * image.height / 5),
+                round((max(columns) + 1) * image.width / 12), round((max(rows) + 1) * image.height / 5))})
+    return sorted(equipment, key=lambda footprint: footprint["slots"][0])
+
+
+def _inventory_equipment_footprints(image):
+    """Expose whole-item slot groups to the existing unique-artwork candidate reader."""
+    return [tuple(item["slots"]) for item in inventory_item_footprints(image)]
 
 
 def _inventory_equipment_slots(image):
@@ -752,7 +892,7 @@ def _inventory_unique_row(match, image, slots):
     result = {"slot": first, "name": name, "quantity": 1, "score": match["score"],
               "category": "Item", "catalog_unique": match.get("catalog_unique", True),
               "catalog_revision": match.get("catalog_revision", ""), "source": match.get("source", ""),
-              "grid_slots": list(slots), "box": (left, top, right, bottom),
+              "grid_slots": list(slots), "box": (left, top, right, bottom), "box_space": "inventory_grid",
               "count_needs_review": False, "name_needs_review": not bool(name)}
     if not name:
         result["candidate"] = " / ".join(match.get("candidate_names") or [])
@@ -761,6 +901,8 @@ def _inventory_unique_row(match, image, slots):
 
 def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitivity.DEFAULT):
     """Match stacks using a frozen strictness while retaining count, tier and occupied-slot review."""
+    from PoE2_Data_Logger.ocr.inventory_labels import complete_count_glyphs
+
     strictness = ocr_sensitivity.validate(strictness)
     references = _reference_snapshot(references)
     if not isinstance(image, Image.Image):
@@ -769,12 +911,16 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
     if image.width < 360 or image.height < 180 or image.width * image.height > 12_000_000:
         raise ValueError("Select the complete 12×5 inventory grid.")
     image = inventory_grid(image)
-    equipment = _inventory_equipment_slots(image)
+    clipped_count_slots = set(image.info.get("poe2_inventory_clipped_count_slots") or [])
+    count_geometry_uncertain = bool(image.info.get("poe2_inventory_geometry_uncertain"))
+    proven_groups = set(_inventory_equipment_footprints(image))
     labels = _inventory_labels(image) if read is None else None
     if labels is not None:
-        # Similar colours can make separate stacks appear continuous across a
-        # grid boundary. A visible stack label keeps that cell reviewable.
-        equipment.difference_update(slot for slot, label in labels.items() if label["count_present"])
+        # Repeated stack art can hide dividers; independently verified counts
+        # across the whole rectangle establish separate stacks instead of gear.
+        proven_groups = {group for group in proven_groups if not all(
+            type(labels[slot].get("count")) is int and labels[slot]["count"] > 1 for slot in group)}
+    equipment = {slot for group in proven_groups for slot in group}
     read = read or ocr_lines
     reader = currency_ocr.get_reader()
     reviewed = _reviewed_bank(reader, references)
@@ -788,24 +934,28 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
     from PoE2_Data_Logger.ocr import unique_items
     from PoE2_Data_Logger.core.review_learning import footprint
     unique_rows, unique_slots = [], set()
-    for group in _inventory_unique_footprints(image, labels, cells):
+    groups = set(_inventory_unique_footprints(image, labels, cells)) | proven_groups
+    for group in sorted(groups, key=lambda value: (-len(value), value[0])):
         if unique_slots.intersection(group):
             continue
         bounds = _inventory_unique_row({"score": 0}, image, group)["box"]
-        match = unique_items.match(image.crop(bounds), footprint(group, maximum_rows=5), strictness=strictness)
-        if match:
-            shape = footprint(group, maximum_rows=5)
+        shape = footprint(group, maximum_rows=5)
+        match = unique_items.match(image.crop(bounds), shape, strictness=strictness)
+        if not (match and len(match.get("candidate_names") or []) > 1):
             # User corrections keep their existing priority except when the
             # source explicitly says that several names share this artwork.
-            if len(match.get("candidate_names") or []) <= 1:
-                correction = _reviewed_match(reader, image.crop(bounds),
-                    _reviewed_bank(reader, references, shape), strictness=strictness)
-                if correction:
-                    match = {**match, "name": correction[0], "score": correction[1],
-                             "source": "local reviewed reference", "catalog_unique":
-                             unique_items.is_unique_name(correction[0])}
+            correction = _reviewed_match(reader, image.crop(bounds),
+                _reviewed_bank(reader, references, shape), strictness=strictness)
+            if correction:
+                match = {**(match or {}), "name": correction[0], "score": correction[1],
+                         "source": "local reviewed reference", "catalog_unique":
+                         unique_items.is_unique_name(correction[0])}
+        if match is None and group in proven_groups:
+            match = {"name": "", "score": 0, "candidate_names": [], "catalog_unique": False,
+                     "source": "Occupied full inventory item; name unresolved"}
+        if match:
             row = _inventory_unique_row(match, image, group)
-            if strictness == 100:
+            if strictness == 100 or count_geometry_uncertain:
                 row["name_needs_review"] = True
             unique_rows.append(row)
             unique_slots.update(group)
@@ -816,7 +966,7 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
         if slot not in equipment and slot not in unique_slots))
     found, unknown = list(unique_rows), []
     for slot, cell in cells.items():
-        if slot in unique_slots:
+        if slot in unique_slots or slot in equipment:
             continue
         count_hint = hints[slot]
         icon = (reader.icon(cell, count_digits=len(str(count_hint)) if count_hint is not None else None)
@@ -913,8 +1063,14 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
                                                   else (native_count, False))
                 quantity = native_count if native_count is not None else generic_count
                 guessed = native_count is None and generic_unclear
-            found.append({"slot": slot, "name": name, "quantity": quantity,
-                          "score": round(score, 3), "count_needs_review": guessed})
+            glyph_count = complete_count_glyphs(cell)
+            guessed = (guessed or count_geometry_uncertain or slot in clipped_count_slots or
+                       len(str(quantity)) < (glyph_count or 0))
+            item = {"slot": slot, "name": name, "quantity": quantity,
+                    "score": round(score, 3), "count_needs_review": guessed}
+            if correction and correction[2] == "item":
+                item["category"] = "Item"
+            found.append(item)
             if strictness == 100:
                 found[-1]["name_needs_review"] = True
         elif slot not in equipment and icon.get("all") and (icon.get("uncertain") or score >= .55):
@@ -1306,14 +1462,17 @@ def _ritual_icon_matches(shown, icon, scale, page_key):
 
 def _ritual_cell_labels(cells):
     """Read complete count/tier crops for occupied Ritual cells."""
-    from PoE2_Data_Logger.ocr.inventory_labels import count_crops, tier_crops
+    from PoE2_Data_Logger.ocr.inventory_labels import count_crops, tier_crops, complete_count_glyphs
 
     labels, patches, positions = {}, [], []
     for index, cell in cells.items():
         number_crops, possible_count = count_crops(cell, complete_only=True)
         roman_crops, possible_tier = tier_crops(cell)
         labels[index] = {"count_present": possible_count, "tier_present": possible_tier,
-                         "count_verified": False}
+                         "count_verified": not possible_count,
+                         "count_glyphs": complete_count_glyphs(cell)}
+        if not possible_count:
+            labels[index]["count"] = 1
         for kind, crops in (("count", number_crops), ("tier", roman_crops)):
             for patch in crops:
                 patches.append(np.asarray(patch)); positions.append((index, kind))
@@ -1335,7 +1494,8 @@ def _ritual_cell_labels(cells):
         if values:
             labels[index]["count_candidate"] = max(values, key=lambda value: value[1])[0]
             confident = [value for value, score in values if score >= .98]
-            if len(confident) >= 2 and len({value for value, _score in values}) == 1:
+            if (len(confident) >= 2 and len({value for value, _score in values}) == 1 and
+                    len(str(confident[0])) >= (labels[index]["count_glyphs"] or 0)):
                 labels[index]["count"] = confident[0]
                 labels[index]["count_verified"] = True
         if tiers.get(index) and len(set(tiers[index])) == 1:
@@ -1447,7 +1607,8 @@ def _ritual_reward_icon(reader, cell, label, examples, icon=None, strictness=ocr
     shared tiers or example names stay as candidates for review. Captured strictness
     adjusts identity evidence floors while retaining separate count and tier guards.
     """
-    count = label.get("count") or label.get("count_candidate")
+    count = ((label.get("count") or label.get("count_candidate"))
+             if label.get("count_present", True) else None)
     count_digits = len(str(count)) if count is not None else None
     if icon is None:
         icon = (reader.icon(cell, count_digits=count_digits) if strictness == ocr_sensitivity.DEFAULT else
@@ -1540,7 +1701,8 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
         catalog_icon = None
         unique = None
         if not multiple:
-            count = label.get("count") or label.get("count_candidate")
+            count = ((label.get("count") or label.get("count_candidate"))
+                     if label.get("count_present", True) else None)
             digits = len(str(count)) if count is not None else None
             # Establish shared gray artwork before a reviewed sibling can win.
             catalog_icon = _ritual_gray_omen_icon(cells[index], strictness=strictness)
@@ -1575,7 +1737,7 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
                 "quantity": quantity, "tribute": None,
                 "source": "icon reference: Ritual reward grid" if name else "Occupied Ritual reward; name unresolved",
                 "score": round(score, 3), "name_match": 1.0 if name in omen_names else 0.0,
-                "needs_review": True, "name_needs_review": not bool(name), "unresolved": not bool(name),
+                "name_needs_review": not bool(name), "unresolved": not bool(name),
                 "category_verified": bool(name) or multiple or kind == "omen" or bool(unique),
                 "count_needs_review": False if multiple or unique else not label.get("count_verified", False),
                 "deferred": deferred, "box": box, "grid_slots": list(reward["slots"])}
@@ -1597,6 +1759,8 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
             if (proposal["name"] == name or proposal["name"] in candidates) and float(proposal.get("name_match", 0)) >= .9:
                 item.update(name=proposal["name"], category=proposal["category"], name_match=proposal["name_match"],
                             unresolved=False, name_needs_review=False, tribute=proposal.get("tribute"))
+        item["needs_review"] = bool(item["name_needs_review"] or item["count_needs_review"] or
+                                    score < ocr_sensitivity.clear_threshold(.94, strictness, .14) or strictness == 100)
         items.append(item)
     return items
 

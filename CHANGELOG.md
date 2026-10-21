@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.2.26 Beta
+
+- Show only uncertain Currency and Ritual entries in review while retaining verified records in saved totals.
+- Treat items without a quantity marker as quantity one; keep clipped, unreadable and conflicting count evidence in review.
+- Preserve complete equipment footprints as Items, including captured artwork, name corrections and learned whole-item references.
+- Retain update and uninstall protection for the preceding beta.
+
+See [release notes](docs/RELEASE_1.3.2.26.md).
+
 ## 1.3.2.25 Beta
 
 - Prepare Currency and Ritual artwork once in each OCR worker at desktop startup, using the existing scan caches rather than a separate startup copy. Include scale candidates, reference transforms, learned references, Ritual fallback icons and all eight unique-item footprints.

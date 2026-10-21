@@ -114,7 +114,7 @@ class OCRStrictnessUITests(unittest.TestCase):
             self.assertEqual(ritual_scan.call_args.kwargs["strictness"], 25)
 
     def test_loose_ocr_can_accept_tentative_evidence_but_missing_data_still_holds(self):
-        """Different evidence floors cannot bypass missing counts, modifiers or Ritual prices."""
+        """Different evidence floors cannot bypass missing counts or modifiers; Ritual prices are optional."""
         waystone = {"source": "screen OCR", "fields": {"tier": 15, "waystone": 100, "map_mods": 1},
                     "mods": ["20% increased Quantity"], "ocr_rows": [{"text": "modifier", "score": .85}]}
         self.assertFalse(clear_waystone_read(waystone))
@@ -128,7 +128,7 @@ class OCRStrictnessUITests(unittest.TestCase):
         self.assertTrue(clear_ritual_read({**ritual, "_ocr_strictness": 0}, [item["name"]]))
         self.assertFalse(clear_ritual_read({**ritual, "_ocr_strictness": 100}, [item["name"]]))
         item["tribute"] = None
-        self.assertFalse(clear_ritual_read({**ritual, "_ocr_strictness": 0}, [item["name"]]))
+        self.assertTrue(clear_ritual_read({**ritual, "_ocr_strictness": 0}, [item["name"]]))
 
     def test_thresholds_increase_preserve_default_and_bound_confidence(self):
         """Zero is looser than fifty and one hundred in every supported score scale."""

@@ -51,7 +51,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.25 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.26 Beta"
 SCAN_TIMEOUT_MS = 90000
 SCAN_PRESENTATION_RETRY_MS = 100
 SCAN_PRESENTATION_WAIT_SECONDS = 10
@@ -201,21 +201,26 @@ def clear_waystone_read(result):
     return True
 
 
+def clear_currency_stack(item):
+    """Accept an identified inventory stack only when its name and whole count are verified."""
+    return (isinstance(item.get("name"), str) and
+            not unresolved_ritual_name(item["name"]) and len(item["name"]) <= 200 and
+            type(item.get("quantity")) is int and 1 <= item["quantity"] <= 1000000 and
+            not any(item.get(flag) for flag in (
+                "needs_review", "name_needs_review", "unresolved", "count_needs_review")))
+
+
 def clear_currency_read(result):
-    """Accept currency reads only when every named stack has a positive integer count and no
-    review flags.
-    """
+    """Accept a complete inventory only when every stack has a verified name and count."""
     items = result.get("items") or []
-    return result.get("_ocr_strictness", ocr_sensitivity.DEFAULT) != 100 and bool(items) and not result.get("unknown") and all(
-        item.get("name") and type(item.get("quantity")) is int and
-        item["quantity"] >= 1 and not item.get("count_needs_review") and
-        not item.get("name_needs_review") for item in items)
+    return (result.get("_ocr_strictness", ocr_sensitivity.DEFAULT) != 100 and bool(items) and
+            not result.get("unknown") and all(map(clear_currency_stack, items)))
 
 
 def currency_review_rank(item):
     """Group accepted names/counts, held named or candidate matches, then unidentified slots."""
     if str(item.get("name") or "").strip():
-        return 1 if item.get("count_needs_review") or item.get("name_needs_review") else 0
+        return 0 if clear_currency_stack(item) else 1
     candidate = str(item.get("candidate") or "").strip()
     return 1 if candidate.casefold() not in {
         "", "unknown", "unidentified", "unresolved", "unknown item", "unidentified item", "unrecognized item"
@@ -231,20 +236,43 @@ def header_counter(identifier):
 def unresolved_ritual_name(name):
     """Recognize blank and placeholder reward names that still need identification."""
     return str(name or "").strip().casefold() in {
-        "", "unknown", "unidentified", "unresolved", "deferred omen", "deferred item", "deferred reward",
+        "", "unknown", "unidentified", "unresolved", "unrecognized", "unrecognized item",
+        "deferred omen", "deferred item", "deferred reward",
         "unidentified reward", "unknown reward", "unresolved reward",
         "unknown item", "unidentified item", "unknown omen", "unidentified omen"}
 
 
-def clear_ritual_read(result, omen_names):
-    """Gate Ritual auto-save on complete totals, nonoverlapping grid coverage and confident
-    validated rewards.
-    """
-    strictness = ocr_sensitivity.validate(result.get("_ocr_strictness", ocr_sensitivity.DEFAULT))
+def clear_ritual_reward(item, omen_names, strictness=ocr_sensitivity.DEFAULT):
+    """Require confident reward identity, quantity and deferred status; Tribute is optional."""
+    strictness = ocr_sensitivity.validate(strictness)
     if strictness == 100:
         return False
     floor = ocr_sensitivity.clear_threshold(.94, strictness, .14)
     name_floor = ocr_sensitivity.clear_threshold(.9, strictness, .1)
+    try:
+        score = float(item.get("score", 0))
+        name_match = float(item.get("name_match", 0))
+    except (TypeError, ValueError):
+        return False
+    return not (
+        item.get("category") not in ("Omen", "Item") or not isinstance(item.get("name"), str) or
+        unresolved_ritual_name(item.get("name")) or len(item["name"]) > 200 or
+        (item["category"] == "Omen" and (item["name"] not in omen_names or not name_floor <= name_match <= 1)) or
+        not floor <= score <= 1 or
+        type(item.get("quantity")) is not int or not 1 <= item["quantity"] <= 1000000 or
+        (item.get("tribute") is not None and
+         (type(item["tribute"]) is not int or not 0 <= item["tribute"] <= 1000000000)) or
+        type(item.get("deferred", False)) is not bool or
+        any(item.get(flag) for flag in ("needs_review", "unresolved", "name_needs_review",
+            "count_needs_review", "deferred_needs_review", "deferred_uncertain")) or
+        re.search(r"\b[x×]\s*\d+\b", str(item.get("source", "")), re.I))
+
+
+def clear_ritual_read(result, omen_names):
+    """Gate Ritual auto-save on complete totals, nonoverlapping grid coverage and confident rewards."""
+    strictness = ocr_sensitivity.validate(result.get("_ocr_strictness", ocr_sensitivity.DEFAULT))
+    if strictness == 100:
+        return False
     items = result.get("items") or []
     if (not items or any(result.get(flag) for flag in
             ("unmatched", "unknown", "coverage_uncertain", "needs_review", "unresolved_count",
@@ -260,26 +288,7 @@ def clear_ritual_read(result, omen_names):
         if (any(type(slot) is not int or not 1 <= slot <= 120 for slot in slots) or
                 len(set(footprints)) != result["grid_reward_count"] or len(slots) != len(set(slots))):
             return False
-    for item in items:
-        try:
-            score = float(item.get("score", 0))
-            name_match = float(item.get("name_match", 0))
-        except (TypeError, ValueError):
-            return False
-        if (item.get("category") not in ("Omen", "Item") or not isinstance(item.get("name"), str) or
-                unresolved_ritual_name(item.get("name")) or
-                len(str(item["name"])) > 200 or
-                (item["category"] == "Omen" and (item["name"] not in omen_names or not name_floor <= name_match <= 1)) or
-                not floor <= score <= 1 or
-                type(item.get("quantity")) is not int or not 1 <= item["quantity"] <= 1000000 or
-                type(item.get("tribute")) is not int or not 0 <= item["tribute"] <= 1000000000 or
-                type(item.get("deferred", False)) is not bool or
-                any(item.get(flag) for flag in ("needs_review", "unresolved", "name_needs_review",
-                    "count_needs_review", "deferred_needs_review", "deferred_uncertain")) or
-                str(item.get("source", "")).startswith("icon reference") or
-                re.search(r"\b[x×]\s*\d+\b", str(item.get("source", "")), re.I)):
-            return False
-    return True
+    return all(clear_ritual_reward(item, omen_names, strictness) for item in items)
 
 
 class IconCropCanvas(QWidget):
@@ -6807,7 +6816,7 @@ class LoggerWindow(QMainWindow):
         self.inventory_preview.setFixedSize(picture.size())
 
     def _inventory_read(self, result, live=True, expected_map_id=None, capture=None):
-        """Show certainty groups in slot order with captured evidence; auto-save only clear live reads."""
+        """Retain verified stacks for saving while showing only uncertain captured slots."""
         if capture is not None and capture is not self._inventory_reading:
             return
         if capture is not None:
@@ -6835,22 +6844,30 @@ class LoggerWindow(QMainWindow):
                 self._show_inventory_preview(capture["image"])
         self.inventory_table.setRowCount(0)
         unknown = result["unknown"]
-        uncertain = len(unknown) + sum(bool(item.get("count_needs_review") or item.get("name_needs_review"))
-                                       for item in result["items"])
-        rows = [*result["items"], *({**item, "name": "", "quantity": "", "count_needs_review": True}
-                                   for item in unknown)]
+        uncertain = len(unknown) + sum(not clear_currency_stack(item) for item in result["items"])
+        rows = list(result["items"])
+        for item in unknown:
+            verified_item_count = (item.get("category") == "Item" and
+                                   item.get("count_needs_review") is False and
+                                   type(item.get("quantity")) is int and
+                                   1 <= item["quantity"] <= 1000000)
+            rows.append({**item, "name": "",
+                         "quantity": item["quantity"] if verified_item_count else "",
+                         "count_needs_review": not verified_item_count})
         # Sort before creating widgets so row actions and icon-learning evidence
         # stay attached to their original inventory slots, rather than row numbers.
         rows.sort(key=lambda item: (currency_review_rank(item),
                                    item["slot"] if type(item.get("slot")) is int else 61))
         for item in rows:
             self.add_inventory_row(item, image=capture["image"] if capture is not None else None)
+            self.inventory_table.setRowHidden(self.inventory_table.rowCount() - 1, clear_currency_stack(item))
+        self.inventory_table.setVisible(bool(uncertain))
         if unknown:
             self.icon_slot.setValue(unknown[0]["slot"])
         set_message(self.inventory_status,
                     f"{len(result['items'])} inventory stacks matched. "
-                    f"{uncertain} uncertain slots or shared-icon tiers. Confident matches appear first, "
-                    "then likely matches, then unknowns. Approve uncertain rows individually to include them. "
+                    f"{uncertain} uncertain slots or shared-icon tiers. "
+                    "Approve uncertain rows individually to include them. "
                     "Final Approve rejects unapproved rows and saves the reviewed snapshot.",
                     "success" if result["items"] and not uncertain else "message")
         self._review_pending("currency",
@@ -6934,11 +6951,12 @@ class LoggerWindow(QMainWindow):
             action.setStyleSheet("padding:3px 8px;")
             actions.addWidget(action)
         layout.addLayout(actions)
-        controls.setProperty("requiresApproval", bool(item.get("count_needs_review") or item.get("name_needs_review")
-                                                       or not item.get("name")))
-        controls.setProperty("reviewNameRequired", bool(item.get("name_needs_review") or not item.get("name")))
+        controls.setProperty("requiresApproval", not clear_currency_stack(item))
+        controls.setProperty("reviewNameRequired", bool(item.get("name_needs_review") or
+                                                       unresolved_ritual_name(item.get("name"))))
         controls.setProperty("reviewCountRequired", bool(item.get("count_needs_review")
-                                                        or not str(item.get("quantity", "")).strip()))
+                                                        or type(item.get("quantity")) is not int
+                                                        or not 1 <= item["quantity"] <= 1000000))
         controls.setProperty("confidenceGroup", currency_review_rank(item))
         self.inventory_table.setCellWidget(row, 3, controls)
         self.inventory_table.setRowHeight(row, 62)
@@ -7281,7 +7299,7 @@ class LoggerWindow(QMainWindow):
 
     def _ritual_read(self, result, live=True, expected_map_id=None, capture=None):
         """Ignore superseded captures and validate map ownership before filling Ritual reward
-        drafts. Report incomplete coverage and automatically save only clear live readings.
+        drafts. Hide verified rewards, retain them for saving, and report incomplete coverage.
         """
         if capture is not None and capture is not self._ritual_reading:
             return
@@ -7299,11 +7317,16 @@ class LoggerWindow(QMainWindow):
         self.ritual_tribute.setText("" if result.get("tribute_available") is None else str(result["tribute_available"]))
         self.ritual_rerolls.setText("" if result.get("rerolls_remaining") is None else str(result["rerolls_remaining"]))
         self.ritual_table.setRowCount(0)
+        omen_names = logger.ritual_names()
+        strictness = result.get("_ocr_strictness", ocr_sensitivity.DEFAULT)
         for item in result["items"]:
             self.add_ritual_row(item)
+            self.ritual_table.setRowHidden(self.ritual_table.rowCount() - 1,
+                                          clear_ritual_reward(item, omen_names, strictness))
+        self.ritual_table.setCurrentCell(-1, -1)
         self.ritual_raw.setPlainText(result["raw_text"])
-        review_count = sum(self.ritual_table.item(row, 6).text().split(": ")[-1] != "Ready"
-                           for row in range(self.ritual_table.rowCount()))
+        review_count = sum(not self.ritual_table.isRowHidden(row) for row in range(self.ritual_table.rowCount()))
+        self.ritual_table.setVisible(bool(review_count))
         summary = (f"{len(result['items'])} Ritual rewards · {review_count} need review. "
                    "Enter names, types and counts to include rewards. Unnamed rows are rejected when you Approve.")
         if result.get("coverage_uncertain"):
@@ -7488,8 +7511,7 @@ class LoggerWindow(QMainWindow):
         if deferred and deferred.checkState() == Qt.CheckState.PartiallyChecked:
             missing.append("Deferred")
         status = "Rejected: no name" if rejected else ("Saved" if saved else ("Confirm " + " / ".join(missing) if missing else (
-            "Check reading" if metadata.get("needs_review") or (
-                "tribute" in metadata and metadata["tribute"] is None and not field(3)) else "Ready")))
+            "Check reading" if metadata.get("needs_review") else "Ready")))
         slots = metadata.get("grid_slots") or []
         if slots:
             status = "Slot " + ", ".join(str(slot) for slot in slots) + ": " + status

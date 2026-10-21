@@ -85,8 +85,8 @@ class RitualReviewRowsTests(unittest.TestCase):
         self.window.ritual_table.item(row, 5).setCheckState(
             Qt.CheckState.Checked if deferred else Qt.CheckState.Unchecked)
 
-    def test_all_occupied_rows_remain_visible_with_unknown_fields_and_review_reasons(self):
-        """Verify every occupied reward remains visible with unknown fields and appropriate review reasons."""
+    def test_only_uncertain_rows_remain_visible_with_unknown_fields_and_review_reasons(self):
+        """Retain every occupied reward while displaying only rows that need correction."""
         items = [self.known(grid_slots=[1]), self.unknown(),
                  self.unknown(15, count_needs_review=True)]
         self.read(self.result(items, grid_detected=True, grid_reward_count=3), live=True, auto=True)
@@ -96,7 +96,9 @@ class RitualReviewRowsTests(unittest.TestCase):
         self.assertEqual(table.columnCount(), 7)
         self.assertEqual(table.horizontalHeaderItem(6).text(), "Review")
         self.assertEqual(table.item(0, 1).text(), "Chaos Orb")
+        self.assertTrue(table.isRowHidden(0))
         for row in (1, 2):
+            self.assertFalse(table.isRowHidden(row))
             self.assertEqual((table.item(row, 0).text(), table.item(row, 1).text()), ("", ""))
             self.assertIn("name", table.item(row, 6).text().casefold())
         self.assertEqual(table.item(1, 2).text(), "1")
@@ -169,7 +171,7 @@ class RitualReviewRowsTests(unittest.TestCase):
         self.assertEqual(crop.pixelColor(crop.width() // 2, crop.height() // 2).getRgb()[:3], (220, 30, 40))
 
     def test_auto_commit_rejects_uncertain_names_counts_deferred_state_and_confidence(self):
-        """Verify uncertain names, counts, deferred flags, confidence or price block automatic saving."""
+        """Verify uncertain names, counts, deferred flags or confidence block automatic saving."""
         base = self.result([self.known()])
         self.assertTrue(clear_ritual_read(base, logger.ritual_names()))
         changes = ({"name": ""}, {"name": "Unidentified reward"}, {"name": "Deferred omen"},
@@ -177,12 +179,14 @@ class RitualReviewRowsTests(unittest.TestCase):
                    {"quantity": 0}, {"quantity": 1.5}, {"quantity": True},
                    {"quantity": 1000001}, {"deferred": None}, {"deferred": "false"},
                    {"deferred_needs_review": True}, {"deferred_uncertain": True},
-                   {"score": .93}, {"score": float("nan")}, {"tribute": None})
+                   {"score": .93}, {"score": float("nan")})
         for change in changes:
             with self.subTest(change=change):
                 result = copy.deepcopy(base)
                 result["items"][0].update(change)
                 self.assertFalse(clear_ritual_read(result, logger.ritual_names()))
+        base["items"][0]["tribute"] = None
+        self.assertTrue(clear_ritual_read(base, logger.ritual_names()))
 
     def test_auto_commit_rejects_incomplete_grid_duplicate_slots_and_page_uncertainty(self):
         """Verify incomplete grid coverage, duplicate slots and page uncertainty block automatic saving."""
@@ -270,7 +274,8 @@ class RitualReviewRowsTests(unittest.TestCase):
                 self.window.developer_mode.setChecked(enabled)
                 self.window.tabs.setCurrentIndex(0)
                 self.app.processEvents()
-                self.assertTrue(self.window.ritual_table.isVisible())
+                self.assertFalse(self.window.ritual_table.isVisible())
+                self.assertTrue(self.window.ritual_table.isRowHidden(0))
                 self.assertFalse(self.window.ritual_raw.isVisible())
                 self.window.tabs.setCurrentIndex(5)
                 self.app.processEvents()

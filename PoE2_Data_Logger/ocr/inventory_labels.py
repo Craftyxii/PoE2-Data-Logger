@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image, ImageOps
 
 
-def count_crops(cell, *, complete_only=False):
+def _count_groups(cell, *, complete_only=False):
     """Crop complete aligned digits while preserving anchored count evidence from rejected clusters."""
     pixels = np.asarray(cell.convert('RGB'), dtype=np.uint8)
     height = max(11, round(cell.height * .36))
@@ -54,11 +54,6 @@ def count_crops(cell, *, complete_only=False):
         selected = np.isin(components[y0:y1, x0:x1], [part[4] for part in group])
         clean = Image.fromarray(np.where(selected, lo[y0:y1, x0:x1], 0).astype(np.uint8)).convert('RGB')
         groups.append((len(group), (raw, clean)))
-    patches = []
-    for size, variants in groups:
-        for patch in variants:
-            patch = ImageOps.expand(patch, border=10, fill='black')
-            patches.append(patch.resize((patch.width * 2, patch.height * 2), Image.Resampling.BICUBIC))
     anchor = strip[:max(8, round(cell.height * .28)), :max(7, round(cell.width * .14))]
     anchor_ink = ((anchor.min(axis=2) > 145) &
                   (anchor.max(axis=2).astype(np.int16) - anchor.min(axis=2) < 55)).astype(np.uint8)
@@ -66,7 +61,25 @@ def count_crops(cell, *, complete_only=False):
     possible = anchored_components or bool(groups) or any(
         h >= max(3, round(cell.height * .09)) and area >= 5
         for x, y, w, h, area in stats[1:count])
+    return groups, possible
+
+
+def count_crops(cell, *, complete_only=False):
+    """Crop complete aligned digits while retaining rejected marker evidence."""
+    groups, possible = _count_groups(cell, complete_only=complete_only)
+    patches = []
+    for size, variants in groups:
+        for patch in variants:
+            patch = ImageOps.expand(patch, border=10, fill='black')
+            patches.append(patch.resize((patch.width * 2, patch.height * 2), Image.Resampling.BICUBIC))
     return patches, possible
+
+
+def complete_count_glyphs(cell):
+    """Describe full label coverage only when its complete threshold groups agree."""
+    groups, _ = _count_groups(cell, complete_only=True)
+    sizes = [size for size, _ in groups]
+    return sizes[0] if sizes and len(set(sizes)) == 1 else None
 
 
 def fallback_crops(cell):

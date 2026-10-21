@@ -577,6 +577,9 @@ class CurrencyReader:
         Use a bounded cell thumbnail and the expected upper-left count anchor;
         callers retain review responsibility for clipping or conflicting readings.
         """
+        from PoE2_Data_Logger.ocr.inventory_labels import complete_count_glyphs
+
+        glyph_count = complete_count_glyphs(image)
         image = image.copy()
         image.thumbnail((96, 96), Image.Resampling.LANCZOS)
         # Cache only this independent reader's exact input, including failed
@@ -590,7 +593,8 @@ class CurrencyReader:
         key = (rgba.size, rgba.tobytes())
         if key in cache:
             cache.move_to_end(key)
-            return cache[key]
+            value = cache[key]
+            return value if value is None or len(str(value)) >= (glyph_count or 0) else None
         size = image.size
         scale = max(.5, min(size) / 40)
         pixels = self._pixels(image)
@@ -607,7 +611,7 @@ class CurrencyReader:
         cache[key] = value
         if len(cache) > 128:
             cache.popitem(last=False)
-        return value
+        return value if value is None or len(str(value)) >= (glyph_count or 0) else None
 
 
 _ICON_IMPLEMENTATION = CurrencyReader.icon

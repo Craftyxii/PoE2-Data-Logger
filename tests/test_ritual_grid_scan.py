@@ -1,6 +1,7 @@
 """Ritual image enumeration checks keeping occupied unknown items visible with explicit uncertain fields."""
 
 import io
+from pathlib import Path
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -57,7 +58,7 @@ class RitualGridScanTests(unittest.TestCase):
         self.assertEqual(result["reward_count"], 4)
         self.assertEqual([item["grid_slots"] for item in result["items"]], [[1], [2], [13], [14]])
         self.assertEqual([item["name"] for item in result["items"]], ["Omen of Whittling"] * 4)
-        self.assertTrue(all(item["needs_review"] for item in result["items"]))
+        self.assertTrue(all(not item["needs_review"] for item in result["items"]))
         self.assertTrue(all(item["tribute"] is None for item in result["items"]))
         self.assertEqual((result["tribute_available"], result["rerolls_remaining"]), (5430, 2))
 
@@ -210,6 +211,81 @@ class RitualGridScanTests(unittest.TestCase):
         self.assertEqual(len(result["items"]), 120)
         self.assertEqual(result["unmatched"], ["Omen of Whittling 4,000"])
 
+
+    def test_accepted_but_lower_confidence_artwork_still_needs_confirmation(self):
+        """A possible catalog identity must not gain the high-confidence bypass."""
+        self.reader.icon = lambda cell, count_digits=None: {
+            "family": "omen", "members": ["Omen of Whittling"], "score": .82, "method": "inventory"}
+        item = self.scan(reward_grid([[1]]))["items"][0]
+        self.assertEqual(item["name"], "Omen of Whittling")
+        self.assertTrue(item["needs_review"])
+        self.assertFalse(item["count_needs_review"])
+
+    def test_reliable_artwork_with_unreadable_count_still_needs_confirmation(self):
+        """A known icon cannot bypass an actual uncertain quantity marker."""
+        item = self.scan(reward_grid([[1]]), labels={
+            0: {"count_present": True, "count_verified": False, "count_candidate": 11}})["items"][0]
+        self.assertEqual((item["name"], item["quantity"]), ("Omen of Whittling", 11))
+        self.assertTrue(item["needs_review"])
+        self.assertTrue(item["count_needs_review"])
+
+    def test_default_quantity_does_not_change_artwork_count_mask(self):
+        """An implicit one must keep the original unlabelled-artwork matching mask."""
+        for present, expected_hint in ((False, None), (True, 1)):
+            with self.subTest(marker_present=present):
+                hints = []
+                def icon(cell, count_digits=None):
+                    """Record the numeral mask used by direct and full-grid matching."""
+                    hints.append(count_digits)
+                    return {"family": "omen", "members": ["Omen of Whittling"], "score": .99}
+                self.reader.icon = icon
+                label = {"count": 1, "count_verified": True, "count_present": present}
+                item_ocr._ritual_reward_icon(self.reader, self.page.crop((0, 0, 40, 40)), label, [])
+                item = self.scan(reward_grid([[1]]), labels={0: label})["items"][0]
+                self.assertEqual(hints, [expected_hint, expected_hint])
+                self.assertEqual((item["name"], item["quantity"]), ("Omen of Whittling", 1))
+                self.assertFalse(item["count_needs_review"])
+
+    def test_absent_marker_means_one_but_unreadable_marker_stays_pending(self):
+        """Distinguish an unmarked single item from a clipped or unreadable label."""
+        from PoE2_Data_Logger.ocr import inventory_labels
+        cell = Image.new("RGB", (40, 40), "navy")
+        for present in (False, True):
+            with self.subTest(present=present), \
+                    patch.object(inventory_labels, "count_crops", return_value=([], present)), \
+                    patch.object(inventory_labels, "tier_crops", return_value=([], False)), \
+                    patch.object(item_ocr, "_engine") as engine:
+                label = item_ocr._ritual_cell_labels({0: cell})[0]
+                self.assertEqual(label["count_verified"], not present)
+                if present:
+                    self.assertNotIn("count", label)
+                else:
+                    self.assertEqual(label["count"], 1)
+                engine.assert_not_called()
+
+    def test_captured_sacred_bloom_without_marker_has_verified_quantity_one(self):
+        """The supplied Sacred Bloom artwork must not ask for a nonexistent stack label."""
+        path = Path(__file__).parent / "fixtures/ritual_rewards/10.png"
+        with Image.open(path) as source:
+            original = source.convert("RGB")
+        for scale in (1, 2):
+            with self.subTest(scale=scale):
+                page = original.resize((original.width * scale, original.height * scale),
+                                       Image.Resampling.LANCZOS)
+                grid = ritual_grid.detect_reward_grid(page)
+                self.assertIsNotNone(grid)
+                inset = max(1, round(grid["pitch"] * .02))
+                cells = {}
+                for reward in grid["rewards"]:
+                    if reward["slots"] in ([37], [49]):
+                        left, top, right, bottom = reward["box"]
+                        cells[reward["slots"][0]] = page.crop((left + inset, top + inset, right, bottom))
+                self.assertEqual(set(cells), {37, 49})
+                labels = item_ocr._ritual_cell_labels(cells)
+                for slot in cells:
+                    self.assertFalse(labels[slot]["count_present"])
+                    self.assertTrue(labels[slot]["count_verified"])
+                    self.assertEqual(labels[slot]["count"], 1)
 
 if __name__ == "__main__":
     unittest.main()
