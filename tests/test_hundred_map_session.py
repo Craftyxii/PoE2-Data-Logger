@@ -392,6 +392,17 @@ class HundredMapSession(unittest.TestCase):
         with patch.object(item_ocr, "scan_inventory_grid", return_value=result):
             self.w._inventory_captured(self.artwork.copy(), live=automatic or live)
             self.wait_tasks()
+        if not automatic:
+            # A captured stack cannot have zero items. The manual correction
+            # fixture deliberately supplies zero, so explicitly confirm that
+            # uncertain count through the existing row action before saving.
+            for row in range(len(items)):
+                if self.w.inventory_table.item(row, 2).text() == "0":
+                    controls = self.w.inventory_table.cellWidget(row, 3)
+                    self.check(controls.property("requiresApproval"), True,
+                               "review:zero-captured-count-requires-confirmation")
+                    controls.findChild(QPushButton, "approveCurrency").click()
+                    self.coverage["zero count manually confirmed"] += 1
         offset = len(items)
         for i, name in enumerate([val for val in [custom, rejected, "" if unnamed else None] if val is not None]):
             row = offset + i
