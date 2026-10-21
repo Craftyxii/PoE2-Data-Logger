@@ -11,7 +11,7 @@ import unittest
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile
 
-from PoE2_Data_Logger.core import logger_store as logger, store, workbook_export
+from PoE2_Data_Logger.core import logger_store as logger, reference_pack, store, workbook_export
 
 
 class ItemOccurrenceAccountingTests(unittest.TestCase):
@@ -226,6 +226,41 @@ class ItemOccurrenceAccountingTests(unittest.TestCase):
         for exporter in (logger.export_record_history_csv, logger.export_all_csv):
             saved = next(row for row in self.rows(exporter()) if row["Currency"] == "Headhunter")
             self.assertEqual((saved["Item Name"], saved["Session Found Quantity"]), ("", "3"))
+
+    def test_item_case_change_after_reference_reset_has_one_current_projection(self):
+        """Keep raw spellings while crediting one Item after its canonical name changes case."""
+        logger.save_currency_snapshot("start", [{"category": "Item", "name": "Bramblejack", "quantity": 2}],
+                                      register_names=True)
+        original = self.raw_commits("Currency")[0]
+        reference_pack.reset_to_defaults()
+        latest = logger.save_currency_snapshot("end", [{"category": "Item", "name": "bramblejack", "quantity": 3}],
+                                               register_names=True)
+        commits = self.raw_commits("Currency")
+        self.reopen()
+        current = logger.currency_for_map("M0001")
+        self.assertEqual(current["start"], {"Bramblejack": 2})
+        self.assertEqual(current["end"], {"bramblejack": 3})
+        self.assertEqual(current["net"], {"bramblejack": 3})
+        self.assertEqual(self.totals(), {"bramblejack": 3})
+        rows = self.rows(logger.export_currency_csv())
+        self.assertEqual(len(rows), 1)
+        self.assertEqual([rows[0][key] for key in
+                          ("Currency", "Start Count", "End Count", "Net Change", "Session Found Quantity")],
+                         ["bramblejack", "2", "3", "3", "3"])
+        for exporter in (logger.export_record_history_csv, logger.export_all_csv):
+            rows = [row for row in self.rows(exporter())
+                    if row["Scan Commit #"] == str(latest["scan_commit_number"])]
+            self.assertEqual({row["Item Name"]: (row["Quantity"], row["Session Found Quantity"]) for row in rows},
+                             {"Bramblejack": ("0", "0"), "bramblejack": ("3", "3")})
+        with logger._connect() as db:
+            snapshots = {row["phase"]: json.loads(row["items_json"]) for row in db.execute(
+                "SELECT phase,items_json FROM currency_snapshots WHERE map_id='M0001'")}
+            details = [json.loads(row[0]) for row in db.execute(
+                "SELECT details_json FROM commits WHERE kind='Currency' ORDER BY number")]
+        self.assertEqual(snapshots, {"start": {"Bramblejack": 2}, "end": {"bramblejack": 3}})
+        self.assertEqual([detail["items"] for detail in details], [{"Bramblejack": 2}, {"bramblejack": 3}])
+        self.assertEqual(commits[0], original)
+        self.assertEqual(self.raw_commits("Currency"), commits)
 
     def test_ritual_duplicate_items_follow_the_same_deferred_rule_as_omens(self):
         """Each nondeferred footprint contributes one New Find, even with an identical name."""

@@ -3543,8 +3543,11 @@ def currency_for_map(map_id):
     end = snapshots.get("end", {}).get("items", {})
     net = {name: end.get(name, 0) - start.get(name, 0) for name in set(start) | set(end)} if "end" in snapshots else {}
     if item_projection is not None:
-        for name in set(start) | set(end) | set(item_projection["names"].values()):
-            key = name.strip().casefold()
+        names = {name.strip().casefold(): name for name in set(start) | set(end)}
+        names.update(item_projection["names"])
+        net = {name: quantity for name, quantity in net.items()
+               if name.strip().casefold() not in item_projection["keys"]}
+        for key, name in names.items():
             if key in item_projection["keys"]:
                 net[name] = item_projection["counts"].get(key, 0)
     return {"map_id": map_id, "start": start, "end": end,
@@ -3662,13 +3665,25 @@ def export_currency_csv():
         item_projection = item_projections.get(map_id)
         # An empty inventory is still an approved snapshot with its own map,
         # timestamp, commit and settings. Keep its metadata in this export too.
-        names = set(start) | set(end) | (set(item_projection["names"].values()) if item_projection else set())
+        names = set(start) | set(end)
+        if item_projection is not None:
+            item_names = {name.strip().casefold(): name for name in names
+                          if name.strip().casefold() in item_projection["keys"]}
+            item_names.update({key: name for key, name in item_projection["names"].items()
+                               if key in item_projection["keys"]})
+            names = {name for name in names if name.strip().casefold() not in item_projection["keys"]}
+            names.update(item_names.values())
         for name in sorted(names) or [""]:
-            is_item = item_projection is not None and name.strip().casefold() in item_projection["keys"]
-            net = (item_projection["counts"].get(name.strip().casefold(), 0) if is_item else
+            key = name.strip().casefold()
+            is_item = item_projection is not None and key in item_projection["keys"]
+            start_count = (sum(quantity for label, quantity in start.items() if label.strip().casefold() == key)
+                           if is_item else start.get(name, 0))
+            end_count = (sum(quantity for label, quantity in end.items() if label.strip().casefold() == key)
+                         if is_item else end.get(name, 0))
+            net = (item_projection["counts"].get(key, 0) if is_item else
                    end.get(name, 0) - start.get(name, 0) if "end" in phases else "")
-            writer.writerow(_csv_row([map_id, name, start.get(name, 0) if name else "",
-                             end.get(name, 0) if name and "end" in phases else "",
+            writer.writerow(_csv_row([map_id, name, start_count if name else "",
+                             end_count if name and "end" in phases else "",
                              net if name else "",
                              phases["start"]["recorded_at"] if "start" in phases else "",
                              phases["end"]["recorded_at"] if "end" in phases else "",
@@ -4428,11 +4443,13 @@ def export_record_history_csv(*, _db=None):
                     item_projection = item_projections.get(commit["map_id"]) if is_item else None
                     if item_projection is not None:
                         found = (item_projection["counts"].get(key, 0)
-                                 if item_projection["number"] == commit["number"] and key not in credited else 0)
+                                 if item_projection["number"] == commit["number"] and amount > 0
+                                 and key not in credited else 0)
                     else:
                         found = (max(0, current_end.get(key, 0) - current_start.get(key, 0))
                                  if is_current and phase == "end" and key not in credited else 0)
-                    credited.add(key)
+                    if item_projection is None or amount > 0:
+                        credited.add(key)
                     entries.append({"Item Name" if is_item else "Currency": name, "Quantity": amount,
                                     "Item Source": "Inventory" if is_item else "",
                                     "Start Count": amount if phase == "start" else
