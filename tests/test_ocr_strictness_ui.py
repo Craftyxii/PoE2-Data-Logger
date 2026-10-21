@@ -148,7 +148,7 @@ class OCRStrictnessUITests(unittest.TestCase):
         reader.count.return_value = 23
         image = Image.fromarray(np.random.default_rng(4).integers(0, 256, (200, 480, 3), dtype=np.uint8))
         image.info["poe2_inventory_aligned"] = True
-        with patch.object(item_ocr.currency_ocr, "get_reader", return_value=reader), patch.object(item_ocr, "_inventory_equipment_slots", return_value=set()):
+        with patch.object(item_ocr.currency_ocr, "get_reader", return_value=reader), patch.object(item_ocr, "_inventory_equipment_footprints", return_value=[]):
             result = item_ocr.scan_inventory_grid(image, read=lambda _: [], strictness=100)
         self.assertTrue(result["items"][0]["name_needs_review"])
         self.assertFalse(clear_currency_read(result))

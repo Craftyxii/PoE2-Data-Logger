@@ -168,7 +168,7 @@ class CurrencyArtworkParallelTests(unittest.TestCase):
             self.reader._rank_cache.clear()
             with patch.object(currency_ocr, "get_reader", return_value=self.reader), \
                     patch.object(ocr_runtime, "active_threads", return_value=cores), \
-                    patch.object(item_ocr, "_inventory_equipment_slots", return_value=set()), \
+                    patch.object(item_ocr, "_inventory_equipment_footprints", return_value=[]), \
                     patch.object(self.reader, "count", side_effect=count):
                 outputs.append(item_ocr.scan_inventory_grid(grid, read=lambda _: []))
         self.assertEqual(outputs[0], outputs[1])
@@ -189,7 +189,7 @@ class CurrencyArtworkParallelTests(unittest.TestCase):
 
         with patch.object(currency_ocr, "get_reader", return_value=self.reader), \
                 patch.object(currency_ocr, "prefetch_catalog_ranks", side_effect=capture), \
-                patch.object(item_ocr, "_inventory_equipment_slots", return_value={2}), \
+                patch.object(item_ocr, "_inventory_equipment_footprints", return_value=[(2, 14)]), \
                 patch.object(self.reader, "count", return_value=2):
             item_ocr.scan_inventory_grid(grid, read=lambda _: [])
         self.assertEqual(len(requests), 2)

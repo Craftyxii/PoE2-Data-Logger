@@ -120,7 +120,12 @@ class InventoryEmptySlotTests(unittest.TestCase):
         self.assertFalse({17, 32} & item_ocr._inventory_equipment_slots(image))
         result = self.scan(image)
         self.assertEqual([(row["slot"], row["name"]) for row in result["items"]],
-                         [(17, "Chaos Orb"), (32, "Runic Alloy")])
+                         [(17, "Chaos Orb"), (18, ""), (32, "Runic Alloy")])
+        equipment = next(row for row in result["items"] if row["slot"] == 18)
+        self.assertEqual((equipment["category"], equipment["quantity"], equipment["grid_slots"]),
+                         ("Item", 1, [18, 19, 30, 31, 42, 43]))
+        self.assertFalse(equipment["count_needs_review"])
+        self.assertTrue(equipment["name_needs_review"])
         self.assertEqual(result["unknown"], [])
 
 
