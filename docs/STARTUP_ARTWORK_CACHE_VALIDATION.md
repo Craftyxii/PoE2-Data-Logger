@@ -1,7 +1,9 @@
 # Currency and Ritual artwork startup preparation
 
-Local, unreleased work based on `00cf00fa8dc448e80589124a31dd8ab7410e7cad`
-(`v1.3.2.24-beta`). No version or release metadata changes.
+Implementation commit `cd3fc7e`, based on
+`00cf00fa8dc448e80589124a31dd8ab7410e7cad` (`v1.3.2.24-beta`), prepared for
+[1.3.2.25 Beta](RELEASE_1.3.2.25.md). The measurements below precede release
+metadata synchronization; published notes identify the verified release source.
 
 ## Implementation
 
@@ -67,4 +69,4 @@ Full Linux regression run: **2,184 cases; 2,181 passed, three skipped, zero
 failures or errors**, across 12 isolated batches in 1,764.237 seconds. The skips
 were native Windows hotkey APIs, the separate native Windows desktop gate, and
 the opt-in 100-map GUI gate. No batch crashed or required rerunning. These results
-do not replace Windows release checks; this change has not been published.
+do not replace the separate Windows release checks.

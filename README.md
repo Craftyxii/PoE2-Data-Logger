@@ -4,9 +4,9 @@ A Windows desktop logger for Path of Exile 2. Record Expedition remnants and run
 
 ## Download and source status
 
-This source targets [1.3.2.24 Beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.24-beta). Its [installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.24-beta/PoE2-Data-Logger-Setup-v1.3.2.24-beta.exe) becomes available after the required release checks pass. See the [release notes](docs/RELEASE_1.3.2.24.md). The [previous beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.23-beta) and [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2) remain available.
+This source targets [1.3.2.25 Beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.25-beta). Its [installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.25-beta/PoE2-Data-Logger-Setup-v1.3.2.25-beta.exe) becomes available after the required release checks pass. See the [release notes](docs/RELEASE_1.3.2.25.md). The [previous beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.24-beta) and [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2) remain available.
 
-This beta adds sourced unique-item artwork matching to Currency and Ritual, with complete equipment footprints, shared-art choices, Item exports and full-item correction learning. It retains the earlier tablet sets, Rite settings and scan caches. HUD layout, historical records, screenshots, manual end-map entries and mandatory propagation approval remain intact. See the [changelog](CHANGELOG.md#13224-beta). Installer, executable and window version labels identify 1.3.2.24 Beta.
+This beta prepares Currency and Ritual artwork at startup in the same banks that scans reuse. It retains sourced unique-item matching, tablet sets, Rite settings and screenshot-result caches. HUD layout, historical records, screenshots, manual end-map entries and mandatory propagation approval remain intact. See the [changelog](CHANGELOG.md#13225-beta). Installer, executable and window version labels identify 1.3.2.25 Beta.
 
 ## What you can record
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.2.25 Beta
+
+- Prepare Currency and Ritual artwork once in each OCR worker at desktop startup, using the existing scan caches rather than a separate startup copy. Include scale candidates, reference transforms, learned references, Ritual fallback icons and all eight unique-item footprints.
+- Reuse the same prepared banks when scanning. Preserve first-query arithmetic verification, reference-edit invalidation, screenshot-result caches and normal recognition fallback if optional startup preparation fails.
+- Keep startup preparation within the existing bounded worker lifecycle, with distinct worker ownership, cancellation, shutdown and original scan deadlines. Retain running-client update/uninstall protection for beta24.
+
+See [release notes](docs/RELEASE_1.3.2.25.md) and [startup validation](docs/STARTUP_ARTWORK_CACHE_VALIDATION.md) for measured memory, verification scope and release gates.
+
 ## 1.3.2.24 Beta
 
 - Add an offline, source-pinned unique-item artwork catalog to Currency and Ritual scans, using complete equipment footprints and retaining shared-art name choices. Approved inventory uniques use Item registration and correction learning; bundled assets are checked during Windows build verification.
