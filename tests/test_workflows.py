@@ -261,19 +261,24 @@ class WorkflowTests(unittest.TestCase):
     def test_new_map_flag_columns_preserve_existing_export_positions(self):
         """Verify new map flag columns preserve existing export positions."""
         logger.add_item_name("Example reward")
+        with logger._connect() as db:
+            bundled_fields = ["Item: " + row[0] for row in db.execute(
+                "SELECT name FROM unique_item_catalog ORDER BY name")]
         positions = {
             logger.export_currency_csv: {"End Tier": 117},
             logger.export_record_history_csv: {"Tablet Slot Capacity": 149, "Jado Configured Perk 1": 150,
                                                "Hilda Configured Perk 4": 161, "Deli": 164, "Wisp": 165},
             logger.export_all_csv: {"Type": 127, "Tablet Slot Capacity": 156, "Jado Configured Perk 1": 157,
                                     "Hilda Configured Perk 4": 168, "Item: Example reward": 169,
-                                    "Deli": 172, "Wisp": 173},
+                                    "Deli": 172 + len(bundled_fields), "Wisp": 173 + len(bundled_fields)},
         }
         for exporter, fields in positions.items():
             with self.subTest(exporter=exporter.__name__):
                 headers = next(csv.reader(io.StringIO(exporter().decode("utf-8-sig"))))
                 for name, index in fields.items():
                     self.assertEqual(headers.index(name), index)
+                if exporter == logger.export_all_csv:
+                    self.assertEqual(headers[170:170 + len(bundled_fields)], bundled_fields)
                 if exporter == logger.export_currency_csv:
                     self.assertEqual(headers[-4:], ["Start Currency Scan ID", "End Currency Scan ID",
                                                    "Start Currency Scan #", "End Currency Scan #"])
