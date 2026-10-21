@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.2.24 Beta
+
+- Add an offline, source-pinned unique-item artwork catalog to Currency and Ritual scans, using complete equipment footprints and retaining shared-art name choices. Approved inventory uniques use Item registration, correction learning and existing SQL/CSV/XLSX accounting; bundled assets are checked during Windows build verification.
+
+See [release notes](docs/RELEASE_1.3.2.24.md) for source provenance, validation scope and release gates.
+
 ## 1.3.2.23 Beta
 
 - Include the unpublished 1.3.2.22 tablet, Ritual, review-delivery and optional GPU changes below.

@@ -40,6 +40,7 @@ Optional GPU label acceleration uses a separate executable with `onnxruntime-dir
 | Currency overlay / Exiled Exchange 2 | Currency and inventory readers, icon matching and reference data | [README](PoE2_Data_Logger/third_party/currency_overlay/README.txt), [currency-overlay license](PoE2_Data_Logger/third_party/currency_overlay/LICENSE), [Exiled Exchange 2 license](PoE2_Data_Logger/third_party/currency_overlay/EXILED-EXCHANGE-2-LICENSE.txt) |
 | DejaVu fonts | Regular and bold fonts used by the app | [Font license](PoE2_Data_Logger/fonts/LICENSE.txt) |
 | RePoE / Path of Exile 2 atlas | Exported atlas layout, passive effects, variant choices and game artwork | [Atlas notice](PoE2_Data_Logger/atlas/NOTICE.txt) |
+| RePoE / Path of Exile 2 uniques | 449 unique records and 446 original artwork files, with inventory dimensions and shared-art base alternatives | [Unique catalog notice](PoE2_Data_Logger/unique_item_assets/NOTICE.txt), [pinned source manifest](PoE2_Data_Logger/unique_item_assets/manifest.json). Generated game data and artwork are owned by GGG; RePoE's MIT software license does not license the artwork. |
 | Path of Exile 2 Ritual frames | Two small captured reward-frame corners used for item grouping | [Ritual frame notice](PoE2_Data_Logger/ocr/ritual_assets/NOTICE.txt) |
 | OpenCV matching arithmetic | Adapted CPU correlation order for cached artwork transforms | [Provenance](PoE2_Data_Logger/third_party/opencv_matching/README.txt), [original notice](PoE2_Data_Logger/third_party/opencv_matching/LICENSE.txt) |
 

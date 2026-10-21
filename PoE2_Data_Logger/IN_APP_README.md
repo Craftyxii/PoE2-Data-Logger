@@ -46,6 +46,8 @@ Currency review lists confident items first, possible matches next, then unknown
 
 Double-click an item name in Currency or Ritual review to correct it. Committing an accepted name correction saves its captured artwork as a local recognition example for later scans and adds its item-count column to exports. Rows left unnamed are rejected. Confirm other critical fields before approval. Local recognition examples can be exported in an OCR reference pack.
 
+Currency and Ritual also match bundled unique-item artwork. Multi-slot items use one row with quantity 1. Shared or uncertain artwork offers name choices for review; item rolls and prices are not inferred from its icon. Accepted uniques are logged as Items using the existing snapshots and exports.
+
 **Ritual:** deferred rewards are marked **Deferred** and contribute zero new finds. Available tribute and remaining rerolls are saved with the scan.
 
 The optional **Ritual** tab records Rite affixes without requiring them for scans. Proliferating affixes carry from completed earlier maps of the same selected Rite. The first and final approved Tribute/reroll readings are saved per map, including readable counters on an empty reward page.

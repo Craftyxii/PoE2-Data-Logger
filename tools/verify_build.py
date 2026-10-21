@@ -2,12 +2,44 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import struct
 import sys
 
 from PyInstaller.archive.readers import CArchiveReader
+
+
+UNIQUE_CATALOG_SHA256 = '4e71e5f8b74218dfcceab69592ffd7cceb3081fc4665b5d1bc7c7219f6de8a7e'
+
+
+def verify_unique_catalog(directory):
+    """Require the reviewed catalog, its credits and every original artwork file."""
+    directory = Path(directory)
+    manifest = directory / 'manifest.json'
+    if not manifest.is_file():
+        raise ValueError('Missing bundled unique catalog: manifest.json')
+    raw = manifest.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != UNIQUE_CATALOG_SHA256:
+        raise ValueError('Bundled unique catalog manifest integrity check failed.')
+    notice = directory / 'NOTICE.txt'
+    if not notice.is_file() or notice.stat().st_size == 0:
+        raise ValueError('Missing bundled unique catalog credits: NOTICE.txt')
+    checked = set()
+    for row in json.loads(raw)['items']:
+        name = row['icon']
+        if name in checked:
+            continue
+        path = directory / name
+        if not path.is_file():
+            raise ValueError(f'Missing bundled unique artwork: {name}')
+        with path.open('rb') as source:
+            digest = hashlib.file_digest(source, 'sha256').hexdigest()
+        if digest != row['image_sha256']:
+            raise ValueError(f'Bundled unique artwork integrity check failed: {name}')
+        checked.add(name)
+    return len(checked)
 
 
 def pe_machine(path):
@@ -67,6 +99,7 @@ def verify(executable, check_files=True):
                  'PoE2_Data_Logger.platform.hotkey',
                  'PoE2_Data_Logger.ocr.opened_scan',
                  'PoE2_Data_Logger.ocr.item_ocr',
+                 'PoE2_Data_Logger.ocr.unique_items',
                  'PoE2_Data_Logger.ocr.propagation_scan',
                  'PoE2_Data_Logger.ocr.runehelper_ocr',
                  'PoE2_Data_Logger.core.catalog_repairs',
@@ -82,6 +115,7 @@ def verify(executable, check_files=True):
         module_archive.extract(name)
     runtime = executable.parent / '_internal'
     native_files = 0
+    unique_artwork_files = 0
     if check_files:
         if pe_machine(executable) != 0x8664:
             raise ValueError('The application must be a 64-bit Windows executable.')
@@ -96,6 +130,7 @@ def verify(executable, check_files=True):
         for path in required:
             if not path.is_file() or path.stat().st_size == 0:
                 raise ValueError(f'Missing runtime file: {path.relative_to(executable.parent).as_posix()}')
+        unique_artwork_files = verify_unique_catalog(runtime / 'PoE2_Data_Logger' / 'unique_item_assets')
         for path in runtime.rglob('*'):
             if path.suffix.casefold() in ('.exe', '.dll', '.pyd') and path.is_file():
                 if pe_machine(path) != 0x8664:
@@ -104,7 +139,8 @@ def verify(executable, check_files=True):
     return {'options': options, 'python_version': version,
             'python_library': '_internal/' + library,
             'application_modules': len(module_archive.toc), 'files_checked': check_files,
-            'native_files_checked': native_files}
+            'native_files_checked': native_files,
+            'unique_artwork_files_checked': unique_artwork_files}
 
 
 if __name__ == '__main__':

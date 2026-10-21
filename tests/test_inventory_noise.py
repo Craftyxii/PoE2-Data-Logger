@@ -98,14 +98,19 @@ class InventoryNoiseTests(unittest.TestCase):
         self.assertEqual(result["items"], [])
         self.assertEqual(result["unknown"], [])
 
-    def test_belt_spanning_slots_38_and_39_does_not_create_review_rows(self):
-        """Verify belt spanning slots 38 and 39 does not create review rows."""
+    def test_unique_belt_spanning_slots_38_and_39_creates_one_complete_item_row(self):
+        """The supplied Mageblood art now reaches review once, with both cells intact."""
         image = self.grid()
         image.paste(self.source.crop((1424, 450, 1525, 501)).resize((80, 40)), (40, 120))
         self.assertEqual(item_ocr._inventory_equipment_slots(image), {38, 39})
         with patch.object(currency_ocr, "get_reader", return_value=self.reader):
             result = item_ocr.scan_inventory_grid(image)
-        self.assertEqual(result["items"], [])
+        self.assertEqual(len(result["items"]), 1)
+        item = result["items"][0]
+        self.assertEqual((item["slot"], item["grid_slots"], item["quantity"], item["category"]),
+                         (38, [38, 39], 1, "Item"))
+        self.assertTrue(item["name"] == "Mageblood" or "Mageblood" in item.get("candidate", "").split(" / "))
+        self.assertFalse(item["count_needs_review"])
         self.assertEqual(result["unknown"], [])
 
     def test_unknown_single_slot_item_stays_reviewable_beside_large_gear(self):

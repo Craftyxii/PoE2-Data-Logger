@@ -48,6 +48,7 @@
 | [item_ocr.py](PoE2_Data_Logger/ocr/item_ocr.py) | Item and Ritual reward readings |
 | [item_text.py](PoE2_Data_Logger/ocr/item_text.py) | Tooltip text parsing |
 | [ritual_grid.py](PoE2_Data_Logger/ocr/ritual_grid.py) | Ritual reward-grid geometry and item footprints |
+| [unique_items.py](PoE2_Data_Logger/ocr/unique_items.py) | Cached, full-footprint unique-item artwork matching for Currency and Ritual; shared artwork retains name choices |
 | [opened_scan.py](PoE2_Data_Logger/ocr/opened_scan.py) | Opened remnant scanning and OCR model checks |
 | [propagation_scan.py](PoE2_Data_Logger/ocr/propagation_scan.py) | Selected recipe and propagated rune marker recognition |
 | [propagation_marks.py](PoE2_Data_Logger/ocr/propagation_marks.py) | Three-peak propagation mark detection against recipe tile positions |
@@ -92,6 +93,7 @@
 - [tools/verify_build.py](tools/verify_build.py) checks the packaged Windows runtime.
 - [gpu_worker/](gpu_worker/README.md), [tools/build_label_gpu.py](tools/build_label_gpu.py) and [tools/verify_label_gpu.py](tools/verify_label_gpu.py) build and verify the separate optional DirectML runtime.
 - [tools/build_atlas_catalog.py](tools/build_atlas_catalog.py) rebuilds the bundled atlas from its versioned source data.
+- [tools/build_unique_item_catalog.py](tools/build_unique_item_catalog.py) rebuilds the pinned [unique artwork catalog](PoE2_Data_Logger/unique_item_assets/NOTICE.txt), retaining source images, inventory dimensions and shared-art alternatives.
 - [tools/run_tests.py](tools/run_tests.py) runs targeted tests or full discovery in isolated batches.
 - [tools/audit_propagation_crowns.py](tools/audit_propagation_crowns.py) and [tools/audit_propagation_prefill.py](tools/audit_propagation_prefill.py) measure captured-image mark recognition and family filling.
 - [tools/native_hud_input.py](tools/native_hud_input.py) exercises native Windows input for HUD validation.

@@ -1,0 +1,13 @@
+User-supplied PoE2 inventory capture, supplied 2026-10-20 in
+Screenshot 2026-10-20 163653.zip. Original PNG bytes retained.
+SHA-256: df67a0867e746e8f55bed4191c41471d378e41ee860b2b03e183a2663559c1f6
+
+Game artwork belongs to Grinding Gear Games. This fixture is recognition
+evidence, not an original asset of PoE2 Data Logger.
+
+Production inventory alignment: (8, 18, 653, 286), size 645 x 268.
+The rightmost shield occupies slots 11, 12, 23, 24, 35, 36, 47, 48.
+Its complete artwork visually matches the pinned Redblade Banner image.
+The test requires that name among review choices, not automatic approval.
+Resampled variants test this capture's scale tolerance, not independent
+captures from different game display settings.

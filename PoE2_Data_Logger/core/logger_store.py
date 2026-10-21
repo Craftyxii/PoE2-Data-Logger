@@ -3400,10 +3400,14 @@ def save_currency_snapshot(phase, items, expected_map_id=None, *, register_names
         if expected_map_id is not None and map_id != expected_map_id:
             raise ValueError(f"This currency scan belongs to {expected_map_id}. Scan {map_id} before saving.")
         if register_names:
+            item_labels = {str(item.get("name") or "").strip().casefold() for item in items
+                           if isinstance(item, dict) and item.get("category") == "Item"}
             for item in items:
                 if not isinstance(item, dict):
                     raise ValueError("Review the inventory rows first.")
-                _canonical_registered_name(db, item.get("name"), "Currency")
+                category = ("Item" if str(item.get("name") or "").strip().casefold() in item_labels
+                            else "Currency")
+                _canonical_registered_name(db, item.get("name"), category)
         known = {row[0].casefold(): row[0] for row in db.execute("SELECT name FROM currency_items")}
         item_catalog = {row[0].casefold(): row[0] for row in db.execute("SELECT name FROM item_names")}
         known.update(item_catalog)

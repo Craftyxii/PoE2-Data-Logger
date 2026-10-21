@@ -51,7 +51,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.23 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.24 Beta"
 SCAN_TIMEOUT_MS = 90000
 SCAN_PRESENTATION_RETRY_MS = 100
 SCAN_PRESENTATION_WAIT_SECONDS = 10
@@ -6889,7 +6889,8 @@ class LoggerWindow(QMainWindow):
                 if slot is not None:
                     cell.setToolTip(f"Inventory slot {slot}")
                 if isinstance(image, Image.Image) and type(slot) is int and 1 <= slot <= 60:
-                    crop = item_ocr.inventory_cell(image, slot)
+                    declared = review_learning.inventory_footprint_crop(image, item)
+                    crop = declared[0] if declared is not None else item_ocr.inventory_cell(image, slot)
                     crop.thumbnail((48, 48))
                     raw = io.BytesIO()
                     crop.save(raw, format="PNG")
@@ -7149,6 +7150,7 @@ class LoggerWindow(QMainWindow):
         rows, examples = [], []
         item_names = {name.casefold() for name in logger.item_names()}
         omen_names = {name.casefold() for name in logger.ritual_names()}
+        currency_names = {name.casefold() for name in logger.currency_names()}
         for row in range(self.inventory_table.rowCount()):
             controls = self.inventory_table.cellWidget(row, 3)
             name = self.inventory_table.item(row, 1)
@@ -7162,17 +7164,22 @@ class LoggerWindow(QMainWindow):
                     self._set_currency_review(controls, "rejected", unnamed=True)
                 continue
             amount = self.inventory_table.item(row, 2)
-            review_learning.validate_name(text, "Omen" if text.casefold() in omen_names else "Currency")
+            metadata = name.data(Qt.ItemDataRole.UserRole) or {}
+            original = metadata.get("original", {})
+            category = ("Omen" if text.casefold() in omen_names else
+                        "Item" if text.casefold() in item_names else
+                        "Currency" if text.casefold() in currency_names else
+                        "Item" if original.get("category") == "Item" else "Currency")
+            review_learning.validate_name(text, category)
             logger._integer(amount.text().strip() if amount else "", text + " stack count", 0, 1000000)
             rows.append({"name": text,
                          "quantity": amount.text().strip() if amount else ""})
-            metadata = name.data(Qt.ItemDataRole.UserRole) or {}
+            if category == "Item":
+                rows[-1]["category"] = "Item"
             capture = self._inventory_capture_context if reviewing else None
             if metadata.get("has_capture") and capture and logger._integer(
                     rows[-1]["quantity"], text + " stack count", 0, 1000000) > 0:
-                example = review_learning.make_example(capture["image"], metadata.get("original", {}),
-                                                       text, "Item" if text.casefold() in item_names else "Currency",
-                                                       "currency")
+                example = review_learning.make_example(capture["image"], original, text, category, "currency")
                 if example:
                     examples.append(example)
         saved = logger.save_currency_snapshot(phase, rows,

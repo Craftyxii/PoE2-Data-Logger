@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from runpy import run_path
 import struct
@@ -11,7 +13,7 @@ from unittest.mock import Mock, patch
 
 from PyInstaller.archive.readers import CArchiveReader
 
-from tools.verify_build import pe_machine, verify
+from tools.verify_build import UNIQUE_CATALOG_SHA256, pe_machine, verify, verify_unique_catalog
 
 
 MODULES = (
@@ -27,6 +29,7 @@ MODULES = (
     'PoE2_Data_Logger.platform.hotkey',
     'PoE2_Data_Logger.ocr.opened_scan',
     'PoE2_Data_Logger.ocr.item_ocr',
+    'PoE2_Data_Logger.ocr.unique_items',
     'PoE2_Data_Logger.ocr.propagation_scan',
     'PoE2_Data_Logger.ocr.runehelper_ocr',
     'PoE2_Data_Logger.core.catalog_repairs',
@@ -78,6 +81,28 @@ class BuildVerificationTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(windows_binary())
         (self.runtime / 'base_library.zip').write_bytes(b'bundled standard library')
+        self.unique_assets = self.runtime / 'PoE2_Data_Logger/unique_item_assets'
+        self.unique_assets.mkdir(parents=True)
+        (self.unique_assets / 'NOTICE.txt').write_text('Original artwork belongs to Grinding Gear Games.')
+        source_assets = Path(__file__).resolve().parents[1] / 'PoE2_Data_Logger/unique_item_assets'
+        self.unique_icons = {}
+        entries = []
+        for source in sorted((source_assets / 'icons').glob('*.png'))[:2]:
+            raw = source.read_bytes()
+            digest = hashlib.sha256(raw).hexdigest()
+            name = f'icons/{digest}.png'
+            target = self.unique_assets / name
+            target.parent.mkdir(exist_ok=True)
+            target.write_bytes(raw)
+            self.unique_icons[name] = raw
+            entries.append({'icon': name, 'image_sha256': digest, 'shared_names': ['Shared artwork rival']})
+        self.assertEqual(len(entries), 2)
+        self.unique_manifest = (json.dumps({'schema_version': 1, 'items': entries}) + '\n').encode()
+        (self.unique_assets / 'manifest.json').write_bytes(self.unique_manifest)
+        digest_patch = patch('tools.verify_build.UNIQUE_CATALOG_SHA256',
+                             hashlib.sha256(self.unique_manifest).hexdigest())
+        digest_patch.start()
+        self.addCleanup(digest_patch.stop)
         reader_patch = patch('tools.verify_build.CArchiveReader', return_value=self.archive)
         self.reader = reader_patch.start()
         self.addCleanup(reader_patch.stop)
@@ -98,6 +123,7 @@ class BuildVerificationTests(unittest.TestCase):
         self.assertEqual(result['python_library'], '_internal/python312.dll')
         self.assertTrue(result['files_checked'])
         self.assertEqual(result['native_files_checked'], 4)
+        self.assertEqual(result['unique_artwork_files_checked'], 2)
         self.archive.open_embedded_archive.assert_called_once_with('PYZ.pyz')
         self.assertEqual([call.args[0] for call in self.module_archive.extract.call_args_list],
                          list(MODULES))
@@ -205,6 +231,42 @@ class BuildVerificationTests(unittest.TestCase):
 
         self.assertEqual(verify(self.executable)['native_files_checked'], 4)
 
+    def test_missing_or_damaged_unique_manifest_is_rejected(self):
+        """The bundle must retain the exact reviewed manifest, including all rival labels."""
+        path = self.unique_assets / 'manifest.json'
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, 'Missing bundled unique catalog: manifest.json'):
+            verify(self.executable)
+        changed = json.loads(self.unique_manifest)
+        del changed['items'][0]['shared_names']
+        path.write_text(json.dumps(changed))
+        with self.assertRaisesRegex(ValueError, 'unique catalog manifest integrity check failed'):
+            verify(self.executable)
+
+    def test_missing_or_empty_unique_artwork_credits_are_rejected(self):
+        """The distributed game artwork must include its ownership and source notice."""
+        path = self.unique_assets / 'NOTICE.txt'
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, 'Missing bundled unique catalog credits: NOTICE.txt'):
+            verify(self.executable)
+        path.write_bytes(b'')
+        with self.assertRaisesRegex(ValueError, 'Missing bundled unique catalog credits: NOTICE.txt'):
+            verify(self.executable)
+
+    def test_each_missing_or_damaged_unique_artwork_is_rejected(self):
+        """A missing or replaced rival cannot silently reduce the packaged catalog."""
+        for name, original in self.unique_icons.items():
+            path = self.unique_assets / name
+            with self.subTest(icon=name, damage='missing'):
+                path.unlink()
+                with self.assertRaisesRegex(ValueError, 'Missing bundled unique artwork'):
+                    verify(self.executable)
+            with self.subTest(icon=name, damage='changed'):
+                path.write_bytes(original + b'changed')
+                with self.assertRaisesRegex(ValueError, 'unique artwork integrity check failed'):
+                    verify(self.executable)
+            path.write_bytes(original)
+
     def test_incompatible_native_extension_is_rejected(self):
         """Verify bundled native extensions with incompatible architecture are rejected."""
         (self.runtime / 'scanner.pyd').write_bytes(windows_binary(machine=0x14C))
@@ -222,7 +284,18 @@ class BuildVerificationTests(unittest.TestCase):
 
         self.assertFalse(result['files_checked'])
         self.assertEqual(result['native_files_checked'], 0)
+        self.assertEqual(result['unique_artwork_files_checked'], 0)
         self.assertEqual(self.module_archive.extract.call_count, len(MODULES))
+
+
+class UniqueCatalogSourceTests(unittest.TestCase):
+    """Bind the real bundled source catalog to its reviewed metadata and original PNGs."""
+
+    def test_source_assets_match_the_pinned_manifest_and_all_image_hashes(self):
+        directory = Path(__file__).resolve().parents[1] / 'PoE2_Data_Logger/unique_item_assets'
+        self.assertEqual(hashlib.sha256((directory / 'manifest.json').read_bytes()).hexdigest(),
+                         UNIQUE_CATALOG_SHA256)
+        self.assertEqual(verify_unique_catalog(directory), 446)
 
 
 class WindowsBinaryTests(unittest.TestCase):

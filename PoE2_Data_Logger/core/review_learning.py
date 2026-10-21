@@ -39,6 +39,32 @@ def footprint(slots, *, columns=12, maximum_rows=10):
     return width, height
 
 
+def inventory_footprint_crop(image, original):
+    """Crop a declared full item only when its box matches its aligned inventory slots."""
+    if not isinstance(image, Image.Image) or not isinstance(original, dict):
+        return None
+    slots = original.get("grid_slots")
+    shape = footprint(slots, maximum_rows=5)
+    box = original.get("box")
+    if (shape is None or type(original.get("slot")) is not int or original.get("slot") != min(slots) or
+            not isinstance(box, (list, tuple)) or len(box) != 4 or
+            any(isinstance(value, bool) or not isinstance(value, (int, float)) or
+                not math.isfinite(value) for value in box)):
+        return None
+    from PoE2_Data_Logger.ocr.item_ocr import inventory_grid
+    aligned = inventory_grid(image)
+    column, row = (min(slots) - 1) % 12, (min(slots) - 1) // 12
+    expected = (round(column * aligned.width / 12), round(row * aligned.height / 5),
+                round((column + shape[0]) * aligned.width / 12),
+                round((row + shape[1]) * aligned.height / 5))
+    if tuple(box) != expected:
+        return None
+    left, top, right, bottom = expected
+    if not 0 <= left < right <= aligned.width or not 0 <= top < bottom <= aligned.height:
+        return None
+    return aligned.crop(expected).convert("RGB"), shape
+
+
 def make_example(image, original, name, category, mode):
     """Return an example only for an actual correction with captured evidence.
 
@@ -56,12 +82,20 @@ def make_example(image, original, name, category, mode):
     if original.get("rejected"):
         return None
     if mode == "currency":
-        slot = original.get("slot")
-        if type(slot) is not int or not 1 <= slot <= 60:
-            return None
-        from PoE2_Data_Logger.ocr.item_ocr import inventory_cell, inventory_grid
-        crop = inventory_cell(inventory_grid(image), slot)
-        shape = (1, 1)
+        if "grid_slots" in original:
+            declared = inventory_footprint_crop(image, original)
+            if declared is None:
+                return None
+            crop, shape = declared
+            if shape != (1, 1) and category != "Item":
+                return None
+        else:
+            slot = original.get("slot")
+            if type(slot) is not int or not 1 <= slot <= 60:
+                return None
+            from PoE2_Data_Logger.ocr.item_ocr import inventory_cell, inventory_grid
+            crop = inventory_cell(inventory_grid(image), slot)
+            shape = (1, 1)
     elif mode == "ritual":
         shape = footprint(original.get("grid_slots"))
         box = original.get("box")

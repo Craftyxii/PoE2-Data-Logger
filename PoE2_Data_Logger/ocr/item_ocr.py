@@ -544,7 +544,7 @@ def _inventory_labels(image):
     return labels
 
 
-def _inventory_equipment_slots(image):
+def _inventory_equipment_footprints(image):
     """Find occupied rectangular multi-cell equipment from missing inventory dividers.
 
     Only rectangles up to two columns by four rows with content across their
@@ -594,7 +594,7 @@ def _inventory_equipment_slots(image):
             left, right = round(column * image.width / 12), round((column + 1) * image.width / 12)
             if continuous(0, round(row * image.height / 5), left, right):
                 join((row - 1) * 12 + column + 1, row * 12 + column + 1)
-    equipment = set()
+    equipment = []
     for group in groups:
         columns = [(slot - 1) % 12 for slot in group]
         rows = [(slot - 1) // 12 for slot in group]
@@ -603,8 +603,91 @@ def _inventory_equipment_slots(image):
         content_rows = {(slot - 1) // 12 for slot in group & occupied}
         if (2 <= len(group) <= 8 and width <= 2 and height <= 4 and len(group) == width * height
                 and len(content_columns) == width and len(content_rows) == height):
-            equipment.update(group)
+            equipment.append(tuple(sorted(group)))
     return equipment
+
+
+def _inventory_equipment_slots(image):
+    """Retain the existing equipment exclusion as a set of occupied cells."""
+    return {slot for group in _inventory_equipment_footprints(image) for slot in group}
+
+
+def _inventory_unique_footprints(image, labels, cells):
+    """Find full equipment candidates without treating a matched stack as part of gear.
+
+    Occupied blue item backgrounds can obscure the gold lattice. The existing
+    continuity detector remains a fallback; absent divider runs supply extra
+    candidates only. No cells are consumed until complete catalog artwork matches.
+    """
+    if not cells:
+        return []
+    # A complete equipment rectangle can contain a nearly blank subcell
+    # (thin handles and shield corners). Keep those cells available for whole
+    # artwork matching without adding them to the ordinary stack scan.
+    allowed = set(range(1, 61))
+    if labels is not None:
+        allowed.difference_update(slot for slot, label in labels.items()
+                                  if type(label.get("count")) is int and label["count"] > 1)
+    pixels = np.asarray(image.convert("RGB"), dtype=np.float32)
+    red, green, blue = pixels.transpose(2, 0, 1)
+    divider = (((red > green * 1.12) & (green > blue * 1.08) & (red > 17) & (red < 170)) |
+               ((red < 7) & (green < 7) & (blue < 7)))
+    parents = list(range(60))
+
+    def root(index):
+        """Read a candidate's disjoint-set owner without retaining cross-scan state."""
+        while parents[index] != index:
+            index = parents[index]
+        return index
+
+    def join(first, second):
+        """Keep verified count stacks separate while following an uncut item background."""
+        if first + 1 in allowed and second + 1 in allowed:
+            parents[root(first)] = root(second)
+
+    for row in range(5):
+        top, bottom = round(row * image.height / 5), round((row + 1) * image.height / 5)
+        inset = max(2, round((bottom - top) * .08))
+        for column in range(1, 12):
+            x = round(column * image.width / 12)
+            support = divider[top + inset:bottom - inset, max(0, x - 2):x + 3].mean(axis=0).max()
+            if support < .92:
+                join(row * 12 + column - 1, row * 12 + column)
+    for row in range(1, 5):
+        y = round(row * image.height / 5)
+        for column in range(12):
+            left, right = round(column * image.width / 12), round((column + 1) * image.width / 12)
+            inset = max(2, round((right - left) * .08))
+            support = divider[max(0, y - 2):y + 3, left + inset:right - inset].mean(axis=1).max()
+            if support < .92:
+                join((row - 1) * 12 + column, row * 12 + column)
+    groups = {}
+    for slot in allowed:
+        groups.setdefault(root(slot - 1), set()).add(slot)
+    candidates = {tuple(sorted(group)) for group in groups.values()
+                  if len(group) > 1 and group.intersection(cells)}
+    candidates.update(group for group in _inventory_equipment_footprints(image)
+                      if set(group).issubset(allowed))
+    from PoE2_Data_Logger.core.review_learning import footprint
+    return sorted((group for group in candidates if footprint(group, maximum_rows=5) is not None),
+                  key=lambda group: (-len(group), group[0]))
+
+
+def _inventory_unique_row(match, image, slots):
+    """Describe one catalog item using the existing review fields and its whole footprint."""
+    first, last = min(slots), max(slots)
+    left, top = round(((first - 1) % 12) * image.width / 12), round(((first - 1) // 12) * image.height / 5)
+    right = round((((last - 1) % 12) + 1) * image.width / 12)
+    bottom = round((((last - 1) // 12) + 1) * image.height / 5)
+    name = match.get("name") or ""
+    result = {"slot": first, "name": name, "quantity": 1, "score": match["score"],
+              "category": "Item", "catalog_unique": match.get("catalog_unique", True),
+              "catalog_revision": match.get("catalog_revision", ""), "source": match.get("source", ""),
+              "grid_slots": list(slots), "box": (left, top, right, bottom),
+              "count_needs_review": False, "name_needs_review": not bool(name)}
+    if not name:
+        result["candidate"] = " / ".join(match.get("candidate_names") or [])
+    return result
 
 
 def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitivity.DEFAULT):
@@ -633,12 +716,39 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
         if float(np.asarray(cell, dtype=np.uint8).std(axis=(0, 1)).mean()) < 8:
             continue
         cells[slot] = cell
+    from PoE2_Data_Logger.ocr import unique_items
+    from PoE2_Data_Logger.core.review_learning import footprint
+    unique_rows, unique_slots = [], set()
+    for group in _inventory_unique_footprints(image, labels, cells):
+        if unique_slots.intersection(group):
+            continue
+        bounds = _inventory_unique_row({"score": 0}, image, group)["box"]
+        match = unique_items.match(image.crop(bounds), footprint(group, maximum_rows=5), strictness=strictness)
+        if match:
+            shape = footprint(group, maximum_rows=5)
+            # User corrections keep their existing priority except when the
+            # source explicitly says that several names share this artwork.
+            if len(match.get("candidate_names") or []) <= 1:
+                correction = _reviewed_match(reader, image.crop(bounds),
+                    _reviewed_bank(reader, references, shape), strictness=strictness)
+                if correction:
+                    match = {**match, "name": correction[0], "score": correction[1],
+                             "source": "local reviewed reference", "catalog_unique":
+                             unique_items.is_unique_name(correction[0])}
+            row = _inventory_unique_row(match, image, group)
+            if strictness == 100:
+                row["name_needs_review"] = True
+            unique_rows.append(row)
+            unique_slots.update(group)
     hints = {slot: (labels[slot].get("count") if labels is not None and
                     labels[slot]["count_present"] else None) for slot in cells}
     currency_ocr.prefetch_catalog_ranks(reader, ((cell, len(str(hints[slot])) if
-        hints[slot] is not None else None) for slot, cell in cells.items() if slot not in equipment))
-    found, unknown = [], []
+        hints[slot] is not None else None) for slot, cell in cells.items()
+        if slot not in equipment and slot not in unique_slots))
+    found, unknown = list(unique_rows), []
     for slot, cell in cells.items():
+        if slot in unique_slots:
+            continue
         count_hint = hints[slot]
         icon = (reader.icon(cell, count_digits=len(str(count_hint)) if count_hint is not None else None)
                 if strictness == ocr_sensitivity.DEFAULT else
@@ -647,13 +757,29 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
         # A saved reference must not turn a confirmed empty cell into a reward.
         if icon.get("empty"):
             continue
+        unique = (unique_items.match(cell, (1, 1), strictness=strictness)
+                  if slot not in equipment and
+                  not icon.get("family") and
+                  not (labels is not None and type(labels[slot].get("count")) is int and
+                       labels[slot]["count"] > 1) else None)
         correction = (_reviewed_match(reader, cell, reviewed, catalog=icon, strictness=strictness)
-                      if slot not in equipment else None)
+                      if slot not in equipment and not (unique and
+                          len(unique.get("candidate_names") or []) > 1) else None)
         name = correction[0] if correction else None
         score = icon.get("score", 0)
         if correction:
             score = correction[1]
-        elif icon.get("family"):
+        if unique:
+            if correction:
+                unique = {**unique, "name": correction[0], "score": correction[1],
+                          "source": "local reviewed reference", "catalog_unique":
+                          unique_items.is_unique_name(correction[0])}
+            row = _inventory_unique_row(unique, image, (slot,))
+            if strictness == 100:
+                row["name_needs_review"] = True
+            found.append(row)
+            continue
+        if not correction and icon.get("family"):
             if labels is not None:
                 tier = labels[slot].get("tier", "")
                 if len(icon["members"]) > 1 and labels[slot].get("tier_present") and not tier:
@@ -668,7 +794,7 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
                 unknown.append({"slot": slot, "candidate": " / ".join(icon["members"]),
                                 "score": round(score, 3), "reason": "shared icon; check tier"})
                 continue
-        elif examples:
+        elif not correction and examples:
             ranked = reader.examples(cell, examples)
             if ranked:
                 top = ranked[0]
@@ -731,6 +857,7 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
         elif strictness != ocr_sensitivity.DEFAULT and slot not in equipment:
             # A stricter suggestion gate must retain occupied cells for manual labels.
             unknown.append({"slot": slot, "candidate": "Unrecognized item", "score": round(score, 3)})
+    found.sort(key=lambda item: item["slot"])
     result = {"items": found, "unknown": unknown, "status": "review"}
     if strictness != ocr_sensitivity.DEFAULT:
         result["_ocr_strictness"] = strictness
@@ -1303,6 +1430,7 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
     between standard and 4K captures.
     """
     from PoE2_Data_Logger.core.review_learning import footprint
+    from PoE2_Data_Logger.ocr import unique_items
     reader = currency_ocr.get_reader()
     references = _reference_snapshot(references)
     reviewed = {}
@@ -1335,6 +1463,7 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
         shape = footprint(reward["slots"])
         correction = None
         catalog_icon = None
+        unique = None
         if not multiple:
             count = label.get("count") or label.get("count_candidate")
             digits = len(str(count)) if count is not None else None
@@ -1348,26 +1477,37 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
                 reviewed[shape] = _reviewed_bank(reader, references, shape)
             shown = (image.crop((box[0] + frame_inset, box[1] + frame_inset, box[2], box[3])).convert("RGB")
                      if multiple else cells[index])
-            correction = _reviewed_match(reader, shown, reviewed[shape], catalog=catalog_icon,
-                                         strictness=strictness)
+            if multiple or (not catalog_icon.get("family") and not catalog_icon.get("shared_icon") and
+                            not (type(label.get("count")) is int and label["count"] > 1)):
+                unique = unique_items.match(shown, shape, strictness=strictness)
+            if not (unique and len(unique.get("candidate_names") or []) > 1):
+                correction = _reviewed_match(reader, shown, reviewed[shape], catalog=catalog_icon,
+                                             strictness=strictness)
         if correction:
             name, score, kind = correction
             candidates = []
+        elif unique:
+            name, score, candidates = unique["name"], unique["score"], unique["candidate_names"]
+            kind = "item"
         else:
             name, score, candidates = (None, 0.0, []) if multiple else _ritual_reward_icon(
                 reader, cells[index], label, examples, icon=catalog_icon, strictness=strictness)
             kind = "omen" if (name in omen_names or
                               catalog_icon and catalog_icon.get("method") == "Ritual grayscale Omen shape") else "item"
-        quantity = 1 if multiple else label.get("count") or label.get("count_candidate") or 1
+        quantity = 1 if multiple or unique else label.get("count") or label.get("count_candidate") or 1
         deferred = index in deferred_rewards
         item = {"category": "Omen" if kind == "omen" else "Item", "name": name or "",
                 "quantity": quantity, "tribute": None,
                 "source": "icon reference: Ritual reward grid" if name else "Occupied Ritual reward; name unresolved",
                 "score": round(score, 3), "name_match": 1.0 if name in omen_names else 0.0,
                 "needs_review": True, "name_needs_review": not bool(name), "unresolved": not bool(name),
-                "category_verified": bool(name) or multiple or kind == "omen",
-                "count_needs_review": False if multiple else not label.get("count_verified", False),
+                "category_verified": bool(name) or multiple or kind == "omen" or bool(unique),
+                "count_needs_review": False if multiple or unique else not label.get("count_verified", False),
                 "deferred": deferred, "box": box, "grid_slots": list(reward["slots"])}
+        if unique:
+            item.update(catalog_unique=unique_items.is_unique_name(name) if correction else True,
+                        catalog_revision=unique["catalog_revision"],
+                        source="local reviewed reference" if correction else unique["source"])
         if not name and candidates:
             item["candidate_names"] = candidates
         # Text may confirm an ambiguous occupied icon or its price. It cannot

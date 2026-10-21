@@ -1,0 +1,44 @@
+Path of Exile 2 unique-item artwork reference catalog
+===================================================
+
+Game data, item names and artwork are owned by Grinding Gear Games (GGG).
+Path of Exile is a trademark of Grinding Gear Games. These reference assets
+are not original artwork of PoE2 Data Logger and are not covered by its asset
+license. No endorsement by GGG is implied.
+
+Source: RePoE PoE2 generated export
+https://github.com/repoe-fork/poe2
+Pinned revision: 75885a099f2e9be1619aa3c793fe6ab0754a511f
+Export revision date: 2026-10-19
+Export/internal build label: 0.5.5.4.2
+This is an upstream export label, not a claim about the installed game version.
+
+Canonical names, unique-stash row IDs, visual identities and inventory
+footprints come from data/uniques.json. Base-name artwork alternatives come
+from data/base_items.json. Original PNG artwork comes from the same pinned
+export's data/Art tree. The manifest records immutable URLs and SHA-256 hashes.
+PNG bytes, aspect ratios and alpha channels are retained without rendering or
+resizing. Repeated files are deduplicated by their exact SHA-256 digest.
+
+The unique export does not provide an authoritative relationship to base-item
+Metadata IDs. base_id is therefore null; shared-art base references are visual
+alternatives and must not be treated as a unique-to-base identity mapping.
+The export's data/uniques.html explicitly states that game files cannot confirm
+actual unique availability or drop rates. This catalog does not claim that all
+listed items are obtainable, current, or eligible for Ritual rewards.
+
+RePoE generator source and license:
+https://github.com/repoe-fork/repoe
+Pinned generator reference: 6041ef0f2847bf9063713336d85b43067d057a2f
+https://github.com/repoe-fork/repoe/blob/6041ef0f2847bf9063713336d85b43067d057a2f/LICENSE.md
+RePoE software is MIT licensed, Copyright (c) 2016 brather1ng.
+The RePoE license separately states that contents of generated files in the
+data directory are owned by Grinding Gear Games and their use/publication
+must accord with GGG's terms of use. The MIT software license does not grant
+an MIT license to this generated game data or artwork.
+
+GGG terms of use: https://www.pathofexile.com/legal/terms-of-use-and-privacy-policy
+
+Credit to the RePoE maintainers and contributors, PyPoE, the PoE2 data-schema
+contributors, and Grinding Gear Games. Reference matching runs entirely from
+the bundled local files; scanning does not fetch these URLs.

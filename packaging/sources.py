@@ -46,6 +46,7 @@ OCR_SOURCES = (
     "ocr/item_text.py",
     "ocr/kill_counts.py",
     "ocr/ritual_grid.py",
+    "ocr/unique_items.py",
     "ocr/opened_scan.py",
     "ocr/propagation_scan.py",
     "ocr/propagation_marks.py",
@@ -107,4 +108,5 @@ DESKTOP_RESOURCES = (
 
 FILE_RESOURCES = DATABASE_RESOURCES + SCANNER_RESOURCES + DESKTOP_RESOURCES
 # These directories retain their relative layout for runtime asset lookups.
-DIRECTORY_RESOURCES = ("fonts", "region_examples", "third_party", "atlas", "ocr/ritual_assets", "rune_icons")
+DIRECTORY_RESOURCES = ("fonts", "region_examples", "third_party", "atlas", "ocr/ritual_assets", "rune_icons",
+                       "unique_item_assets")
