@@ -85,8 +85,8 @@ class RitualReviewRowsTests(unittest.TestCase):
         self.window.ritual_table.item(row, 5).setCheckState(
             Qt.CheckState.Checked if deferred else Qt.CheckState.Unchecked)
 
-    def test_all_occupied_rows_remain_visible_with_unknown_fields_and_review_reasons(self):
-        """Verify every occupied reward remains visible with unknown fields and appropriate review reasons."""
+    def test_only_uncertain_occupied_rows_are_visible_with_fields_and_review_reasons(self):
+        """Keep verified rewards for saving while exposing only occupied rows needing correction."""
         items = [self.known(grid_slots=[1]), self.unknown(),
                  self.unknown(15, count_needs_review=True)]
         self.read(self.result(items, grid_detected=True, grid_reward_count=3), live=True, auto=True)
@@ -96,7 +96,9 @@ class RitualReviewRowsTests(unittest.TestCase):
         self.assertEqual(table.columnCount(), 7)
         self.assertEqual(table.horizontalHeaderItem(6).text(), "Review")
         self.assertEqual(table.item(0, 1).text(), "Chaos Orb")
+        self.assertTrue(table.isRowHidden(0))
         for row in (1, 2):
+            self.assertFalse(table.isRowHidden(row))
             self.assertEqual((table.item(row, 0).text(), table.item(row, 1).text()), ("", ""))
             self.assertIn("name", table.item(row, 6).text().casefold())
         self.assertEqual(table.item(1, 2).text(), "1")
@@ -177,12 +179,58 @@ class RitualReviewRowsTests(unittest.TestCase):
                    {"quantity": 0}, {"quantity": 1.5}, {"quantity": True},
                    {"quantity": 1000001}, {"deferred": None}, {"deferred": "false"},
                    {"deferred_needs_review": True}, {"deferred_uncertain": True},
-                   {"score": .93}, {"score": float("nan")}, {"tribute": None})
+                   {"score": .93}, {"score": float("nan")}, {"tribute": -1},
+                   {"source": "Chaos Orb x3"})
         for change in changes:
             with self.subTest(change=change):
                 result = copy.deepcopy(base)
                 result["items"][0].update(change)
                 self.assertFalse(clear_ritual_read(result, logger.ritual_names()))
+
+    def test_verified_icon_reward_without_tribute_skips_review_and_saves_automatically(self):
+        """An optional absent price must not hold an otherwise verified icon and stack count."""
+        item = self.known(name="Sacred Bloom", tribute=None, grid_slots=[13],
+                          source="icon reference: Ritual reward grid")
+        result = self.result([item], grid_detected=True, grid_reward_count=1)
+        self.assertTrue(clear_ritual_read(result, logger.ritual_names()))
+        self.read(result, live=True, auto=True)
+
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertTrue(self.window.ritual_table.isRowHidden(0))
+        self.assertTrue(self.window.ritual_table.isHidden())
+        self.assertEqual([(reward["name"], reward["quantity"], reward["tribute"])
+                          for reward in self.saved_items()], [("Sacred Bloom", 1, None)])
+
+    def test_hidden_verified_rewards_survive_rejection_of_unnamed_review_rows(self):
+        """Final approval retains hidden accepted rewards while rejecting unnamed uncertain rows."""
+        self.read(self.result([self.known(tribute=None), self.unknown()]))
+        table = self.window.ritual_table
+        self.assertTrue(table.isRowHidden(0))
+        self.assertFalse(table.isRowHidden(1))
+        self.assertIn("1 need review", self.window.review_summary.text())
+
+        self.window.approve_review()
+
+        self.assertEqual([(item["name"], item["quantity"]) for item in self.saved_items()], [("Chaos Orb", 1)])
+
+    def test_low_confidence_named_reward_stays_visible_and_editing_hidden_reward_reveals_it(self):
+        """A familiar name alone cannot bypass review; edits to accepted rows renew visibility."""
+        self.read(self.result([self.known(score=.93), self.known(name="Regal Orb")]))
+        table = self.window.ritual_table
+        self.assertFalse(table.isRowHidden(0))
+        self.assertIn("Check reading", table.item(0, 6).text())
+        self.assertTrue(table.isRowHidden(1))
+        table.item(1, 2).setText("")
+        self.assertFalse(table.isRowHidden(1))
+        self.assertIn("quantity", table.item(1, 6).text())
+
+    def test_invisible_verified_reward_cannot_be_removed_by_stale_selection(self):
+        """The remove action cannot discard an accepted reward that is absent from review."""
+        self.read(self.result([self.known(), self.unknown()]))
+        self.window.ritual_table.setCurrentCell(0, 1)
+        with self.assertRaisesRegex(ValueError, "Select a reward"):
+            self.window.remove_ritual_row()
+        self.assertEqual(self.window.ritual_table.rowCount(), 2)
 
     def test_auto_commit_rejects_incomplete_grid_duplicate_slots_and_page_uncertainty(self):
         """Verify incomplete grid coverage, duplicate slots and page uncertainty block automatic saving."""
@@ -270,7 +318,8 @@ class RitualReviewRowsTests(unittest.TestCase):
                 self.window.developer_mode.setChecked(enabled)
                 self.window.tabs.setCurrentIndex(0)
                 self.app.processEvents()
-                self.assertTrue(self.window.ritual_table.isVisible())
+                self.assertTrue(self.window.ritual_table.isHidden())
+                self.assertTrue(self.window.ritual_table.isRowHidden(0))
                 self.assertFalse(self.window.ritual_raw.isVisible())
                 self.window.tabs.setCurrentIndex(5)
                 self.app.processEvents()

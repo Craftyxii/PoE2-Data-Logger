@@ -88,25 +88,27 @@ class InventoryNoiseTests(unittest.TestCase):
                     self.reader.icon(image.resize((size, size)))
                     ranked.assert_called_once()
 
-    def test_continuous_body_armour_does_not_create_currency_rows(self):
-        """Verify continuous body armour does not create currency rows."""
+    def test_continuous_body_armour_creates_one_whole_item_review(self):
+        """Verify body armour stays one name-review item instead of currency fragments."""
         image = self.grid()
         image.paste(self.source.crop((1425, 284, 1524, 431)).resize((80, 120)), (200, 40))
         self.assertEqual(item_ocr._inventory_equipment_slots(image), {18, 19, 30, 31, 42, 43})
         with patch.object(currency_ocr, "get_reader", return_value=self.reader):
             result = item_ocr.scan_inventory_grid(image)
         self.assertEqual(result["items"], [])
-        self.assertEqual(result["unknown"], [])
+        self.assertEqual([item["grid_slots"] for item in result["unknown"]], [[18, 19, 30, 31, 42, 43]])
+        self.assertEqual(result["unknown"][0]["quantity"], 1)
 
-    def test_belt_spanning_slots_38_and_39_does_not_create_review_rows(self):
-        """Verify belt spanning slots 38 and 39 does not create review rows."""
+    def test_belt_spanning_slots_38_and_39_creates_one_whole_item_review(self):
+        """Verify a belt retains its whole artwork and one naming confirmation."""
         image = self.grid()
         image.paste(self.source.crop((1424, 450, 1525, 501)).resize((80, 40)), (40, 120))
         self.assertEqual(item_ocr._inventory_equipment_slots(image), {38, 39})
         with patch.object(currency_ocr, "get_reader", return_value=self.reader):
             result = item_ocr.scan_inventory_grid(image)
         self.assertEqual(result["items"], [])
-        self.assertEqual(result["unknown"], [])
+        self.assertEqual([item["grid_slots"] for item in result["unknown"]], [[38, 39]])
+        self.assertEqual(result["unknown"][0]["quantity"], 1)
 
     def test_unknown_single_slot_item_stays_reviewable_beside_large_gear(self):
         """Verify unknown single slot item stays reviewable beside large gear."""
@@ -115,7 +117,7 @@ class InventoryNoiseTests(unittest.TestCase):
         image.paste(self.source.crop((1352, 322, 1402, 378)).resize((40, 40)), (40, 120))
         with patch.object(currency_ocr, "get_reader", return_value=self.reader):
             result = item_ocr.scan_inventory_grid(image)
-        self.assertEqual([entry["slot"] for entry in result["unknown"]], [38])
+        self.assertEqual([entry["slot"] for entry in result["unknown"]], [18, 38])
 
     def test_separate_catalog_tiles_do_not_become_equipment(self):
         """Verify separate catalog tiles do not become equipment."""

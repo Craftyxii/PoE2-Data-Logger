@@ -106,6 +106,49 @@ class InventoryCountClippingTests(unittest.TestCase):
                 self.assertTrue(stack["count_needs_review"])
                 self.assertFalse(clear_currency_read(result))
 
+    def test_generic_ocr_prefix_cannot_verify_a_longer_visible_count(self):
+        """Even agreeing high-confidence OCR must cover all actual captured glyphs."""
+        cell = self.cell("783")
+        self.assertEqual(inventory_labels.complete_count_glyphs(cell), 3)
+        reader = currency_ocr.CurrencyReader()
+        icon = {"family": "scroll", "members": ["Scroll of Wisdom"], "score": .99}
+        for text, held in (("78", True), ("783", False)):
+            with self.subTest(ocr=text):
+                engine = SimpleNamespace(text_rec=lambda value, text=text: SimpleNamespace(
+                    txts=[text] * len(value.img), scores=[.999] * len(value.img)))
+                with patch.object(currency_ocr, "get_reader", return_value=reader), \
+                        patch.object(reader, "icon", return_value=icon), \
+                        patch.object(reader, "read_count", return_value=json.dumps({"text": "7", "conf": .99})), \
+                        patch.object(item_ocr, "_engine", return_value=engine):
+                    result = item_ocr.scan_inventory_grid(self.grid(cell))
+                    ritual_label = item_ocr._ritual_cell_labels({0: cell})[0]
+                stack = next(row for row in result["items"] if row["slot"] == 1)
+                self.assertEqual(stack["quantity"], int(text))
+                self.assertEqual(stack["count_needs_review"], held)
+                self.assertEqual(clear_currency_read(result), not held)
+                self.assertEqual(ritual_label["count_verified"], not held)
+                if held:
+                    self.assertNotIn("count", ritual_label)
+                else:
+                    self.assertEqual(ritual_label["count"], 783)
+
+    def test_custom_ocr_callback_must_cover_the_complete_visible_count(self):
+        """A caller-supplied OCR prefix cannot bypass full-count coverage checking."""
+        cell = self.cell("783")
+        reader = currency_ocr.CurrencyReader()
+        icon = {"family": "scroll", "members": ["Scroll of Wisdom"], "score": .99}
+        for text, held in (("78", True), ("783", False)):
+            with self.subTest(ocr=text), \
+                    patch.object(currency_ocr, "get_reader", return_value=reader), \
+                    patch.object(reader, "icon", return_value=icon), \
+                    patch.object(reader, "read_count", return_value=json.dumps({"text": "7", "conf": .99})):
+                result = item_ocr.scan_inventory_grid(self.grid(cell), read=lambda image: [{
+                    "text": text, "score": .999}])
+                stack = next(row for row in result["items"] if row["slot"] == 1)
+                self.assertEqual(stack["quantity"], int(text))
+                self.assertEqual(stack["count_needs_review"], held)
+                self.assertEqual(clear_currency_read(result), not held)
+
     def test_incomplete_ritual_count_cluster_never_becomes_verified(self):
         """Verify incomplete ritual count clusters remain present but unverified."""
         labels = item_ocr._ritual_cell_labels({0: self.cell("783", 2.5, taller_tail=True)})

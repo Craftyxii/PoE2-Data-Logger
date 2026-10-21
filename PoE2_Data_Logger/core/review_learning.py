@@ -60,8 +60,22 @@ def make_example(image, original, name, category, mode):
         if type(slot) is not int or not 1 <= slot <= 60:
             return None
         from PoE2_Data_Logger.ocr.item_ocr import inventory_cell, inventory_grid
-        crop = inventory_cell(inventory_grid(image), slot)
-        shape = (1, 1)
+        aligned = inventory_grid(image)
+        slots = original.get("grid_slots")
+        if slots:
+            shape = footprint(slots, maximum_rows=5)
+            if shape is None or slot != min(slots):
+                return None
+            columns = [(value - 1) % 12 for value in slots]
+            rows = [(value - 1) // 12 for value in slots]
+            left, top = round(min(columns) * aligned.width / 12), round(min(rows) * aligned.height / 5)
+            right = round((max(columns) + 1) * aligned.width / 12)
+            bottom = round((max(rows) + 1) * aligned.height / 5)
+            inset = max(1, round(min(aligned.width / 12, aligned.height / 5) * .02))
+            crop = aligned.crop((left + inset, top + inset, right, bottom)).convert("RGB")
+        else:
+            crop = inventory_cell(aligned, slot)
+            shape = (1, 1)
     elif mode == "ritual":
         shape = footprint(original.get("grid_slots"))
         box = original.get("box")

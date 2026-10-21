@@ -1,0 +1,2 @@
+Inventory screenshots provided by the user for count and grid alignment regressions.
+Game UI artwork copyright Grinding Gear Games.

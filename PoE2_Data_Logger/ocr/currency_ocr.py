@@ -458,8 +458,12 @@ class CurrencyReader:
         """Return a positive one-to-five-digit native count only at confidence .76 or higher.
 
         Use a bounded cell thumbnail and the expected upper-left count anchor;
-        callers retain review responsibility for clipping or conflicting readings.
+        reject prefix-only glyph matches when complete label geometry proves
+        additional digits. Callers retain responsibility for clipping and conflicts.
         """
+        from PoE2_Data_Logger.ocr.inventory_labels import complete_count_glyphs
+
+        glyph_count = complete_count_glyphs(image)
         image = image.copy()
         image.thumbnail((96, 96), Image.Resampling.LANCZOS)
         size = image.size
@@ -470,7 +474,8 @@ class CurrencyReader:
             trial = json.loads(self.read_count(json.dumps({**pixels, "cx": cx, "cy": cy,
                                                            "scale": scale}, separators=(",", ":"))))
             if (re.fullmatch(r"\d{1,5}", trial.get("text", "")) and
-                    trial.get("conf", 0) >= .76 and int(trial["text"]) > 0):
+                    trial.get("conf", 0) >= .76 and int(trial["text"]) > 0 and
+                    (glyph_count is None or len(trial["text"]) >= glyph_count)):
                 results.append((float(trial["conf"]), int(trial["text"])))
         if not results:
             return None

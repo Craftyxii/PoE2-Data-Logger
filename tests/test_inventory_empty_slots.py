@@ -109,7 +109,10 @@ class InventoryEmptySlotTests(unittest.TestCase):
         image.paste(self.source.crop((1352, 322, 1402, 378)).resize((40, 40)), (40, 120))
         self.assertNotIn(38, item_ocr._inventory_equipment_slots(image))
         result = self.scan(image)
-        self.assertEqual([entry["slot"] for entry in result["unknown"]], [38])
+        self.assertEqual([entry["slot"] for entry in result["unknown"]], [18, 38])
+        gear = result["unknown"][0]
+        self.assertEqual(gear["grid_slots"], [18, 19, 30, 31, 42, 43])
+        self.assertEqual((gear["category"], gear["quantity"]), ("Item", 1))
 
     def test_currency_adjacent_to_multicell_gear_is_not_discarded(self):
         """Verify currency adjacent to multicell gear is not discarded."""
@@ -121,7 +124,9 @@ class InventoryEmptySlotTests(unittest.TestCase):
         result = self.scan(image)
         self.assertEqual([(row["slot"], row["name"]) for row in result["items"]],
                          [(17, "Chaos Orb"), (32, "Runic Alloy")])
-        self.assertEqual(result["unknown"], [])
+        self.assertEqual([entry["slot"] for entry in result["unknown"]], [18])
+        self.assertEqual(result["unknown"][0]["grid_slots"], [18, 19, 30, 31, 42, 43])
+        self.assertEqual(result["unknown"][0]["quantity"], 1)
 
 
 if __name__ == "__main__":

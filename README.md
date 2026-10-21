@@ -22,6 +22,8 @@ Kills are recorded separately for Normal, Magic, Rare and Unique monsters. Each 
 
 Approved name corrections in Currency and Ritual review save captured artwork as local recognition examples and create dedicated item-count export columns. Unnamed rows are rejected. Remnant review stays tied to its captured expedition while propagation continues. **Scan settings** offers 1, 2, 4 or 6 CPU OCR threads, applied after restarting the app.
 
+Currency and Ritual review show only items needing confirmation. Confident matches remain included in the saved totals. Ritual rewards without a quantity marker count as one; unreadable visible markers remain in review.
+
 See the [user guide](docs/USER_GUIDE.md) for map setup, hotkeys, scans, reviews and exporting your data.
 
 ## Source and libraries

@@ -2439,7 +2439,7 @@ def save_currency_snapshot(phase, items, expected_map_id=None, *, register_names
             for item in items:
                 if not isinstance(item, dict):
                     raise ValueError("Review the inventory rows first.")
-                _canonical_registered_name(db, item.get("name"), "Currency")
+                _canonical_registered_name(db, item.get("name"), item.get("category", "Currency"))
         known = {row[0].casefold(): row[0] for row in db.execute("SELECT name FROM currency_items")}
         item_catalog = {row[0].casefold(): row[0] for row in db.execute("SELECT name FROM item_names")}
         known.update(item_catalog)

@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QTableWidget
 
 from PoE2_Data_Logger.core import logger_store as logger, store
 from PoE2_Data_Logger.ocr import item_ocr
-from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
+from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, clear_currency_read
 
 
 class CurrencyReviewIconsTests(unittest.TestCase):
@@ -103,6 +103,7 @@ class CurrencyReviewIconsTests(unittest.TestCase):
                          ["Icon", "Currency / Item", "Count", "Review"])
         for row, slot in enumerate((1, 60, 14)):
             self.assert_icon(row, slot, image)
+            self.assertEqual(table.isRowHidden(row), row < 2)
         self.assertEqual(table.item(2, 1).text(), "")
         self.assertEqual(table.item(2, 2).text(), "")
         self.assertEqual(table.cellWidget(2, 3).property("reviewStatus"), "pending")
@@ -150,6 +151,45 @@ class CurrencyReviewIconsTests(unittest.TestCase):
             status = table.cellWidget(row, 3).findChild(QLabel, "currencyReviewStatus")
             self.assertNotIn("Likely match", status.text())
         self.assertEqual(result, before)
+
+    def test_hidden_verified_stacks_are_saved_when_uncertain_rows_are_rejected(self):
+        """Filtering accepted stacks out of review must preserve their snapshot totals."""
+        self.capture(self.grid())(self.result(known=(1, 60), unknown=(14,)))
+        table = self.window.inventory_table
+        self.assertEqual([table.isRowHidden(row) for row in range(3)], [True, True, False])
+        self.assertIn("1 uncertain slots", self.window.review_summary.text())
+
+        self.window.approve_review()
+
+        self.assertEqual(logger.currency_for_map("M0001")["start"], {"Chaos Orb": 63})
+        self.assertEqual(table.cellWidget(2, 3).property("reviewStatus"), "rejected")
+
+    def test_named_stacks_with_identity_or_count_uncertainty_remain_visible_and_pending(self):
+        """A known label cannot suppress review when any identity or count evidence is unresolved."""
+        changes = ({"needs_review": True}, {"name_needs_review": True}, {"unresolved": True},
+                   {"count_needs_review": True}, {"quantity": 0}, {"quantity": 1.5},
+                   {"quantity": True}, {"quantity": 1000001}, {"name": " "},
+                   {"name": "Unrecognized item"})
+        for change in changes:
+            with self.subTest(change=change):
+                item = {"slot": 1, "name": "Chaos Orb", "quantity": 2, **change}
+                result = {"items": [item], "unknown": []}
+                self.assertFalse(clear_currency_read(result))
+                self.capture(self.grid())(result)
+                table = self.window.inventory_table
+                self.assertFalse(table.isRowHidden(0))
+                self.assertEqual(table.cellWidget(0, 3).property("reviewStatus"), "pending")
+
+    def test_all_verified_stacks_hide_table_and_editing_a_stack_reopens_confirmation(self):
+        """All-known reads omit the editable list until a stack is changed."""
+        self.capture(self.grid())(self.result(known=(1,), unknown=()))
+        table = self.window.inventory_table
+        self.assertTrue(table.isRowHidden(0))
+        self.assertTrue(table.isHidden())
+        table.item(0, 2).setText("4")
+        self.assertFalse(table.isRowHidden(0))
+        self.assertFalse(table.isHidden())
+        self.assertEqual(table.cellWidget(0, 3).property("reviewStatus"), "pending")
 
     def test_manual_and_captureless_rows_keep_slot_text_without_reusing_old_screenshot(self):
         """Verify manual and captureless rows show slot text without borrowing prior screenshot icons."""
