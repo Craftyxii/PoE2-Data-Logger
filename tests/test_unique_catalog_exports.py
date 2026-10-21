@@ -2,7 +2,7 @@
 
 This exercises persistence and export projection, not screenshot recognition. The
 bounded API batches intentionally include duplicate approved item rows so saved
-quantities and latest-inventory subtraction are checked for every catalog label.
+quantities and latest-scan Item accounting are checked for every catalog label.
 """
 
 import csv
@@ -10,12 +10,14 @@ import io
 from itertools import zip_longest
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from openpyxl import load_workbook
 
-from PoE2_Data_Logger.core import logger_store as logger, store, workbook_export
+from PoE2_Data_Logger.core import logger_store as logger, reference_pack, store, workbook_export
 from PoE2_Data_Logger.ocr import unique_items
 
 
@@ -44,14 +46,136 @@ class UniqueCatalogExportTests(unittest.TestCase):
         self.assertTrue(all(None not in row for row in rows))
         return headers, rows
 
-    def test_every_catalog_name_round_trips_with_latest_inventory_and_ritual_offers(self):
+    def catalog_names(self):
         manifest = Path(__file__).resolve().parents[1] / "PoE2_Data_Logger/unique_item_assets/manifest.json"
         source = json.loads(manifest.read_text(encoding="utf-8"))
         names = tuple(sorted({item["name"] for item in source["items"]}, key=str.casefold))
         self.assertEqual(len(source["items"]), 449)
         self.assertEqual(len(names), 441)
         self.assertEqual(unique_items.names(), names)
-        # Loading artwork metadata does not register unapproved user data.
+        return names, source["source"]["revision"]
+
+    def test_unobserved_catalog_is_in_sql_csv_and_xlsx_without_finds_or_ui_types(self):
+        names, revision = self.catalog_names()
+        local_names = logger.inventory_names()
+        undo_before = logger.undo_action()
+        with logger._connect() as db:
+            references = list(db.execute("SELECT name,source_revision FROM unique_item_catalog ORDER BY name"))
+            self.assertEqual(dict(references), dict.fromkeys(names, revision))
+            for table in ("commits", "currency_snapshots", "ritual_pages", "item_names", "item_icons"):
+                self.assertEqual(db.execute(f"SELECT count(*) FROM {table}").fetchone()[0], 0, table)
+        self.assertFalse(set(names).intersection(local_names))
+        self.assertFalse(set(names).intersection(row["name"] for row in logger.session_currency_totals()["items"]))
+
+        # The SQL export contains reference names and source identity, with no
+        # synthetic quantities or scan history needed to make them available.
+        sql_export = Path(self.temporary.name) / "catalog-export.sqlite3"
+        sql_export.write_bytes(logger.backup_bytes())
+        sql = sqlite3.connect(sql_export)
+        try:
+            self.assertEqual(dict(sql.execute("SELECT name,source_revision FROM unique_item_catalog")),
+                             dict.fromkeys(names, revision))
+            self.assertEqual(sql.execute("SELECT count(*) FROM commits").fetchone()[0], 0)
+        finally:
+            sql.close()
+
+        history_headers, history = self.csv_rows(logger.export_all_csv())
+        primary_headers, primary = self.csv_rows(logger.export_primary_csv())
+        self.assertEqual(history, [])
+        self.assertEqual(len(primary), 1)
+        for name in names:
+            self.assertIn("Item: " + name, history_headers)
+            self.assertIn(name, primary_headers)
+            self.assertEqual(primary[0][name], "")
+        self.assertEqual(self.csv_rows(logger.export_currency_csv())[1], [])
+        self.assertEqual(self.csv_rows(logger.export_ritual_csv())[1], [])
+
+        book = load_workbook(io.BytesIO(workbook_export.export_xlsx()), read_only=True, data_only=True)
+        try:
+            for sheet_name, headers in (("Scan History", history_headers), ("Export", primary_headers)):
+                rows = book[sheet_name].iter_rows(values_only=True)
+                self.assertEqual(list(next(rows)), headers)
+                values = list(rows)
+                if sheet_name == "Scan History":
+                    self.assertEqual(values, [])
+                else:
+                    self.assertEqual(len(values), 1)
+                    self.assertTrue(all(values[0][headers.index(name)] is None for name in names))
+        finally:
+            book.close()
+
+        # Reopening a profile is idempotent and does not decode recognition art.
+        logger._READY = False
+        with patch("PIL.Image.open", side_effect=AssertionError("Startup decoded an image")):
+            logger.initialize()
+        self.assertEqual(logger.inventory_names(), local_names)
+        self.assertEqual(logger.undo_action(), undo_before)
+        with logger._connect() as db:
+            self.assertEqual(list(db.execute("SELECT name,source_revision FROM unique_item_catalog ORDER BY name")),
+                             references)
+
+    def test_catalog_keeps_existing_and_recorded_categories_and_canonical_labels(self):
+        self.catalog_names()
+        logger.add_currency_item("bramblejack")
+        logger.add_ritual_name("HeAdHuNtEr")
+        headers, _ = self.csv_rows(logger.export_all_csv())
+        self.assertIn("Currency: bramblejack", headers)
+        self.assertIn("Omen: HeAdHuNtEr", headers)
+        self.assertNotIn("Item: Bramblejack", headers)
+        self.assertNotIn("Item: Headhunter", headers)
+        logger.save_currency_snapshot("end", [{"name": "Bramblejack", "quantity": 2,
+                                               "category": "Currency"}], register_names=True)
+        logger.save_ritual_page([{"name": "Headhunter", "quantity": 1, "category": "Omen"}],
+                                register_names=True)
+        for reset in (False, True):
+            if reset:
+                reference_pack.reset_to_defaults()
+            headers, history = self.csv_rows(logger.export_all_csv())
+            self.assertIn("Currency: bramblejack", headers)
+            self.assertIn("Omen: HeAdHuNtEr", headers)
+            self.assertNotIn("Item: Bramblejack", headers)
+            self.assertNotIn("Item: Headhunter", headers)
+            currency = next(row for row in history if row["Type"] == "Currency")
+            offer = next(row for row in history if row["Type"] == "Ritual")
+            self.assertEqual(currency["Currency: bramblejack"], "2")
+            self.assertEqual((offer["Reward Type"], offer["Omen: HeAdHuNtEr"]), ("Omen", "1"))
+
+    def test_reference_reset_import_and_undo_preserve_catalog_and_real_records(self):
+        names, revision = self.catalog_names()
+        logger.save_currency_snapshot("end", [{"name": "Bramblejack", "quantity": 2,
+                                               "category": "Item"}], register_names=True)
+        pack = Path(self.temporary.name) / "real-references.zip"
+        pack.write_bytes(reference_pack.export_pack())
+        with logger._connect() as db:
+            saved = {table: [tuple(row) for row in db.execute(f"SELECT * FROM {table}")]
+                     for table in ("commits", "currency_snapshots")}
+
+        def unchanged():
+            with logger._connect() as db:
+                self.assertEqual(dict(db.execute("SELECT name,source_revision FROM unique_item_catalog")),
+                                 dict.fromkeys(names, revision))
+                for table, rows in saved.items():
+                    self.assertEqual([tuple(row) for row in db.execute(f"SELECT * FROM {table}")], rows)
+            _, history = self.csv_rows(logger.export_all_csv())
+            real = next(row for row in history if row["Type"] == "Item")
+            self.assertEqual(real["Item: Bramblejack"], "2")
+
+        reference_pack.reset_to_defaults()
+        unchanged()
+        self.assertNotIn("Bramblejack", logger.item_names())
+        reference_pack.import_pack(pack)
+        unchanged()
+        self.assertIn("Bramblejack", logger.item_names())
+        self.assertEqual(logger.undo_last_action()["action"], "Import OCR references")
+        unchanged()
+        self.assertNotIn("Bramblejack", logger.item_names())
+        self.assertEqual(logger.undo_last_action()["action"], "Reset OCR references")
+        unchanged()
+        self.assertIn("Bramblejack", logger.item_names())
+
+    def test_every_catalog_name_round_trips_with_latest_inventory_and_ritual_offers(self):
+        names, _ = self.catalog_names()
+        # Export-only references do not register unapproved user data.
         self.assertFalse(set(names).intersection(logger.item_names()))
         self.assertFalse(set(names).intersection(logger.currency_names()))
 
@@ -71,7 +195,7 @@ class UniqueCatalogExportTests(unittest.TestCase):
             final = logger.save_currency_snapshot("end", copies(3), register_names=True)
             self.assertEqual(final["start"], dict.fromkeys(batch, 1))
             self.assertEqual(final["end"], dict.fromkeys(batch, 3))
-            self.assertEqual(final["net"], dict.fromkeys(batch, 2))
+            self.assertEqual(final["net"], dict.fromkeys(batch, 3))
             logger.save_ritual_page([
                 {"name": name, "quantity": 1, "category": "Item", "deferred": deferred,
                  "source": "approved sourced unique catalog proposal"}
@@ -108,7 +232,7 @@ class UniqueCatalogExportTests(unittest.TestCase):
         totals = logger.session_currency_totals()
         self.assertEqual(totals["maps_counted"], len(maps))
         self.assertEqual({row["name"]: (row["kind"], row["quantity"]) for row in totals["items"]},
-                         {name: ("Item", 2) for name in names})
+                         {name: ("Item", 3) for name in names})
 
         _, inventory = self.csv_rows(logger.export_currency_csv())
         self.assertEqual(len(inventory), len(names))
@@ -116,7 +240,7 @@ class UniqueCatalogExportTests(unittest.TestCase):
         for row in inventory:
             self.assertIn(row["Currency"], maps[row["Map ID"]])
             self.assertEqual([row[key] for key in ("Start Count", "End Count", "Net Change", "Session Found Quantity")],
-                             ["1", "3", "2", "2"])
+                             ["1", "3", "3", "3"])
             self.assertEqual(row["End Currency Scan #"], "3")
 
         _, ritual = self.csv_rows(logger.export_ritual_csv())
@@ -150,7 +274,7 @@ class UniqueCatalogExportTests(unittest.TestCase):
             self.assertEqual([row["Final Currency Scan"] for row in readings["inventory"]],
                              ["False", "False", "True"], name)
             self.assertEqual([row["Session Found Quantity"] for row in readings["inventory"]],
-                             ["0", "0", "2"], name)
+                             ["0", "0", "3"], name)
             self.assertEqual([row["Item: " + name] for row in readings["offers"]], ["1", "0"], name)
 
         primary_headers, primary = self.csv_rows(logger.export_primary_csv())
@@ -158,7 +282,7 @@ class UniqueCatalogExportTests(unittest.TestCase):
         for row in primary:
             for name in maps[row["Map ID"]]:
                 self.assertIn(name, primary_headers)
-                self.assertEqual(row[name], "2")
+                self.assertEqual(row[name], "3")
 
         book = load_workbook(io.BytesIO(workbook_export.export_xlsx()), read_only=True, data_only=True)
         try:
@@ -182,7 +306,7 @@ class UniqueCatalogExportTests(unittest.TestCase):
                     elif sheet_name == "Export":
                         for name in maps[values[name_index]]:
                             self.assertIs(type(values[item_indices[name]]), int)
-                            self.assertEqual(values[item_indices[name]], 2)
+                            self.assertEqual(values[item_indices[name]], 3)
         finally:
             book.close()
 

@@ -527,6 +527,8 @@ def initialize():
                     image_png BLOB NOT NULL,recorded_at TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS currency_icon_name_idx ON currency_icons(name);
                 CREATE TABLE IF NOT EXISTS item_names(name TEXT PRIMARY KEY);
+                CREATE TABLE IF NOT EXISTS unique_item_catalog(
+                    name TEXT PRIMARY KEY,source_revision TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS item_icons(
                     id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,
                     image_png BLOB NOT NULL,recorded_at TEXT NOT NULL);
@@ -610,6 +612,7 @@ def initialize():
                                    (snapshot["detonated"], eid))
                 _set_meta(db, "bootstrapped", True)
             _initialize_references(db)
+            _initialize_unique_item_catalog(db)
             _sync_recipe_ids(db)
             from PoE2_Data_Logger.core.reference_updates import apply_bundled_updates
             apply_bundled_updates(db)
@@ -935,6 +938,35 @@ def _seed_reference_snapshot(db, snapshot):
                    ((master, perk["name"], perk["tier"], perk["effect"])
                     for master, data in snapshot["masters"].items()
                     for perk in data["perks"]))
+
+
+def _initialize_unique_item_catalog(db):
+    """Seed export-only unique references without registering finds or local learning.
+
+    Keep this immutable source catalog outside the editable reference tables and
+    Undo journal. Read only bounded, pinned JSON metadata, never artwork or OCR
+    modules, so every bundled name can be exported before its first approval.
+    """
+    revision = "75885a099f2e9be1619aa3c793fe6ab0754a511f"
+    digest = "4e71e5f8b74218dfcceab69592ffd7cceb3081fc4665b5d1bc7c7219f6de8a7e"
+    with (HERE / "unique_item_assets" / "manifest.json").open("rb") as file:
+        raw = file.read(8 * 1024 * 1024 + 1)
+    if len(raw) > 8 * 1024 * 1024 or hashlib.sha256(raw).hexdigest() != digest:
+        raise ValueError("Unique catalog integrity check failed.")
+    data = json.loads(raw)
+    if (not isinstance(data, dict) or data.get("schema_version") != 1 or
+            not isinstance(data.get("items"), list) or not 1 <= len(data["items"]) <= 2000 or
+            not isinstance(data.get("source"), dict) or data["source"].get("revision") != revision):
+        raise ValueError("Unsupported unique catalog.")
+    names = set()
+    for item in data["items"]:
+        name = item.get("name") if isinstance(item, dict) else None
+        if (not isinstance(name, str) or not 1 <= len(name) <= 160 or name != name.strip() or
+                any(ord(char) < 32 or 0xD800 <= ord(char) <= 0xDFFF for char in name)):
+            raise ValueError("Invalid unique catalog name.")
+        names.add(name)
+    db.executemany("INSERT OR IGNORE INTO unique_item_catalog(name,source_revision) VALUES(?,?)",
+                   ((name, revision) for name in sorted(names, key=str.casefold)))
 
 
 def _initialize_references(db):
@@ -3450,23 +3482,73 @@ def save_currency_snapshot(phase, items, expected_map_id=None, *, register_names
         identity = {"currency_scan_number": scan_number, "currency_scan_id": f"{map_id}-C{scan_number:03d}"}
         commit_number = _record_commit(db, "Currency", map_id, reference=phase.title() + " inventory", context=context,
             details={"phase": phase, "items": totals, **identity,
+                     "item_accounting": "latest_scan",
                      "start_baseline": "Scanned" if has_start else "Assumed empty",
                      "item_kinds": {name: "Item" if name.casefold() in item_catalog else "Currency"
                                     for name in totals}})
     return {**currency_for_map(map_id), **identity, "scan_commit_number": commit_number}
 
 
+def _inventory_item_projections(db, map_id=None):
+    """Project current Item observations independently of Currency's inventory phases.
+
+    New approvals explicitly select this policy. Untagged historical approvals
+    retain their original accounting. Raw snapshots and commits are never edited.
+    Separate approved rows add within a scan; rescanning replaces that map's Item
+    counts, including an approved inventory containing no Items.
+    """
+    catalog = {row[0].casefold() for row in db.execute("SELECT name FROM item_names")}
+    other = {row[0].casefold() for table in ("currency_items", "ritual_names")
+             for row in db.execute(f"SELECT name FROM {table}")}
+    catalog.update(row[0].casefold() for row in db.execute("SELECT name FROM unique_item_catalog")
+                   if row[0].casefold() not in other)
+    latest, seen, saved_kinds = {}, {}, {}
+    query = "SELECT number,map_id,details_json FROM commits WHERE kind='Currency'"
+    parameters = ()
+    if map_id is not None:
+        query += " AND map_id=?"
+        parameters = (map_id,)
+    for row in db.execute(query + " ORDER BY number", parameters):
+        details = _load(row["details_json"])
+        kinds = details.get("item_kinds", {})
+        counts = {}
+        names = seen.setdefault(row["map_id"], {})
+        recorded_kinds = saved_kinds.setdefault(row["map_id"], {})
+        for name, quantity in details.get("items", {}).items():
+            key = name.strip().casefold()
+            recorded_kinds[key] = kinds.get(name, "Currency")
+            if kinds.get(name) == "Item":
+                names[key] = name
+                counts[key] = counts.get(key, 0) + quantity
+        if details.get("item_accounting") == "latest_scan":
+            latest[row["map_id"]] = {"number": row["number"], "counts": counts}
+        else:
+            latest.pop(row["map_id"], None)
+    for map_id, projection in latest.items():
+        projection["names"] = seen[map_id]
+        non_items = {key for key, kind in saved_kinds[map_id].items() if kind != "Item"}
+        projection["keys"] = (catalog | set(seen[map_id])) - non_items
+    return latest
+
+
 def currency_for_map(map_id):
-    """Return latest start/end inventories and their signed difference, assuming an empty missing start."""
+    """Return raw phases, Currency differences and the latest independent Item counts."""
     with _connect() as db:
+        db.execute("BEGIN")
         snapshots = {row["phase"]: {"items": _load(row["items_json"]), "recorded_at": row["recorded_at"]}
                      for row in db.execute("SELECT phase,items_json,recorded_at FROM currency_snapshots "
                                            "WHERE map_id=?", (map_id,))}
+        item_projection = _inventory_item_projections(db, map_id).get(map_id)
     start = snapshots.get("start", {}).get("items", {})
     end = snapshots.get("end", {}).get("items", {})
+    net = {name: end.get(name, 0) - start.get(name, 0) for name in set(start) | set(end)} if "end" in snapshots else {}
+    if item_projection is not None:
+        for name in set(start) | set(end) | set(item_projection["names"].values()):
+            key = name.strip().casefold()
+            if key in item_projection["keys"]:
+                net[name] = item_projection["counts"].get(key, 0)
     return {"map_id": map_id, "start": start, "end": end,
-            "net": {name: end.get(name, 0) - start.get(name, 0) for name in set(start) | set(end)}
-            if "end" in snapshots else {},
+            "net": net,
             "start_baseline": "Scanned" if "start" in snapshots else
                               "Assumed empty" if "end" in snapshots else None,
             "recorded_at": {phase: row["recorded_at"] for phase, row in snapshots.items()}}
@@ -3477,11 +3559,13 @@ def session_currency_totals():
 
     Only each map's latest approved end inventory contributes. A missing start
     scan is treated as empty, so the whole end inventory
-    counts. A scanned start takes precedence. Ritual rewards remain offers
-    rather than inventory acquisitions.
+    counts. A scanned start takes precedence for Currency. Item counts use the
+    latest approved inventory scan without subtraction or requiring an end scan.
+    Ritual rewards remain offers rather than inventory acquisitions.
     """
     with _connect() as db:
         db.execute("BEGIN")
+        item_projections = _inventory_item_projections(db)
         snapshots, saved_names = {}, {}
         for row in db.execute("SELECT map_id,phase,items_json FROM currency_snapshots ORDER BY map_id,phase"):
             items = {}
@@ -3517,7 +3601,13 @@ def session_currency_totals():
                 if not missing:
                     break
         totals, counted, assumed_empty, pending_end = {}, 0, 0, 0
-        for phases in snapshots.values():
+        for map_id, phases in snapshots.items():
+            item_projection = item_projections.get(map_id)
+            if item_projection is not None:
+                for key, quantity in item_projection["counts"].items():
+                    if quantity > 0:
+                        totals[key] = totals.get(key, 0) + quantity
+                        labels[key] = (item_projection["names"][key], "Item")
             if "end" not in phases:
                 pending_end += 1
                 continue
@@ -3526,6 +3616,8 @@ def session_currency_totals():
                 assumed_empty += 1
             start, end = phases.get("start", {}), phases["end"]
             for key, quantity in end.items():
+                if item_projection is not None and key in item_projection["keys"]:
+                    continue
                 gained = quantity - start.get(key, 0)
                 if gained > 0:
                     totals[key] = totals.get(key, 0) + gained
@@ -3539,7 +3631,7 @@ def session_currency_totals():
 
 
 def export_currency_csv():
-    """Export latest inventory phases and signed item deltas with settings and latest phase commit IDs."""
+    """Export raw phases, signed Currency deltas and independent latest Item counts."""
     with _connect() as db:
         db.execute("BEGIN")
         snapshots = {}
@@ -3550,6 +3642,7 @@ def export_currency_csv():
                    for row in db.execute("SELECT number,map_id,reference FROM commits WHERE kind='Currency' "
                                          "ORDER BY number")}
         identities = _currency_scan_identities(db)
+        item_projections = _inventory_item_projections(db)
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     writer.writerow(["Map ID", "Currency", "Start Count", "End Count", "Net Change",
@@ -3566,12 +3659,17 @@ def export_currency_csv():
         end = _load(phases["end"]["items_json"]) if "end" in phases else {}
         start_config = _config_export_values(_load(phases["start"]["snapshot_json"]) if "start" in phases else {})
         end_config = _config_export_values(_load(phases["end"]["snapshot_json"]) if "end" in phases else {})
+        item_projection = item_projections.get(map_id)
         # An empty inventory is still an approved snapshot with its own map,
         # timestamp, commit and settings. Keep its metadata in this export too.
-        for name in sorted(set(start) | set(end)) or [""]:
+        names = set(start) | set(end) | (set(item_projection["names"].values()) if item_projection else set())
+        for name in sorted(names) or [""]:
+            is_item = item_projection is not None and name.strip().casefold() in item_projection["keys"]
+            net = (item_projection["counts"].get(name.strip().casefold(), 0) if is_item else
+                   end.get(name, 0) - start.get(name, 0) if "end" in phases else "")
             writer.writerow(_csv_row([map_id, name, start.get(name, 0) if name else "",
                              end.get(name, 0) if name and "end" in phases else "",
-                             end.get(name, 0) - start.get(name, 0) if name and "end" in phases else "",
+                             net if name else "",
                              phases["start"]["recorded_at"] if "start" in phases else "",
                              phases["end"]["recorded_at"] if "end" in phases else "",
                              commits.get((map_id, "start"), "") if "start" in phases else "",
@@ -3580,8 +3678,7 @@ def export_currency_csv():
                              *start_config[-4:-2], *end_config[-4:-2],
                              *start_config[-2:], *end_config[-2:],
                              "Scanned" if "start" in phases else "Assumed empty",
-                             max(0, end.get(name, 0) - start.get(name, 0))
-                             if name and "end" in phases else 0 if "end" in phases else "",
+                             max(0, net) if name and net != "" else 0 if "end" in phases else "",
                              *(identities.get(commits.get((map_id, phase)), {}).get("currency_scan_id", "")
                                if phase in phases else "" for phase in ("start", "end")),
                              *(identities.get(commits.get((map_id, phase)), {}).get("currency_scan_number", "")
@@ -3908,6 +4005,10 @@ def _map_summary_item_columns(db, reserved, commits, snapshots):
             if isinstance(name, str) and name.strip():
                 name = name.strip()
                 labels.setdefault(name.casefold(), (name, "Currency"))
+    # Source-only fields follow saved/category evidence so an older Currency or
+    # Omen registration keeps its canonical kind and label.
+    for row in db.execute("SELECT name FROM unique_item_catalog ORDER BY name"):
+        labels.setdefault(row[0].casefold(), (row[0], "Item"))
     legacy_headers = [*_meta(db, "export_headers", []), *EXPORT_EXTRA_HEADERS, *ATLAS_EXPORT_HEADERS,
                       *KILL_EXPORT_HEADERS, *CHAIN_EXPORT_HEADERS, "Type", "Map Modifiers"]
     used = {header.casefold() for header in [*reserved, *legacy_headers]}
@@ -3947,9 +4048,9 @@ def _map_summary_unstarted_row(map_id, context, recorded_at, last_commit):
 def export_map_summary_csv(*, _db=None):
     """One acquired-item count per map, from its latest approved inventories.
 
-    End-only maps assume an empty starting inventory. A missing end scan leaves
-    counts blank; an approved empty end produces zeros. Ritual offers and prior
-    approvals remain in History and never inflate these acquisition totals.
+    Currency uses the latest end minus start, assuming an empty missing start.
+    Items use the latest approved scan independently of its inventory phase.
+    Ritual offers and prior approvals remain in History.
     """
     with (nullcontext(_db) if _db is not None else _connect()) as db:
         if _db is None:
@@ -3958,6 +4059,7 @@ def export_map_summary_csv(*, _db=None):
         headers = [*maps.fieldnames, *MAP_SUMMARY_SCAN_HEADERS]
         rows = {row["Map ID"]: row for row in maps}
         commits, snapshots = _map_summary_records(db)
+        item_projections = _inventory_item_projections(db)
         columns = _map_summary_item_columns(db, headers, commits, snapshots)
         headers.extend(header for _, header in columns)
         latest, inventory_commits = {}, {}
@@ -4003,8 +4105,11 @@ def export_map_summary_csv(*, _db=None):
                 row[f"{phase.title()} Commit #"] = inventory_commits.get((map_id, phase), "") if snapshot is not None else ""
                 row[f"{phase.title()} Recorded UTC"] = snapshot["recorded_at"] if snapshot is not None else ""
             baseline = start["counts"] if start is not None else {}
+            item_projection = item_projections.get(map_id)
             for key, header in columns:
-                row[header] = max(0, end["counts"].get(key, 0) - baseline.get(key, 0)) if end is not None else ""
+                row[header] = (item_projection["counts"].get(key, 0)
+                               if item_projection is not None and key in item_projection["keys"] else
+                               max(0, end["counts"].get(key, 0) - baseline.get(key, 0)) if end is not None else "")
             # Existing map CSV strings are already escaped. Escape only the raw
             # fallback metadata here, and never reinterpret numeric count cells.
             writer.writerow({key: _csv_row([value])[0] for key, value in row.items()})
@@ -4268,7 +4373,7 @@ def _current_inventory_projection(db):
 def export_record_history_csv(*, _db=None):
     """Expand each commit's frozen details, chain origins and settings into history rows.
 
-    Mark current inventory approvals and credit gains only to the latest end.
+    Credit Currency gains to the latest end, and Items to their latest scan.
     Project current chain completion alongside append and correction history.
     """
     output = io.StringIO(newline="")
@@ -4283,6 +4388,7 @@ def export_record_history_csv(*, _db=None):
         if _db is None:
             db.execute("BEGIN")
         current_inventories, current_commits = _current_inventory_projection(db)
+        item_projections = _inventory_item_projections(db)
         identities = _currency_scan_identities(db)
         completed = {row[0] for row in db.execute("SELECT expedition_id FROM chain_completions")}
         recipe_ids = {row["recipe_name"]: row["recipe_id"] for row in db.execute("SELECT * FROM recipe_ids")}
@@ -4316,17 +4422,23 @@ def export_record_history_csv(*, _db=None):
                          **details.get("item_kinds", {})}
                 for name in sorted(names):
                     is_item = kinds.get(name) == "Item"
+                    independent_item = is_item and details.get("item_accounting") == "latest_scan"
                     amount = totals.get(name, 0)
                     key = name.strip().casefold()
-                    found = (max(0, current_end.get(key, 0) - current_start.get(key, 0))
-                             if is_current and phase == "end" and key not in credited else 0)
+                    item_projection = item_projections.get(commit["map_id"]) if is_item else None
+                    if item_projection is not None:
+                        found = (item_projection["counts"].get(key, 0)
+                                 if item_projection["number"] == commit["number"] and key not in credited else 0)
+                    else:
+                        found = (max(0, current_end.get(key, 0) - current_start.get(key, 0))
+                                 if is_current and phase == "end" and key not in credited else 0)
                     credited.add(key)
                     entries.append({"Item Name" if is_item else "Currency": name, "Quantity": amount,
                                     "Item Source": "Inventory" if is_item else "",
                                     "Start Count": amount if phase == "start" else
                                                    start["items"].get(name, 0) if start else 0,
                                     "End Count": amount if phase == "end" else "",
-                                    "Net Change": amount - start["items"].get(name, 0)
+                                    "Net Change": amount if independent_item else amount - start["items"].get(name, 0)
                                                   if phase == "end" and start else
                                                   amount if phase == "end" else "",
                                     "Start Recorded UTC": commit["recorded_at"] if phase == "start" else
@@ -4421,8 +4533,9 @@ def _review_item_export_columns(db):
 
     History CSV has already escaped formula-like names. Reading raw saved names
     also distinguishes a literal leading apostrophe from CSV's safety prefix.
-    The existing Item columns retain their order; other columns describe names
-    actually recorded rather than adding the entire bundled icon catalogue.
+    Existing Item columns retain their order. Bundled uniques also have fields
+    before their first approval, retaining any existing or recorded category
+    rather than changing a Currency or Omen label into an Item.
     """
     catalogs = {}
     for kind, table in (("Item", "item_names"), ("Currency", "currency_items"), ("Omen", "ritual_names")):
@@ -4459,6 +4572,14 @@ def _review_item_export_columns(db):
             fields.append(columns[key])
         if entries:
             recorded[str(commit["number"])] = fields
+    known_names = {key for _, key in columns}
+    for row in db.execute("SELECT name FROM unique_item_catalog ORDER BY name"):
+        key = row[0].casefold()
+        if key not in known_names:
+            kind = next((kind for kind in ("Omen", "Currency", "Item") if key in catalogs[kind]), "Item")
+            canonical = catalogs[kind].get(key, row[0])
+            columns[(kind, key)] = f"{kind}: {canonical}"
+            known_names.add(key)
     item_columns = [column for (kind, _), column in columns.items() if kind == "Item"]
     extra_columns = sorted((column for (kind, _), column in columns.items() if kind != "Item"),
                            key=str.casefold)

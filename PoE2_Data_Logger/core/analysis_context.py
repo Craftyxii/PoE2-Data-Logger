@@ -22,7 +22,8 @@ ENTRIES = (
      "without treating IDs, choice numbers or text positions as measured strengths. Use saved configuration "
      "at the relevant observation, not current settings or repeated history rows. Check missing values, "
      "scan coverage, discarded/undone parts, overlapping settings and outcome availability. For loot, "
-     "use recorded inventory gains and the baseline rules, not Ritual offers or recipe names. "
+     "use Currency gains with their baseline rules or Item counts from the latest approved inventory, "
+     "not Ritual offers or recipe names. "
      "Report sample counts, means/medians, variation and uncertainty, and compare similar settings "
      "or account for relevant confounders. Keep numeric quantities separate from prices and do not "
      "assume independent, additive or multiplicative game effects without a documented rule. "
@@ -73,17 +74,18 @@ ENTRIES = (
      "Effectiveness % and acquired-item totals from that map's first Export row. Blank effectiveness "
      "is unrecorded, not zero; 0 is an explicit value. Choose a defined outcome, such as Chaos Orb "
      "quantity per map, and compare observed effectiveness levels or clearly stated ranges. "
-     "Prefer maps with approved Start and End inventories timed to bracket that same map; "
-     "flag or analyze Assumed empty baselines "
-     "separately and exclude maps without an approved End. Acquired quantities are positive inventory "
-     "gains, not direct counts of ground drops: spending, transfers and incomplete scans can affect them. "
+     "For Currency outcomes, prefer approved Start and End inventories timed to bracket that same map; "
+     "flag or analyze Assumed empty baselines separately and exclude maps without an approved End. "
+     "Item outcomes use the latest approved inventory scan regardless of phase, without Start subtraction. "
+     "Currency gains and Item snapshot counts are not direct counts of ground drops: spending, transfers "
+     "and incomplete scans can affect them. "
      "Ritual offers are not acquired loot. Compare similar maps or account for Item Rarity %, "
      "Monster Rarity %, Pack Size %, Gear Item Rarity %, Atlas Setup ID, map/tablet modifiers, tier, "
      "area level, biome, city, Irradiated, Ocean Map, Deli, Wisp and recorded rune chains. "
      "Show map counts, means/medians, variation and uncertainty; sparse or inseparable settings "
      "cannot establish an independent effectiveness effect. Normalize by recorded kills or "
      "remnants detonated only for a relevant outcome with complete, positive denominators. "
-     "Do not divide map loot among recipe or chain-step rows: inventory gains are map-level, "
+     "Do not divide map loot among recipe or chain-step rows: inventory gains and Item counts are map-level, "
      "so these records do not identify which individual recipe, remnant or step produced a drop. "
      "Do not convert mixed item quantities into currency value without a separate, dated price source. "
      "Report observed associations, missing-data exclusions and assumptions rather than claiming "
@@ -110,10 +112,14 @@ ENTRIES = (
      "records the removal. Its details_json embeds removed commits for explanation, not extra current activity. "
      "Discard operations are undoable."),
     ("inventory_latest", "Inventory", "Latest approved inventories",
-     "Only the latest approved Start and End inventory for each Map ID determine current gains. "
-     "Rescans replace a phase's current snapshot rather than adding quantities. Currency scans also include "
-     "registered equipment/items and Omens. Item name headers can carry a category prefix to avoid metadata collisions; "
-     "labels differing only in case share current gain counts."),
+     "Currency gains use the latest approved Start and End inventories for each Map ID. Item counts use "
+     "the latest approved inventory scan for that map, whether Start or End, without subtraction. "
+     "Rescans replace the applicable current snapshot rather than adding quantities. Two separate occupied "
+     "Item footprints count twice within one scan. Currency scans also include registered equipment/items "
+     "and Omens. Item name headers can carry a category prefix to avoid metadata collisions; "
+     "labels differing only in case share current counts. New saves mark Item counting with "
+     "item_accounting=latest_scan; "
+     "legacy raw logs remain intact rather than being rewritten as new observations."),
     ("inventory_stages", "Inventory", "Currency scan IDs and stages within a map",
      "Each approved Currency scan has a Currency Scan ID and Currency Scan # within its Map ID, "
      "independent of Expedition ID. One scan can expand into several item rows: group by Currency "
@@ -121,8 +127,9 @@ ENTRIES = (
      "not an item quantity or an additional map. Historical stages retain their approved quantities "
      "and saved settings. Rescanning replaces the applicable current inventory; never add earlier "
      "stage quantities to a later scan. For example, End scans showing 1 Divine Orb then 3 Divine "
-     "Orbs leave an End count of 3, not 4; the separate baseline and gain rules still apply. "
-     "Final Currency Scan identifies the latest approved End scan used by those rules at export time. "
+     "Orbs leave an End count of 3, not 4; Currency baseline and gain rules still apply. "
+     "Item counts use the latest approved scan across both phases. Final Currency Scan identifies "
+     "the latest approved End scan used for Currency gains at export time. "
      "A currency absent from an approved replacement inventory is not carried forward from an older "
      "stage. IDs for older records lacking a stored scan ID are derived from surviving Currency "
      "commit order during export; the historical commit payload is not rewritten."),
@@ -139,34 +146,46 @@ ENTRIES = (
      "the logged chain using Complete chain, and leaves the incoming part in the next expedition "
      "for explicit approval or Commit. Unknown legacy timing does not establish a gap."),
     ("inventory_gains", "Inventory", "Signed net versus acquired counts",
-     "Net Change is signed End Count minus Start Count. Export's acquired-item columns and Session Found Quantity "
-     "use max(0, latest End minus latest Start) per map and label. Negative deltas indicate inventory loss or spending "
-     "and contribute zero acquired items. Session totals sum these positive per-map gains, not raw End inventories "
-     "or all historical approvals. These are inferred inventory gains; spending, transfers and inaccurate scans "
-     "can affect the result."),
+     "Currency Net Change is signed End Count minus Start Count. For Items saved with "
+     "item_accounting=latest_scan, Net Change records that approval's Item quantity without subtraction. "
+     "For Currency, Export's named columns and Session Found "
+     "Quantity use max(0, latest End minus latest Start) per map and label. Negative deltas indicate inventory "
+     "loss or spending and contribute zero Currency gains. For Items, these fields use the quantity in the "
+     "latest approved inventory scan for the map, whether Start or End, without subtraction. Session totals "
+     "sum each map's current contribution, not all historical approvals. These are Currency gains and Item "
+     "snapshot counts; spending, transfers and inaccurate scans can affect the result."),
     ("inventory_baseline", "Inventory", "Missing Start or End",
-     "An approved End with no Start assumes an empty baseline: the entire End inventory counts, and Start Baseline "
+     "For Currency, an approved End with no Start assumes an empty baseline: the entire End inventory counts, and Start Baseline "
      "is Assumed empty. A saved Start takes precedence even if recorded later than End. Without an approved End, "
-     "current acquisition counts stay blank. An approved empty End produces zero current gains. "
-     "Use Currency Scan Status and the phase commit/timestamp fields to distinguish these cases."),
+     "current Currency acquisition counts stay blank. An approved empty End produces zero current Currency gains. "
+     "Items need no Start baseline or End phase: the latest approved inventory scan supplies their counts, "
+     "and an approved empty replacement scan produces zero. Use Currency Scan Status and the phase "
+     "commit/timestamp fields to distinguish these cases."),
     ("inventory_history", "Inventory", "Historical quantities and current credits",
      "Quantity in a Currency/Item history row is that approval's inventory count. Historical Start Count, End Count "
-     "and Net Change reflect the baseline available in commit order. Session Found Quantity credits only the "
-     "current End approval, using the current Start; earlier and Start approvals receive zero. "
-     "A later Start can change credited gains without rewriting the earlier End's recorded details."),
+     "reflect their recorded phases. Currency and unmarked legacy Net Change reflect the baseline "
+     "available in commit order; new Item Net Change records that approval's quantity without subtraction. "
+     "Currency Session Found Quantity credits "
+     "only the current End approval, using the current Start; earlier and Start approvals receive zero Currency "
+     "credit. Item Session Found Quantity credits the latest approved inventory scan across both phases; "
+     "earlier approvals receive zero Item credit. A later scan can change current credits without rewriting "
+     "an earlier approval's recorded details."),
     ("ritual_offers", "Ritual", "Offered rewards versus obtained inventory",
      "Ritual rows record rewards offered on a saved reward page, including Quantity, Tribute cost, "
      "Tribute Available and Rerolls Remaining. They do not record purchases or prove an item was obtained. "
-     "New Find Quantity describes a non-deferred offered reward; deferred rewards have zero New Find Quantity. "
+     "New Find Quantity equals the offered Quantity for each non-deferred occurrence and zero for each deferred "
+     "occurrence. Unique Items use this same per-occurrence rule as Omens, including mixed deferred states "
+     "for the same name on one page. "
      "Neither offered quantities nor New Find Quantity contribute to current inventory acquisitions. "
-     "Obtained rewards count only when present in approved inventory gains."),
+     "Inventory counts come from approved inventory scans using the category's counting rule."),
     ("ritual_history", "Ritual", "Page replacements and repeated offers",
      "ritual_pages stores the latest saved page for (Map ID, page_number), while commits retain surviving earlier "
      "Ritual approvals. A map can contain more than 50 saved pages. Ritual and Currency do not maintain a "
      "waiting-capture backlog; waiting requests are not saved observations. Clear Ritual pages can still "
      "save automatically when enabled. Rescanning the same capture hash updates "
      "its page while retaining approval "
-     "history. The same reward can appear on multiple pages or rescans. Do not sum every history offer "
+     "history. Different saved pages remain independent, even when the same reward appears on both. "
+     "The same reward can appear on multiple pages or rescans. Do not sum every history offer "
      "as a unique reward. Deferred status is a recorded offer attribute, not an acquisition flag."),
     ("ritual_boundaries", "Ritual", "First and final map resources",
      "First/final Tribute Available and Rerolls Remaining are the earliest/latest surviving approved Ritual "
@@ -511,7 +530,11 @@ ENTRIES = (
      "rewards_json and status; it describes catalog stages, not logged events."),
     ("sql_item_catalogs", "SQLite schema", "Item catalogs and recognition references",
      "currency_items, item_names and ritual_names register Currency, Item and Omen names. Their rows are "
-     "reference labels, not acquired quantities. currency_icons, item_icons, omen_icons and review_icon_examples "
+     "reference labels, not acquired quantities. unique_item_catalog stores name and source_revision for "
+     "all 441 bundled unique names before observation, matching the named CSV/XLSX export columns. "
+     "Existing Currency/Omen category registrations retain their labels. Catalog metadata does not create "
+     "approved observations or register every unique on the Currency page. currency_icons, item_icons, "
+     "omen_icons and review_icon_examples "
      "store recognition examples, including PNG BLOBs. Removing an active reference does not remove saved "
      "event labels or current inventory counts."),
     ("sql_commits", "SQLite schema", "commits / chain_completions",
@@ -592,7 +615,8 @@ ENTRIES = (
      "comparisons. known_kills_total includes only known categories and can be partial; check Map settings "
      "kill_categories_complete and each category's coverage. Detonation counts use each current expedition "
      "once, retaining real totals after a chain discard. These summaries do not create acquired-item totals: "
-     "those remain the once-per-map positive inventory gains in Export and the Inventory rules. Queued "
+     "those remain the once-per-map Currency gains and Item latest-inventory counts in Export under the "
+     "Inventory rules. Queued "
      "inventory-only IDs before map creation do not increase the created-map denominator. Legacy empty "
      "map snapshots are explicitly marked unavailable; use their Export fields where recoverable rather "
      "than assigning present-day settings."),
@@ -858,17 +882,22 @@ COLUMN_GUIDANCE = (
     ("field_quantity", r"Quantity", "Recorded quantity by event type",
      "Quantity is the approved inventory count on Currency/Item history rows, or offered stack quantity "
      "on Ritual rows. It is not automatically newly acquired loot. Filter by Type and use current "
-     "Start/End gain rules for acquisition; repeated rescans and offers are separate evidence, not "
+     "Currency Start/End gains or Item latest-inventory counts; repeated rescans and offers are separate evidence, not "
      "quantities to add into current totals."),
     ("field_inventory_counts", r"Start Count|End Count|Net Change|Session Found Quantity", "Inventory counts and gains",
-     "Start Count and End Count describe their approved inventory phases. Net Change is signed End "
-     "minus Start; Session Found Quantity credits max(0, latest End minus latest Start) only to the "
-     "current End history approval. Older/Start approvals receive zero credit. Compare defined "
-     "per-item map gains, not every historical Quantity or negative spending as a drop count; a "
-     "missing Start assumes empty and an unscanned End cannot establish gains."),
+     "Start Count and End Count describe their approved inventory phases. Currency Net Change is signed "
+     "End minus Start; Item Net Change records the approval's quantity for item_accounting=latest_scan. "
+     "Unmarked legacy records retain their original rules. Currency Session Found Quantity credits "
+     "max(0, latest End minus latest Start) only to the "
+     "current End history approval. Item Session Found Quantity credits the latest approved inventory scan "
+     "across Start and End, without subtraction. Superseded approvals receive zero current credit. Compare "
+     "one current contribution per map and label, not every historical Quantity or negative spending as a "
+     "drop count. Currency assumes an empty missing Start and needs an approved End; Items need an approved "
+     "inventory scan in either phase."),
     ("field_inventory_status", r"Inventory Phase|Start Baseline|Current Inventory Snapshot|Currency Scan Status", "Inventory availability and selection",
      "Inventory Phase is Start or End; Start Baseline distinguishes Scanned from Assumed empty. "
      "Current Inventory Snapshot marks the latest saved phase approval, not recognition confidence. "
+     "Item current credit instead selects the latest approved scan across both phases. "
      "Currency Scan Status describes which approved phases exist for the map. Use these to select "
      "comparable complete maps and distinguish unscanned End, explicit empty End and assumed baseline."),
     ("field_currency_scan_id", r"(?:(?:Start|End) )?Currency Scan ID", "Currency stage identity",
@@ -885,7 +914,10 @@ COLUMN_GUIDANCE = (
      "Earlier approvals remain in history and are not additional currency gains. This is a current "
      "selection flag, not OCR confidence or proof that the user actually ended the map then."),
     ("field_item_columns", r"(?:Item|Currency|Omen): .+", "Named acquired-item columns",
-     "Named item columns in Export contain that label's current positive inventory gain once per map. "
+     "Named columns in Export contain current Currency gains or Item latest-inventory counts once per map. "
+     "All 441 bundled unique names have named export columns before observation, retaining existing "
+     "Currency/Omen registrations where applicable. Columns and catalog metadata are not approved "
+     "observations or Currency-page registrations. "
      "Many currency/Omen names use plain headers; Item:/Currency:/Omen: prefixes disambiguate categories "
      "or metadata-name collisions. These are item quantities, not values or recipe drop guarantees. "
      "Compare the same labels/outcomes and use a separate dated price source for value analysis."),
@@ -902,9 +934,11 @@ COLUMN_GUIDANCE = (
      "displayed cost by stack quantity unless its pricing rule is known."),
     ("field_ritual_deferred", r"Deferred|New Find Quantity", "Deferred Ritual offers",
      "Deferred records the offer's deferred status. New Find Quantity equals the offered Quantity "
-     "for non-deferred offers and zero for deferred ones. Neither field contributes to inventory "
+     "for each non-deferred occurrence and zero for each deferred occurrence, including unique Items "
+     "under the Omen rule. A same-hash page correction replaces that current page; different pages remain "
+     "independent. Neither field contributes to inventory "
      "gains or proves a purchase. Compare deferred versus other offers as offer populations, and "
-     "use approved inventory changes for obtained-item analysis."),
+     "use approved inventory scans and the category's counting rule for inventory analysis."),
     ("field_ocr", r"OCR Source|Page OCR Text", "Recognition evidence",
      "OCR Source and Page OCR Text retain text/source evidence supporting a saved reading, not a "
      "numeric accuracy score or ground truth. Use them to audit specific records; do not convert "

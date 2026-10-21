@@ -134,6 +134,52 @@ class UniqueScanIntegrationTests(unittest.TestCase):
                 self.assertEqual(item["grid_slots"], self.slots(shape))
                 self.assertEqual(item["box"], (108, 54, 216, 270))
 
+    def test_same_unique_at_separate_positions_stays_two_items_with_local_deferred_state(self):
+        """Whole belts remain distinct; a badge belongs only to its own Ritual footprint."""
+        pitch = 54
+        art, shape = self.artwork("Headhunter", pitch)
+        image = self.grid(5, pitch)
+        for column in (2, 6):
+            image.paste(art, (column * pitch, pitch))
+        labels = {slot: {"count": 1, "count_present": False, "tier_present": False}
+                  for slot in range(1, 61)}
+        with patch.object(currency_ocr, "get_reader", return_value=self.reader), \
+                patch.object(item_ocr, "_inventory_labels", return_value=labels):
+            result = item_ocr.scan_inventory_grid(image)
+        self.assertEqual(result["unknown"], [])
+        self.assertEqual(len(result["items"]), 2)
+        self.assertEqual({item["slot"] for item in result["items"]}, {15, 19})
+        for item in result["items"]:
+            self.assert_identity_suggested(item, "Headhunter")
+            self.assertEqual((item["category"], item["quantity"]), ("Item", 1))
+
+        art, _ = self.artwork("Headhunter", pitch, frame=1)
+        image = self.grid(10, pitch)
+        rewards = []
+        for column, first in ((2, 15), (6, 19)):
+            box = (column * pitch, pitch, (column + shape[0]) * pitch, (1 + shape[1]) * pitch)
+            image.paste(art, (box[0] + 1, box[1] + 1))
+            rewards.append({"slots": self.slots(shape, first=first), "box": box})
+        grid = {"bounds": (0, 0, image.width, image.height), "columns": 12, "rows": 10,
+                "pitch": pitch, "confidence": 1, "rewards": rewards,
+                "evidence": {"complete": True, "horizontal_hits": 11, "vertical_hits": 13}}
+        with patch.object(currency_ocr, "get_reader", return_value=self.reader), \
+                patch.object(item_ocr, "ocr_lines", return_value=[]), \
+                patch.object(item_ocr, "ritual_totals", return_value={"tribute_available": 62,
+                                                                   "rerolls_remaining": 3}), \
+                patch.object(item_ocr, "deferred_markers", return_value=[
+                    {"x": rewards[0]["box"][0] + 5, "y": pitch + 5, "score": .99}]), \
+                patch.object(ritual_grid, "detect_reward_grid", return_value=grid), \
+                patch.object(item_ocr, "_ritual_cell_labels", return_value={
+                    index: {"count": 1, "count_present": False, "count_verified": True} for index in (0, 1)}):
+            result = item_ocr.scan_ritual_page(image, OMEN_NAMES)
+        self.assertEqual(len(result["items"]), 2)
+        self.assertEqual([item["deferred"] for item in result["items"]], [True, False])
+        self.assertTrue(set(result["items"][0]["grid_slots"]).isdisjoint(result["items"][1]["grid_slots"]))
+        for item in result["items"]:
+            self.assert_identity_suggested(item, "Headhunter")
+            self.assertEqual((item["category"], item["quantity"]), ("Item", 1))
+
     def test_ritual_color_and_gray_source_art_preserves_footprints_and_review(self):
         for gray in (False, True):
             for name in ("Astramentis", "Headhunter", "Bramblejack", "Redblade Banner"):

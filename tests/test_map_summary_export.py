@@ -52,7 +52,7 @@ class MapSummaryExportTests(unittest.TestCase):
             "Chaos Orb", "Divine Orb", "Perfect Chaos Orb", "New Registered Token",
             "New Registered Armour", "Omen of Registered Learning")))
         with logger._connect() as db:
-            registered = {row[0].casefold() for table in ("currency_items", "item_names", "ritual_names")
+            registered = {row[0].casefold() for table in ("currency_items", "item_names", "ritual_names", "unique_item_catalog")
                           for row in db.execute(f"SELECT name FROM {table}")}
         item_headers = logger.map_summary_item_headers()
         self.assertEqual(len(item_headers), len(registered))

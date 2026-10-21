@@ -13,8 +13,8 @@ This beta adds sourced unique-item artwork matching to Currency and Ritual, with
 - **Maps:** Biome, City Type, area level, map options, waystone and tablet modifiers, Atlas Master/perks, Atlas allocations, gear item rarity, and Normal/Magic/Rare/Unique kills. Map IDs connect records to saved settings.
 - **Remnants:** visible seed bars, opened reward panels, or both stages linked through one Remnant ID.
 - **Propagation:** recipe/family identity and marked runes in socket order. Every propagation scan requires manual approval. Existing rune dropdowns remain available for corrections. Shared family sockets can recover missing crowns from a complete mark or corroborating fragments.
-- **Inventory:** approved scans retain map-local IDs and history. The latest approved Start and End snapshots determine map totals; rescans replace that phase rather than adding it again. Session totals sum positive End-minus-Start gains; a missing Start is treated as empty. Inventory gains do not prove individual ground drops.
-- **Ritual:** offered rewards, quantities, deferred state, tribute and rerolls. Offers do not add to acquired inventory totals.
+- **Inventory:** approved scans retain map-local IDs and history. Currency totals use positive latest-End-minus-Start gains; a missing Start is treated as empty. Item totals use the latest approved inventory scan for the map, whether Start or End, without subtraction. Rescanning replaces that map's contribution; two separate occupied Item footprints count twice. Inventory counts do not prove individual ground drops.
+- **Ritual:** offered rewards, quantities, deferred state, tribute and rerolls. Each non-deferred offer contributes its quantity to new finds; each deferred occurrence contributes zero. Correcting the same page replaces it, while different pages remain independent. Offers do not add to acquired inventory totals.
 
 Screenshot previews remain part of scan review. Possible Currency matches offer editable suggestions; approving or rejecting rows preserves the scroll position. Accepted corrections can teach local icon references. OCR Strictness is set separately for each scan type; it never enables automatic propagation approval.
 
@@ -40,9 +40,11 @@ The working-source Excel export contains nine worksheets:
 | Reference Aliases | Reference aliases and their recipe targets |
 | Kill Count Readings | Cumulative OCR observations, screenshot evidence and latest-reading status per map |
 
-The first four sheet positions remain unchanged. All nine read one database snapshot. Reference rows explain the data; they are not logged loot. The Context explains how earlier propagated marks combine with a current recipe's full rune combination, as well as missing values, percentage units and limits on attributing loot to individual chain steps. Editable recipe catalogs cannot reconstruct deleted historical combinations or unrecorded outcomes.
+The first four sheet positions remain unchanged. All nine read one database snapshot. All 441 bundled unique names have named columns in CSV and Excel and SQL reference metadata before they are found. Existing Currency/Omen category labels are retained. This catalog coverage does not create approved observations or register every name on the Currency page. Reference rows explain the data; they are not logged loot. The Context explains how earlier propagated marks combine with a current recipe's full rune combination, as well as missing values, percentage units and limits on attributing loot to individual chain steps. Editable recipe catalogs cannot reconstruct deleted historical combinations or unrecorded outcomes.
 
 CSV folder exports contain four data files: Export, Atlas Character Settings, Scan History and Kill Counts. A raw SQLite backup includes logs, reference tables, stored image bytes, and the SQL-readable Context table and views. Images stored as external files need a separate copy. Export filenames are timestamped to preserve earlier exports.
+
+New saves identify the Item counting policy they use. Existing raw logs remain intact; older records are not rewritten as new observations.
 
 ## Local data and game interaction
 
