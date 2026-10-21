@@ -155,7 +155,9 @@ class RecipeIdExportTests(unittest.TestCase):
         self.accept(family=8801)
         logger.add_item_name("Recipe ID Export Test Item")
         primary_headers, _ = self.csv_rows(logger.export_primary_csv)
-        self.assertEqual(primary_headers[-2], "Recipe ID Export Test Item")
+        item_headers = logger.map_summary_item_headers()
+        self.assertIn("Recipe ID Export Test Item", item_headers)
+        self.assertEqual(primary_headers[-len(item_headers) - 1:-1], item_headers)
         recipe_id = self.recipe_id()
         namespace = {"s": workbook_export.NS}
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:

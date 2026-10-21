@@ -183,7 +183,7 @@ class MetricExportAuditTests(unittest.TestCase):
         main = self.csv_rows(logger.export_all_csv())
         currency = self.csv_rows(logger.export_currency_csv())
         for name, start, end, net in (("Chaos Orb", "5", "0", "-5"),
-                                      ("Audit Equipment", "7", "0", "-7"),
+                                      ("Audit Equipment", "7", "0", "0"),
                                       ("Exalted Orb", "0", "9", "9")):
             row = next(row for row in currency if row["Currency"] == name)
             self.assertEqual([row[key] for key in ("Start Count", "End Count", "Net Change")], [start, end, net])

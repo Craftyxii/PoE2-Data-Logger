@@ -2,7 +2,9 @@
 
 ## 1.3.2.24 Beta
 
-- Add an offline, source-pinned unique-item artwork catalog to Currency and Ritual scans, using complete equipment footprints and retaining shared-art name choices. Approved inventory uniques use Item registration, correction learning and existing SQL/CSV/XLSX accounting; bundled assets are checked during Windows build verification.
+- Add an offline, source-pinned unique-item artwork catalog to Currency and Ritual scans, using complete equipment footprints and retaining shared-art name choices. Approved inventory uniques use Item registration and correction learning; bundled assets are checked during Windows build verification.
+- Include all 441 unique names in SQL reference metadata and CSV/XLSX fields before discovery, without creating observations or changing HUD catalogs.
+- Count Items from the map's latest approved inventory scan independently of Currency Start/End subtraction. Distinct footprints remain distinct occurrences; deferred Ritual uniques follow the existing deferred-Omen rule. Preserve raw history and its recorded counting policy.
 
 See [release notes](docs/RELEASE_1.3.2.24.md) for source provenance, validation scope and release gates.
 
