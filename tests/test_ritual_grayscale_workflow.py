@@ -60,6 +60,7 @@ class RitualGrayscaleWorkflowTests(unittest.TestCase):
         return result
 
     def slot_rows(self):
+        """Locate review actions by complete source footprint rather than mutable row order."""
         table = self.window.ritual_table
         return {tuple((table.item(row, 0).data(Qt.ItemDataRole.UserRole) or {})["grid_slots"]): row
                 for row in range(table.rowCount())}
@@ -71,12 +72,20 @@ class RitualGrayscaleWorkflowTests(unittest.TestCase):
         for field, value in zip(kill_fields, drafts):
             field.setText(value)
         result = self.read_actual_capture()
+        self.assertEqual([item["grid_slots"] for item in result["items"]],
+                         [[1], [2], [13], [14], [25], [37], [49], [61],
+                          [73, 74, 85, 86], [97], [109]])
         self.assertEqual((result["tribute_available"], result["rerolls_remaining"]), (264, 13))
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
         self.assertEqual(logger.review_icons(), [])
         self.assertEqual(self.window.pending_review_kind, "ritual")
         table = self.window.ritual_table
         rows = self.slot_rows()
+        self.assertEqual(table.rowCount(), 11)
+        armor_row = rows[(73, 74, 85, 86)]
+        self.assertEqual((table.item(armor_row, 0).text(), table.item(armor_row, 2).text()),
+                         ("Item", "1"))
+        self.assertTrue({(73,), (74,), (85,), (86,)}.isdisjoint(rows))
         choices = {2: "Omen of Resurgence", 49: "Omen of Amelioration"}
         alternatives = {}
         for slot, name in choices.items():

@@ -901,6 +901,24 @@ def _inventory_unique_row(match, image, slots):
     return result
 
 
+def _verified_unmarked_inventory_single(cell, label, reader):
+    """Retain one only when absent-marker geometry and native digits do not conflict.
+
+    Identity remains a separate review decision. A missed count detector alone
+    cannot verify one: clipping, glyph evidence or a native multi-count vetoes it.
+    """
+    from PoE2_Data_Logger.ocr.inventory_labels import complete_count_glyphs
+
+    if (label.get("count_present") is not False or type(label.get("count")) is not int
+            or label["count"] != 1 or label.get("count_clipped")
+            or label.get("count_geometry_uncertain") or label.get("count_candidate") not in (None, 1)
+            or label.get("count_glyphs") not in (None, 0)
+            or complete_count_glyphs(cell) not in (None, 0)):
+        return False
+    native = reader.count(cell)
+    return native is None or (type(native) is int and native == 1)
+
+
 def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitivity.DEFAULT):
     """Match stacks using a frozen strictness while retaining count, tier and occupied-slot review."""
     from PoE2_Data_Logger.ocr.inventory_labels import complete_count_glyphs
@@ -966,12 +984,6 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
     currency_ocr.prefetch_catalog_ranks(reader, ((cell, len(str(hints[slot])) if
         hints[slot] is not None else None) for slot, cell in cells.items()
         if slot not in equipment and slot not in unique_slots))
-    # Confirmed limitation: ordinary unknown payloads below omit labels' count
-    # and clipping evidence. Even an unmarked count of one reaches desktop
-    # review as a blank count; unknown identity does not itself make that count
-    # uncertain. A future correction must retain clipped/unreadable count gates
-    # rather than assigning one to every unknown. Details and capture evidence:
-    # docs/FRONTEND_SWEEP_2026-10-22.md#confirmed-issues
     found, unknown = list(unique_rows), []
     for slot, cell in cells.items():
         if slot in unique_slots or slot in equipment:
@@ -986,9 +998,21 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
             continue
         unique = (unique_items.match(cell, (1, 1), strictness=strictness)
                   if slot not in equipment and
-                  not icon.get("family") and
                   not (labels is not None and type(labels[slot].get("count")) is int and
                        labels[slot]["count"] > 1) else None)
+        if unique and icon.get("family"):
+            # A currency-family hit must not suppress competing item artwork.
+            # The scores use different matchers, so neither can outrank the
+            # other numerically. Keep both identities reviewable rather than
+            # auto-saving a currency guess (Idol of Uldurn is one such overlap).
+            item_names = unique.get("candidate_names") or [unique.get("name")]
+            currency_names = icon.get("members") or []
+            if not set(item_names).issubset(currency_names):
+                choices = list(dict.fromkeys(name for name in (*item_names, *currency_names) if name))
+                unknown.append({"slot": slot, "candidate": " / ".join(choices),
+                                "score": round(unique.get("score", 0), 3),
+                                "reason": "item and currency artwork overlap; check name"})
+                continue
         correction = (_reviewed_match(reader, cell, reviewed, catalog=icon, strictness=strictness)
                       if slot not in equipment and not (unique and
                           len(unique.get("candidate_names") or []) > 1) else None)
@@ -1090,6 +1114,16 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
         elif strictness != ocr_sensitivity.DEFAULT and slot not in equipment:
             # A stricter suggestion gate must retain occupied cells for manual labels.
             unknown.append({"slot": slot, "candidate": "Unrecognized item", "score": round(score, 3)})
+    # Ordinary unknown identities retain independently verified no-marker counts.
+    # Do this after all candidate/tier/reference branches so each has the same
+    # clipping and contradictory-digit safeguards; no name is approved here.
+    if labels is not None and not count_geometry_uncertain:
+        for item in unknown:
+            slot = item["slot"]
+            if slot not in clipped_count_slots and _verified_unmarked_inventory_single(
+                    cells[slot], labels[slot], reader):
+                item.update(quantity=1, count_verified=True, count_needs_review=False,
+                            name_needs_review=True)
     found.sort(key=lambda item: item["slot"])
     result = {"items": found, "unknown": unknown, "status": "review"}
     if strictness != ocr_sensitivity.DEFAULT:
@@ -1700,12 +1734,11 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
         if nearby:
             deferred_rewards.add(min(nearby)[2])
     items = []
-    # Footprints come from the grid detector; this stage does not reconstruct
-    # equipment split into single cells. In the original 264-Tribute capture,
-    # one confirmed 2x2 gray item arrives as slots 73/74/85/86 separately, so
-    # its fragments are classified independently (including a named fragment).
-    # Grid coverage alone therefore does not verify item boundaries. See
-    # docs/FRONTEND_SWEEP_2026-10-22.md#confirmed-issues
+    # Classify complete grid-detector footprints rather than reconstructing
+    # cells into guessed items here. Paired ornate-frame evidence keeps the
+    # original 264-Tribute gray 2x2 item and Tetzlapokal's gray 2x3 item whole
+    # before matching. Complete grid coverage alone does not establish item
+    # boundaries; the captured and catalog geometry regressions guard them.
     for index, reward in enumerate(grid["rewards"]):
         box = tuple(reward["box"])
         multiple = len(reward["slots"]) > 1
@@ -1814,9 +1847,9 @@ def scan_ritual_page(image, omen_names, references=(), strictness=ocr_sensitivit
                       coverage_uncertain=False, reward_count=len(result["items"]),
                       unresolved_count=sum(bool(item["unresolved"]) for item in result["items"]),
                       deferred_count=len(markers))
-        # The fallback below runs only when no grid is detected. It cannot
-        # repair the confirmed gray-item split above: that capture has a grid
-        # and returns here with coverage_uncertain=False despite the split.
+        # The no-grid fallback cannot repair a detected grid's item boundaries.
+        # Consume its established complete footprints above; grouping regressions
+        # separately verify those boundaries before this covered-grid return.
         return result
     result.update(grid_detected=False, coverage_uncertain=header is not None or has_grid_structure(image))
     omens = [item for item in result["items"] if item["category"] == "Omen"]

@@ -51,7 +51,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.26 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.27 Beta"
 SCAN_TIMEOUT_MS = 90000
 SCAN_PRESENTATION_RETRY_MS = 100
 SCAN_PRESENTATION_WAIT_SECONDS = 10
@@ -6848,13 +6848,13 @@ class LoggerWindow(QMainWindow):
         uncertain = len(unknown) + sum(not clear_currency_stack(item) for item in result["items"])
         rows = list(result["items"])
         for item in unknown:
-            verified_item_count = (item.get("category") == "Item" and
-                                   item.get("count_needs_review") is False and
-                                   type(item.get("quantity")) is int and
-                                   1 <= item["quantity"] <= 1000000)
+            verified_count = ((item.get("category") == "Item" or item.get("count_verified") is True) and
+                              item.get("count_needs_review") is False and
+                              type(item.get("quantity")) is int and
+                              1 <= item["quantity"] <= 1000000)
             rows.append({**item, "name": "",
-                         "quantity": item["quantity"] if verified_item_count else "",
-                         "count_needs_review": not verified_item_count})
+                         "quantity": item["quantity"] if verified_count else "",
+                         "count_needs_review": not verified_count})
         # Sort before creating widgets so row actions and icon-learning evidence
         # stay attached to their original inventory slots, rather than row numbers.
         rows.sort(key=lambda item: (currency_review_rank(item),

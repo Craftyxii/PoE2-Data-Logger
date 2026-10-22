@@ -9,5 +9,9 @@ it does not independently establish why the game grayed each offer.
 Expected shared shape sets come from bundled `inventory-icons.json` source-art
 filenames `VoodooOmens1`, `VoodooOmens2`, and `VoodooOmens3` with their color
 suffixes. No annotations or transformed artwork have been added to the image.
-The current grid detector splits the visible gray armor into several cells;
-these tests preserve that existing geometry and use those crops as negatives.
+The user confirmed that the gray armor at slots 73, 74, 85 and 86 is one 2×2
+item. Tests assert that complete footprint, Item category and quantity one while
+keeping adjacent single-cell rewards independent. Individually cropped pixels
+from those four armor cells remain negative controls for Omen-shape matching;
+they do not represent four separate rewards. Earlier sweep reports document the
+old split behavior with their original tested revision.

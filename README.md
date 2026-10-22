@@ -4,9 +4,9 @@ A Windows desktop logger for Path of Exile 2. Record Expedition remnants and run
 
 ## Download and source status
 
-This source targets [1.3.2.26 Beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.26-beta). Its [installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.26-beta/PoE2-Data-Logger-Setup-v1.3.2.26-beta.exe) becomes available after the required release checks pass. See the [release notes](docs/RELEASE_1.3.2.26.md). The [previous beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.25-beta) and [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2) remain available.
+This source is the **1.3.2.27 Beta candidate**. Its installer is not published until the required checks pass on the exact release source. See the [candidate release notes](docs/RELEASE_1.3.2.27.md). The latest published [1.3.2.26 Beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.26-beta) and its [installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.26-beta/PoE2-Data-Logger-Setup-v1.3.2.26-beta.exe), plus the [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2), remain available.
 
-This beta keeps verified Currency and Ritual items out of review, treats items without a quantity marker as quantity one, and preserves whole equipment during inventory recognition and correction learning. It builds on 1.3.2.25 Beta. See the [changelog](CHANGELOG.md#13226-beta). Installer, executable and window version labels identify 1.3.2.26 Beta.
+This candidate addresses the confirmed grayscale Ritual equipment grouping and Currency review bugs on top of 1.3.2.26 Beta. See the [changelog](CHANGELOG.md). Installer, executable and window version labels target 1.3.2.27 Beta; the existing HUD controls, layout and styling are retained.
 
 ## What you can record
 

@@ -341,8 +341,31 @@ def _corner_strength(pixels, box, pitch, bottom_right=False):
             # frame's expected corner. Artwork farther inside a cell needs
             # much stronger shape evidence before it can split a frame.
             threshold = .82
+        if bottom_right and gray_score < .72 and gray_at[1] != min(radius, y):
+            # A weak curl found inside artwork is not the item's bottom edge.
+            # In particular, gray Tetzlapokal art resembles a lower ornament
+            # one pixel inside its first cell. Real partly covered lower curls
+            # can be weak too, but must then sit on the proposed bottom edge.
+            # Its x position may move by one pixel when dividers are resampled.
+            return 0.
+        placement = max(abs(gray_at[0] - min(radius, x)),
+                        abs(gray_at[1] - min(radius, y)))
+        # Game-gray frames retain blue backing between their pale strokes.
+        # Requiring the entire patch to be neutral loses both genuine corners
+        # of the original 264-Tribute armor. A very strong, correctly placed
+        # luminance shape with pale strokes over that blue tint can establish
+        # the same ornate frame. Allow its two-pixel resampling displacement;
+        # grouping still requires the opposite complete frame corner.
+        neutral_frame = float(neutral.mean()) >= .70
+        red, green, blue = gray_patch.transpose(2, 0, 1)
+        blue_excess = blue - np.maximum(red, green)
+        blue_tinted = ((np.abs(red - green) <= 6) &
+                       (blue_excess >= 0) & (blue_excess <= 25))
+        tinted_frame = (gray_score >= .85 and placement <= 2 and
+                        float(blue_tinted.mean()) >= .85 and
+                        float((blue_excess >= 6).mean()) >= .10)
         luminance = cv2.cvtColor(gray_patch.astype(np.uint8), cv2.COLOR_RGB2GRAY)
-        return float(gray_score >= threshold and float(neutral.mean()) >= .70
+        return float(gray_score >= threshold and (neutral_frame or tinted_frame)
                      and float(luminance.mean()) >= 22
                      and float(np.percentile(luminance, 90)) >= 35)
     # Icon artwork sometimes overlaps the lower ornament.  At small capture

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — 1.3.2.27 Beta candidate
+
+- Preserve complete grayscale Ritual equipment footprints, including the original gray armor capture and Tetzlapokal's Desire, instead of reviewing individual fragments.
+- Retain independently verified quantity one for unnamed inventory objects without a quantity marker, requesting only the unresolved name while preserving uncertain and clipped count review.
+- Prevent the confirmed Idol of Uldurn control from being silently accepted as Vaal Armourer's Infuser; unresolved identities remain held for review.
+- Protect running 1.3.2.26 Beta clients during installation and removal, retaining the earlier-client guards.
+
+The candidate is awaiting the exact-source Windows release gates and publication. See [candidate release notes](docs/RELEASE_1.3.2.27.md).
+
 ## 1.3.2.26 Beta
 
 - Show only uncertain Currency and Ritual entries in review while retaining verified records in saved totals.
