@@ -1748,6 +1748,7 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
         correction = None
         catalog_icon = None
         unique = None
+        identity_conflict = []
         if not multiple:
             count = ((label.get("count") or label.get("count_candidate"))
                      if label.get("count_present", True) else None)
@@ -1762,13 +1763,24 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
                 reviewed[shape] = _reviewed_bank(reader, references, shape)
             shown = (image.crop((box[0] + frame_inset, box[1] + frame_inset, box[2], box[3])).convert("RGB")
                      if multiple else cells[index])
-            if multiple or (not catalog_icon.get("family") and not catalog_icon.get("shared_icon") and
+            if multiple or (not catalog_icon.get("shared_icon") and
                             not (type(label.get("count")) is int and label["count"] > 1)):
                 unique = unique_items.match(shown, shape, strictness=strictness)
-            if not (unique and len(unique.get("candidate_names") or []) > 1):
+            if unique and not multiple and catalog_icon.get("family"):
+                # Match Inventory's cross-catalog safeguard before certifying
+                # identity. These matchers have incomparable diagnostic scores;
+                # credible competing artwork must remain a choice, not a winner.
+                item_names = unique.get("candidate_names") or [unique.get("name")]
+                currency_names = catalog_icon.get("members") or []
+                if not set(item_names).issubset(currency_names):
+                    identity_conflict = list(dict.fromkeys(
+                        name for name in (*item_names, *currency_names) if name))
+            if not identity_conflict and not (unique and len(unique.get("candidate_names") or []) > 1):
                 correction = _reviewed_match(reader, shown, reviewed[shape], catalog=catalog_icon,
                                              strictness=strictness)
-        if correction:
+        if identity_conflict:
+            name, score, candidates, kind = None, unique["score"], identity_conflict, "item"
+        elif correction:
             name, score, kind = correction
             candidates = []
         elif unique:
@@ -1786,7 +1798,8 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
                 "source": "icon reference: Ritual reward grid" if name else "Occupied Ritual reward; name unresolved",
                 "score": round(score, 3), "name_match": 1.0 if name in omen_names else 0.0,
                 "name_needs_review": not bool(name), "unresolved": not bool(name),
-                "category_verified": bool(name) or multiple or kind == "omen" or bool(unique),
+                "identity_verified": bool(name),
+                "category_verified": not identity_conflict and (bool(name) or multiple or kind == "omen" or bool(unique)),
                 "count_needs_review": False if multiple or unique else not label.get("count_verified", False),
                 "deferred": deferred, "box": box, "grid_slots": list(reward["slots"])}
         if unique:
@@ -1806,9 +1819,17 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
                 continue
             if (proposal["name"] == name or proposal["name"] in candidates) and float(proposal.get("name_match", 0)) >= .9:
                 item.update(name=proposal["name"], category=proposal["category"], name_match=proposal["name_match"],
-                            unresolved=False, name_needs_review=False, tribute=proposal.get("tribute"))
+                            unresolved=False, name_needs_review=False, identity_verified=True, category_verified=True,
+                            tribute=proposal.get("tribute"))
+        # Each named branch above has already passed its own captured-strictness
+        # identity/tier/rival gates. Their diagnostic scores use different scales;
+        # applying a second generic .94 floor rejects identities Currency accepts
+        # (the real Refreshment capture scores .922). Suggestions have no proof,
+        # and verified identity never removes an uncertain count or manual hold.
         item["needs_review"] = bool(item["name_needs_review"] or item["count_needs_review"] or
-                                    score < ocr_sensitivity.clear_threshold(.94, strictness, .14) or strictness == 100)
+                                    (not item["identity_verified"] and
+                                     score < ocr_sensitivity.clear_threshold(.94, strictness, .14)) or
+                                    strictness == 100)
         items.append(item)
     return items
 

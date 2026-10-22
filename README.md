@@ -6,7 +6,7 @@ A Windows desktop logger for Path of Exile 2. Record Expedition remnants and run
 
 This source is the **1.3.2.27 Beta candidate**. Its installer is not published until the required checks pass on the exact release source. See the [candidate release notes](docs/RELEASE_1.3.2.27.md). The latest published [1.3.2.26 Beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.26-beta) and its [installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.26-beta/PoE2-Data-Logger-Setup-v1.3.2.26-beta.exe), plus the [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2), remain available.
 
-This candidate addresses the confirmed grayscale Ritual equipment grouping and Currency review bugs on top of 1.3.2.26 Beta. See the [changelog](CHANGELOG.md). Installer, executable and window version labels target 1.3.2.27 Beta; the existing HUD controls, layout and styling are retained.
+This candidate addresses grayscale Ritual equipment grouping, recognition/review holds, strictness range and Sacred Bloom recognition on top of 1.3.2.26 Beta. See the [changelog](CHANGELOG.md). Installer, executable and window version labels target 1.3.2.27 Beta. Ritual reuses Currency's per-item Approve/Reject actions in its existing Review column; other HUD controls, columns, layout and styling are retained.
 
 ## What you can record
 

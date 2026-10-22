@@ -212,14 +212,53 @@ class RitualGridScanTests(unittest.TestCase):
         self.assertEqual(result["unmatched"], ["Omen of Whittling 4,000"])
 
 
-    def test_accepted_but_lower_confidence_artwork_still_needs_confirmation(self):
-        """A possible catalog identity must not gain the high-confidence bypass."""
+    def test_accepted_weighted_identity_does_not_get_a_second_score_gate(self):
+        """A calibrated family match retains its identity proof despite a different score scale."""
         self.reader.icon = lambda cell, count_digits=None: {
             "family": "omen", "members": ["Omen of Whittling"], "score": .82, "method": "inventory"}
         item = self.scan(reward_grid([[1]]))["items"][0]
         self.assertEqual(item["name"], "Omen of Whittling")
-        self.assertTrue(item["needs_review"])
+        self.assertFalse(item["needs_review"])
+        self.assertTrue(item.get("identity_verified", False))
         self.assertFalse(item["count_needs_review"])
+
+    def test_candidate_score_does_not_verify_an_unresolved_identity(self):
+        """Even a high suggestion score cannot supply a name without matcher acceptance."""
+        self.reader.icon = lambda cell, count_digits=None: {
+            "family": None, "score": .999,
+            "all": [{"name": "Omen of Whittling", "score": .999}]}
+        item = self.scan(reward_grid([[1]]))["items"][0]
+        self.assertEqual(item["name"], "")
+        self.assertFalse(item.get("identity_verified", False))
+        self.assertTrue(item["needs_review"])
+
+    def test_real_refreshment_match_is_verified_without_a_second_raw_score_gate(self):
+        """The supplied pixels establish the accepted Omen while count and identity stay separate."""
+        with Image.open(Path(__file__).parent / "fixtures/ritual_rewards/02.png") as source:
+            result = item_ocr.scan_ritual_page(source.convert("RGB"), OMEN_NAMES)
+        item = next(item for item in result["items"] if item["name"] == "Omen of Refreshment")
+        self.assertLess(item["score"], .94)
+        self.assertEqual(item["quantity"], 1)
+        self.assertFalse(item["count_needs_review"])
+        self.assertFalse(item["needs_review"])
+        self.assertTrue(item.get("identity_verified", False))
+
+    def test_competing_accepted_item_and_currency_identities_remain_unverified(self):
+        """Independent accepted identities cannot override each other through score scales."""
+        from PoE2_Data_Logger.ocr import unique_items
+        self.reader.icon = lambda cell, count_digits=None: {
+            "family": "infuser", "members": ["Vaal Armourer's Infuser"],
+            "score": .99, "method": "inventory"}
+        match = {"name": "Idol of Uldurn", "score": .99,
+                 "candidate_names": ["Idol of Uldurn"],
+                 "catalog_revision": "test-controlled-conflict", "source": "Controlled item evidence"}
+        with patch.object(unique_items, "match", return_value=match):
+            item = self.scan(reward_grid([[1]]))["items"][0]
+        self.assertEqual(item["name"], "")
+        self.assertFalse(item.get("identity_verified", False))
+        self.assertFalse(item["category_verified"])
+        self.assertEqual(set(item["candidate_names"]), {"Idol of Uldurn", "Vaal Armourer's Infuser"})
+        self.assertTrue(item["needs_review"])
 
     def test_reliable_artwork_with_unreadable_count_still_needs_confirmation(self):
         """A known icon cannot bypass an actual uncertain quantity marker."""

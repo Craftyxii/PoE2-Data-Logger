@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QApplication, QPushButton
 
 from PoE2_Data_Logger.core import logger_store as logger, ocr_sensitivity, store
 from PoE2_Data_Logger.ocr import item_ocr, item_text
-from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, clear_currency_read, clear_ritual_read, clear_waystone_read
+from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, clear_currency_read, clear_currency_stack, clear_ritual_read, clear_waystone_read
 
 
 class OCRStrictnessUITests(unittest.TestCase):
@@ -140,6 +140,63 @@ class OCRStrictnessUITests(unittest.TestCase):
             if 0 <= base <= 1:
                 self.assertGreaterEqual(floors[0], 0)
                 self.assertLessEqual(floors[2], 1)
+
+    def test_real_ritual_item_captures_follow_loose_default_and_manual_policy(self):
+        """Rescan actual game pixels and deliver their real recognition to Qt at each setting.
+
+        These captures scored below the old .945 minimum automatic-name gate,
+        so moving the slider to zero previously left both single candidates held.
+        No OCR text, labels, geometry, catalog evidence or review result is replaced.
+        """
+        captures = Path(__file__).parent / "fixtures/ritual_rewards"
+        cases = (("08.png", "Coward's Legacy", [61, 62]),
+                 ("05.png", "Visage of Ayah", [37, 38, 49, 50]))
+        for filename, name, slots in cases:
+            with Image.open(captures / filename) as source:
+                image = source.convert("RGB")
+            for level in (50, 40, 0, 100):
+                with self.subTest(capture=filename, strictness=level):
+                    self.window.ocr_sensitivity_sliders["ritual"].setValue(level)
+                    self.window._ritual_captured(image.copy(), live=False)
+                    work, done = self.jobs[-1]
+                    self.assertEqual(work.kwargs["strictness"], level)
+                    # Only scheduling is controlled; invoke the frozen production
+                    # request directly so this also verifies its captured policy.
+                    result = work.function(*work.args, **work.kwargs)
+                    index, item = next((index, item) for index, item in enumerate(result["items"])
+                                       if item["grid_slots"] == slots)
+                    try:
+                        done(result)
+                        self.assertEqual(item["quantity"], 1)
+                        self.assertFalse(item["count_needs_review"])
+                        self.assertEqual(self.window.ritual_table.isRowHidden(index), level == 0)
+                        if level == 0:
+                            self.assertEqual(item["name"], name)
+                            self.assertFalse(item["name_needs_review"])
+                            self.assertFalse(item["needs_review"])
+                            # Row evidence rounds Visage's .944992 to .945.
+                            self.assertLessEqual(item["score"], .945)
+                        elif level in (40, 50):
+                            self.assertEqual(item["name"], "")
+                            self.assertIn(name, item["candidate_names"])
+                            self.assertTrue(item["name_needs_review"])
+                        else:
+                            self.assertFalse(clear_ritual_read(result, logger.ritual_names()))
+                            self.assertTrue(item["needs_review"])
+                    finally:
+                        self.window.discard_scan()
+
+    def test_loose_catalog_identity_still_holds_the_actual_idol_currency_conflict(self):
+        """Looser unique acceptance cannot hide the independently competing currency identity."""
+        from tests.test_inventory_identity_conflicts import InventoryIdentityConflictTests
+
+        result = item_ocr.scan_inventory_grid(InventoryIdentityConflictTests.idol_image(), strictness=0)
+        item = InventoryIdentityConflictTests.row_for(result, 57)
+        self.assertIn("Idol of Uldurn", InventoryIdentityConflictTests.candidates(item))
+        self.assertIn("Vaal Armourer's Infuser", InventoryIdentityConflictTests.candidates(item))
+        self.assertTrue(item["name_needs_review"])
+        self.assertFalse(clear_currency_stack(item))
+        self.assertFalse(clear_currency_read(result))
 
     def test_maximum_currency_requires_row_confirmation_then_saves_once(self):
         """An exact named read stays held at 100; explicit row approval saves the correct count."""

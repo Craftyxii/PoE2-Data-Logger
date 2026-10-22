@@ -178,7 +178,10 @@ class RitualGrayscaleOmenTests(unittest.TestCase):
         self.assertEqual(items[13]["name"], "Omen of Whittling")
         self.assertEqual(items[13]["tribute"], 1200)
         self.assertFalse(items[13]["unresolved"] or items[13]["name_needs_review"])
-        self.assertTrue(items[13]["needs_review"])
+        # Independent anchored text resolves this sibling's identity; gray art
+        # alone still cannot confirm the different shape below.
+        self.assertTrue(items[13]["identity_verified"])
+        self.assertFalse(items[13]["needs_review"])
         self.assertEqual(items[2]["name"], "")
 
     def test_actual_colored_and_non_omen_crops_keep_existing_paths(self):

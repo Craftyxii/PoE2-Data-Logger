@@ -1,4 +1,4 @@
-"""Exercise captured Ritual alternatives through the existing page-review controls."""
+"""Exercise Ritual alternatives while keeping selection and explicit row approval separate."""
 
 import copy
 import os
@@ -81,6 +81,13 @@ class RitualSuggestionDropdownTests(unittest.TestCase):
                          pos=selector.view().visualRect(model_index).center())
         self.app.processEvents()
 
+    def approve_row(self, row=0):
+        """Approve one corrected draft without committing its page or learned artwork."""
+        controls = self.window.ritual_table.cellWidget(row, 6)
+        self.window.review_ritual_row(controls, True)
+        self.assertEqual(controls.property("reviewStatus"), "approved")
+        self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+
     def approve(self):
         self.assertTrue(self.window.approve_scan_button.isEnabled())
         QTest.mouseClick(self.window.approve_scan_button, Qt.MouseButton.LeftButton)
@@ -142,15 +149,17 @@ class RitualSuggestionDropdownTests(unittest.TestCase):
         self.assertEqual(table.item(0, 5).checkState(), Qt.CheckState.Unchecked)
         self.assertEqual(table.item(0, 0).data(Qt.ItemDataRole.UserRole), metadata)
         self.assertEqual(table.item(0, 1).icon().cacheKey(), icon_key)
-        self.assertIn("Check reading", table.item(0, 6).text())
+        self.assertIn("Confirm row", table.item(0, 6).text())
+        self.assertEqual(table.cellWidget(0, 6).property("reviewStatus"), "pending")
         self.assertFalse(table.item(0, 0).data(Qt.ItemDataRole.UserRole + 1))
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
         self.assertEqual(logger.review_icons(), [])
         self.assert_crop_visible()
 
-    def test_existing_global_approve_saves_choice_and_locks_preview(self):
+    def test_row_then_global_approval_saves_choice_and_locks_preview(self):
         selector = self.read()
         self.choose(selector)
+        self.approve_row()
         self.approve()
         table = self.window.ritual_table
         pages = logger.ritual_pages_for_map("M0001")
@@ -185,6 +194,8 @@ class RitualSuggestionDropdownTests(unittest.TestCase):
         selector.lineEdit().selectAll()
         QTest.keyClicks(selector.lineEdit(), "Omen of a Confirmed Type Audit")
         self.assertEqual(table.item(0, 0).text(), "Item")
+        self.assertEqual(table.cellWidget(0, 6).property("reviewStatus"), "pending")
+        self.approve_row()
         self.approve()
         saved = logger.ritual_pages_for_map("M0001")[0]["items"][0]
         self.assertEqual((saved["name"], saved["category"]), ("Omen of a Confirmed Type Audit", "Item"))
@@ -202,10 +213,10 @@ class RitualSuggestionDropdownTests(unittest.TestCase):
         QTest.keyClicks(selector.lineEdit(), "A manually confirmed Omen")
         self.assertEqual(table.item(0, 0).text(), "Omen")
         with self.assertRaisesRegex(ValueError, "quantity"):
-            self.window.save_ritual()
+            self.window.review_ritual_row(table.cellWidget(0, 6), True)
         table.item(0, 2).setText("2")
         with self.assertRaisesRegex(ValueError, "Deferred"):
-            self.window.save_ritual()
+            self.window.review_ritual_row(table.cellWidget(0, 6), True)
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
 
     def test_row_removal_keeps_remaining_selector_bound_and_removed_callback_inert(self):
@@ -221,6 +232,7 @@ class RitualSuggestionDropdownTests(unittest.TestCase):
         self.choose(remaining, 1)
         self.assertEqual(table.item(0, 1).text(), "Omen of Refreshment")
         self.assertEqual(table.item(0, 0).data(Qt.ItemDataRole.UserRole)["grid_slots"], [15])
+        self.approve_row()
         self.approve()
         self.assertEqual(logger.ritual_pages_for_map("M0001")[0]["items"][0]["name"],
                          "Omen of Refreshment")
@@ -260,6 +272,8 @@ class RitualSuggestionDropdownTests(unittest.TestCase):
         table.item(2, 1).setText("Omen of a Manual Row Audit")
         self.assertIsNone(table.cellWidget(2, 1))
         self.assertEqual(table.item(2, 0).text(), "Omen")
+        self.approve_row(1)
+        self.approve_row(2)
         self.approve()
         self.assertIn("Rejected: no name", table.item(0, 6).text())
         self.assertFalse(selector.isEnabled())

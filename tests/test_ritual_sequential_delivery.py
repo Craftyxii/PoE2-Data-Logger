@@ -180,6 +180,10 @@ class RitualSequentialDeliveryTests(unittest.TestCase):
         self.assertEqual(len(self.futures), 2)
         self.assertEqual(self.window.ritual_table.item(0, 2).text(), "2")
         self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
+        # Confirm the latest held reward locally before the whole-page commit.
+        controls = self.window.ritual_table.cellWidget(0, 6)
+        self.window.review_ritual_row(controls, True)
+        self.assertEqual(controls.property("reviewStatus"), "approved")
         self.click_approve()
         self.window.poll()
         self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [2])

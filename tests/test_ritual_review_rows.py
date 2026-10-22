@@ -1,4 +1,4 @@
-"""Qt correction checks retaining unknown Ritual rows until required fields are corrected or removed."""
+"""Qt checks retaining Ritual drafts until corrected rows receive explicit approval."""
 
 import copy
 import csv
@@ -85,6 +85,10 @@ class RitualReviewRowsTests(unittest.TestCase):
         self.window.ritual_table.item(row, 5).setCheckState(
             Qt.CheckState.Checked if deferred else Qt.CheckState.Unchecked)
 
+    def approve_row(self, row):
+        """Confirm the corrected reward locally before the final whole-page transaction."""
+        self.window.review_ritual_row(self.window.ritual_table.cellWidget(row, 6), True)
+
     def test_only_uncertain_rows_remain_visible_with_unknown_fields_and_review_reasons(self):
         """Retain every occupied reward while displaying only rows that need correction."""
         items = [self.known(grid_slots=[1]), self.unknown(),
@@ -112,9 +116,10 @@ class RitualReviewRowsTests(unittest.TestCase):
         self.read(self.result([self.unknown(count_needs_review=True, deferred=None)]))
         self.window.ritual_table.item(0, 1).setText("A manually identified rare ring")
         with self.assertRaisesRegex(ValueError, r"(?i)row|name|type|reward"):
-            self.window.save_ritual()
+            self.approve_row(0)
         self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
         self.correct(0, "A manually identified rare ring", quantity=3)
+        self.approve_row(0)
         self.window.approve_review()
 
         item = self.saved_items()[0]
@@ -135,6 +140,7 @@ class RitualReviewRowsTests(unittest.TestCase):
         self.assertNotIn("type", reason)
         self.assertNotIn("quantity", reason)
         table.item(0, 1).setText("A manually identified rare belt")
+        self.approve_row(0)
         self.window.approve_review()
 
         self.assertEqual([(item["category"], item["name"], item["quantity"]) for item in self.saved_items()],
@@ -147,6 +153,7 @@ class RitualReviewRowsTests(unittest.TestCase):
         self.window.ritual_table.setCurrentCell(2, 1)
         self.window.ritual_remove_row_button.click()
         self.assertEqual(self.window.ritual_table.rowCount(), 2)
+        self.approve_row(1)
         self.window.approve_review()
         self.assertEqual([(item["name"], item["quantity"]) for item in self.saved_items()],
                          [("Chaos Orb", 1), ("A second custom item", 2)])
@@ -206,8 +213,8 @@ class RitualReviewRowsTests(unittest.TestCase):
             with self.subTest(result=result):
                 self.assertFalse(clear_ritual_read(result, logger.ritual_names()))
 
-    def test_save_rejects_invalid_critical_fields_without_partial_page_writes(self):
-        """Verify invalid critical fields reject the save without partially writing a page."""
+    def test_row_approval_rejects_invalid_critical_fields_without_partial_page_writes(self):
+        """Verify invalid critical fields block local approval without writing a page."""
         cases = ((0, ""), (0, "Currency"), (1, "Unidentified reward"),
                  (1, "Deferred omen"), (2, ""), (2, "0"), (2, "-1"),
                  (2, "1.5"), (2, "1000001"), (5, Qt.CheckState.PartiallyChecked))
@@ -217,7 +224,7 @@ class RitualReviewRowsTests(unittest.TestCase):
                 cell = self.window.ritual_table.item(0, column)
                 cell.setCheckState(value) if column == 5 else cell.setText(value)
                 with self.assertRaises(ValueError):
-                    self.window.save_ritual()
+                    self.approve_row(0)
                 self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
                 self.assertEqual(self.window.pending_review_kind, "ritual")
                 self.window.reject_review()
@@ -231,6 +238,7 @@ class RitualReviewRowsTests(unittest.TestCase):
         self.assertEqual(self.window.ritual_table.item(0, 2).text(), "")
         name = logger.ritual_names()[0]
         self.correct(0, name=name, category="Omen", quantity=1, deferred=True)
+        self.approve_row(0)
         self.window.approve_review()
         rows = list(csv.DictReader(io.StringIO(logger.export_ritual_csv().decode("utf-8-sig"))))
         self.assertEqual(rows[0]["Name"], name)
@@ -246,6 +254,7 @@ class RitualReviewRowsTests(unittest.TestCase):
         self.assertEqual(self.window.pending_review_kind, "ritual")
         self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
         self.assertEqual(self.window.ritual_table.item(0, 1).text(), name)
+        self.approve_row(0)
         self.window.approve_review()
         self.assertEqual(self.saved_items()[0]["name"], name)
         self.assertIsNone(self.saved_items()[0]["tribute"])
@@ -295,6 +304,7 @@ class RitualReviewRowsTests(unittest.TestCase):
         """Verify saved corrections retain readonly evidence and a new scan restores pending editing."""
         self.read(self.result([self.unknown(count_needs_review=True)]))
         self.correct(0, quantity=3)
+        self.approve_row(0)
         self.window.approve_review()
         table = self.window.ritual_table
         self.assertIn("Saved", table.item(0, 6).text())

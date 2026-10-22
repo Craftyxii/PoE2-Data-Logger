@@ -83,6 +83,12 @@ class ReviewLearningUITests(unittest.TestCase):
         controls.findChild(QPushButton, "approveCurrency").click()
         self.assertEqual(controls.property("reviewStatus"), "approved")
 
+    def approve_ritual_row(self, row=0):
+        """Accept this reward without committing or learning before final page approval."""
+        controls = self.window.ritual_table.cellWidget(row, 6)
+        controls.findChild(QPushButton, "approveRitual").click()
+        self.assertEqual(controls.property("reviewStatus"), "approved")
+
     def test_currency_new_name_approval_learns_and_exports_the_captured_item(self):
         """Verify committed approval stores a new token's quantity, captured icon and export column."""
         self.inventory()
@@ -331,6 +337,7 @@ class ReviewLearningUITests(unittest.TestCase):
         table = self.window.ritual_table
         table.item(0, 1).setText("Omen of a custom outcome")
         self.assertEqual(table.item(0, 0).text(), "Omen")
+        self.approve_ritual_row()
         self.window.approve_review()
         name = "Omen of a custom outcome"
         self.assertIn(name, logger.ritual_names())
@@ -346,6 +353,7 @@ class ReviewLearningUITests(unittest.TestCase):
         known = {"category": "Item", "name": "Chaos Orb", "quantity": 2,
                  "tribute": None, "deferred": False, "source": "verified"}
         self.ritual([known, self.unknown_reward(quantity=None, deferred=None)])
+        self.approve_ritual_row()
         self.window.approve_review()
         items = logger.ritual_pages_for_map("M0001")[0]["items"]
         self.assertEqual([(item["name"], item["quantity"]) for item in items], [("Chaos Orb", 2)])
@@ -373,12 +381,19 @@ class ReviewLearningUITests(unittest.TestCase):
         known = {"category": "Item", "name": "Chaos Orb", "quantity": 0,
                  "tribute": None, "deferred": False, "source": "manual"}
         self.ritual([self.unknown_reward(), known])
+        # Row decisions hold invalid rewards before any whole-page commit;
+        # final Approve intentionally excludes rows that remain unapproved.
+        self.window.review_ritual_row(self.window.ritual_table.cellWidget(0, 6), True)
         with self.assertRaises(ValueError):
-            self.window.approve_review()
+            self.window.review_ritual_row(self.window.ritual_table.cellWidget(1, 6), True)
+        self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
+        self.assertEqual(logger.review_icons(), [])
         self.assertIn("Rejected", self.window.ritual_table.item(0, 6).text())
         self.window.ritual_table.item(0, 1).setText("A recovered Ritual token")
         self.assertNotIn("Rejected", self.window.ritual_table.item(0, 6).text())
         self.window.ritual_table.item(1, 2).setText("2")
+        self.approve_ritual_row(0)
+        self.approve_ritual_row(1)
         self.window.approve_review()
         self.assertEqual([item["name"] for item in logger.ritual_pages_for_map("M0001")[0]["items"]],
                          ["A recovered Ritual token", "Chaos Orb"])

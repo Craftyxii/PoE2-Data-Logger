@@ -496,6 +496,10 @@ class NativeWindowsHUDTests(unittest.TestCase):
                      lambda:self.window.pending_review_kind == "ritual" and self.window.ritual_table.rowCount()==1)
         self.table_edit(self.window.ritual_table,0,1,"A manually identified rare belt")
         before = logger.get_state()["scan_commit_count"]
+        controls = self.window.ritual_table.cellWidget(0,6)
+        self.native.click(controls.findChild(QPushButton,"approveRitual"))
+        self.assertEqual(controls.property("reviewStatus"),"approved")
+        self.assertEqual(logger.get_state()["scan_commit_count"],before)
         self.native.click(self.window.approve_scan_button)
         saved = logger.ritual_pages_for_map("M0001")[-1]["items"][0]
         self.assertEqual((saved["category"],saved["name"],saved["quantity"]),("Item","A manually identified rare belt",1))

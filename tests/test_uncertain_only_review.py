@@ -8,7 +8,7 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from PoE2_Data_Logger.core import logger_store as logger, store
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, clear_currency_read, clear_ritual_read
@@ -125,6 +125,9 @@ class UncertainOnlyReviewTests(unittest.TestCase):
         self.assertNotIn("type", reason)
         self.assertNotIn("quantity", reason)
         table.item(1, 1).setText("Reviewed Ritual equipment")
+        controls = table.cellWidget(1, 6)
+        controls.findChild(QPushButton, "approveRitual").click()
+        self.assertEqual(controls.property("reviewStatus"), "approved")
         self.window.approve_review()
         saved = logger.ritual_pages_for_map("M0001")[0]["items"]
         self.assertEqual([(item["name"], item["quantity"]) for item in saved],

@@ -140,6 +140,9 @@ class RitualGrayscaleEquipmentLearningTests(unittest.TestCase):
                 table.item(row, 1).setText(name)
                 table.item(row, 2).setText("1")
                 table.item(row, 5).setCheckState(Qt.CheckState.Unchecked)
+                controls = table.cellWidget(row, 6)
+                self.window.review_ritual_row(controls, True)
+                self.assertEqual(controls.property("reviewStatus"), "approved")
             else:
                 table.item(row, 1).setText("")
         self.assertEqual(logger.review_icons(), [])

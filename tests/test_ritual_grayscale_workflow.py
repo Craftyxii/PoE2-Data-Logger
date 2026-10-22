@@ -13,7 +13,7 @@ from openpyxl import load_workbook
 from PIL import Image
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QComboBox
+from PySide6.QtWidgets import QApplication, QComboBox, QPushButton
 
 from PoE2_Data_Logger.core import logger_store as logger, store, workbook_export
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
@@ -108,6 +108,9 @@ class RitualGrayscaleWorkflowTests(unittest.TestCase):
             self.assertEqual(table.item(row, 0).text(), "Omen")
             # Explicitly confirm the visible single count, retaining its separate review gate.
             table.item(row, 2).setText("1")
+            controls = table.cellWidget(row, 6)
+            controls.findChild(QPushButton, "approveRitual").click()
+            self.assertEqual(controls.property("reviewStatus"), "approved")
         for footprint, row in rows.items():
             if footprint not in {(2,), (49,)}:
                 table.item(row, 1).setText("")

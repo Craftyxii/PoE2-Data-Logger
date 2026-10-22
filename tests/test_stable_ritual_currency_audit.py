@@ -42,11 +42,20 @@ class StableRitualCurrencyAudit(unittest.TestCase):
         logger._READY = False
         self.tmp.cleanup()
 
-    def click(self, table, row, name):
-        """Invoke a named enabled row action on the specified captured currency row."""
-        action = table.cellWidget(row, 3).findChild(QPushButton, name)
+    def click(self, table, row, name, column=3):
+        """Invoke an enabled action inside its existing Currency or Ritual review cell."""
+        action = table.cellWidget(row, column).findChild(QPushButton, name)
         self.assertTrue(action.isEnabled())
         action.click()
+
+    def approve_pending_ritual_rows(self):
+        """Confirm corrected rewards while preserving automatically accepted known rows."""
+        table = self.window.ritual_table
+        for row in range(table.rowCount()):
+            controls = table.cellWidget(row, 6)
+            if controls.property("reviewStatus") == "pending":
+                self.click(table, row, "approveRitual", column=6)
+                self.assertEqual(controls.property("reviewStatus"), "approved")
 
     def test_real_reward_pixels_preserve_duplicates_deferred_raw_and_page_identity(self):
         """No OCR injection: scan captured 08.png, correct unknowns, and scan it again."""
@@ -75,6 +84,7 @@ class StableRitualCurrencyAudit(unittest.TestCase):
             if scan == 0:
                 raw_evidence = self.window.ritual_raw.toPlainText()
             self.assertEqual(self.window.ritual_raw.toPlainText(), raw_evidence)
+            self.approve_pending_ritual_rows()
             self.window.approve_scan_button.click()
             self.assertIsNone(self.window.pending_review_kind)
             pages = logger.ritual_pages_for_map("M0001")
@@ -127,6 +137,7 @@ class StableRitualCurrencyAudit(unittest.TestCase):
                 repeated += 1
             if not table.item(row, 2).text():
                 table.item(row, 2).setText("1")
+        self.approve_pending_ritual_rows()
         self.window.approve_scan_button.click()
         self.assertIsNone(self.window.pending_review_kind)
         items = logger.ritual_pages_for_map("M0001")[0]["items"]
@@ -177,9 +188,10 @@ class StableRitualCurrencyAudit(unittest.TestCase):
         deferred = self.window.ritual_table.item(0, 5)
         self.assertEqual(deferred.checkState(), Qt.CheckState.PartiallyChecked)
         with self.assertRaisesRegex(ValueError, "Deferred"):
-            self.window.save_ritual()
+            self.window.review_ritual_row(self.window.ritual_table.cellWidget(0, 6), True)
         self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
         deferred.setCheckState(Qt.CheckState.Checked)
+        self.approve_pending_ritual_rows()
         self.window.approve_scan_button.click()
         self.assertIsNone(self.window.pending_review_kind)
         self.assertTrue(logger.ritual_pages_for_map("M0001")[0]["items"][0]["deferred"])

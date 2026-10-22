@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import logging
+import math
 import os
 import re
 import sqlite3
@@ -243,7 +244,12 @@ def unresolved_ritual_name(name):
 
 
 def clear_ritual_reward(item, omen_names, strictness=ocr_sensitivity.DEFAULT):
-    """Require confident reward identity, quantity and deferred status; Tribute is optional."""
+    """Require verified identity and complete values; Tribute remains optional.
+
+    A matcher-approved identity already passed its calibrated evidence gate.
+    Only that explicit boolean bypasses the legacy raw-score floor; all payloads
+    still need a finite score in range and independently verified row fields.
+    """
     strictness = ocr_sensitivity.validate(strictness)
     if strictness == 100:
         return False
@@ -252,13 +258,14 @@ def clear_ritual_reward(item, omen_names, strictness=ocr_sensitivity.DEFAULT):
     try:
         score = float(item.get("score", 0))
         name_match = float(item.get("name_match", 0))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return False
     return not (
         item.get("category") not in ("Omen", "Item") or not isinstance(item.get("name"), str) or
         unresolved_ritual_name(item.get("name")) or len(item["name"]) > 200 or
         (item["category"] == "Omen" and (item["name"] not in omen_names or not name_floor <= name_match <= 1)) or
-        not floor <= score <= 1 or
+        not math.isfinite(score) or not 0 <= score <= 1 or
+        (item.get("identity_verified") is not True and score < floor) or
         type(item.get("quantity")) is not int or not 1 <= item["quantity"] <= 1000000 or
         (item.get("tribute") is not None and
          (type(item["tribute"]) is not int or not 0 <= item["tribute"] <= 1000000000)) or
@@ -1417,11 +1424,17 @@ class LoggerWindow(QMainWindow):
                     if controls:
                         controls.setEnabled(editable)
                 else:
+                    controls = table.cellWidget(row, 6)
+                    if controls:
+                        controls.setEnabled(editable)
                     deferred = table.item(row, 5)
                     if deferred:
                         flags = deferred.flags()
-                        deferred.setFlags(flags | Qt.ItemFlag.ItemIsUserCheckable if editable else
-                                          flags & ~Qt.ItemFlag.ItemIsUserCheckable)
+                        # Locking a preview is lifecycle bookkeeping, not a
+                        # Deferred edit requiring renewed reward approval.
+                        with QSignalBlocker(table):
+                            deferred.setFlags(flags | Qt.ItemFlag.ItemIsUserCheckable if editable else
+                                              flags & ~Qt.ItemFlag.ItemIsUserCheckable)
         ritual_editable = kind == "ritual" and self.approve_scan_button.isEnabled()
         self.ritual_tribute.setReadOnly(not ritual_editable)
         self.ritual_rerolls.setReadOnly(not ritual_editable)
@@ -1457,7 +1470,7 @@ class LoggerWindow(QMainWindow):
         self.tabs.setCurrentIndex(2)
 
     def approve_review(self):
-        """Dispatch review approval without promoting pending currency rows to accepted items."""
+        """Save accepted rows without promoting pending Currency or Ritual decisions."""
         kind = self.pending_review_kind
         if kind in ("seed", "remnant"):
             return self.approve_remnant_scan()
@@ -2363,7 +2376,7 @@ class LoggerWindow(QMainWindow):
         actions.addStretch()
         review.addLayout(actions)
         review.addWidget(paragraph("Type is Omen or Item. Correct quantity and Tribute if visible; "
-                                "leave Tribute blank if unreadable. Unnamed rows are rejected when you Approve. "
+                                "leave Tribute blank if unreadable. Approve each corrected reward to include it. "
                                 "Approved name corrections teach future icon scans."))
         self.ritual_saved = message("")
         review.addWidget(self.ritual_saved)
@@ -7328,17 +7341,19 @@ class LoggerWindow(QMainWindow):
         self.ritual_rerolls.setText("" if result.get("rerolls_remaining") is None else str(result["rerolls_remaining"]))
         self.ritual_table.setRowCount(0)
         omen_names = logger.ritual_names()
-        strictness = result.get("_ocr_strictness", ocr_sensitivity.DEFAULT)
+        strictness = capture["strictness"] if capture else result.get("_ocr_strictness", ocr_sensitivity.DEFAULT)
         for item in result["items"]:
-            self.add_ritual_row(item)
-            self.ritual_table.setRowHidden(self.ritual_table.rowCount() - 1,
-                                          clear_ritual_reward(item, omen_names, strictness))
+            # Saving and visibility share the capture's acceptance decision;
+            # hidden known rows must survive a later whole-page approval.
+            accepted = clear_ritual_reward(item, omen_names, strictness)
+            self.add_ritual_row(item, approved=accepted)
+            self.ritual_table.setRowHidden(self.ritual_table.rowCount() - 1, accepted)
         self.ritual_table.setCurrentCell(-1, -1)
         self.ritual_raw.setPlainText(result["raw_text"])
         review_count = sum(not self.ritual_table.isRowHidden(row) for row in range(self.ritual_table.rowCount()))
         self.ritual_table.setVisible(bool(review_count))
         summary = (f"{len(result['items'])} Ritual rewards · {review_count} need review. "
-                   "Enter names, types and counts to include rewards. Unnamed rows are rejected when you Approve.")
+                   "Correct and approve each reward to include it. Unapproved rows are rejected when you Approve.")
         if result.get("coverage_uncertain"):
             summary = ("The complete reward grid could not be verified. " + summary +
                        " Check for missing rewards or capture the full grid again.")
@@ -7346,7 +7361,7 @@ class LoggerWindow(QMainWindow):
                     summary)
         self._review_pending("ritual", summary)
         if live and self.state["settings"].get("ocr_auto_commit"):
-            if clear_ritual_read(result, logger.ritual_names()):
+            if clear_ritual_read(dict(result, _ocr_strictness=strictness), omen_names):
                 saved = self.run(self.save_ritual)
                 if saved is not None:
                     set_message(self.ritual_status,
@@ -7359,7 +7374,7 @@ class LoggerWindow(QMainWindow):
                 set_message(self.ritual_status,
                             "Auto-commit held: check the reward names, quantities and Tribute, then Approve.")
 
-    def add_ritual_row(self, item=None):
+    def add_ritual_row(self, item=None, *, approved=None):
         """Add a Ritual reward draft with capture evidence, unresolved fields, and a tri-state
         Deferred control when its status needs confirmation.
         """
@@ -7417,7 +7432,36 @@ class LoggerWindow(QMainWindow):
             self.ritual_table.setItem(row, 5, deferred)
             self._add_ritual_name_selector(row, item.get("candidate_names"))
         self.ritual_table.show()
-        self._refresh_ritual_row_review(row)
+        # Reuse Currency's existing action layout inside Ritual's Review column.
+        # The table item below remains readable to accessibility/export checks.
+        controls = QWidget()
+        controls.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        layout = QVBoxLayout(controls)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(2)
+        status = QLabel()
+        status.setObjectName("ritualReviewStatus")
+        status.setWordWrap(True)
+        layout.addWidget(status)
+        actions = QHBoxLayout()
+        actions.setSpacing(5)
+        approve = button("Approve", lambda checked=False, c=controls:
+                         self.run(lambda: self.review_ritual_row(c, True)))
+        approve.setObjectName("approveRitual")
+        reject = button("Reject", lambda checked=False, c=controls:
+                        self.run(lambda: self.review_ritual_row(c, False)))
+        reject.setObjectName("rejectRitual")
+        for action in (approve, reject):
+            action.setStyleSheet("padding:3px 8px;")
+            actions.addWidget(action)
+        layout.addLayout(actions)
+        self.ritual_table.setCellWidget(row, 6, controls)
+        self.ritual_table.setRowHeight(row, 62)
+        if approved is None:
+            capture = self._ritual_capture_context
+            strictness = capture["strictness"] if capture else ocr_sensitivity.DEFAULT
+            approved = clear_ritual_reward(item, logger.ritual_names(), strictness)
+        self._set_ritual_review(controls, "approved" if approved else "pending")
 
     def _add_ritual_name_selector(self, row, candidates):
         """Offer captured reward alternatives without prefilling or approving a guess."""
@@ -7464,8 +7508,7 @@ class LoggerWindow(QMainWindow):
                 cell.setText(text)
 
     def _ritual_row_changed(self, item):
-        """Synchronize name selectors, infer a missing type, and refresh review status.
-        """
+        """Synchronize selectors and invalidate acceptance after any reward edit."""
         selector = self.ritual_table.cellWidget(item.row(), 1)
         if item.column() == 0 and selector is not None:
             selector.setProperty("inferredType", None)
@@ -7489,12 +7532,95 @@ class LoggerWindow(QMainWindow):
                     # Omen; a user's explicit type edit always ends inference.
                     selector.setProperty("inferredType", kind)
         if item.column() < 6:
-            self._refresh_ritual_row_review(item.row())
+            controls = self.ritual_table.cellWidget(item.row(), 6)
+            if controls:
+                self._set_ritual_review(controls, "pending")
+
+    def _ritual_row_values(self, row):
+        """Validate a complete reward before either local approval or final persistence."""
+        def field(column):
+            """Read the authoritative table item, including editable suggestion text."""
+            cell = self.ritual_table.item(row, column)
+            return cell.text().strip() if cell else ""
+        category, name = field(0).title(), field(1)
+        if category not in ("Omen", "Item"):
+            raise ValueError(f"Ritual row {row + 1}: confirm whether the reward is an Item or Omen.")
+        if unresolved_ritual_name(name):
+            raise ValueError(f"Ritual row {row + 1}: confirm the unidentified reward's name before saving.")
+        review_learning.validate_name(name, category)
+        logger._integer(field(2), f"Ritual row {row + 1} quantity", 1, 1000000)
+        logger._integer(field(3), f"Ritual row {row + 1} Tribute", 0, 1000000000, blank=True)
+        deferred = self.ritual_table.item(row, 5)
+        if deferred is None or deferred.checkState() == Qt.CheckState.PartiallyChecked:
+            raise ValueError(f"Ritual row {row + 1}: check or uncheck Deferred to confirm its status.")
+        return {"category": category, "name": name, "quantity": field(2),
+                "tribute": field(3), "source": field(4),
+                "deferred": deferred.checkState() == Qt.CheckState.Checked}
+
+    def _set_ritual_review(self, controls, state, *, unnamed=False):
+        """Keep the row's local decision and readable status together without writing data."""
+        row = next((row for row in range(self.ritual_table.rowCount())
+                    if self.ritual_table.cellWidget(row, 6) is controls), None)
+        if row is None:
+            return
+        controls.setProperty("reviewStatus", state)
+        controls.setProperty("unnamedRejected", bool(unnamed and state == "rejected"))
+        with QSignalBlocker(self.ritual_table):
+            cell = self.ritual_table.item(row, 0)
+            cell.setData(Qt.ItemDataRole.UserRole + 2, state == "rejected")
+            if state != "approved":
+                cell.setData(Qt.ItemDataRole.UserRole + 1, False)
+        controls.findChild(QPushButton, "approveRitual").setEnabled(state != "approved")
+        controls.findChild(QPushButton, "rejectRitual").setEnabled(state != "rejected")
+        self._refresh_ritual_row_review(row)
+
+    def review_ritual_row(self, controls, approve):
+        """Record one context-bound reward decision while retaining review scroll position.
+
+        This only changes the draft. Names, icon learning and rewards are committed
+        together by the existing final whole-page save transaction.
+        """
+        row = next((row for row in range(self.ritual_table.rowCount())
+                    if self.ritual_table.cellWidget(row, 6) is controls), None)
+        if row is None or self.pending_review_kind != "ritual" or not self.approve_scan_button.isEnabled():
+            return
+        if self._ritual_capture_context is not None:
+            logger.validate_scan_context(self._ritual_capture_context["context"])
+        name = self.ritual_table.item(row, 1).text().strip()
+        unnamed = bool(approve and not name)
+        if unnamed:
+            approve = False
+        elif approve:
+            self._ritual_row_values(row)
+        positions = []
+        ancestor = self.ritual_table
+        while ancestor is not None:
+            if isinstance(ancestor, QAbstractScrollArea):
+                for bar in (ancestor.verticalScrollBar(), ancestor.horizontalScrollBar()):
+                    positions.append((bar, bar.value()))
+            ancestor = ancestor.parentWidget()
+        action = controls.findChild(QPushButton, "approveRitual" if approve else "rejectRitual")
+        if QApplication.focusWidget() is action:
+            controls.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._set_ritual_review(controls, "approved" if approve else "rejected", unnamed=unnamed)
+        token = getattr(self, "_ritual_row_scroll_token", 0) + 1
+        self._ritual_row_scroll_token = token
+        owner = self.pending_review_kind, self._overlay_review_token
+
+        def restore_position():
+            """Restore queued focus/layout movement only while this reward still owns the action."""
+            if (self._closed or self._ritual_row_scroll_token != token or
+                    (self.pending_review_kind, self._overlay_review_token) != owner or
+                    self.ritual_table.cellWidget(row, 6) is not controls):
+                return
+            for bar, position in positions:
+                bar.setValue(position)
+
+        restore_position()
+        QTimer.singleShot(0, self, restore_position)
 
     def _refresh_ritual_row_review(self, row):
-        """Mark a Ritual row with missing or uncertain fields, preserving its saved/rejected
-        flags and grid-slot evidence.
-        """
+        """Mirror local approval, required fields and grid evidence in the existing Review cell."""
         def field(column):
             """Read a stripped reward field, treating a missing table cell as blank."""
             cell = self.ritual_table.item(row, column)
@@ -7503,12 +7629,18 @@ class LoggerWindow(QMainWindow):
         metadata = cell.data(Qt.ItemDataRole.UserRole) if cell else {}
         metadata = metadata or {}
         saved = bool(cell and cell.data(Qt.ItemDataRole.UserRole + 1))
-        rejected = bool(cell and cell.data(Qt.ItemDataRole.UserRole + 2))
+        controls = self.ritual_table.cellWidget(row, 6)
+        state = controls.property("reviewStatus") if controls else "pending"
         missing = []
         if field(0).title() not in ("Omen", "Item"):
             missing.append("type")
         if unresolved_ritual_name(field(1)):
             missing.append("name")
+        else:
+            try:
+                review_learning.validate_name(field(1), field(0))
+            except ValueError:
+                missing.append("name")
         try:
             logger._integer(field(2), "Ritual quantity", 1, 1000000)
         except ValueError:
@@ -7518,18 +7650,24 @@ class LoggerWindow(QMainWindow):
         except ValueError:
             missing.append("Tribute")
         deferred = self.ritual_table.item(row, 5)
-        if deferred and deferred.checkState() == Qt.CheckState.PartiallyChecked:
+        if deferred is None or deferred.checkState() == Qt.CheckState.PartiallyChecked:
             missing.append("Deferred")
-        status = "Rejected: no name" if rejected else ("Saved" if saved else ("Confirm " + " / ".join(missing) if missing else (
-            "Check reading" if metadata.get("needs_review") else "Ready")))
+        status = ("Rejected: no name" if state == "rejected" and controls.property("unnamedRejected") else
+                  "Rejected" if state == "rejected" else "Saved" if saved else
+                  "Approved" if state == "approved" else
+                  "Confirm " + " / ".join(missing) if missing else "Confirm row")
         slots = metadata.get("grid_slots") or []
         if slots:
             status = "Slot " + ", ".join(str(slot) for slot in slots) + ": " + status
         with QSignalBlocker(self.ritual_table):
             review = QTableWidgetItem(status)
             review.setFlags(review.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            review.setForeground(QColor("#F5C364") if status.split(": ")[-1] not in ("Ready", "Saved") else QColor("#BCB7AE"))
+            review.setForeground(QColor("#BCB7AE") if state == "rejected" or saved else QColor("#F5C364"))
             self.ritual_table.setItem(row, 6, review)
+        if controls:
+            label = controls.findChild(QLabel, "ritualReviewStatus")
+            label.setText(status)
+            label.setStyleSheet("color:#BCB7AE;" if state == "rejected" or saved else "color:#F5C364;")
 
     def remove_ritual_row(self):
         """Remove the selected Ritual reward draft and hide the table when no rows remain."""
@@ -7541,9 +7679,10 @@ class LoggerWindow(QMainWindow):
             self.ritual_table.hide()
 
     def save_ritual(self):
-        """Validate held context and named rewards, then commit their map-owned page using the
-        capture hash with registered names and learned icons. Reject unnamed rows and
-        retain readable counters even when no rewards remain; mark saved rows after a successful commit.
+        """Commit verified and individually approved rewards in one map-owned transaction.
+
+        Pending/rejected drafts cannot register labels or teach artwork. Readable
+        page counters survive their omission; saved flags follow a successful commit.
         """
         if self.pending_review_kind == "ritual" and self._failed_review:
             raise ValueError("This scan failed. Scan again or reject this reading before saving.")
@@ -7553,33 +7692,20 @@ class LoggerWindow(QMainWindow):
             logger.validate_scan_context(self._ritual_capture_context["context"])
         rows, examples, accepted_rows = [], [], []
         for row in range(self.ritual_table.rowCount()):
-            def field(col, row=row):
-                """Read a stripped field from this reward row, treating a missing table cell as
-                blank.
-                """
-                cell = self.ritual_table.item(row, col)
-                return cell.text().strip() if cell else ""
-            if not field(1):
-                with QSignalBlocker(self.ritual_table):
-                    self.ritual_table.item(row, 0).setData(Qt.ItemDataRole.UserRole + 2, True)
-                self._refresh_ritual_row_review(row)
+            controls = self.ritual_table.cellWidget(row, 6)
+            name = self.ritual_table.item(row, 1)
+            text = name.text().strip() if name else ""
+            if not controls or controls.property("reviewStatus") != "approved" or not text:
+                if controls:
+                    self._set_ritual_review(controls, "rejected", unnamed=not text)
                 continue
-            if field(0).title() not in ("Omen", "Item"):
-                raise ValueError(f"Ritual row {row + 1}: confirm whether the reward is an Item or Omen.")
-            if unresolved_ritual_name(field(1)):
-                raise ValueError(f"Ritual row {row + 1}: confirm the unidentified reward's name before saving.")
-            logger._integer(field(2), f"Ritual row {row + 1} quantity", 1, 1000000)
-            logger._integer(field(3), f"Ritual row {row + 1} Tribute", 0, 1000000000, blank=True)
-            if self.ritual_table.item(row, 5).checkState() == Qt.CheckState.PartiallyChecked:
-                raise ValueError(f"Ritual row {row + 1}: check or uncheck Deferred to confirm its status.")
-            rows.append({"category": field(0), "name": field(1), "quantity": field(2),
-                         "tribute": field(3), "source": field(4),
-                         "deferred": self.ritual_table.item(row, 5).checkState() == Qt.CheckState.Checked})
+            reward = self._ritual_row_values(row)
+            rows.append(reward)
             accepted_rows.append(row)
             capture = self._ritual_capture_context if self.pending_review_kind == "ritual" else None
             if capture:
                 original = self.ritual_table.item(row, 0).data(Qt.ItemDataRole.UserRole) or {}
-                example = review_learning.make_example(capture["image"], original, field(1), field(0).title(), "ritual")
+                example = review_learning.make_example(capture["image"], original, reward["name"], reward["category"], "ritual")
                 if example:
                     examples.append(example)
         if (not rows and self.pending_review_kind == "ritual" and

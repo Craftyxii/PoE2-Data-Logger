@@ -15,8 +15,8 @@ Items with shared artwork need a separately readable tier; uncertain results
 are presented for manual correction. The upstream price/network features and
 Electron UI are not included.
 
-inventory-icons.json contains 275 inventory-sized currency/omen artwork
-templates covering 297 names, plus 261 exclusion templates for maps,
+inventory-icons.json contains inventory-sized currency/omen artwork
+templates and exclusion templates for maps,
 tablets and socketable runes. Item names and GGG CDN artwork URLs come from
 Exiled Exchange 2's renderer/public/data/en/items.ndjson, retrieved 2026-10-04:
 https://github.com/Kvan7/Exiled-Exchange-2
@@ -28,6 +28,23 @@ The catalog contains in-game reference artwork for Origin Spark and
 Simulacrum, plus an exclusion reference for the Rite of Passage Golden Charm.
 inventory-reference-variants.json provides additional in-game variants for
 existing catalog entries.
+
+Sacred Bloom adds a 40x40 RGBA template under family sacred-bloom, with the
+single member Sacred Bloom. Canonical identity, 1x1 footprint and stack size
+one were verified in repoe-fork/poe2 data/base_items/AtlasCurrency.json at
+revision 75885a099f2e9be1619aa3c793fe6ab0754a511f (SacredBloom). Its artwork is:
+https://raw.githubusercontent.com/repoe-fork/poe2/75885a099f2e9be1619aa3c793fe6ab0754a511f/data/Art/2DItems/Currency/Harvest/SacredLifeforce.png
+Source PNG SHA-256:
+24666edfeab920db684c2d2844fda26b0f49f642248313b642e675cd253ec6d3
+The canonical PNG is contained and centered in a transparent 40x40 canvas
+using Lanczos resampling. One captured variant comes from the unlabelled
+Sacred Bloom in tests/fixtures/ritual_rewards/10.png, slot 37, independently
+identified against that canonical artwork. It uses the existing 40x40 RGB
+Lanczos resize and near-black-to-navy background normalization. Slot 49 of
+the same page is held out from the bank for regression coverage; it is a
+same-page control, not an independent accuracy sample. These additions
+supply the missing identity without changing matcher thresholds or mapping
+Mirror of Kalandra to Sacred Bloom.
 
 The inventory adapter uses icon-matcher.js's foreground-weighted SSD,
 top-left stack-count mask and clamped +/-4px alignment search. OpenCV's

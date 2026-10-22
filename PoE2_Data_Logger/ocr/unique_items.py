@@ -375,7 +375,12 @@ def match(image, shape, strictness=ocr_sensitivity.DEFAULT):
                 return None if cached is None else {**cached, "candidate_names": list(cached["candidate_names"])}
         ranked = _rank(bank, normalized)
         floor = ocr_sensitivity.review_threshold(.90, strictness, .06)
-        clear = ocr_sensitivity.clear_threshold(.97, strictness, .025)
+        # Give the existing slider useful identity latitude without changing
+        # its default: 0 requires .87, 50 keeps .97, and 100 remains manual
+        # below. This stays above the .84 loose candidate floor; merely being
+        # suggested is insufficient. Shared names and rival margins still veto
+        # automatic naming even when the absolute confidence gate is lowered.
+        clear = ocr_sensitivity.clear_threshold(.97, strictness, .10)
         result = None
         if ranked and ranked[0][0] >= floor:
             top, _, gray = ranked[0]

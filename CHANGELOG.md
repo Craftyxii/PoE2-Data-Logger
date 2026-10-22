@@ -6,6 +6,10 @@
 - Retain independently verified quantity one for unnamed inventory objects without a quantity marker, requesting only the unresolved name while preserving uncertain and clipped count review.
 - Prevent the confirmed Idol of Uldurn control from being silently accepted as Vaal Armourer's Infuser; unresolved identities remain held for review, and approved Item/currency choices preserve their category in logging, learning and exports.
 - Protect running 1.3.2.26 Beta clients during installation and removal, retaining the earlier-client guards.
+- Honor Ritual's independently verified identity evidence without a second unrelated raw-score hold; preserve separate name, quantity, deferred and shared-art safeguards.
+- Reuse Currency's per-item Approve/Reject actions in Ritual's existing Review column, keeping final page logging and correction learning atomic.
+- Widen the useful low end of unique-item strictness without changing the standard value-50 threshold or identity ambiguity checks.
+- Add verified Sacred Bloom artwork and a documented capture variant so Blooms are recognized instead of receiving Mirror suggestions; preserve existing Item registrations and logs during catalog updates.
 
 The candidate is awaiting the exact-source Windows release gates and publication. See [candidate release notes](docs/RELEASE_1.3.2.27.md).
 

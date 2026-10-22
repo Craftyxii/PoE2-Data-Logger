@@ -1025,8 +1025,13 @@ def _initialize_references(db):
     from PoE2_Data_Logger.ocr.currency_ocr import catalog_names, catalog_version
     catalog_key = catalog_version()
     if _meta(db, "currency_inventory_catalog_version") != catalog_key:
+        # A newly bundled icon may already have a user's valid Item registration
+        # (for example Sacred Bloom). Preserve its counting policy and history;
+        # seeding a second category would make subsequent approvals fail.
+        item_labels = {name.casefold() for name, in db.execute("SELECT name FROM item_names")}
         db.executemany("INSERT OR IGNORE INTO currency_items(name) VALUES(?)",
-                       ((name,) for name in catalog_names() if not _retired_currency_default(name)))
+                       ((name,) for name in catalog_names()
+                        if name.casefold() not in item_labels and not _retired_currency_default(name)))
         _set_meta(db, "currency_overlay_catalog_initialized", True)
         _set_meta(db, "currency_inventory_catalog_version", catalog_key)
     db.execute("INSERT OR IGNORE INTO affixes(name) VALUES(?)", ("Chance to Contain Essences",))

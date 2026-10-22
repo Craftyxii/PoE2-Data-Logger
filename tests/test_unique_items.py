@@ -156,12 +156,13 @@ class SourcedUniqueArtworkTests(unittest.TestCase):
                     "Kalandra's Touch": "Ring"}
         for name, other in expected.items():
             row, image = self.source_image(name)
-            with self.subTest(name=name):
-                result = unique.match(image, (row["columns"], row["rows"]))
-                self.assertIsNotNone(result)
-                self.assertEqual(result["name"], "")
-                self.assertIn(name, result["candidate_names"])
-                self.assertIn(other, result["candidate_names"])
+            for level in (0, 50, 100):
+                with self.subTest(name=name, strictness=level):
+                    result = unique.match(image, (row["columns"], row["rows"]), strictness=level)
+                    self.assertIsNotNone(result)
+                    self.assertEqual(result["name"], "")
+                    self.assertIn(name, result["candidate_names"])
+                    self.assertIn(other, result["candidate_names"])
 
     def test_all_ordinary_currency_families_are_negative_controls(self):
         rows = json.loads((ROOT / "PoE2_Data_Logger/third_party/currency_overlay/inventory-icons.json")
@@ -178,7 +179,7 @@ class SourcedUniqueArtworkTests(unittest.TestCase):
                 with self.subTest(currency=row["members"], mode=label):
                     self.assertIsNone(unique.match(image, (1, 1)))
             checked += 1
-        self.assertEqual(checked, 277)
+        self.assertEqual(checked, 278)  # Includes the appended Sacred Bloom catalog entry.
 
     def test_empty_noise_partial_item_and_wrong_shape_do_not_acquire_unique_names(self):
         rng = np.random.default_rng(20261020)
@@ -222,29 +223,33 @@ class UniqueMatcherMechanicsTests(unittest.TestCase):
         red, green = texture(0), texture(1)
         entries = [("Red unique", red, (1, 1), []), ("Green unique", green, (1, 1), [])]
         with temporary_catalog(entries):
-            for name, artwork in (("Red unique", red), ("Green unique", green)):
-                image = render(artwork, (1, 1), scale=80)
-                with self.subTest(name=name):
-                    self.assertEqual(unique.match(image, (1, 1))["name"], name)
-                    gray = ImageOps.grayscale(image).convert("RGB")
-                    first = unique.match(gray, (1, 1))
-                    self.assertEqual(first["name"], "")
-                    self.assertEqual(set(first["candidate_names"]), {"Red unique", "Green unique"})
-                    # A caller's selected name is not a matcher input or cached approval.
-                    first["name"] = name
-                    first["candidate_names"].clear()
-                    repeated = unique.match(gray, (1, 1))
-                    self.assertEqual(repeated["name"], "")
-                    self.assertEqual(set(repeated["candidate_names"]), {"Red unique", "Green unique"})
+            for level in (0, 50):
+                for name, artwork in (("Red unique", red), ("Green unique", green)):
+                    image = render(artwork, (1, 1), scale=80)
+                    with self.subTest(name=name, strictness=level):
+                        self.assertEqual(unique.match(image, (1, 1), strictness=level)["name"], name)
+                        gray = ImageOps.grayscale(image).convert("RGB")
+                        first = unique.match(gray, (1, 1), strictness=level)
+                        self.assertEqual(first["name"], "")
+                        self.assertEqual(set(first["candidate_names"]), {"Red unique", "Green unique"})
+                        # Looser acceptance cannot distinguish grayscale siblings,
+                        # nor can a caller mutate cached evidence into approval.
+                        first["name"] = name
+                        first["candidate_names"].clear()
+                        repeated = unique.match(gray, (1, 1), strictness=level)
+                        self.assertEqual(repeated["name"], "")
+                        self.assertEqual(set(repeated["candidate_names"]), {"Red unique", "Green unique"})
 
     def test_shared_png_names_and_base_names_never_become_clear(self):
         artwork = texture()
         with temporary_catalog([("First unique", artwork, (1, 1), ["Ordinary base"]),
                                 ("Second unique", artwork, (1, 1), [])]):
-            result = unique.match(render(artwork, (1, 1), scale=80), (1, 1))
-            self.assertEqual(result["name"], "")
-            self.assertEqual(set(result["candidate_names"]),
-                             {"First unique", "Second unique", "Ordinary base"})
+            for level in (0, 50, 100):
+                with self.subTest(strictness=level):
+                    result = unique.match(render(artwork, (1, 1), scale=80), (1, 1), strictness=level)
+                    self.assertEqual(result["name"], "")
+                    self.assertEqual(set(result["candidate_names"]),
+                                     {"First unique", "Second unique", "Ordinary base"})
 
     def test_multiple_art_variants_of_same_name_are_not_competing_names(self):
         artwork = texture()

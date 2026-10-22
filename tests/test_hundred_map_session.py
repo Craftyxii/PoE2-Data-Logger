@@ -501,6 +501,13 @@ class HundredMapSession(unittest.TestCase):
         rows[1]["quantity"] += 1
         self.w.ritual_table.item(1, 5).setCheckState(Qt.CheckState.Checked if n % 3 == 0 else Qt.CheckState.Unchecked)
         rows[1]["deferred"] = n % 3 == 0
+        # Match Currency's two-stage review: accept named rewards individually,
+        # then commit the complete page once; the unnamed third row stays out.
+        for row in (0, 1):
+            controls = self.w.ritual_table.cellWidget(row, 6)
+            controls.findChild(QPushButton, "approveRitual").click()
+            self.check(controls.property("reviewStatus"), "approved", "ritual:individual-row-approved")
+        self.check(logger.get_state()["scan_commit_count"], before, "ritual:row-approvals-no-commit")
         self.w.approve_scan_button.click()
         context = {**self.expected[f"M{n:04}"]["snapshot"], "expedition": self.expedition}
         self.record("Ritual", {"page": 1, "items": rows, "raw_text": raw,

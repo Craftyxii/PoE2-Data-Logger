@@ -190,6 +190,11 @@ class UniqueItemWorkflowTests(unittest.TestCase):
         self.assertEqual(selector.count(), 2)
         self.assertEqual(selector.currentText(), "")
         selector.setCurrentIndex(0)
+        # Choosing a candidate identifies the reward; its explicit row decision
+        # accepts it for the later atomic page save and artwork learning.
+        controls = self.window.ritual_table.cellWidget(0, 6)
+        controls.findChild(QPushButton, "approveRitual").click()
+        self.assertEqual(controls.property("reviewStatus"), "approved")
         self.window.approve_review()
         self.assertIn("Ritual Unique A", logger.item_names())
         pages = logger.ritual_pages_for_map("M0001")
