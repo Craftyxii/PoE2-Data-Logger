@@ -1,7 +1,9 @@
-# PoE2 Data Logger 1.3.2.27 Beta candidate
+# PoE2 Data Logger 1.3.2.27 Beta
 
-This candidate applies the confirmed scan/review corrections on top of
-[1.3.2.26 Beta](RELEASE_1.3.2.26.md). It is not yet a published installer.
+This beta applies the confirmed scan/review corrections on top of
+[1.3.2.26 Beta](RELEASE_1.3.2.26.md). Download the
+[verified Windows installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.27-beta/PoE2-Data-Logger-Setup-v1.3.2.27-beta.exe)
+or view the [release and checksum](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.27-beta).
 
 - Keep the original gray Ritual armor as one complete 2×2 Item instead of four
   review entries.
@@ -36,8 +38,9 @@ See the [frontend sweep](FRONTEND_SWEEP_2026-10-22.md) and
 [grayscale catalog sweep](GRAYSCALE_CATALOG_SWEEP_2026-10-22.md) for the confirmed
 reproductions and simulation limits.
 
-Publication requires the focused reproductions, grayscale catalog checks,
-logging/snapshot checks, native Windows HUD and 100-map workflows, full regression,
-frozen runtime, installer/update/file-retention checks and installer checksum on
-the exact release source. Verified results and the installer link are added only
-after those gates complete.
+All required Windows gates passed on release source
+`fec15f15a37d37c64157b3a6949866bb44615f57`: native Windows input, the 100-map
+workflow, 2,249 regression tests with three expected skips, frozen build,
+installation, update, recognition and saved-file retention. Publication reused
+the verified installer and checked its SHA-256. The [validation record](BETA27_VALIDATION.md)
+identifies the exact runs, audit sources and remaining simulation limits.

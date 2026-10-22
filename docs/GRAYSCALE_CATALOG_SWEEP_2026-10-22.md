@@ -1,5 +1,9 @@
 # Grayscale equipment catalog sweep — 2026-10-22
 
+Published follow-up: Beta 27 corrects the user-confirmed issues below. See
+[Beta 27 validation](BETA27_VALIDATION.md). This report retains its original
+tested source, simulation observations and limits.
+
 Tested executable source: `fb798a8efa8934037f84e2f9e92e92bddddb98a9`.
 Catalog revision: `75885a099f2e9be1619aa3c793fe6ab0754a511f`.
 Catalog manifest SHA-256: `4e71e5f8b74218dfcceab69592ffd7cceb3081fc4665b5d1bc7c7219f6de8a7e`.

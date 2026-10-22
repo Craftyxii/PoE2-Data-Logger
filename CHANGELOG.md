@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — 1.3.2.27 Beta candidate
+## 1.3.2.27 Beta
 
 - Preserve complete grayscale Ritual equipment footprints, including the original gray armor capture and Tetzlapokal's Desire, instead of reviewing individual fragments.
 - Retain independently verified quantity one for unnamed inventory objects without a quantity marker, requesting only the unresolved name while preserving uncertain and clipped count review.
@@ -11,7 +11,7 @@
 - Widen the useful low end of unique-item strictness without changing the standard value-50 threshold or identity ambiguity checks.
 - Add verified Sacred Bloom artwork and a documented capture variant so Blooms are recognized instead of receiving Mirror suggestions; preserve existing Item registrations and logs during catalog updates.
 
-The candidate is awaiting the exact-source Windows release gates and publication. See [candidate release notes](docs/RELEASE_1.3.2.27.md).
+Published after the exact-source Windows release gates passed. See [release notes](docs/RELEASE_1.3.2.27.md) and the [validation record](docs/BETA27_VALIDATION.md).
 
 ## 1.3.2.26 Beta
 

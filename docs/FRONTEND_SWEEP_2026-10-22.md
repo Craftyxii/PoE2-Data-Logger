@@ -1,5 +1,9 @@
 # Frontend logging and snapshot sweep — 2026-10-22
 
+Published follow-up: Beta 27 corrects the user-confirmed issues below. See
+[Beta 27 validation](BETA27_VALIDATION.md). This report retains its original
+tested source and observations.
+
 Tested source: `489da8c06a99b912b0b5393bebf26671ff3c6ded` on `beta26-release`.
 The installed beta26 tag remains `5e06ab49c71cbb7e3c8ed2e4c0de78f4bb0d9ba3`.
 Later documentation/comments do not change the tested runtime behavior.

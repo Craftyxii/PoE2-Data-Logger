@@ -9,8 +9,8 @@
 - [Changelog](../CHANGELOG.md): pending work followed by published version history.
 - [Propagation recipe IDs](PROPAGATION_RECIPE_IDS.md) and [chain discard](CHAIN_DISCARD.md): targeted data and correction behavior.
 - [Working-source regression review](CHANGE_REGRESSION_REVIEW.md): the latest targeted review, additional empty-map fix and verification limits.
-- [Frontend logging and snapshot sweep](FRONTEND_SWEEP_2026-10-22.md): source-bound validation, two user-confirmed issues left unfixed, and reproduction notes.
-- [Grayscale catalog sweep](GRAYSCALE_CATALOG_SWEEP_2026-10-22.md): all 449 equipment entries through direct matching and both scan paths, per-layer limits, and two further user-confirmed bugs left unfixed.
+- [Frontend logging and snapshot sweep](FRONTEND_SWEEP_2026-10-22.md): historical reproductions and source-bound validation; its confirmed issues are corrected in Beta 27.
+- [Grayscale catalog sweep](GRAYSCALE_CATALOG_SWEEP_2026-10-22.md): historical 449-entry simulations and their limits; see [Beta 27 validation](BETA27_VALIDATION.md) for the confirmed fixes and release checks.
 
 The working source can include features absent from the latest installer. The README and changelog identify that distinction.
 
@@ -20,8 +20,8 @@ Release notes and validation reports describe their named version or tested sour
 
 | Scope | Documents |
 | --- | --- |
-| Current source, unpublished 1.3.2.27 Beta candidate | [Candidate release notes](RELEASE_1.3.2.27.md) |
-| Latest published beta, 1.3.2.26 Beta | [Release notes](RELEASE_1.3.2.26.md) |
+| Latest published beta, 1.3.2.27 Beta | [Release notes](RELEASE_1.3.2.27.md), [validation](BETA27_VALIDATION.md) |
+| 1.3.2.26 Beta | [Release notes](RELEASE_1.3.2.26.md) |
 | 1.3.2.25 Beta | [Release notes](RELEASE_1.3.2.25.md), [startup artwork validation](STARTUP_ARTWORK_CACHE_VALIDATION.md) |
 | 1.3.2.24 Beta | [Release notes](RELEASE_1.3.2.24.md) |
 | 1.3.2.23 Beta | [Release notes](RELEASE_1.3.2.23.md) |
