@@ -234,6 +234,11 @@ class ChainDiscardUITests(unittest.TestCase):
                 table.item(0, 2).setText("9")
                 if kind == "currency":
                     self.window.review_currency_row(table.cellWidget(0, 3), True)
+                else:
+                    # Ritual now shares Currency's local row approval; only
+                    # final page approval persists this independent draft.
+                    self.window.review_ritual_row(table.cellWidget(0, 6), True)
+                    self.assertEqual(table.cellWidget(0, 6).property("reviewStatus"), "approved")
                 summary = self.window.review_summary.text()
                 self.window.tabs.setCurrentIndex(1)
 
@@ -246,6 +251,8 @@ class ChainDiscardUITests(unittest.TestCase):
                 self.assertEqual(self.window.review_kind.property("scanKind"), kind)
                 self.assertEqual(self.window.review_summary.text(), summary)
                 self.assertEqual(table.item(0, 2).text(), "9")
+                if kind == "ritual":
+                    self.assertEqual(table.cellWidget(0, 6).property("reviewStatus"), "approved")
                 self.assertEqual(self.window.tabs.currentIndex(), 1)
                 self.assertTrue(self.window.approve_scan_button.isEnabled())
                 logger.validate_scan_context(context)
