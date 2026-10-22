@@ -10,6 +10,7 @@
 - [Propagation recipe IDs](PROPAGATION_RECIPE_IDS.md) and [chain discard](CHAIN_DISCARD.md): targeted data and correction behavior.
 - [Working-source regression review](CHANGE_REGRESSION_REVIEW.md): the latest targeted review, additional empty-map fix and verification limits.
 - [Frontend logging and snapshot sweep](FRONTEND_SWEEP_2026-10-22.md): source-bound validation, two user-confirmed issues left unfixed, and reproduction notes.
+- [Grayscale catalog sweep](GRAYSCALE_CATALOG_SWEEP_2026-10-22.md): all 449 equipment entries through direct matching and both scan paths, per-layer limits, and two further user-confirmed bugs left unfixed.
 
 The working source can include features absent from the latest installer. The README and changelog identify that distinction.
 
