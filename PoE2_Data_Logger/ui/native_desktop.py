@@ -2411,6 +2411,7 @@ class LoggerWindow(QMainWindow):
         return next((row for row in self._ritual_rite_catalog if row["text"] == text), None)
 
     def _ritual_rite_kind_changed(self, field, kind):
+        """Lock bundled modifier kinds while allowing kind edits for custom Rite wording."""
         selected = self._ritual_rite_choice(field)
         if selected is not None:
             select(kind, selected["kind"])

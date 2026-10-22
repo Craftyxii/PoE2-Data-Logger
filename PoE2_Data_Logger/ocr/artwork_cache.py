@@ -24,6 +24,7 @@ class _Correlation:
     """Cache reference FFTs, preserving OpenCV's block sizes and channel rounding."""
 
     def __init__(self, source):
+        """Prepare read-only channel FFT blocks using OpenCV's 40x40 template geometry."""
         height, width = source.shape[:2]
         self.channels = 1 if source.ndim == 2 else source.shape[2]
         self.shape = height - 39, width - 39
@@ -76,6 +77,7 @@ class _SquaredDifference:
     """Reuse reference and squared-reference FFTs for RGB weighted SSD."""
 
     def __init__(self, source, _mask):
+        """Prepare source and squared-source transforms shared by masked RGB SSD queries."""
         self.source = _Correlation(source)
         self.squared = _Correlation(np.multiply(source, source))
         self.nbytes = self.source.nbytes + self.squared.nbytes
@@ -94,6 +96,7 @@ class _GrayCorrelation:
     """Reuse reference-only correlations and normalization for the fixed gray mask."""
 
     def __init__(self, source, mask):
+        """Build source FFTs and fixed-mask normalization once for grayscale query correlation."""
         self.source = _Correlation(source)
         self.mask = mask.astype(np.float32, copy=True)
         self.mask.flags.writeable = False

@@ -73,6 +73,7 @@ def _reviewed_pixels(image):
 class _ReferenceSnapshot:
     """Freeze one capture's reference inputs and hash every identity-bearing field."""
     def __init__(self, references):
+        """Isolate mutable PIL inputs and fingerprint ordered reference metadata and image content."""
         self.references = []
         digest = hashlib.sha256()
         for source in references:
@@ -163,6 +164,7 @@ def _ritual_fallback_bank(reader, references):
     references = _reference_snapshot(references)
 
     def build():
+        """Decode the bounded fallback icon set and freeze usable non-flat pixel arrays."""
         icons = []
         for reference in list(references)[:128]:
             name = reference.get("name")
@@ -964,6 +966,12 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
     currency_ocr.prefetch_catalog_ranks(reader, ((cell, len(str(hints[slot])) if
         hints[slot] is not None else None) for slot, cell in cells.items()
         if slot not in equipment and slot not in unique_slots))
+    # Confirmed limitation: ordinary unknown payloads below omit labels' count
+    # and clipping evidence. Even an unmarked count of one reaches desktop
+    # review as a blank count; unknown identity does not itself make that count
+    # uncertain. A future correction must retain clipped/unreadable count gates
+    # rather than assigning one to every unknown. Details and capture evidence:
+    # docs/FRONTEND_SWEEP_2026-10-22.md#confirmed-issues
     found, unknown = list(unique_rows), []
     for slot, cell in cells.items():
         if slot in unique_slots or slot in equipment:
@@ -1692,6 +1700,12 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
         if nearby:
             deferred_rewards.add(min(nearby)[2])
     items = []
+    # Footprints come from the grid detector; this stage does not reconstruct
+    # equipment split into single cells. In the original 264-Tribute capture,
+    # one confirmed 2x2 gray item arrives as slots 73/74/85/86 separately, so
+    # its fragments are classified independently (including a named fragment).
+    # Grid coverage alone therefore does not verify item boundaries. See
+    # docs/FRONTEND_SWEEP_2026-10-22.md#confirmed-issues
     for index, reward in enumerate(grid["rewards"]):
         box = tuple(reward["box"])
         multiple = len(reward["slots"]) > 1
@@ -1800,6 +1814,9 @@ def scan_ritual_page(image, omen_names, references=(), strictness=ocr_sensitivit
                       coverage_uncertain=False, reward_count=len(result["items"]),
                       unresolved_count=sum(bool(item["unresolved"]) for item in result["items"]),
                       deferred_count=len(markers))
+        # The fallback below runs only when no grid is detected. It cannot
+        # repair the confirmed gray-item split above: that capture has a grid
+        # and returns here with coverage_uncertain=False despite the split.
         return result
     result.update(grid_detected=False, coverage_uncertain=header is not None or has_grid_structure(image))
     omens = [item for item in result["items"] if item["category"] == "Omen"]

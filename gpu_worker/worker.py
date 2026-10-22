@@ -21,6 +21,7 @@ import threading
 
 
 def _load_protocol():
+    """Load shared wire constants directly without importing the application package."""
     if getattr(sys, "frozen", False):
         path = Path(sys._MEIPASS) / "gpu_label_protocol.py"
     else:
@@ -41,6 +42,7 @@ class WorkerError(ValueError):
 
 
 def _integer(value, name, minimum, maximum):
+    """Reject booleans and out-of-range request integers before allocating worker resources."""
     if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
         raise WorkerError(f"{name} must be an integer from {minimum} to {maximum}.")
     return value
@@ -50,6 +52,7 @@ class ParentWatchdog:
     """Watch only the explicitly supplied owner, never an application/game process."""
 
     def __init__(self, parent_pid, *, platform=None, kernel32=None, exit_process=None, interval=0.1):
+        """Bind lifetime monitoring to the explicit OCR owner and injectable process adapters."""
         self.parent_pid = _integer(parent_pid, "parent_pid", 1, 2**32 - 1)
         if self.parent_pid == os.getpid():
             raise WorkerError("The helper cannot watch itself as its owner.")
@@ -62,6 +65,7 @@ class ParentWatchdog:
         self._thread = None
 
     def start(self):
+        """Verify owner liveness and start polling using only the required synchronization access."""
         if self.platform == "nt":
             if self.kernel32 is None:
                 self.kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -91,6 +95,7 @@ class ParentWatchdog:
         return self
 
     def _watch_windows(self):
+        """Terminate the helper when its owner signals or waiting fails, except during explicit shutdown."""
         while not self._stop.is_set():
             state = self.kernel32.WaitForSingleObject(self._handle, max(1, int(self.interval * 1000)))
             if state != 0x00000102:
@@ -99,12 +104,14 @@ class ParentWatchdog:
                 return
 
     def _watch_posix(self):
+        """Terminate a reparented helper so its GPU session cannot outlive the original OCR owner."""
         while not self._stop.wait(self.interval):
             if os.getppid() != self.parent_pid:
                 self.exit_process(71)
                 return
 
     def close(self):
+        """Stop polling, join the watcher when possible and release the Windows owner handle."""
         self._stop.set()
         if self._thread is not None and self._thread is not threading.current_thread():
             self._thread.join(timeout=max(1.0, 2 * self.interval))
@@ -120,10 +127,12 @@ def enumerate_dxgi_adapters():
     from ctypes import wintypes
 
     class GUID(ctypes.Structure):
+        """Represent a DXGI interface identifier with the native Windows GUID field layout."""
         _fields_ = [("Data1", ctypes.c_uint32), ("Data2", ctypes.c_uint16),
                     ("Data3", ctypes.c_uint16), ("Data4", ctypes.c_ubyte * 8)]
 
     class DESC(ctypes.Structure):
+        """Match DXGI_ADAPTER_DESC1 fields used for device identity, memory and software flags."""
         _fields_ = [("Description", ctypes.c_wchar * 128), ("VendorId", wintypes.UINT),
                     ("DeviceId", wintypes.UINT), ("SubSysId", wintypes.UINT),
                     ("Revision", wintypes.UINT), ("DedicatedVideoMemory", ctypes.c_size_t),
@@ -142,6 +151,7 @@ def enumerate_dxgi_adapters():
         raise WorkerError("DXGI adapter enumeration failed.")
 
     def method(obj, slot, result, *arguments):
+        """Bind a COM vtable entry with the specified ctypes result and argument calling convention."""
         table = ctypes.cast(obj, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
         return ctypes.WINFUNCTYPE(result, ctypes.c_void_p, *arguments)(table[slot])
 
@@ -171,6 +181,7 @@ def enumerate_dxgi_adapters():
 
 
 def select_adapter(adapters):
+    """Choose the hardware adapter with most dedicated memory, breaking ties by the lowest DXGI index."""
     usable = [adapter for adapter in adapters
               if not adapter.get("flags", 0) & 2]
     if not usable:
@@ -180,6 +191,7 @@ def select_adapter(adapters):
 
 
 def _verified_model(path):
+    """Hash the complete local model and require the pinned label-model digest before session setup."""
     model = Path(path).resolve(strict=True)
     if not model.is_file():
         raise WorkerError("The label model is not a file.")
@@ -193,6 +205,7 @@ def _verified_model(path):
 
 
 def _request_paths(request):
+    """Resolve a bounded NPY input and unused NPZ output beneath the same request directory."""
     root = Path(request["root"]).resolve(strict=True)
     if not root.is_dir():
         raise WorkerError("Tensor root must be a directory.")
@@ -214,6 +227,7 @@ class LabelWorker:
     """Injectable runtime and adapter seams keep contract tests hardware independent."""
 
     def __init__(self, *, runtime_loader=None, numpy_loader=None, adapter_loader=None, model_verifier=None):
+        """Keep inference imports lazy so owner monitoring can start before runtime allocation."""
         self.runtime_loader = runtime_loader or (lambda: __import__("onnxruntime"))
         self.numpy_loader = numpy_loader or (lambda: __import__("numpy"))
         self.adapter_loader = adapter_loader or enumerate_dxgi_adapters
@@ -227,6 +241,7 @@ class LabelWorker:
         self._failed = False
 
     def initialize(self, request):
+        """Select the verified model and device, then validate one DirectML session's fixed label input."""
         if self.session is not None or self._failed:
             raise WorkerError("GPU label helper is already initialized or unavailable.")
         threads = _integer(request.get("threads"), "threads", 1, 64)
@@ -268,6 +283,7 @@ class LabelWorker:
                 "adapter": self.adapter, "runtime": str(runtime.__version__)}
 
     def _finish_profile(self):
+        """Require evidence of executed DirectML nodes and remove the bounded profiling file."""
         if self._profile_finished or self.session is None:
             return self.gpu_nodes
         self._profile_finished = True
@@ -290,6 +306,7 @@ class LabelWorker:
         return self.gpu_nodes
 
     def _run(self, tensor):
+        """Run one batch and reject malformed or nonfinite model scores before decoding."""
         outputs = self.session.run(None, {self.input_name: tensor})
         if not isinstance(outputs, (list, tuple)) or not outputs:
             raise WorkerError("The label model returned no outputs.")
@@ -301,6 +318,7 @@ class LabelWorker:
         return output
 
     def infer(self, request):
+        """Validate request paths and batch limits before processing the bounded input tensor."""
         if self.session is None or self._failed:
             raise WorkerError("The GPU label helper is unavailable.")
         batch_size = _integer(request.get("batch_size"), "batch_size", protocol.MIN_BATCH_SIZE, protocol.MAX_BATCH_SIZE)
@@ -310,6 +328,7 @@ class LabelWorker:
 
     @contextlib.contextmanager
     def _tensor(self, source):
+        """Map a finite label tensor without pickle and release its file mapping on every exit path."""
         tensor = self.np.load(source, allow_pickle=False, mmap_mode="r")
         try:
             if not isinstance(tensor, self.np.ndarray) or tensor.dtype != self.np.float32 or tensor.ndim != 4 \
@@ -326,6 +345,7 @@ class LabelWorker:
                 tensor.close()
 
     def _infer_tensor(self, tensor, target, batch_size):
+        """Prove GPU execution before atomically publishing character indices and probabilities."""
         temporary = None
         try:
             indices, probabilities = [], []
@@ -356,6 +376,7 @@ class LabelWorker:
                 temporary.unlink(missing_ok=True)
 
     def close(self):
+        """Finish pending profiling when possible and release the inference session reference."""
         if self.session is not None and not self._profile_finished:
             try:
                 self._finish_profile()
@@ -364,6 +385,7 @@ class LabelWorker:
         self.session = None
 
     def dispatch(self, request):
+        """Check the wire version and route initialization, inference or shutdown requests."""
         if not isinstance(request, dict) or type(request.get("protocol")) is not int \
                 or request["protocol"] != protocol.PROTOCOL_VERSION:
             raise WorkerError("Unsupported GPU label protocol.")
@@ -379,6 +401,7 @@ class LabelWorker:
 
 
 def serve(worker, input_stream, output_stream):
+    """Answer bounded JSON-lines requests while keeping runtime diagnostics off protocol stdout."""
     while True:
         line = input_stream.readline(65537)
         if not line:
@@ -406,6 +429,7 @@ def serve(worker, input_stream, output_stream):
 
 
 def main(argv=None):
+    """Watch the explicit owner before creating the helper and close both resources when serving ends."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parent-pid", type=int, required=True)
     args = parser.parse_args(argv)

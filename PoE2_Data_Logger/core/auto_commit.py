@@ -132,6 +132,7 @@ def family_candidate(opened, seed=None, resolver=logger.resolve):
     eligibility check does not rewrite raw confidence, geometry or sockets.
     """
     def review(reason):
+        """Return the manual-review outcome with the reason this family cannot auto-save."""
         return {"ready": False, "reason": reason}
 
     if not isinstance(opened, dict):

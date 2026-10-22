@@ -41,6 +41,7 @@ _RETAINED_BYTES = 0
 
 @dataclass(frozen=True)
 class _Catalog:
+    """Hold validated catalog rows and source identity until manifest metadata changes."""
     root: Path
     signature: tuple
     revision: str
@@ -49,6 +50,7 @@ class _Catalog:
 
 @dataclass(frozen=True)
 class _Bank:
+    """Retain one footprint's read-only matching arrays, shared labels and cache cost."""
     signature: tuple
     revision: str
     shape: tuple
@@ -72,11 +74,13 @@ def clear_caches():
 
 
 def _label(value):
+    """Validate catalog label length and reject C0 controls and surrogate code points."""
     return (isinstance(value, str) and 0 < len(value) <= 160 and
             not any(ord(ch) < 32 or 0xD800 <= ord(ch) <= 0xDFFF for ch in value))
 
 
 def _catalog():
+    """Validate and cache the pinned manifest until its root or file metadata changes."""
     global _CATALOG
     root = Path(ASSET_ROOT).resolve()
     path = root / "manifest.json"
@@ -152,6 +156,11 @@ def prepare_artwork():
 
 
 def _bank(shape):
+    """Build or reuse a bounded footprint bank without separating shared-art names.
+
+    Verify source PNGs before preparing aspect-preserving variants and read-only
+    matching arrays; a corrupt rival rejects the entire footprint bank.
+    """
     global _RETAINED_BYTES
     catalog = _catalog()
     groups = OrderedDict()
@@ -265,6 +274,7 @@ def _correlations(bank, grey):
 
 
 def _rgb_score(reference, query, weight, total):
+    """Return foreground-weighted RGB correlation, or -1 for insufficient contrast."""
     r = reference.astype(np.float32)
     q = query.astype(np.float32)
     mean_r = float(np.sum(r * weight[:, None], dtype=np.float64) / (total * 3))
@@ -279,6 +289,11 @@ def _rgb_score(reference, query, weight, total):
 
 
 def _rank(bank, image):
+    """Rank artwork/name groups across small translations of the captured footprint.
+
+    Reject poorly explained foreground, then combine gray and color agreement
+    unless the captured artwork is desaturated.
+    """
     height, width = bank.shape[1] * _UNIT, bank.shape[0] * _UNIT
     rgb = np.asarray(image.convert("RGB").resize((width, height), Image.Resampling.LANCZOS),
                      dtype=np.uint8)

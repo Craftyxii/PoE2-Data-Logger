@@ -21,6 +21,7 @@ KINDS = frozenset(("local", "proliferation", "bounty"))
 
 @lru_cache(maxsize=1)
 def _bundled_catalog() -> dict:
+    """Load and cache bundled Rite choices after checking their schema, kinds and unique IDs."""
     with CATALOG_PATH.open(encoding="utf-8") as handle:
         data = json.load(handle)
     rows = data.get("affixes")
@@ -53,6 +54,7 @@ def affix(affix_id: str) -> dict | None:
 
 
 def _positive_count(value: Any) -> int:
+    """Require a canonical positive integer count, rejecting booleans and lossy coercions."""
     if isinstance(value, bool):
         raise ValueError("Rite modifier count must be a positive integer")
     try:
@@ -65,6 +67,7 @@ def _positive_count(value: Any) -> int:
 
 
 def _custom_affix(value: dict) -> dict:
+    """Give user-entered wording a stable identity and provenance without inferring game stats."""
     text = value.get("text", value.get("description", ""))
     if not isinstance(text, str) or not text.strip():
         raise ValueError("A custom Rite modifier needs a description")

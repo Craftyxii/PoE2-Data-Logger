@@ -53,6 +53,11 @@ class _Client:
     """One serialized, bounded JSON control channel to a parent-watched helper."""
 
     def __init__(self, executable, model_path, threads):
+        """Start a parent-watched helper and require its DirectML initialization handshake.
+
+        Register the helper for shutdown and read replies through a bounded queue;
+        close any partially initialized process before propagating startup failures.
+        """
         self.process = None
         self.responses = queue.Queue(maxsize=2)
         self.closed = False
@@ -93,6 +98,11 @@ class _Client:
             pass
 
     def _exchange(self, payload):
+        """Send one JSON control request and require a timely, successful protocol reply.
+
+        A stopped helper, closed channel, invalid reply or timeout raises
+        GPUFallback so callers can discard the request's GPU evidence.
+        """
         import json
 
         if self.closed or self.process.poll() is not None:
@@ -175,6 +185,11 @@ class _Client:
 
 
 def _shutdown():
+    """Ask every registered helper to stop when the interpreter exits.
+
+    Release the registry lock after taking a snapshot so each close can remove
+    its own client without holding the same lock during process shutdown.
+    """
     with _CLIENTS_LOCK:
         clients = tuple(_CLIENTS)
     for client in clients:
@@ -188,6 +203,11 @@ class _LabelReader:
     """Reuse the pinned RapidOCR reader's preprocessing and CTC decoding on GPU evidence."""
 
     def __init__(self, cpu, executable):
+        """Retain the CPU reader's recognition contract while deferring GPU helper startup.
+
+        Share its crop configuration, batch settings and decoder, and expose a
+        session identity before the first supported request needs a helper.
+        """
         self.cpu = cpu
         self.executable = executable
         self.rec_image_shape = cpu.rec_image_shape
@@ -199,6 +219,12 @@ class _LabelReader:
         self.failed = False
 
     def __call__(self, args):
+        """Recognize a supported fixed-width crop batch and restore the original image order.
+
+        Keep CPU preprocessing and decoding around validated GPU inference. Any
+        unsupported input or failure retires the helper, marks this wrapper failed
+        and forces the caller to retry the complete request on CPU.
+        """
         try:
             images = args.img
             if args.return_word_box or tuple(self.rec_image_shape) != LABEL_SHAPE:

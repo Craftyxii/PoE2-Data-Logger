@@ -298,6 +298,7 @@ def _scaled_rarity_headers(rows, anchor, center):
     radius = max(160, anchor["right"] - anchor["x"])
 
     def aligned(part):
+        """Require finite OCR bounds and center alignment with the Waystone title."""
         return (all(key in part and math.isfinite(part[key]) for key in ("x", "y", "right", "bottom")) and
                 abs((part["x"] + part["right"]) / 2 - center) <= alignment)
 

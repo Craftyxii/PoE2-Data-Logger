@@ -32,6 +32,19 @@ Injected OCR results verify review and accounting behavior, not recognition accu
 
 See [SOURCES.md](SOURCES.md) for module purposes and [PoE2_Data_Logger/README.md](PoE2_Data_Logger/README.md) for package directories. Keep purpose notes and docstrings current when behavior changes. Preserve captured-context ownership, explicit propagation approval, map history and existing controls unless the change specifically calls for different behavior.
 
+Every first-party module should state its purpose, and functions/classes should explain their responsibility where it is not clear from the name. Keep these notes with the implementation when extracting or moving code. Document non-obvious invariants: image coordinate space and complete footprints, confidence versus candidate values, callback context ownership, transaction boundaries, cache keys/limits and fallback behavior. Explain why a threshold or guard exists instead of narrating each line. When changing an invariant, update its source note, relevant source-index entry and regression evidence together.
+
+Use these starting points to find existing coverage before adding a regression:
+
+| Change area | Existing checks |
+| --- | --- |
+| Quantity, grid and review decisions | `test_currency_count_coverage.py`, `test_inventory_grid_geometry.py`, `test_ritual_review_rows.py`, `test_review_learning_ui.py` |
+| Worker lifecycle and reusable artwork | `test_desktop_ocr_workers.py`, `test_startup_artwork_cache.py` |
+| Logging, exports and Undo | `test_logging_adversarial_workflows.py`, `test_reference_export_snapshot.py`, `test_export_settings_guard.py`, `test_universal_undo_ui.py` |
+| Kill observations and propagation accounting | `test_kill_count_ui.py`, `test_unique_propagation_counts_ui.py`, `test_chain_currency_workflow.py` |
+
+These are navigation pointers, not substitutes for the full release gates or captured-image checks. Test files live under [tests/](tests/); read their fixtures to distinguish real pixels, injected OCR, independent export parsing and native input.
+
 [packaging/sources.py](packaging/sources.py) lists first-party modules and required resources. The PyInstaller specification checks source completeness. New runtime helpers must be added there; asset directories retain their relative paths. Keep upstream notices and licenses with third-party files.
 
 ## Build and release

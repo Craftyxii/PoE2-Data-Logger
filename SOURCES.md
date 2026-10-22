@@ -2,6 +2,8 @@
 
 [packaging/sources.py](packaging/sources.py) groups the application modules and resources used by [the PyInstaller specification](packaging/PoE2-Data-Logger.spec).
 
+[PoE2_Data_Logger/__main__.py](PoE2_Data_Logger/__main__.py) handles the desktop entry point, frozen child processes and isolated smoke checks. Package markers and all functional modules are declared in `APP_SOURCES`; the build checks that list against the package's Python files.
+
 ## Logging, records and exports
 
 [Browse core source](PoE2_Data_Logger/core/)
@@ -10,10 +12,13 @@
 | --- | --- |
 | [logger_store.py](PoE2_Data_Logger/core/logger_store.py) | Map settings, remnant records, inventory snapshots, Ritual records and review state |
 | [undo_store.py](PoE2_Data_Logger/core/undo_store.py) | Persistent transaction journals and atomic Universal Undo |
+| [chain_gap.py](PoE2_Data_Logger/core/chain_gap.py) | Read-only timing and captured-context validation for the explicit same-chain question |
+| [kill_counts.py](PoE2_Data_Logger/core/kill_counts.py) | Independent, undoable screenshot kill observations and their evidence/export fields |
 | [store.py](PoE2_Data_Logger/core/store.py) | Scanner records, seed candidates and reviewed glyphs |
 | [service.py](PoE2_Data_Logger/core/service.py) | Application actions and scan routing |
 | [auto_commit.py](PoE2_Data_Logger/core/auto_commit.py) | Accepting clear remnant readings |
 | [reference_pack.py](PoE2_Data_Logger/core/reference_pack.py) | Reference database import and export |
+| [reference_updates.py](PoE2_Data_Logger/core/reference_updates.py) | Guarded bundled reference corrections that preserve local edits and recorded activity |
 | [ritual_catalog.py](PoE2_Data_Logger/core/ritual_catalog.py) | Ritual reward catalog helpers |
 | [ritual_rites_catalog.py](PoE2_Data_Logger/core/ritual_rites_catalog.py) | Source-traced optional Rite affix catalog |
 | [ritual_rite_store.py](PoE2_Data_Logger/core/ritual_rite_store.py) | Explicit Rite membership, saved affixes and completed-map proliferation |
@@ -40,6 +45,7 @@
 | File | Purpose |
 | --- | --- |
 | [affix_capture.py](PoE2_Data_Logger/ocr/affix_capture.py) | Waystone and tablet affix capture |
+| [artwork_cache.py](PoE2_Data_Logger/ocr/artwork_cache.py) | Bounded immutable artwork transforms preserving the pinned matcher's arithmetic |
 | [currency_ocr.py](PoE2_Data_Logger/ocr/currency_ocr.py) | Currency and inventory OCR |
 | [digit_kernels.py](PoE2_Data_Logger/ocr/digit_kernels.py) | Exact native arithmetic for the pinned upstream digit reader |
 | [label_gpu.py](PoE2_Data_Logger/ocr/label_gpu.py) | Optional isolated GPU label inference and complete CPU retry |
@@ -47,6 +53,7 @@
 | [inventory_labels.py](PoE2_Data_Logger/ocr/inventory_labels.py) | Inventory item-label helpers |
 | [item_ocr.py](PoE2_Data_Logger/ocr/item_ocr.py) | Item and Ritual reward readings |
 | [item_text.py](PoE2_Data_Logger/ocr/item_text.py) | Tooltip text parsing |
+| [kill_counts.py](PoE2_Data_Logger/ocr/kill_counts.py) | Pixel-based skull-counter location and numeric readings, retaining uncertain evidence |
 | [ritual_grid.py](PoE2_Data_Logger/ocr/ritual_grid.py) | Ritual reward-grid geometry and item footprints |
 | [unique_items.py](PoE2_Data_Logger/ocr/unique_items.py) | Cached, full-footprint unique-item artwork matching for Currency and Ritual; shared artwork retains name choices |
 | [opened_scan.py](PoE2_Data_Logger/ocr/opened_scan.py) | Opened remnant scanning and OCR model checks |
@@ -71,6 +78,18 @@
 | [live_watch.py](PoE2_Data_Logger/platform/live_watch.py) | Game-window checks used during capture |
 | [region_select.py](PoE2_Data_Logger/ui/region_select.py) | Capture-region selection and reference screenshots |
 | [atlas_settings.py](PoE2_Data_Logger/ui/atlas_settings.py) | Interactive atlas tree and gear item rarity settings |
+
+## Trace a scan through the application
+
+| Stage | Maintenance entry points and boundaries |
+| --- | --- |
+| Capture and queue | `native_desktop._inventory_captured` / `_ritual_captured` bind the image, map and session context before `_submit_scan` delegates to `core/ocr_workers.py`. Replacement, cancellation and deadline handling belong to that worker lifecycle. |
+| Recognize | `ocr/item_ocr.py` combines grid geometry, count/tier evidence, catalog artwork and local references. Identity and quantity confidence are separate; whole equipment retains its footprint and image coordinates. |
+| Review and learn | `native_desktop._inventory_read` / `_ritual_read` populate the existing review controls. Verified hidden rows remain part of the saved reading. `core/review_learning.py` validates captured artwork for accepted name corrections. |
+| Persist and undo | `native_desktop.save_inventory` / `save_ritual` hand accepted data to `core/logger_store.py`. Captured context, canonical item categories, writes and reference learning must remain transactionally consistent; `core/undo_store.py` journals reversible state. |
+| Export | `core/logger_store.py`, `workbook_export.py`, `workbook_references.py` and `export_files.py` preserve the selected database snapshot, frozen map context and companion files. Export is separate from recognition and review acceptance. |
+
+Reusable artwork preparation starts in `core/ocr_workers._prepare_artwork` and delegates to `ocr/item_ocr.prepare_artwork`. Artwork transforms, unique-item banks and screenshot-result caches have different keys and lifetimes. Preserve their worker/thread ownership, memory bounds, reference invalidation and original-matcher fallback; preparing references must not create observations. See [startup cache validation](docs/STARTUP_ARTWORK_CACHE_VALIDATION.md) for the historical measurements and [CONTRIBUTING.md](CONTRIBUTING.md) for current test entry points.
 
 ## Resources and third-party code
 

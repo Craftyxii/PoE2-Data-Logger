@@ -196,6 +196,7 @@ def _rite_json_table(data):
         prefix = "Rite metadata | " + prefix
 
     def expanded_rows():
+        """Stream oversized Rite JSON cells into ordered continuation columns without text loss."""
         for values in rows:
             fragments = [values[column][part * 32767:(part + 1) * 32767]
                          for column, _, part in plan]

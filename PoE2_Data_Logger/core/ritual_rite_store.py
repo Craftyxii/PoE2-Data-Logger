@@ -19,15 +19,18 @@ CONTEXT_FIELDS = ("ritual_rite_id", "ritual_rite_name", "ritual_rite_map_ordinal
 
 
 def _dump(value):
+    """Encode Rite metadata as compact JSON while preserving Unicode wording."""
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
 def _meta(db, key, default=None):
+    """Read one JSON metadata entry from the caller's connection, or return its default."""
     row = db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
     return json.loads(row[0]) if row else default
 
 
 def _set_meta(db, key, value):
+    """Upsert JSON-encoded Rite metadata within the caller's transaction."""
     db.execute("INSERT INTO meta VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                (key, _dump(value)))
 
@@ -54,6 +57,7 @@ def target_map_id(db):
 
 
 def _selected_rite(db):
+    """Resolve the selected Rite ID to its saved name and identity, or return None."""
     selected = _meta(db, "selected_ritual_rite_id")
     return db.execute("SELECT rite_id,name FROM ritual_rites WHERE rite_id=?", (selected,)).fetchone()
 
@@ -76,6 +80,7 @@ def _inherited_sources(db, rite_id, map_id):
 
 
 def _live_state(db, map_id):
+    """Assemble this map's Rite draft, ordinal and completed-map sources without writing."""
     rite = _selected_rite(db)
     selected = rite["rite_id"] if rite else None
     ordinal = None
@@ -100,6 +105,7 @@ def state(db):
 
 
 def _context_from_state(value):
+    """Project optional Rite state into observation fields, omitting wholly empty metadata."""
     if not (value["selected_rite_id"] or value["current_affixes"] or value["inherited_sources"]):
         return {}
     return {"ritual_rite_id": value["selected_rite_id"], "ritual_rite_name": value["selected_rite_name"],
