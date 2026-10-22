@@ -11,7 +11,9 @@ This candidate applies the four user-confirmed scan/review corrections on top of
   without a quantity marker. Request its unresolved name while retaining count
   confirmation for clipped, uncertain or conflicting evidence.
 - Prevent the confirmed Idol of Uldurn control from being silently accepted as
-  Vaal Armourer's Infuser. Unresolved identity must remain reviewable.
+  Vaal Armourer's Infuser. Unresolved identity remains reviewable; choosing the
+  Item candidate preserves its Item category in logging, learning and exports,
+  while the currency alternative retains its Currency category.
 - Retain install/uninstall protection for the preceding beta and older clients.
 
 The HUD controls, layout and styling are retained. The prior audit reports remain

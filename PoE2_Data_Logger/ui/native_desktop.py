@@ -7185,10 +7185,19 @@ class LoggerWindow(QMainWindow):
             amount = self.inventory_table.item(row, 2)
             metadata = name.data(Qt.ItemDataRole.UserRole) or {}
             original = metadata.get("original", {})
+            # A held cross-catalog row has no single category until the user
+            # chooses a name. Keep that candidate's Item evidence through save
+            # and learning without assigning Item to its currency alternative.
+            candidates = original.get("catalog_item_candidates", ())
+            if not isinstance(candidates, (list, tuple)):
+                candidates = ()
+            catalog_item = any(isinstance(candidate, str) and
+                               text.casefold() == candidate.strip().casefold()
+                               for candidate in candidates)
             category = ("Omen" if text.casefold() in omen_names else
                         "Item" if text.casefold() in item_names else
                         "Currency" if text.casefold() in currency_names else
-                        "Item" if original.get("category") == "Item" else "Currency")
+                        "Item" if original.get("category") == "Item" or catalog_item else "Currency")
             review_learning.validate_name(text, category)
             logger._integer(amount.text().strip() if amount else "", text + " stack count", 0, 1000000)
             rows.append({"name": text,

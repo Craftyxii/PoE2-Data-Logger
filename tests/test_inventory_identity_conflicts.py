@@ -7,6 +7,8 @@ identity/count evidence to isolate the conditions that must remain under review.
 """
 
 import copy
+import csv
+import io
 import json
 import os
 from pathlib import Path
@@ -18,10 +20,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageOps
+from openpyxl import load_workbook
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 
-from PoE2_Data_Logger.core import logger_store as logger, store
+from PoE2_Data_Logger.core import logger_store as logger, store, workbook_export
 from PoE2_Data_Logger.ocr import currency_ocr, item_ocr, unique_items
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, clear_currency_read, clear_currency_stack
 
@@ -116,6 +119,24 @@ class InventoryIdentityConflictTests(unittest.TestCase):
         self.app.processEvents()
         return self.window.inventory_table
 
+    def save_idol_choice(self, name):
+        """Select and approve a real captured catalog conflict through existing Qt controls."""
+        self.window = LoggerWindow()
+        self.window._poll.stop()
+        jobs = []
+        self.window._submit = lambda label, work, done=None: jobs.append(done)
+        self.window._inventory_captured(self.idol_image(), live=False)
+        jobs[-1](self.idol_result())
+        table = self.window.inventory_table
+        row = self.table_row(table, 57)
+        table.cellWidget(row, 1).setEditText(name)
+        controls = table.cellWidget(row, 3)
+        controls.findChild(QPushButton, "approveCurrency").click()
+        self.assertEqual(controls.property("reviewStatus"), "approved")
+        self.window.approve_scan_button.click()
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
+
     @staticmethod
     def table_row(table, slot):
         """Locate the row by captured slot identity after the review has sorted it."""
@@ -174,6 +195,48 @@ class InventoryIdentityConflictTests(unittest.TestCase):
         self.assertTrue(table.cellWidget(index, 3).property("reviewNameRequired"))
         self.assertEqual(self.window.pending_review_kind, "currency")
         self.assertEqual(logger.get_state()["scan_commit_count"], 0)
+
+    def test_approved_idol_choice_registers_learns_and_exports_as_item(self):
+        """A selected Item candidate retains its own category after actual row and scan approval."""
+        self.assertNotIn("Idol of Uldurn", logger.item_names())
+        self.assertNotIn("Idol of Uldurn", logger.currency_names())
+        self.save_idol_choice("Idol of Uldurn")
+        self.assertIn("Idol of Uldurn", logger.item_names())
+        self.assertNotIn("Idol of Uldurn", logger.currency_names())
+        self.assertEqual(logger.currency_for_map("M0001")["start"], {"Idol of Uldurn": 1})
+        self.assertEqual([(row["name"], row["kind"]) for row in logger.review_icons()],
+                         [("Idol of Uldurn", "item")])
+        rows = list(csv.DictReader(io.StringIO(logger.export_all_csv().decode("utf-8-sig"))))
+        self.assertTrue(any(row.get("Item: Idol of Uldurn") == "1" for row in rows))
+        self.assertFalse(any("Currency: Idol of Uldurn" in row for row in rows))
+        workbook = load_workbook(io.BytesIO(workbook_export.export_xlsx()), read_only=True)
+        try:
+            history = list(workbook["Scan History"].values)
+            column = history[0].index("Item: Idol of Uldurn")
+            self.assertIn(1, [row[column] for row in history[1:]])
+        finally:
+            workbook.close()
+
+    def test_approved_currency_alternative_does_not_inherit_item_candidate_category(self):
+        """Choosing the competing currency preserves Currency registration and learned artwork kind."""
+        self.save_idol_choice("Vaal Armourer's Infuser")
+        self.assertIn("Vaal Armourer's Infuser", logger.currency_names())
+        self.assertNotIn("Vaal Armourer's Infuser", logger.item_names())
+        self.assertEqual([(row["name"], row["kind"]) for row in logger.review_icons()],
+                         [("Vaal Armourer's Infuser", "currency")])
+
+    def test_registered_category_wins_over_the_same_item_candidate_hint(self):
+        """A user's already registered Currency name is not silently migrated by catalog proposals."""
+        logger.add_currency_item("Idol of Uldurn")
+        self.save_idol_choice("Idol of Uldurn")
+        self.assertIn("Idol of Uldurn", logger.currency_names())
+        self.assertNotIn("Idol of Uldurn", logger.item_names())
+
+    def test_manually_typed_other_name_does_not_inherit_item_candidate_category(self):
+        """Candidate-specific evidence cannot assign Item to a different manually supplied name."""
+        self.save_idol_choice("Manual unrelated token")
+        self.assertIn("Manual unrelated token", logger.currency_names())
+        self.assertNotIn("Manual unrelated token", logger.item_names())
 
     def test_actual_unmarked_unknown_capture_cells_retain_verified_one(self):
         """Source captures with clear empty count corners retain count evidence despite unknown names."""

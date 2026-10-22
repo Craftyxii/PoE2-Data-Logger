@@ -1010,6 +1010,7 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
             if not set(item_names).issubset(currency_names):
                 choices = list(dict.fromkeys(name for name in (*item_names, *currency_names) if name))
                 unknown.append({"slot": slot, "candidate": " / ".join(choices),
+                                "catalog_item_candidates": list(item_names),
                                 "score": round(unique.get("score", 0), 3),
                                 "reason": "item and currency artwork overlap; check name"})
                 continue
