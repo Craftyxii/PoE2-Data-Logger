@@ -8,7 +8,7 @@ import csv
 import io
 
 
-CONTEXT_VERSION = "8"
+CONTEXT_VERSION = "9"
 HEADERS = ("Section", "Topic", "Guidance", "Context Version")
 ENTRIES = (
     ("purpose", "Overview", "How to use this export",
@@ -520,6 +520,10 @@ ENTRIES = (
      "completed map_id, map_number, rite_id, ordinal, snapshot_json and completed_at. Saved map/event "
      "snapshots retain ritual_rite_id, ritual_rite_name, ritual_rite_map_ordinal, ritual_rite_affixes and "
      "ritual_rite_inherited_sources. Read their frozen values rather than substituting the current editor. "
+     "Rites apply only to maps whose Activity Type is Ritual: other maps carry no Rite fields, take no "
+     "Rite stage and inherit nothing, even while a Rite stays selected. Rite affixes can be entered "
+     "manually or read from a hovered Atlas map tooltip; unknown tooltip wording is saved as a custom "
+     "affix of its Foretold kind. "
      "Each inherited source retains origin_map_id, origin_rite_id, origin_map_ordinal, origin_affix_position "
      "and affix_id, plus the source affix and occurrence count."),
     ("sql_scans", "SQLite schema", "scans / scan_links / seed_states",

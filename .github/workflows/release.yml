@@ -124,7 +124,8 @@ jobs:
           path: ${{ runner.temp }}/poe2-release-session
           if-no-files-found: ignore
       - name: Run regression tests
-        run: python tools/run_tests.py
+        # Batches are isolated processes; two at once fit the runner's memory.
+        run: python tools/run_tests.py --jobs 2
       - name: Prepare NSIS
         shell: pwsh
         run: |
