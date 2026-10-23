@@ -56,3 +56,13 @@ activity, Rite and OCR settings, leave finished maps and their export rows
 unchanged until Undo reopens them. A new regression test checks this end to end.
 Running 1.3.2.27 Beta and earlier clients are protected during installation and
 removal.
+
+All required Windows gates passed on release source
+`63bbc3a37fca0c056ed1a13f549d702b39dadfdc` in the
+[Windows verification run](https://github.com/Craftyxii/PoE2-Data-Logger/actions/runs/39966286915):
+platform, capture-region, review-navigation and export fixtures; native Windows
+input; the 100-map workflow; the complete regression suite; the frozen build; and
+installation, update and saved-file retention. The
+[publication run](https://github.com/Craftyxii/PoE2-Data-Logger/actions/runs/39977325186)
+reused that verified installer; its SHA-256 is
+`dc393f0251f80c3c5831de05b8e488702eb203733f5376168420af9e45465705`.

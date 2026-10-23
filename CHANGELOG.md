@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Cache the bundled catalog's item names by file identity, so creating or opening a profile no longer parses the 10 MB icon catalog each time.
+- Build the Session Currency cards when the Currency page first shows them. Totals, groups, search and the summary stay current meanwhile, and the page looks the same once opened.
+- Together they make app startup about half a second faster. In the test suite, a fresh profile drops from about 0.57 to 0.20 seconds and opening the app window from about 0.60 to 0.35 seconds.
+
 ## 1.3.2.28 Beta
 
 - Add **Reset map…** to Map / Tablets. After confirmation it clears every scan and log saved for the current map in one action that Undo restores, keeping the Map #, map and Atlas settings, earlier maps and learned OCR references.

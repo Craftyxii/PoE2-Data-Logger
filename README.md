@@ -4,9 +4,9 @@ A Windows desktop logger for Path of Exile 2. Record Expedition remnants and run
 
 ## Download and source status
 
-This source is the **1.3.2.28 Beta candidate**. Its installer is published only after the required Windows checks pass on the exact release source. See the [candidate release notes](docs/RELEASE_1.3.2.28.md). The latest published [1.3.2.27 Beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.27-beta) and its [installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.27-beta/PoE2-Data-Logger-Setup-v1.3.2.27-beta.exe), plus the [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2), remain available.
+The latest beta is **1.3.2.28 Beta**: download the [Windows installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.28-beta/PoE2-Data-Logger-Setup-v1.3.2.28-beta.exe) or view the [release and checksum](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.28-beta). Its exact source passed the Windows release gates; see the [release notes](docs/RELEASE_1.3.2.28.md). The [preceding beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.27-beta) and [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2) remain available.
 
-This candidate reduces Currency and Ritual review to genuinely uncertain items, scans Rite modifiers, reads kill counters at every UI scale, adds **Reset map…**, and removes the GPU label helper, on top of 1.3.2.27 Beta. See the [changelog](CHANGELOG.md). Installer, executable and window version labels target 1.3.2.28 Beta; the existing HUD controls, layout and styling are retained.
+This beta reduces Currency and Ritual review to genuinely uncertain items, scans Rite modifiers, reads kill counters at every UI scale, adds **Reset map…**, and removes the GPU label helper, on top of 1.3.2.27 Beta. See the [changelog](CHANGELOG.md). Installer, executable and window version labels identify 1.3.2.28 Beta; the existing HUD controls, layout and styling are retained.
 
 ## What you can record
 
