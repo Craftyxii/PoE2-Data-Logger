@@ -133,7 +133,10 @@ class RitualCaptureImageAuditTests(unittest.TestCase):
                             self.assertTrue(row["name_needs_review"])
 
     def test_modest_desaturation_keeps_one_staff_as_one_reviewable_reward(self):
-        """Scan actual staff pixels without duplicating its dim interior cells into separate rewards."""
+        """Scan actual staff pixels without duplicating its dim interior cells into separate rewards.
+
+        The whole staff is The Blood Thorn, whose artwork has no catalog rival.
+        """
         folder = ROOT / "tests/fixtures/ritual_rewards"
         case = next(case for case in json.loads((folder / "expected.json").read_text(encoding="utf-8"))
                     if case["file"] == "05.png")
@@ -145,7 +148,8 @@ class RitualCaptureImageAuditTests(unittest.TestCase):
         self.assertEqual(result["reward_count"], 8)
         staff = next(row for row in result["items"] if row["grid_slots"][0] == 73)
         self.assertEqual((staff["quantity"], staff["category"]), (1, "Item"))
-        self.assertTrue(staff["name_needs_review"])
+        self.assertEqual(staff["name"], "The Blood Thorn")
+        self.assertFalse(staff["name_needs_review"])
 
 
 if __name__ == "__main__":
