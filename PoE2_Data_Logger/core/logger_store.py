@@ -1198,6 +1198,7 @@ def _validate_settings(db, data):
     if c["atlas_master"] not in ("None", "Jado", "Doryani", "Hilda"):
         raise ValueError("Choose an Atlas Master from the list.")
     allowed_affixes = {r[0] for r in db.execute("SELECT name FROM affixes")}
+    learned_units = _meta(db, "affix_units", {})
     pairs = c["tablet_affixes"]
     if not isinstance(pairs, list) or len(pairs) != 16:
         raise ValueError("Tablet Config needs four slots on each of four tablets.")
@@ -1209,7 +1210,7 @@ def _validate_settings(db, data):
             raise ValueError(f"Tablet slot {i+1}: add this affix to Affix DB first.")
         if bool(affix) != (value not in (None, "")):
             raise ValueError(f"Tablet slot {i+1} needs both an affix and its value.")
-        unit = (pair.get("unit") or affix_unit(affix)) if affix else "%"
+        unit = (pair.get("unit") or learned_units.get(affix) or affix_unit(affix)) if affix else "%"
         if unit not in ("%", "count", "seconds", "flag"):
             raise ValueError(f"Tablet slot {i+1} has an invalid value unit.")
         amount = _number(value, "Tablet value") if affix else None
@@ -1392,14 +1393,16 @@ def add_affix(name):
     return get_state()
 
 
-def add_affixes(names, *, record_undo=True):
+def add_affixes(names, *, record_undo=True, units=None):
     """Append valid missing affixes, journaling deliberate reference edits together.
 
     Automatic scan discovery attaches its inverse to the latest user action
     instead of adding a standalone command. Reinserting a reset reference then
     remains reversible, and Undo still targets the user's last saved action.
+    ``units`` keeps the scanned unit of a new name whose wording implies another.
     """
     added = []
+    units = units or {}
     with _connect(undo_label="Affix references", undo_append_latest=not record_undo) as db:
         for name in names:
             name = str(name or "").strip()
@@ -1407,7 +1410,22 @@ def add_affixes(names, *, record_undo=True):
                 continue
             if db.execute("INSERT OR IGNORE INTO affixes(name) VALUES(?)", (name,)).rowcount:
                 added.append(name)
+        learned = {name: units[name] for name in added
+                   if units.get(name) in ("count", "seconds", "flag") and units[name] != affix_unit(name)}
+        if learned:
+            _set_meta(db, "affix_units", {**_meta(db, "affix_units", {}), **learned})
     return added
+
+
+def get_affix_units():
+    """Read the scanned units kept for learned affix names."""
+    with _connect() as db:
+        return _meta(db, "affix_units", {})
+
+
+def learned_affix_unit(db, name):
+    """Return a learned name's scanned unit, else its catalog or worded unit."""
+    return _meta(db, "affix_units", {}).get(name) or affix_unit(name)
 
 
 def _check_seed_references(db, family_ids=(), recipe_names=()):
@@ -1573,7 +1591,7 @@ def save_scanned_tablet(matches, raw_mods, *, expected_tablet_set_id=None):
                [list(item) for item in state["tablet_raw_mods"]])
         for offset, item in enumerate(matches):
             slots[(number - 1) * 4 + offset] = {"affix": item["affix"], "value": item["value"],
-                                              "unit": item.get("unit") or affix_unit(item["affix"])}
+                                              "unit": item.get("unit") or learned_affix_unit(db, item["affix"])}
         raw[number - 1] = list(raw_mods)
         _save_settings(db, {"tablets_used": max(state["tablets_used"], number),
                             "plus_two_tablets": 0 if number == 1 else state["plus_two_tablets"],
@@ -4183,6 +4201,7 @@ def get_state():
             "unique_kills": _unique_kills_for_map(db, mid),
             "detonated": d[0] if d else None,
             "affixes": [r[0] for r in db.execute("SELECT name FROM affixes ORDER BY rowid")],
+            "affix_units": _meta(db, "affix_units", {}),
             "masters": masters, "families": families, "seed_states": seed_states,
             "recipes": [r[0] for r in db.execute("SELECT name FROM recipes ORDER BY name")],
             "runes": [r[0] for r in db.execute("SELECT DISTINCT seed_rune FROM seed_states WHERE seed_rune!='Unresolved' ORDER BY seed_rune")],

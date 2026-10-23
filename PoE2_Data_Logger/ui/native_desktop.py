@@ -36,7 +36,8 @@ from PoE2_Data_Logger.core import logger_store as logger
 from PoE2_Data_Logger.core import reference_pack
 from PoE2_Data_Logger.core import review_learning
 from PoE2_Data_Logger.core import ocr_runtime, ocr_sensitivity, ocr_workers
-from PoE2_Data_Logger.ocr.affix_capture import new_affix_names, affix_unit, modifier_value
+from PoE2_Data_Logger.ocr.affix_capture import (new_affix_names, affix_key, affix_unit, modifier_value,
+                                                  tablet_modifier_value)
 from PoE2_Data_Logger.ocr import item_ocr
 from PoE2_Data_Logger.core import service
 from PoE2_Data_Logger.core import store
@@ -2167,7 +2168,7 @@ class LoggerWindow(QMainWindow):
                 affix.setMinimumContentsLength(24)
                 amount = line("Value")
                 affix.currentIndexChanged.connect(
-                    lambda _, a=affix, v=amount: v.setPlaceholderText(affix_unit(value(a)) if value(a) else "Value"))
+                    lambda _, a=affix, v=amount: v.setPlaceholderText(self._affix_unit(value(a)) if value(a) else "Value"))
                 affix.currentIndexChanged.connect(
                     lambda _, number=tablet + 1: self._tablet_review_edit_changed(number))
                 amount.textChanged.connect(
@@ -2837,7 +2838,7 @@ class LoggerWindow(QMainWindow):
         for number in range(4):
             start = number * 4
             entries = tuple((value(affix), amount.text(),
-                amount.property("unit") if amount.property("affix") == value(affix) else affix_unit(value(affix)))
+                amount.property("unit") if amount.property("affix") == value(affix) else self._affix_unit(value(affix)))
                 for affix, amount in zip(self.tablet_affixes[start:start + 4], self.tablet_values[start:start + 4]))
             slots.append((entries, tuple(self.tablet_raw_mods[number])))
         return value(self.tablets_used), tuple(slots)
@@ -3039,7 +3040,7 @@ class LoggerWindow(QMainWindow):
             select(affix, current["affix"])
             amount.setText("" if current["value"] is None else str(current["value"]))
             amount.setProperty("affix", current["affix"])
-            amount.setProperty("unit", current.get("unit") or affix_unit(current["affix"]))
+            amount.setProperty("unit", current.get("unit") or self._affix_unit(current["affix"]))
         self._tablet_form_baseline = self._tablet_form()
         for number, (slot, raw) in tablet_drafts.items():
             self._fill_tablet_slot(number,
@@ -3378,7 +3379,7 @@ class LoggerWindow(QMainWindow):
         if reviewing and self._pending_tablet_slot is None:
             raise ValueError("No tablet affixes were read. Scan the tablet again before saving this reading.")
         entries = [{"affix": value(a), "value": value(v),
-                    "unit": v.property("unit") if v.property("affix") == value(a) else affix_unit(value(a))}
+                    "unit": v.property("unit") if v.property("affix") == value(a) else self._affix_unit(value(a))}
                    for a, v in zip(self.tablet_affixes, self.tablet_values)]
         next_slot = logger.tablet_next_slot()
         reviewed = self._pending_tablet_slot if reviewing else None
@@ -6622,28 +6623,38 @@ class LoggerWindow(QMainWindow):
             amount.setProperty("unit", item["unit"] if item else "%")
         self.tablet_raw_mods[number - 1] = list(raw_mods)
 
+    def _affix_unit(self, name):
+        """Prefer a learned affix's scanned unit over the unit its wording implies."""
+        return (self.state.get("affix_units") or {}).get(name) or affix_unit(name)
+
     def _prepare_tablet_modifiers(self, result):
         """Parse and learn the existing Tablet modifier evidence before replacing review."""
         ocr_rows = result.get("ocr_rows")
+        # Unique tablets read number-free modifiers only inside a proven boundary.
+        flags = bool(result.get("unique") and result.get("bounded"))
         if ocr_rows is not None:
             ocr_rows = item_ocr.merge_tablet_lines(ocr_rows)
             original_mods = [row["text"] for row in ocr_rows if row.get("text")]
-            result = {**result, **item_ocr.parse_tablet(ocr_rows, self.state["affixes"]),
+            result = {**result, **item_ocr.parse_tablet(ocr_rows, self.state["affixes"], flags=flags),
                       "ocr_rows": ocr_rows}
         else:
             original_mods = list(result.get("mods") or
                                  [item["raw"] for item in result["matches"]] + result["uncertain"])
-            result = {**result, **item_ocr.parse_tablet(original_mods, self.state["affixes"])}
+            result = {**result, **item_ocr.parse_tablet(original_mods, self.state["affixes"], flags=flags)}
         unknown = [raw for raw in result.get("uncertain", [])
                    if item_ocr._affix_match(raw, self.state["affixes"])[0] is None]
         proposed = new_affix_names(unknown, self.state["affixes"],
                                    ocr_rows if ocr_rows is not None
-                                   else [] if result.get("source") == "screen OCR" else None)
+                                   else [] if result.get("source") == "screen OCR" else None, flags=flags)
+        read = tablet_modifier_value if flags else modifier_value
+        units = {affix_key(amount["name"]): amount["unit"] for amount in map(read, unknown) if amount}
         # Automatic additive learning is not a separate user command; Undo
         # must still target the last saved scan, chain or map action.
-        added = logger.add_affixes(proposed, record_undo=False)
+        added = logger.add_affixes(proposed, record_undo=False,
+                                   units={name: units.get(affix_key(name)) for name in proposed})
         if added:
             self.state["affixes"].extend(added)
+            self.state["affix_units"] = logger.get_affix_units()
             for widget in self.tablet_affixes:
                 current = widget.currentData()
                 with QSignalBlocker(widget):
@@ -6651,7 +6662,9 @@ class LoggerWindow(QMainWindow):
                         widget.addItem(name, name)
                 select(widget, current or "")
         result = {**result, **item_ocr.parse_tablet(ocr_rows if ocr_rows is not None else original_mods,
-                                                   self.state["affixes"])}
+                                                   self.state["affixes"], flags=flags)}
+        if result.get("unique") and not flags:
+            result["status"] = "review"
         return result, original_mods, ocr_rows, added
 
     def _tablet_read(self, number, result, *, prepared=None):
@@ -6679,9 +6692,10 @@ class LoggerWindow(QMainWindow):
         result, original_mods, ocr_rows, added = (self._prepare_tablet_modifiers(result)
                                                  if prepared is None else prepared)
         preview_matches = list(result["matches"])
-        review_names = new_affix_names(result["uncertain"], self.state["affixes"])
+        flags = bool(result.get("unique") and result.get("bounded"))
+        review_names = new_affix_names(result["uncertain"], self.state["affixes"], flags=flags)
         for raw in result["uncertain"]:
-            amount = modifier_value(raw)
+            amount = tablet_modifier_value(raw) if flags else modifier_value(raw)
             if amount and amount["name"] in review_names:
                 if not any(item["affix"] == amount["name"] for item in preview_matches):
                     preview_matches.append({"affix": amount["name"], "value": amount["value"],

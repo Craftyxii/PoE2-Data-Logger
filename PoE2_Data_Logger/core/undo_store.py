@@ -21,7 +21,7 @@ META_KEYS = frozenset((
     "previous_waystone_settings", "prepared_waystone_setup",
     "reopened_map_id",
     "scan_commit_count", "tablet_auto_next", "selected_tablet_set_id", "finalized_tablet_map_id",
-    "active_retired_currency_names",
+    "active_retired_currency_names", "affix_units",
     "selected_ritual_rite_id",
 ))
 HISTORY_LIMIT = 100

@@ -64,19 +64,33 @@ def affix_catalog():
 
 
 @lru_cache(maxsize=512)
-def affix_unit(name):
-    """Prefer a catalog unit, then infer seconds, percentages or counts from wording."""
+def catalog_unit(name):
+    """Return the bundled catalog unit for a modifier name, or None for learned names."""
     key = affix_key(name)
-    for item in affix_catalog():
-        if affix_key(item["name"]) == key:
-            return item["unit"]
+    return next((item["unit"] for item in affix_catalog() if affix_key(item["name"]) == key), None)
+
+
+def _worded_unit(name):
+    """Infer seconds, percentages or counts from wording, or None when no wording implies a value."""
     if re.search(r"\bseconds?\b", name, re.I):
         return "seconds"
     if re.search(r"\b(?:chance|increased|reduced|more|less|gain|slower|sooner)\b", name, re.I):
         return "%"
     if re.search(r"\badditional\b|\bextra\b|\bfirst unearthed\b", name, re.I):
         return "count"
-    return "%"
+    return None
+
+
+@lru_cache(maxsize=512)
+def affix_unit(name):
+    """Prefer a catalog unit, then infer seconds, percentages or counts from wording."""
+    return catalog_unit(name) or _worded_unit(name) or "%"
+
+
+def flag_unit_allowed(name):
+    """Allow a flag reading for catalog flags and learned names whose wording implies no value."""
+    unit = catalog_unit(name)
+    return unit == "flag" or unit is None and _worded_unit(name) is None
 
 
 def modifier_value(raw):
@@ -128,6 +142,30 @@ def modifier_value(raw):
             "unit": unit, "name": affix_name(text)}
 
 
+def flag_modifier(raw):
+    """Read a number-free tablet modifier line, such as a unique tablet's, as a flag of one.
+
+    Only lines already bounded to a tablet's modifier section reach this check;
+    usage, implicit and property prose stay excluded here too. Wording that
+    implies a value is never a flag, so a roll OCR dropped stays in review.
+    """
+    text = _ROLL_RANGE.sub("", str(raw)).strip()
+    compact = re.sub(r"[^a-z0-9]", "", text.lower())
+    if (not text or len(text) > 150 or re.search(r"\d", text) or "usesremaining" in compact or
+            "personalmapdevice" in compact or "modifierstoamap" in compact or
+            compact.startswith(("adds", "canbeused", "rightclick", "shiftclick", "itemlevel", "inspect",
+                                "toggle", "tablet")) or
+            not re.fullmatch(r"[A-Za-z\s'’,.()-]+", text) or len(text.split()) < 3 or
+            _worded_unit(text) is not None):
+        return None
+    return {"value": 1, "unit": "flag", "name": affix_name(text)}
+
+
+def tablet_modifier_value(raw):
+    """Read a tablet modifier's value, falling back to a number-free flag."""
+    return modifier_value(raw) or flag_modifier(raw)
+
+
 def looks_like_modifier(raw):
     """Recognize likely modifier prose while excluding usage and item-property lines."""
     text = str(raw).strip()
@@ -145,13 +183,21 @@ def looks_like_modifier(raw):
                 re.search(r"\b(?:additional|extra|seconds?|first unearthed)\b", text, re.I))
 
 
-def new_affix_names(uncertain, known, ocr_rows=None):
+def new_affix_names(uncertain, known, ocr_rows=None, *, flags=False):
     """Suggest up to ten distinct unknown names with valid modifier values.
 
     When OCR rows are supplied, require matching text confidence of at least .94
     as well as bounded, permitted wording; this does not save catalog entries.
+    ``flags`` also admits number-free tablet modifiers.
     """
     known_keys = {affix_key(name) for name in known}
+    # Tooltip OCR reads small caps; restore the keyword capitals most known names use.
+    votes = {}
+    for known_name in (*known, *(item["name"] for item in affix_catalog())):
+        for word in re.findall(r"[A-Za-z']+", str(known_name))[1:]:
+            if not word.isupper():
+                votes.setdefault(word.lower(), []).append(1 if word[0].isupper() else -1)
+    casing = {word: word.capitalize() for word, counts in votes.items() if sum(counts) > 0}
     confidence = {}
     if ocr_rows is not None:
         for row in ocr_rows:
@@ -164,13 +210,16 @@ def new_affix_names(uncertain, known, ocr_rows=None):
             continue
         if not re.fullmatch(r"[\w\s%+.,'’()/–—-]+", raw, re.UNICODE):
             continue
-        parsed = modifier_value(raw)
+        parsed = tablet_modifier_value(raw) if flags else modifier_value(raw)
         if parsed is None:
             continue
         name = parsed["name"]
         if (not 10 <= len(name) <= 120 or len(name.split()) < 2 or
                 not re.search(r"[A-Za-z]{3}", name) or affix_key(name) in known_keys):
             continue
+        if name.isupper():
+            name = re.sub(r"[A-Za-z']+", lambda word: casing.get(word.group().lower(), word.group().lower()), name)
+            name = name[:1].upper() + name[1:]
         names.append(name)
         known_keys.add(affix_key(name))
     return names[:10]

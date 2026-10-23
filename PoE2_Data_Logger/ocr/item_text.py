@@ -16,7 +16,7 @@ from PoE2_Data_Logger.ocr.affix_capture import looks_like_modifier, numeric_toke
 
 MAX_ITEM_TEXT = 30000
 _SEPARATOR = re.compile(r"^-{5,}$")
-_MOD_LABEL = re.compile(r"^\{\s*(?:Prefix|Suffix|Implicit|Enchant|Corrupted|Scourge).*?\}$", re.I)
+_MOD_LABEL = re.compile(r"^\{\s*(?:Prefix|Suffix|Implicit|Enchant|Corrupted|Scourge|Unique).*?\}$", re.I)
 _PROPERTY = re.compile(r"^(?:Item Level|Waystone Tier|Revives Available|Waystone Drop Chance|"
                        r"Item Rarity|Monster Rarity|Monster Pack Size|Pack Size|Effectiveness|"
                        r"Monster Effectiveness|Rare Monsters|Uses Remaining|Tablet|Rarity|Item Class)\s*:", re.I)
@@ -93,6 +93,29 @@ def _modifier_lines(lines, kind):
     return result[:80]
 
 
+def _unique_tablet_lines(lines):
+    """Bound a copied unique tablet's modifiers between its implicit and its flavour text.
+
+    Separators split the tooltip into sections. Header, property, implicit and
+    footer sections are dropped; the last remaining section is flavour text.
+    Return the modifier lines and whether that structure was unambiguous.
+    """
+    sections, current = [], []
+    for line in lines:
+        if _SEPARATOR.match(line):
+            sections.append(current)
+            current = []
+        else:
+            current.append(line)
+    sections.append(current)
+    body = [section for section in sections if section and not any(
+        _PROPERTY.match(line) or _is_footer(line) or re.search(r"\(implicit\)$", line, re.I) or
+        re.match(r"^(?:Adds|Requires)\b", line, re.I) for line in section)]
+    labelled = [section for section in body if any(_MOD_LABEL.match(line) for line in section)]
+    mods = labelled or body[:-1]
+    return [line for section in mods for line in section if not _MOD_LABEL.match(line)][:80], bool(mods)
+
+
 def _is_footer(line):
     """Recognize usage, inspection and terminal item-status text that ends modifiers."""
     key = re.sub(r"[^a-z0-9]", "", line.lower())
@@ -153,9 +176,15 @@ def parse_item_text(text, affixes=()):
     if kind == "tablet":
         from PoE2_Data_Logger.ocr.item_ocr import parse_tablet
 
-        proposals = parse_tablet([{"text": line, "score": 1.0} for line in mods], affixes)
-        return {"kind": kind, "mods": mods, "matches": proposals["matches"],
-                "uncertain": proposals["uncertain"], "status": "review"}
+        unique = any(re.fullmatch(r"Rarity\s*:\s*Unique", line, re.I) for line in lines)
+        bounded = False
+        if unique:
+            bounded_mods, bounded = _unique_tablet_lines(lines)
+            mods = bounded_mods if bounded else mods
+        proposals = parse_tablet([{"text": line, "score": 1.0} for line in mods], affixes, flags=bounded)
+        result = {"kind": kind, "mods": mods, "matches": proposals["matches"],
+                  "uncertain": proposals["uncertain"], "status": "review"}
+        return {**result, "unique": True, "bounded": bounded} if unique else result
 
     tier_line = next((line for line in lines if line.lower().startswith("waystone tier:")), "")
     tier_match = re.search(r"\b(\d{1,2})\b", tier_line)
@@ -190,11 +219,48 @@ def parse_item_text(text, affixes=()):
     return result
 
 
-def parse_screen_tooltip(ocr_rows, affixes=(), *, normal_header_start=None):
+def _unique_tablet_rows(rows, body_rows, affixes, flavour):
+    """Cut a unique tablet's modifier rows at its flavour text and rejoin short wrapped endings.
+
+    A row joins the one above only when it is short and number-free, the row
+    above is not already a known modifier, and its first word could not have
+    fit on that full-width line. Return the rows and whether flavour bounded them.
+    """
+    from PoE2_Data_Logger.ocr.item_ocr import _affix_match
+
+    end = next((i for i, row in enumerate(rows) if flavour(row)), None)
+    section = rows if end is None else rows[:end]
+    widths = [row["right"] - row["x"] for row in body_rows
+              if all(key in row for key in ("x", "right"))]
+    width = max(widths, default=0)
+    joined = []
+    for row in section:
+        previous = joined[-1] if joined else None
+        text = row["text"]
+        if (previous and width and all(key in row and key in previous for key in ("x", "right")) and
+                not re.search(r"\d", text) and (len(text.split()) <= 3 or row["right"] - row["x"] <= width * .35) and
+                _affix_match(previous["text"], affixes)[0] is None):
+            first = text.split()[0] if text.split() else ""
+            word = (row["right"] - row["x"]) * (len(first) + 1) / max(1, len(text))
+            if previous["right"] - previous["x"] + word > width:
+                previous["text"] += " " + text
+                previous["score"] = min(float(previous.get("score", 1)), float(row.get("score", 1)))
+                previous["right"] = max(previous["right"], row["right"])
+                previous["x"] = min(previous["x"], row["x"])
+                if "bottom" in row:
+                    previous["bottom"] = row["bottom"]
+                continue
+        joined.append(row)
+    return joined, end is not None
+
+
+def parse_screen_tooltip(ocr_rows, affixes=(), *, normal_header_start=None, flavour=None):
     """Find a waystone/tablet title and parse its bounded tooltip body.
 
     Waystones need a drop-chance boundary or a complete explicitly Normal tooltip;
     tablets merge likely wrapped modifiers and retain OCR rows alongside proposals.
+    ``flavour`` recognizes unique-coloured rows: a unique tablet title enables
+    number-free modifiers, bounded by the flavour text that follows them.
     """
     lines = [row["text"].strip() if isinstance(row, dict) else str(row).strip()
              for row in ocr_rows]
@@ -259,13 +325,22 @@ def parse_screen_tooltip(ocr_rows, affixes=(), *, normal_header_start=None):
             row = dict(source) if isinstance(source, dict) else {"score": 1.0}
             row["text"] = line.strip()
             rows.append(row)
+        title = ocr_rows[index]
+        unique = bool(flavour and isinstance(title, dict) and flavour(title))
+        bounded = False
+        if unique:
+            rows, bounded = _unique_tablet_rows(rows, [row for row in ocr_rows[index:end] if isinstance(row, dict)],
+                                                affixes, flavour)
         rows = merge_tablet_lines(rows)
-        rows = [row for row in rows if looks_like_modifier(row["text"])]
-        proposals = parse_tablet(rows, affixes)
+        # Every row a flavour boundary encloses is a modifier, read or held.
+        rows = [row for row in rows if bounded or looks_like_modifier(row["text"])]
+        proposals = parse_tablet(rows, affixes, flags=bounded)
         if not proposals["matches"] and not proposals["uncertain"]:
             return None
+        if unique and not bounded:
+            proposals["status"] = "review"
         parsed = {"kind": kind, "mods": [row["text"] for row in rows],
-                  **proposals, "ocr_rows": rows}
+                  **proposals, "ocr_rows": rows, **({"unique": True, "bounded": bounded} if unique else {})}
     if parsed:
         parsed["source"] = "screen OCR"
     return parsed
@@ -359,7 +434,11 @@ def read_screen_tooltip(image, affixes=(), ocr_rows=None, strictness=ocr_sensiti
         normal_header_start = next((i for i, row in enumerate(rows)
                                     if re.match(r"^Rarity\s*:", row["text"], re.I) and
                                     any(part in headers for part in row.get("parts", [row]))), None)
-    parsed = parse_screen_tooltip(rows, affixes, normal_header_start=normal_header_start)
+    def flavour(row):
+        """Recognize unique-coloured title and flavour rows that carry OCR geometry."""
+        return all(key in row for key in ("x", "y", "right", "bottom")) and _unique_ink(image, row)
+
+    parsed = parse_screen_tooltip(rows, affixes, normal_header_start=normal_header_start, flavour=flavour)
     level = ocr_sensitivity.validate(strictness.get(parsed["kind"], ocr_sensitivity.DEFAULT)
                                     if isinstance(strictness, dict) and parsed else
                                     ocr_sensitivity.DEFAULT if isinstance(strictness, dict) else strictness)
@@ -372,6 +451,8 @@ def read_screen_tooltip(image, affixes=(), ocr_rows=None, strictness=ocr_sensiti
             if not ambiguous and float(row.get("score", 1)) >= retry_floor:
                 continue
             if not all(key in row for key in ("x", "y", "right", "bottom")):
+                continue
+            if _rollless_ink(image, row):
                 continue
             box = (max(0, int(row["x"]) - 8), max(0, int(row["y"]) - 2),
                    min(image.width, int(row["right"]) + 8), min(image.height, int(row["bottom"]) + 2))
@@ -392,7 +473,7 @@ def read_screen_tooltip(image, affixes=(), ocr_rows=None, strictness=ocr_sensiti
                 row["text"] = normalized
                 changed = True
         if changed:
-            parsed = parse_screen_tooltip(rows, affixes, normal_header_start=normal_header_start)
+            parsed = parse_screen_tooltip(rows, affixes, normal_header_start=normal_header_start, flavour=flavour)
         if parsed and any(float(row.get("score", 1)) < review_floor for row in parsed.get("ocr_rows", [])):
             parsed["uncertain"] = list(dict.fromkeys(parsed.get("uncertain", []) +
                                         [row["text"] for row in parsed["ocr_rows"] if float(row.get("score", 1)) < review_floor]))
@@ -419,6 +500,27 @@ def _flavour_row(image, row):
     pixels = np.asarray(image.convert("RGB").crop(box)).reshape(-1, 3)
     ink = pixels[pixels.max(axis=1) > 90]
     return bool(len(ink)) and float(np.median(ink[:, 0])) > float(np.median(ink[:, 2])) * 1.4
+
+
+def _ink(image, row):
+    """Return the median colour of a row's bright text pixels, or None without ink."""
+    box = tuple(round(row[key]) for key in ("x", "y", "right", "bottom"))
+    pixels = np.asarray(image.convert("RGB").crop(box)).reshape(-1, 3)
+    ink = pixels[pixels.max(axis=1) > 90]
+    return tuple(float(np.median(ink[:, channel])) for channel in range(3)) if len(ink) else None
+
+
+def _unique_ink(image, row):
+    """Recognize the orange unique title and flavour ink, unlike yellow rare titles or gold."""
+    colour = _ink(image, row)
+    return colour is not None and colour[0] > colour[2] * 1.4 and colour[1] < colour[0] * .7
+
+
+def _rollless_ink(image, row):
+    """Recognize grey usage text and orange title or flavour text, which never carry modifier rolls."""
+    colour = _ink(image, row)
+    return colour is not None and (max(colour) <= min(colour) * 1.1 or
+                                   colour[0] > colour[2] * 1.4 and colour[1] < colour[0] * .7)
 
 
 def read_rite_tooltip(ocr_rows, image):

@@ -24,7 +24,8 @@ from PIL import Image, ImageDraw, ImageOps
 from PoE2_Data_Logger.ocr.opened_scan import OCR_LOCK, _engine
 from PoE2_Data_Logger.ocr import currency_ocr
 from PoE2_Data_Logger.core import ocr_sensitivity
-from PoE2_Data_Logger.ocr.affix_capture import affix_key, affix_unit, modifier_value, looks_like_modifier
+from PoE2_Data_Logger.ocr.affix_capture import (affix_key, affix_unit, flag_modifier, flag_unit_allowed,
+                                                  modifier_value, looks_like_modifier)
 
 
 _RITUAL_MATCH_CACHE = OrderedDict()
@@ -370,22 +371,26 @@ def merge_tablet_lines(lines):
     return merged
 
 
-def parse_tablet(lines, affixes):
+def parse_tablet(lines, affixes, *, flags=False):
     """Match extracted values to same-unit known affixes and return up to four unique proposals.
 
     Unknown wording, unit conflicts and extra matches remain uncertain; ready
     means the parsing constraints passed, not that OCR was manually approved.
+    ``flags`` marks lines bounded to a unique tablet's modifiers: number-free
+    wording reads as a flag and any other unread line stays uncertain.
     """
     found, uncertain = [], []
     for line in merge_tablet_lines(lines):
         text = line["text"] if isinstance(line, dict) else str(line)
-        amount = modifier_value(text)
+        amount = modifier_value(text) or (flag_modifier(text) if flags else None)
         if not amount:
-            if looks_like_modifier(text):
+            if looks_like_modifier(text) or flags and text.strip():
                 uncertain.append(text)
             continue
         name, score = _affix_match(text, affixes)
-        if (name and affix_unit(name) == amount["unit"] and
+        unit_matches = name and (flag_unit_allowed(name) if amount["unit"] == "flag" else
+                                 affix_unit(name) == amount["unit"])
+        if (unit_matches and
                 name not in [item["affix"] for item in found]):
             found.append({"affix": name, "value": amount["value"], "unit": amount["unit"],
                           "score": min(score, float(line.get("score", 1)) if isinstance(line, dict) else 1),

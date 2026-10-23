@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Scan unique Tablets. An orange unique title bounds the modifiers between the uses-remaining line and the orange flavour text, rejoins a wrapped short ending, and reads number-free modifiers such as "Map also counts as a Desert Map" as a flag of 1. Copied unique text is bounded the same way by its sections. Unknown wording is added to Affix DB, as for Rites and waystones, so normal and unique Tablets log together in one set. On the four captured uniques (Freedom of Faith, Visions of Paradise and both Mastered Domains) every modifier is read and auto-saved.
+- Keep flags honest: wording that implies a value (increased, chance, additional, seconds) is never read as a flag, so a roll OCR dropped stays in review. A unique title without its flavour boundary is held for review, and rare-coloured titles keep the existing reader.
+- Remember the scanned unit of a learned affix, so picking a learned flag by hand in the Tablet form saves a flag rather than a percentage. Undo removes the unit with the name.
+- Restore keyword capitals (Map, Favours, Ritual Altars, Tribute) when learning a small-caps modifier name from the screen.
+- Skip the slow upscaled percentage retry for grey usage text and orange title or flavour text, which carry no rolls. A Tablet whose footer OCR garbled took about 4.5 seconds longer to read.
 - Name deferred and highlighted Ritual Omens whose gold or red frame hid them. After the frame band is blanked, Omen art that leads every rival by more than 600 gets back the 400 points that band costs; unique and currency art keep the ordinary gates. On 33 real pages this names 19 framed Omens (Whittling, Resurgence, Sinistral and Dextral Erasure), each checked against catalog art and glow colour.
 - Default an unnamed Ritual reward to the Omen type when every suggestion is an Omen; the type still waits for confirmation.
 - Keep multi-cell Ritual rewards whole when their corners are partly covered or highlighted. Fully occupied rectangles are claimed before dark backing can stretch a frame, a strong far corner closes a frame past a weak curl in the art, and red-highlighted gear on a gray page keeps its frame. On the real pages this removes 12 phantom single-cell rows (a gauntlet, a robe, an idol twice and an amulet).
