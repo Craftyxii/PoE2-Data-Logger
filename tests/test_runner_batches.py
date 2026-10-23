@@ -92,8 +92,9 @@ class RunnerBatchTests(unittest.TestCase):
             """Write each child's report and output; fail only the second batch."""
             names = command[command.index("--modules") + 1:command.index("--summary-file")]
             launched.append((names, arguments["env"]["RUNESHAPE_SCAN_DATA_DIR"]))
-            arguments["stdout"].write(f"ran {' '.join(names)}\n")
             failed = names == ["test_c.py", "test_d.py"]
+            # A failed child may be killed before finishing its last line.
+            arguments["stdout"].write(f"ran {' '.join(names)}" + ("" if failed else "\n"))
             Path(command[-1]).write_text(json.dumps({"tests": 2, "failures": int(failed), "errors": 0,
                                                      "skipped": 0, "successful": not failed}), encoding="utf-8")
             return subprocess.CompletedProcess(command, int(failed))
@@ -108,6 +109,7 @@ class RunnerBatchTests(unittest.TestCase):
         text = output.getvalue()
         self.assertLess(text.index("ran test_a.py test_b.py"), text.index("ran test_c.py test_d.py"))
         self.assertLess(text.index("ran test_c.py test_d.py"), text.index("ran test_e.py"))
+        self.assertIn("ran test_c.py test_d.py\nBatch 3/3:", text)
         self.assertEqual((summary["tests"], summary["failures"], summary["successful"]), (6, 1, False))
         self.assertEqual([failure["modules"] for failure in summary["batch_failures"]], [["test_c.py", "test_d.py"]])
 

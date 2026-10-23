@@ -16,7 +16,6 @@ import os
 import re
 import sqlite3
 import sys
-import tempfile
 import threading
 import time
 from uuid import uuid4

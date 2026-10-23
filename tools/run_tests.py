@@ -50,7 +50,9 @@ def run_module_batches(root, modules, *, batch_size=20, jobs=1):
             for index, (batch, future) in enumerate(zip(batches, pending), 1):
                 completed, report, output = future.result()
                 if output is not None:
-                    print(f"Batch {index}/{len(batches)}: {', '.join(batch)}\n{output}", end="", flush=True)
+                    # A killed child can stop mid-line; keep the failure notice on its own line.
+                    print(f"Batch {index}/{len(batches)}: {', '.join(batch)}\n{output}",
+                          end="" if output.endswith("\n") else "\n", flush=True)
                 child = None
                 try:
                     child = json.loads(report.read_text(encoding="utf-8"))
