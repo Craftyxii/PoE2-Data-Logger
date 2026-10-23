@@ -65,10 +65,18 @@ def catalog_names():
     """List distinct names from non-ignored bundled currency and inventory families."""
     names = set()
     for filename in ("currency-icons.json", "inventory-icons.json"):
-        if (ROOT / filename).exists():
-            names.update(name for item in json.loads((ROOT / filename).read_text(encoding="utf-8"))["icons"]
-                         if not item.get("ignored") for name in item["members"])
+        path = ROOT / filename
+        if path.exists():
+            stat = path.stat()
+            names.update(_catalog_file_names(str(path), stat.st_mtime_ns, stat.st_size))
     return sorted(names)
+
+
+@lru_cache(maxsize=2)
+def _catalog_file_names(path, modified, size):
+    """Cache one catalog's member names; its timestamp and size invalidate the 10 MB parse."""
+    return frozenset(name for item in json.loads(Path(path).read_text(encoding="utf-8"))["icons"]
+                     if not item.get("ignored") for name in item["members"])
 
 
 def omen_references():

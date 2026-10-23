@@ -153,7 +153,12 @@ class SessionCurrencyCounter(QWidget):
         super().__init__(parent)
         self.setObjectName("sessionCurrencyCounter")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-        self.cards = {}
+        # Cards are built when the counter is first shown or read; until then
+        # totals, groups and the summary stay current without ~300 widgets.
+        self._cards = {}
+        self._icons = {}
+        self._icon_updates = set()
+        self._built = False
         self.groups = {}
         self.group_labels = {}
         self._catalog = {}
@@ -188,11 +193,51 @@ class SessionCurrencyCounter(QWidget):
         self.empty.setWordWrap(True)
         self.empty.setContentsMargins(0, 12, 0, 12)
         content.addWidget(self.empty)
-        self.grid = QGridLayout()
-        self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setSpacing(12)
-        self.grid.setAlignment(Qt.AlignmentFlag.AlignTop)
-        content.addLayout(self.grid)
+        self._grid = QGridLayout()
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setSpacing(12)
+        self._grid.setAlignment(Qt.AlignmentFlag.AlignTop)
+        content.addLayout(self._grid)
+
+    @property
+    def cards(self):
+        """Return every tracked card, building them on first use."""
+        if not self._built:
+            self._build_cards()
+        return self._cards
+
+    @property
+    def grid(self):
+        """Return the card grid laid out for the current totals and filter."""
+        if not self._built:
+            self._build_cards()
+        return self._grid
+
+    def _build_cards(self):
+        """Create, update or remove cards to match the latest totals, then lay them out once."""
+        first = not self._built
+        self._built = True
+        for name in set(self._cards) - set(self._items):
+            card = self._cards.pop(name)
+            self._grid.removeWidget(card)
+            card.hide()
+            card.deleteLater()
+        for name, item in self._items.items():
+            if name in self._cards:
+                self._cards[name].set_quantity(item["quantity"])
+                if name in self._icon_updates:
+                    self._cards[name].set_icon(self._icons.get(name))
+            else:
+                self._cards[name] = CurrencyCard(item, self._icons.get(name), self)
+        self._icon_updates.clear()
+        if first:
+            self._relayout()
+
+    def showEvent(self, event):
+        """Build deferred cards the first time the Currency page shows them."""
+        super().showEvent(event)
+        if not self._built:
+            self._build_cards()
 
     def set_totals(self, data, icons=None, catalog=None):
         """Replace displayed totals, merge names case-insensitively, and retain catalog zeros.
@@ -221,19 +266,11 @@ class SessionCurrencyCounter(QWidget):
                 items[key]["kind"] = item["kind"]
         tracked = {item["name"]: item for item in items.values()}
         found = sum(item["quantity"] > 0 for item in tracked.values())
-        for name in set(self.cards) - set(tracked):
-            card = self.cards.pop(name)
-            self.grid.removeWidget(card)
-            card.hide()
-            card.deleteLater()
         self._items = tracked
-        for name, item in tracked.items():
-            if name in self.cards:
-                self.cards[name].set_quantity(item["quantity"])
-                if name in icons:
-                    self.cards[name].set_icon(icons[name])
-            else:
-                self.cards[name] = CurrencyCard(item, icons.get(name), self)
+        self._icons = {name: png for name, png in {**self._icons, **icons}.items() if name in tracked}
+        self._icon_updates |= set(icons) & set(tracked)
+        if self._built:
+            self._build_cards()
         groups = {}
         for name, item in tracked.items():
             groups.setdefault(_group_for(item), []).append(name)
@@ -246,7 +283,7 @@ class SessionCurrencyCounter(QWidget):
         }
         for group in set(self.group_labels) - set(self.groups):
             label = self.group_labels.pop(group)
-            self.grid.removeWidget(label)
+            self._grid.removeWidget(label)
             label.hide()
             label.deleteLater()
         for group in self.groups:
@@ -280,24 +317,24 @@ class SessionCurrencyCounter(QWidget):
             _group_key(entry[0]))))
         self._visible = tuple(name for _, names in self._visible_groups for name in names)
         self.empty.setVisible(not self._visible)
-        self.empty.setText("No currency matches your search." if self.cards else
+        self.empty.setText("No currency matches your search." if self._items else
                            "Approve an end inventory scan to count currency found. A start scan subtracts what you brought in.")
         self._relayout()
 
     def _relayout(self):
         """Reuse cards in one to six columns, rebuilding only when width or visible groups change."""
-        if not hasattr(self, "grid"):
+        if not self._built:
             return
         columns = max(1, min(6, (self.width() + 12) // 252))
         key = (columns, self._visible_groups)
         if key == self._layout_key:
             return
         self._layout_key = key
-        while self.grid.count():
-            self.grid.takeAt(0)
+        while self._grid.count():
+            self._grid.takeAt(0)
         visible = set(self._visible)
         visible_groups = {group for group, _names in self._visible_groups}
-        for name, card in self.cards.items():
+        for name, card in self._cards.items():
             if name not in visible and not card.isHidden():
                 card.hide()
         for group, label in self.group_labels.items():
@@ -306,18 +343,18 @@ class SessionCurrencyCounter(QWidget):
         row = 0
         for group, names in self._visible_groups:
             label = self.group_labels[group]
-            self.grid.addWidget(label, row, 0, 1, columns)
+            self._grid.addWidget(label, row, 0, 1, columns)
             if label.isHidden():
                 label.show()
             row += 1
             for index, name in enumerate(names):
-                card = self.cards[name]
-                self.grid.addWidget(card, row + index // columns, index % columns)
+                card = self._cards[name]
+                self._grid.addWidget(card, row + index // columns, index % columns)
                 if card.isHidden():
                     card.show()
             row += (len(names) + columns - 1) // columns
         for column in range(max(columns, self._columns)):
-            self.grid.setColumnStretch(column, 1 if column < columns else 0)
+            self._grid.setColumnStretch(column, 1 if column < columns else 0)
         self._columns = columns
 
     def resizeEvent(self, event):
