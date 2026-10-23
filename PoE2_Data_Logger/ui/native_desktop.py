@@ -43,6 +43,7 @@ from PoE2_Data_Logger.core import service
 from PoE2_Data_Logger.core import store
 from PoE2_Data_Logger.core import kill_counts, chain_gap
 from PoE2_Data_Logger.core import ritual_rites_catalog
+from PoE2_Data_Logger.core.ritual_catalog import NOT_RITUAL_REWARDS
 from PoE2_Data_Logger.ui.region_select import RegionEditor, ScanRegionsPage
 from PoE2_Data_Logger.ui.atlas_settings import AtlasSettingsPage
 from PoE2_Data_Logger.ui.currency_counter import SessionCurrencyCounter
@@ -7640,6 +7641,8 @@ class LoggerWindow(QMainWindow):
         if unresolved_ritual_name(name):
             raise ValueError(f"Ritual row {row + 1}: confirm the unidentified reward's name before saving.")
         review_learning.validate_name(name, category)
+        if name in NOT_RITUAL_REWARDS:
+            raise ValueError(f"Ritual row {row + 1}: {name} is never a Ritual reward; enter the reward shown.")
         logger._integer(field(2), f"Ritual row {row + 1} quantity", 1, 1000000)
         logger._integer(field(3), f"Ritual row {row + 1} Tribute", 0, 1000000000, blank=True)
         deferred = self.ritual_table.item(row, 5)

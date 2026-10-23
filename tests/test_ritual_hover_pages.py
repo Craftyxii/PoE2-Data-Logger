@@ -94,6 +94,34 @@ class RitualHoverPagesTests(unittest.TestCase):
         self.assertFalse(clear_ritual_read(dict(result, grid_detected=False), names))
 
 
+class NotRitualRewardTests(unittest.TestCase):
+    """Art matching a reward Ritual never offers is held, whatever matcher named it."""
+
+    def scan(self, answer):
+        """Scan a real page with every catalog and learned-reference lookup returning ``answer``."""
+        with tempfile.TemporaryDirectory(prefix="poe2-not-ritual-") as folder, \
+                patch.object(store, "DATA_DIR", Path(folder)), patch.object(logger, "_READY", False), \
+                patch.object(item_ocr, "_ritual_reward_icon", return_value=answer), \
+                Image.open(FIXTURES / "124949.png") as source:
+            return item_ocr.scan_ritual_page(source.convert("RGB"), OMEN_NAMES)["items"]
+
+    def test_origin_spark_match_is_held_unnamed_for_review(self):
+        """A confident Origin Spark match becomes an unnamed reward that blocks automatic saving."""
+        items = self.scan(("Origin Spark", .95, []))
+        held = [item for item in items if item["source"] == "Occupied Ritual reward; name unresolved"]
+        self.assertTrue(held)
+        self.assertNotIn("Origin Spark", [item["name"] for item in items])
+        for item in held:
+            self.assertTrue(item["needs_review"] and item["name_needs_review"])
+
+    def test_origin_spark_is_never_suggested(self):
+        """Suggestions keep the other names and drop Origin Spark."""
+        items = self.scan((None, .5, ["Origin Spark", "Orb of Chance"]))
+        suggested = [item["candidate_names"] for item in items if item.get("candidate_names")]
+        self.assertTrue(suggested)
+        self.assertTrue(all(names == ["Orb of Chance"] for names in suggested))
+
+
 class SpriteFootprintTests(unittest.TestCase):
     """Uniques the game sizes to their sprite join that footprint's artwork bank."""
 

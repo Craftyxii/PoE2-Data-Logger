@@ -229,6 +229,18 @@ class RitualReviewRowsTests(unittest.TestCase):
                 self.assertEqual(self.window.pending_review_kind, "ritual")
                 self.window.reject_review()
 
+    def test_reward_ritual_never_offers_cannot_be_confirmed(self):
+        """Origin Spark cannot be typed into a Ritual row; the reward shown can."""
+        self.read(self.result([self.unknown()]))
+        self.correct(0, "Origin Spark", quantity=1)
+        with self.assertRaisesRegex(ValueError, "never a Ritual reward"):
+            self.approve_row(0)
+        self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
+        self.correct(0, "Orb of Chance", quantity=1)
+        self.approve_row(0)
+        self.window.approve_review()
+        self.assertEqual(self.saved_items()[0]["name"], "Orb of Chance")
+
     def test_legacy_deferred_omen_placeholder_requires_real_name_before_export(self):
         """Verify deferred omen placeholders require real names before export and count as no new find."""
         self.read(self.result([self.known(category="Omen", name="Deferred omen", tribute=None,

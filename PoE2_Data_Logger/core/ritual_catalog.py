@@ -51,3 +51,8 @@ OMEN_NAMES = (
     "Omen of Sinistral Necromancy",
     "Omen of Dextral Necromancy",
 )
+
+# Rewards a Ritual altar never offers. Their artwork can still be the closest
+# match for an uncatalogued reward, so a Ritual scan holds such a match for
+# review instead of naming it, and a reviewed Ritual row cannot use the name.
+NOT_RITUAL_REWARDS = frozenset({"Origin Spark"})

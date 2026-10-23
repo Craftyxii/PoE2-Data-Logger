@@ -24,6 +24,7 @@ from PIL import Image, ImageDraw, ImageOps
 from PoE2_Data_Logger.ocr.opened_scan import OCR_LOCK, _engine
 from PoE2_Data_Logger.ocr import currency_ocr
 from PoE2_Data_Logger.core import ocr_sensitivity
+from PoE2_Data_Logger.core.ritual_catalog import NOT_RITUAL_REWARDS
 from PoE2_Data_Logger.ocr.affix_capture import (affix_key, affix_unit, flag_modifier, flag_unit_allowed,
                                                   modifier_value, looks_like_modifier)
 
@@ -1929,6 +1930,10 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
             suggested_omen = (not name and not gray_omen and bool(candidates) and
                               all(entry in omen_names for entry in candidates))
             kind = "omen" if (name in omen_names or suggested_omen or gray_omen) else "item"
+        if name in NOT_RITUAL_REWARDS:
+            # Ritual never offers it, so its art matched something else.
+            name = None
+        candidates = [entry for entry in candidates if entry not in NOT_RITUAL_REWARDS]
         quantity = 1 if multiple or unique else label.get("count") or label.get("count_candidate") or 1
         deferred = index in deferred_rewards
         item = {"category": "Omen" if kind == "omen" else "Item", "name": name or "",
