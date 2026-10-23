@@ -6,6 +6,7 @@ Injected scan-result simulations and mocked Windows tests do not exercise native
 game-overlay input or prove capture recognition."""
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
@@ -16,43 +17,62 @@ import time
 import unittest
 
 
-def run_module_batches(root, modules, *, batch_size=20):
-    """Run each discovered module once in bounded child processes, rejecting test failures and abnormal exits."""
-    if not modules or batch_size < 1 or len(set(modules)) != len(modules):
-        raise ValueError("Use discovered modules, a positive batch size and unique module names.")
+def run_module_batches(root, modules, *, batch_size=20, jobs=1):
+    """Run each discovered module once in bounded child processes, rejecting test failures and abnormal exits.
+
+    Batches are already isolated (own process and data profile), so ``jobs`` may
+    run several at once; their output is buffered and printed in batch order.
+    """
+    if not modules or batch_size < 1 or jobs < 1 or len(set(modules)) != len(modules):
+        raise ValueError("Use discovered modules, a positive batch size and job count, and unique module names.")
     batches = [modules[offset:offset + batch_size] for offset in range(0, len(modules), batch_size)]
     summary = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0, "successful": True,
                "batches": len(batches), "modules": list(modules), "batch_failures": []}
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="poe2-regression-batches-", ignore_cleanup_errors=True) as directory:
-        for index, batch in enumerate(batches, 1):
+        def run_batch(index, batch):
+            """Launch one isolated child and return its exit status, report path and buffered output."""
             report = Path(directory) / f"batch-{index}.json"
             environment = dict(os.environ, RUNESHAPE_SCAN_DATA_DIR=str(Path(directory) / f"profile-{index}"))
-            print(f"Batch {index}/{len(batches)}: {', '.join(batch)}", flush=True)
-            completed = subprocess.run([sys.executable, str(root / "tools/run_tests.py"),
-                "--modules", *batch, "--summary-file", str(report)], cwd=root, env=environment, check=False)
-            child = None
-            try:
-                child = json.loads(report.read_text(encoding="utf-8"))
-                if (not isinstance(child, dict) or not isinstance(child.get("successful"), bool)
-                        or any(type(child.get(key)) is not int or child[key] < 0
-                               for key in ("tests", "failures", "errors", "skipped"))
-                        or child["tests"] == 0):
-                    child = None
-            except (OSError, ValueError, TypeError):
-                pass
-            if child is not None:
-                for key in ("tests", "failures", "errors", "skipped"):
-                    summary[key] += child[key]
-            if (completed.returncode != 0 or child is None or not child["successful"]
-                    or child["failures"] or child["errors"]):
-                summary["successful"] = False
-                summary["batch_failures"].append({"modules": batch, "returncode": completed.returncode,
-                                                   "summary_available": child is not None})
-                if child is None or not child["failures"] and not child["errors"]:
-                    summary["errors"] += 1
-                print(f"Batch {index} failed: exit={completed.returncode}, valid_summary={child is not None}",
-                      file=sys.stderr, flush=True)
+            command = [sys.executable, str(root / "tools/run_tests.py"),
+                       "--modules", *batch, "--summary-file", str(report)]
+            if jobs == 1:
+                print(f"Batch {index}/{len(batches)}: {', '.join(batch)}", flush=True)
+                return subprocess.run(command, cwd=root, env=environment, check=False), report, None
+            log = Path(directory) / f"batch-{index}.log"
+            with log.open("w", encoding="utf-8", errors="replace") as output:
+                completed = subprocess.run(command, cwd=root, env=environment, check=False,
+                                           stdout=output, stderr=subprocess.STDOUT)
+            return completed, report, log.read_text(encoding="utf-8", errors="replace")
+
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            pending = [pool.submit(run_batch, index, batch) for index, batch in enumerate(batches, 1)]
+            for index, (batch, future) in enumerate(zip(batches, pending), 1):
+                completed, report, output = future.result()
+                if output is not None:
+                    print(f"Batch {index}/{len(batches)}: {', '.join(batch)}\n{output}", end="", flush=True)
+                child = None
+                try:
+                    child = json.loads(report.read_text(encoding="utf-8"))
+                    if (not isinstance(child, dict) or not isinstance(child.get("successful"), bool)
+                            or any(type(child.get(key)) is not int or child[key] < 0
+                                   for key in ("tests", "failures", "errors", "skipped"))
+                            or child["tests"] == 0):
+                        child = None
+                except (OSError, ValueError, TypeError):
+                    pass
+                if child is not None:
+                    for key in ("tests", "failures", "errors", "skipped"):
+                        summary[key] += child[key]
+                if (completed.returncode != 0 or child is None or not child["successful"]
+                        or child["failures"] or child["errors"]):
+                    summary["successful"] = False
+                    summary["batch_failures"].append({"modules": batch, "returncode": completed.returncode,
+                                                       "summary_available": child is not None})
+                    if child is None or not child["failures"] and not child["errors"]:
+                        summary["errors"] += 1
+                    print(f"Batch {index} failed: exit={completed.returncode}, valid_summary={child is not None}",
+                          file=sys.stderr, flush=True)
     summary["elapsed_seconds"] = time.monotonic() - started
     print(f"\nRan {summary['tests']} tests in {summary['elapsed_seconds']:.3f}s "
           f"across {len(batches)} isolated batches", file=sys.stderr)
@@ -96,12 +116,14 @@ def main(argv=None):
     selection.add_argument("--pattern", help="Test module filename pattern (single-process targeted run)")
     selection.add_argument("--modules", nargs="+", help=argparse.SUPPRESS)
     parser.add_argument("--summary-file", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--jobs", type=int, default=1,
+                        help="Run this many isolated full-discovery batches at once (default 1)")
     args = parser.parse_args(argv)
     if args.pattern is not None or args.modules is not None:
         summary = run_selected_tests(root, pattern=args.pattern, modules=args.modules)
     else:
         modules = sorted(path.name for path in (root / "tests").glob("test*.py") if path.is_file())
-        summary = run_module_batches(root, modules)
+        summary = run_module_batches(root, modules, jobs=args.jobs)
     if args.summary_file is not None:
         args.summary_file.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return 0 if summary["successful"] else 1

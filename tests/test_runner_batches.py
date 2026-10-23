@@ -84,6 +84,33 @@ class RunnerBatchTests(unittest.TestCase):
         self.assertEqual((summary["tests"], summary["failures"], summary["errors"], summary["successful"]),
                          (4, 1, 0, False))
 
+    def test_parallel_jobs_keep_isolated_profiles_ordered_output_and_failures(self):
+        """Run isolated batches concurrently while reporting them in batch order and still failing on any child."""
+        launched = []
+
+        def child(command, **arguments):
+            """Write each child's report and output; fail only the second batch."""
+            names = command[command.index("--modules") + 1:command.index("--summary-file")]
+            launched.append((names, arguments["env"]["RUNESHAPE_SCAN_DATA_DIR"]))
+            arguments["stdout"].write(f"ran {' '.join(names)}\n")
+            failed = names == ["test_c.py", "test_d.py"]
+            Path(command[-1]).write_text(json.dumps({"tests": 2, "failures": int(failed), "errors": 0,
+                                                     "skipped": 0, "successful": not failed}), encoding="utf-8")
+            return subprocess.CompletedProcess(command, int(failed))
+
+        modules = ["test_a.py", "test_b.py", "test_c.py", "test_d.py", "test_e.py"]
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as folder, patch.object(run_tests.subprocess, "run", side_effect=child), \
+                redirect_stdout(output), redirect_stderr(io.StringIO()):
+            summary = run_tests.run_module_batches(Path(folder), modules, batch_size=2, jobs=3)
+        self.assertEqual(sorted(name for names, _ in launched for name in names), modules)
+        self.assertEqual(len({profile for _, profile in launched}), 3)
+        text = output.getvalue()
+        self.assertLess(text.index("ran test_a.py test_b.py"), text.index("ran test_c.py test_d.py"))
+        self.assertLess(text.index("ran test_c.py test_d.py"), text.index("ran test_e.py"))
+        self.assertEqual((summary["tests"], summary["failures"], summary["successful"]), (6, 1, False))
+        self.assertEqual([failure["modules"] for failure in summary["batch_failures"]], [["test_c.py", "test_d.py"]])
+
     def test_empty_duplicate_or_unbounded_module_requests_are_rejected(self):
         """Prevent empty discovery or malformed batch configuration from appearing to pass."""
         for modules, batch_size in (([], 20), (["test_a.py", "test_a.py"], 20), (["test_a.py"], 0)):
