@@ -181,6 +181,8 @@ class CurrencyCounterGroupsTests(unittest.TestCase):
 
     def test_repeated_refresh_and_search_do_not_accumulate_cards_or_headers(self):
         """Verify repeated refresh and search reuse cards and headers and remove an emptied catalog."""
+        # Cards are built when the counter is shown, as on the Currency page.
+        self.counter.show()
         self.counter.set_totals(self.data(), catalog=self.catalog)
         labels = dict(self.counter.group_labels)
         for index in range(30):

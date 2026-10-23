@@ -319,11 +319,14 @@ class SessionCurrencyCounter(QWidget):
         self.empty.setVisible(not self._visible)
         self.empty.setText("No currency matches your search." if self._items else
                            "Approve an end inventory scan to count currency found. A start scan subtracts what you brought in.")
-        self._relayout()
+        if self._built:
+            self._relayout()
 
     def _relayout(self):
         """Reuse cards in one to six columns, rebuilding only when width or visible groups change."""
         if not self._built:
+            # Building lays the new cards out once.
+            self._build_cards()
             return
         columns = max(1, min(6, (self.width() + 12) // 252))
         key = (columns, self._visible_groups)
@@ -360,4 +363,5 @@ class SessionCurrencyCounter(QWidget):
     def resizeEvent(self, event):
         """Reflow the grouped cards after the widget width changes."""
         super().resizeEvent(event)
-        self._relayout()
+        if self._built:
+            self._relayout()
