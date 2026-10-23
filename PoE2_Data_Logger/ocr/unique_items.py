@@ -374,7 +374,7 @@ def match(image, shape, strictness=ocr_sensitivity.DEFAULT):
                 cached = _QUERIES[key]
                 return None if cached is None else {**cached, "candidate_names": list(cached["candidate_names"])}
         ranked = _rank(bank, normalized)
-        floor = ocr_sensitivity.review_threshold(.90, strictness, .06)
+        floor = ocr_sensitivity.review_threshold(.85, strictness, .06)
         # Give the existing slider useful identity latitude without changing
         # its default: 0 requires .87, 50 keeps .97, and 100 remains manual
         # below. This stays above the .84 loose candidate floor; merely being
@@ -392,7 +392,10 @@ def match(image, shape, strictness=ocr_sensitivity.DEFAULT):
             choices = sorted((name for name, score in by_name.items()
                               if score >= max(floor, top - margin)), key=str.casefold)
             runner = max((score for name, score in by_name.items() if name not in choices), default=-1)
-            name = choices[0] if (len(choices) == 1 and top >= clear and top - runner >= margin
+            # Credible artwork with no rival in the whole catalog is also an
+            # identity: real captures score .86-.98 with no other item above .70.
+            unrivalled = top - runner >= ocr_sensitivity.clear_threshold(.15, strictness, .10)
+            name = choices[0] if (len(choices) == 1 and (unrivalled or (top >= clear and top - runner >= margin))
                                   and strictness != 100) else ""
             result = {"name": name, "candidate_names": choices, "score": round(top, 6),
                       "source": "unique item catalog: " + bank.revision,

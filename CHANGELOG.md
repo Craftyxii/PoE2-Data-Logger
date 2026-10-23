@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Name gray Ritual rewards whose artwork belongs to one item, including Omens with their own source art, Sacred Bloom, Idols and currency. Gray Omens sharing source art and near ties stay in review with every look-alike suggested. Gray artwork is never matched by color, and Abyss Omens, which never appear in Ritual offers, are not Ritual gray rivals.
+- Retry gold-framed deferred and highlighted Ritual rewards without the frame edge, using the same matcher gates.
+- Name unique items whose artwork has no rival anywhere in the catalog; shared art and close rivals still require a choice.
+- Accept a stack count read once at high confidence when its digits match the separately counted label glyphs; conflicting and clipped counts stay in review.
+- Read kill counters at every game resolution and UI scale, treating resampled cell dividers and border lines as UI strokes rather than digits.
+
 ## 1.3.2.27 Beta
 
 - Preserve complete grayscale Ritual equipment footprints, including the original gray armor capture and Tetzlapokal's Desire, instead of reviewing individual fragments.

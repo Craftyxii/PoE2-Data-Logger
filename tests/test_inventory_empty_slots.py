@@ -103,13 +103,17 @@ class InventoryEmptySlotTests(unittest.TestCase):
                 self.assertFalse(result.get("empty", False))
 
     def test_unknown_single_cell_beside_body_armour_remains_reviewable(self):
-        """Verify unknown single cell beside body armour remains reviewable."""
+        """Verify a single-cell ring beside body armour remains its own reward."""
         image = self.grid((480, 200))
         image.paste(self.source.crop((1425, 284, 1524, 431)).resize((80, 120)), (200, 40))
         image.paste(self.source.crop((1352, 322, 1402, 378)).resize((40, 40)), (40, 120))
         self.assertNotIn(38, item_ocr._inventory_equipment_slots(image))
         result = self.scan(image)
-        self.assertEqual([entry["slot"] for entry in result["unknown"]], [38])
+        # The ring stays its own row rather than joining the armour footprint.
+        ring = next(row for row in result["items"] if row["slot"] == 38)
+        self.assertEqual((ring["name"], ring["quantity"]), ("The Taming", 1))
+        self.assertNotIn(38, [slot for row in result["items"] if row["slot"] != 38
+                              for slot in row.get("grid_slots", [row["slot"]])])
 
     def test_currency_adjacent_to_multicell_gear_is_not_discarded(self):
         """Verify currency adjacent to multicell gear is not discarded."""

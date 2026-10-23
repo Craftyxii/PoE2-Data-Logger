@@ -142,7 +142,9 @@ class StableRitualCurrencyAudit(unittest.TestCase):
         self.assertIsNone(self.window.pending_review_kind)
         items = logger.ritual_pages_for_map("M0001")[0]["items"]
         self.assertEqual(sum(item["name"] == "Omen of Refreshment" for item in items), 3)
-        self.assertEqual(sum(item["name"] == "Audit repeated ring" for item in items), 2)
+        self.assertEqual(sum(item["name"] == "Audit repeated ring" for item in items), min(repeated, 2))
+        for name in ("Omen of Sinistral Annulment", "Omen of Dextral Annulment", "Edyrn's Tusks", "Dreadfist"):
+            self.assertIn(name, [item["name"] for item in items])
         rows = list(csv.DictReader(io.StringIO(logger.export_ritual_csv().decode("utf-8-sig"))))
         self.assertTrue(rows)
         self.assertEqual(rows[0]["Page OCR Text"], result["raw_text"])

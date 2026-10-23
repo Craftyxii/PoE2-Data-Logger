@@ -119,13 +119,17 @@ class InventoryNoiseTests(unittest.TestCase):
         self.assertEqual(result["unknown"], [])
 
     def test_unknown_single_slot_item_stays_reviewable_beside_large_gear(self):
-        """Verify unknown single slot item stays reviewable beside large gear."""
+        """Verify a single-slot ring beside large gear remains its own reward."""
         image = self.grid()
         image.paste(self.source.crop((1425, 284, 1524, 431)).resize((80, 120)), (200, 40))
         image.paste(self.source.crop((1352, 322, 1402, 378)).resize((40, 40)), (40, 120))
         with patch.object(currency_ocr, "get_reader", return_value=self.reader):
             result = item_ocr.scan_inventory_grid(image)
-        self.assertEqual([entry["slot"] for entry in result["unknown"]], [38])
+        # The ring stays its own row rather than joining the armour footprint.
+        ring = next(row for row in result["items"] if row["slot"] == 38)
+        self.assertEqual((ring["name"], ring["quantity"]), ("The Taming", 1))
+        self.assertNotIn(38, [slot for row in result["items"] if row["slot"] != 38
+                              for slot in row.get("grid_slots", [row["slot"]])])
 
     def test_separate_catalog_tiles_do_not_become_equipment(self):
         """Verify separate catalog tiles do not become equipment."""

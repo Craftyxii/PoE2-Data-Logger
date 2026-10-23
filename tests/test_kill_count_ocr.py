@@ -52,7 +52,7 @@ class KillCountOCRTests(unittest.TestCase):
 
     def test_controlled_full_screenshot_resolution_derivatives(self):
         # These are resized versions of one image, not independent game captures.
-        for size in ((1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)):
+        for size in ((1280, 720), (1366, 768), (1600, 900), (1920, 1080), (2560, 1440), (3840, 2160)):
             with self.subTest(size=size):
                 result = self.assert_counts(self.image.resize(size, Image.Resampling.LANCZOS))
                 for row in result["readings"]:
@@ -65,8 +65,10 @@ class KillCountOCRTests(unittest.TestCase):
         self.assert_counts(self.image.crop((1494, 290, 1905, 334)))
 
     def test_controlled_selected_region_scale_derivatives(self):
+        # Every UI scale between the fixed reference sizes, including dividers
+        # and border lines that resampling thins to one pixel.
         region = self.image.crop((1631, 259, 1919, 389))
-        for factor in (2 / 3, 4 / 3, 2):
+        for factor in (.5, .6, 2 / 3, .75, .8, .9, 1.1, 4 / 3, 1.5, 1.55, 1.75, 2, 2.5):
             with self.subTest(factor=factor):
                 self.assert_counts(region.resize((round(region.width * factor), round(region.height * factor)),
                                                  Image.Resampling.LANCZOS))

@@ -144,8 +144,8 @@ class OCRStrictnessUITests(unittest.TestCase):
     def test_real_ritual_item_captures_follow_loose_default_and_manual_policy(self):
         """Rescan actual game pixels and deliver their real recognition to Qt at each setting.
 
-        These captures scored below the old .945 minimum automatic-name gate,
-        so moving the slider to zero previously left both single candidates held.
+        These captures score below .945 but have no rival anywhere in the unique
+        catalog, so they are named at every setting except manual confirmation.
         No OCR text, labels, geometry, catalog evidence or review result is replaced.
         """
         captures = Path(__file__).parent / "fixtures/ritual_rewards"
@@ -169,17 +169,13 @@ class OCRStrictnessUITests(unittest.TestCase):
                         done(result)
                         self.assertEqual(item["quantity"], 1)
                         self.assertFalse(item["count_needs_review"])
-                        self.assertEqual(self.window.ritual_table.isRowHidden(index), level == 0)
-                        if level == 0:
+                        self.assertEqual(self.window.ritual_table.isRowHidden(index), level != 100)
+                        if level != 100:
                             self.assertEqual(item["name"], name)
                             self.assertFalse(item["name_needs_review"])
                             self.assertFalse(item["needs_review"])
                             # Row evidence rounds Visage's .944992 to .945.
                             self.assertLessEqual(item["score"], .945)
-                        elif level in (40, 50):
-                            self.assertEqual(item["name"], "")
-                            self.assertIn(name, item["candidate_names"])
-                            self.assertTrue(item["name_needs_review"])
                         else:
                             self.assertFalse(clear_ritual_read(result, logger.ritual_names()))
                             self.assertTrue(item["needs_review"])

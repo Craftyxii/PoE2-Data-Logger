@@ -9,6 +9,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
+import numpy as np
 from PIL import Image
 
 from PoE2_Data_Logger.core.ritual_catalog import OMEN_NAMES
@@ -27,7 +28,9 @@ SHARED_NAMES = {
                      "Omen of Reinforcements"],
 }
 GRAY_SLOTS = {1: "VoodooOmens2", 2: "VoodooOmens2", 13: "VoodooOmens1", 25: "VoodooOmens2",
-              37: "VoodooOmens2", 49: "VoodooOmens3", 61: "VoodooOmens2", 109: None}
+              37: "VoodooOmens2", 49: "VoodooOmens3", 61: "VoodooOmens2"}
+# Omen of the Ancients has its own source art, so gray pixels still identify it.
+GRAY_NAMED = {109: "Omen of the Ancients"}
 EXPECTED_FOOTPRINTS = [[1], [2], [13], [14], [25], [37], [49], [61],
                        [73, 74, 85, 86], [97], [109]]
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -79,12 +82,21 @@ class RitualGrayscaleOmenTests(unittest.TestCase):
                                                OMEN_NAMES, references, strictness=strictness)
         return {item["grid_slots"][0]: item for item in items}
 
-    def assert_gray_candidates(self, items):
-        """Check complete candidates, blank identities and unchanged deferred ownership."""
+    def assert_gray_candidates(self, items, strictness=50):
+        """Check complete sibling candidates, unique-art names and unchanged deferred ownership."""
+        for slot, name in GRAY_NAMED.items():
+            with self.subTest(slot=slot):
+                item = items[slot]
+                self.assertEqual((item["name"], item["category"]), (name, "Omen"))
+                self.assertFalse(item["unresolved"] or item["name_needs_review"])
+                # Strictness 100 keeps every reading for manual confirmation.
+                self.assertEqual(item["needs_review"], strictness == 100)
+                self.assertTrue(item["identity_verified"])
+                self.assertFalse(item["deferred"])
         for slot, shape in GRAY_SLOTS.items():
             with self.subTest(slot=slot):
                 item = items[slot]
-                self.assertEqual(item["candidate_names"], SHARED_NAMES[shape] if shape else ["Omen of the Ancients"])
+                self.assertEqual(item["candidate_names"], SHARED_NAMES[shape])
                 self.assertEqual((item["name"], item["category"]), ("", "Omen"))
                 self.assertTrue(item["unresolved"] and item["name_needs_review"] and item["needs_review"])
                 self.assertTrue(item["category_verified"])
@@ -126,9 +138,10 @@ class RitualGrayscaleOmenTests(unittest.TestCase):
                             for name in entry["members"]]
             self.assertEqual(source_names, expected)
         stat = path.stat()
-        members, owners, atlas = item_ocr._ritual_omen_shapes(str(path), stat.st_mtime_ns, stat.st_size)
+        members, owners, atlas, families = item_ocr._ritual_omen_shapes(str(path), stat.st_mtime_ns, stat.st_size)
         for expected in SHARED_NAMES.values():
             self.assertIn(tuple(expected), members)
+            self.assertIsNone(families[members.index(tuple(expected))])
         self.assertFalse(owners.flags.writeable or atlas.flags.writeable)
 
     def test_shape_cache_ignores_only_pixels_excluded_from_correlation(self):
@@ -167,7 +180,34 @@ class RitualGrayscaleOmenTests(unittest.TestCase):
             for strictness in (0, 50, 100):
                 with self.subTest(reviewed=reviewed, strictness=strictness):
                     items = self.grid_items(references=references, strictness=strictness)
-                    self.assert_gray_candidates(items)
+                    self.assert_gray_candidates(items, strictness)
+
+    def test_grayed_catalog_art_is_named_and_never_color_matched(self):
+        """Gray Sacred Bloom, Omens with their own art and Idols resolve; look-alikes stay held.
+
+        Derived from actual colored captures by luminance and darkening, the way
+        the game grays an offer; it is not an independent gray capture.
+        """
+        luma = np.array([.299, .587, .114], dtype=np.float32)
+        cases = (("10.png", 37, "Sacred Bloom", None), ("08.png", 15, "Omen of Gambling", None),
+                 ("08.png", 49, "Idol of the Pharisee", None),
+                 # Its only close gray look-alike, Omen of Light, is Abyss-only.
+                 ("08.png", 63, "Omen of Bartering", None),
+                 ("08.png", 87, "", SHARED_NAMES["VoodooOmens2"]))
+        for filename, slot, name, candidates in cases:
+            with Image.open(FIXTURES / "ritual_rewards" / filename) as source:
+                image = source.convert("RGB")
+            grid = detect_reward_grid(image)
+            pixels = np.asarray(reward_cells(image, grid)[slot], dtype=np.float32)
+            gray = pixels @ luma * .52 + 4
+            cell = Image.fromarray(np.clip(np.stack([gray, gray, gray + 3], axis=2), 0, 255).astype(np.uint8))
+            with self.subTest(slot=slot, expected=name or candidates):
+                icon = item_ocr._ritual_gray_omen_icon(cell)
+                self.assertTrue(icon["method"].startswith("Ritual grayscale"))
+                found, _score, offered = item_ocr._ritual_reward_icon(currency_ocr.get_reader(), cell, {}, (), icon=icon)
+                self.assertEqual(found or "", name)
+                if candidates:
+                    self.assertEqual(sorted(offered), sorted(candidates))
 
     def test_independent_anchored_name_text_still_confirms_a_supported_sibling(self):
         """Exact anchored OCR may confirm a candidate, while a different shape's label cannot."""
@@ -187,9 +227,13 @@ class RitualGrayscaleOmenTests(unittest.TestCase):
     def test_actual_colored_and_non_omen_crops_keep_existing_paths(self):
         """Color and rival shapes keep both bundled recognition and unrelated review learning."""
         negative_cells = {**self.cells, **self.armor_fragments}
-        for slot in (14, 73, 74, 85, 86, 97):
+        self.assertIsNone(item_ocr._ritual_gray_omen_icon(negative_cells[14]))
+        for slot in (73, 74, 85, 86, 97):
+            # Gray art outside the catalog stays unnamed and is never color-matched.
             with self.subTest(slot=slot):
-                self.assertIsNone(item_ocr._ritual_gray_omen_icon(negative_cells[slot]))
+                result = item_ocr._ritual_gray_omen_icon(negative_cells[slot])
+                self.assertEqual((result["family"], result["members"], result["all"]), (None, [], []))
+                self.assertEqual(result["method"], "Ritual grayscale artwork")
         with Image.open(FIXTURES / "ritual_rewards/08.png") as source:
             image = source.convert("RGB")
         old_cells = reward_cells(image, detect_reward_grid(image))
@@ -245,7 +289,8 @@ class RitualGrayscaleOmenTests(unittest.TestCase):
                 self.assertLessEqual(len(item_ocr._RITUAL_OMEN_CACHE.ranks), 128)
                 path.write_text(json.dumps({"icons": [entry for entry in selected
                                                      if entry["family"] != "omen-of-the-ancients"]}), encoding="utf-8")
-                self.assertIsNone(item_ocr._ritual_gray_omen_icon(self.cells[109]))
+                stale = item_ocr._ritual_gray_omen_icon(self.cells[109])
+                self.assertEqual((stale["family"], stale["members"]), (None, []))
             self.assertLessEqual(item_ocr._ritual_omen_shapes.cache_info().currsize, 2)
 
 

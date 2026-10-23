@@ -58,8 +58,10 @@ def _source(image, *, is_crop=False):
         scale = (image.width / 1919, image.height / 1079)
         frame = image.resize((1919, 1079), Image.Resampling.LANCZOS)
         box = (1631, 259, 1919, 389)
-        return frame.crop(box), (box[0], box[1]), scale, (1.,)
-    return image, (0, 0), (1., 1.), (2 / 3, 1., 1.25, 4 / 3, 2.)
+        return frame.crop(box), (box[0], box[1]), scale, tuple(np.geomspace(.9, 1.1, 5))
+    # Skull templates tolerate only a few percent of size error, so cover every
+    # game resolution and UI scale rather than a handful of fixed sizes.
+    return image, (0, 0), (1., 1.), tuple(np.geomspace(.5, 2.5, 34))
 
 
 def _colour_distance(patch, expected):
@@ -129,6 +131,18 @@ def _gold_ink(patch):
             (rgb[:, :, 2] <= rgb[:, :, 0] * .88) & (rgb[:, :, 1] >= rgb[:, :, 0] * .65))
 
 
+def _ui_stroke(stats, width, height, span):
+    """Recognize cell dividers, border lines and specks, which are never digit bodies.
+
+    Resampling breaks a divider into short one-pixel pieces and leaves border
+    lines one line-weight tall; digit strokes are always thicker than that.
+    """
+    _, _, w, h, area = stats
+    line = max(1, round(height / 21))
+    return ((w <= max(2, round(width / 9)) and h >= span * .8) or min(w, h) <= line or
+            (area <= max(2, round(width / 4)) and h < height * .3))
+
+
 def _number_crops(image, skulls):
     """Bound each number by the preceding skull and reject missing/clipped pixel evidence."""
     pitch = float(np.median(np.diff([p["x"] for p in skulls])))
@@ -149,20 +163,15 @@ def _number_crops(image, skulls):
                 return None
             gutter = _gold_ink(image.crop((gutter_left, box[1], left, box[3])))
             count, _labels, stats, _ = cv2.connectedComponentsWithStats(gutter.astype(np.uint8))
-            for component in range(1, count):
-                _, _, w, h, area = stats[component]
-                divider = w <= max(2, round(width / 9)) and h >= gutter.shape[0] * .8
-                speck = area <= max(2, round(width / 4)) and h < height * .3
-                if not divider and not speck:
-                    return None
+            if not all(_ui_stroke(stats[component], width, height, gutter.shape[0])
+                       for component in range(1, count)):
+                return None
         patch = image.crop(box)
         ink = _gold_ink(patch)
         # The capture has thin vertical cell dividers, which are not digits.
         count, labels, stats, _ = cv2.connectedComponentsWithStats(ink.astype(np.uint8))
         for component in range(1, count):
-            _, _, w, h, area = stats[component]
-            if ((w <= max(2, round(width / 9)) and h >= patch.height * .8) or
-                    (area <= max(2, round(width / 4)) and h < height * .3)):
+            if _ui_stroke(stats[component], width, height, patch.height):
                 ink[labels == component] = False
         yy, xx = np.nonzero(ink)
         if len(xx) < max(8, width * .5):
