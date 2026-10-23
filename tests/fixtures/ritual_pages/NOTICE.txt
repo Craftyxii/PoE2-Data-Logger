@@ -1,0 +1,5 @@
+Exact-pixel Ritual reward-grid crops from user-provided Path of Exile 2
+screenshots (2026-10-23), used as regression fixtures for deferred and
+highlighted Omen frames, red-highlighted gear on a gray page, and item
+footprints whose corners are partly covered. Game UI artwork copyright
+Grinding Gear Games.

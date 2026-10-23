@@ -17,6 +17,10 @@ from PIL import Image
 
 COLUMNS = 12
 ROWS = 10
+# Matched ornate-corner scores: art rarely imitates a curl above WEAK_CORNER,
+# and a genuine unobstructed corner scores at least STRONG_CORNER.
+WEAK_CORNER = .75
+STRONG_CORNER = .9
 
 
 def _line_groups(lines, horizontal, tolerance=2.5):
@@ -293,7 +297,7 @@ def _corner_template(bottom_right):
 
 
 def _corner_strength(pixels, box, pitch, bottom_right=False):
-    """Return corner support from the ornate shape and coloured or neutral frame evidence.
+    """Return the matched corner score, or zero, from the ornate shape and frame colour evidence.
 
     Orientation and pitch accommodate resampling; mild JPEG blur needs stronger color support.
     """
@@ -364,10 +368,18 @@ def _corner_strength(pixels, box, pitch, bottom_right=False):
         tinted_frame = (gray_score >= .85 and placement <= 2 and
                         float(blue_tinted.mean()) >= .85 and
                         float((blue_excess >= 6).mean()) >= .10)
+        # A highlighted reward on a gray page keeps the same pale strokes over
+        # a dark red backing instead of the blue one.
+        red_excess = red - np.maximum(green, blue)
+        red_tinted = ((np.abs(green - blue) <= 6) &
+                      (red_excess >= 0) & (red_excess <= 25))
+        tinted_frame = tinted_frame or (gray_score >= .80 and placement <= 2 and
+                                        float(red_tinted.mean()) >= .85 and
+                                        float((red_excess >= 6).mean()) >= .10)
         luminance = cv2.cvtColor(gray_patch.astype(np.uint8), cv2.COLOR_RGB2GRAY)
-        return float(gray_score >= threshold and (neutral_frame or tinted_frame)
-                     and float(luminance.mean()) >= 22
-                     and float(np.percentile(luminance, 90)) >= 35)
+        return float(gray_score) if (gray_score >= threshold and (neutral_frame or tinted_frame)
+                                     and float(luminance.mean()) >= 22
+                                     and float(np.percentile(luminance, 90)) >= 35) else 0.
     # Icon artwork sometimes overlaps the lower ornament.  At small capture
     # scales the upper eight-pixel ornament also loses detail to resampling.
     threshold = .60 if bottom_right else (.65 if pitch < 35 else .72)
@@ -377,7 +389,7 @@ def _corner_strength(pixels, box, pitch, bottom_right=False):
     # Rectangle grouping still requires an independent matching lower corner.
     if not bottom_right and float(ornate.mean()) >= .75:
         threshold = min(threshold, .68)
-    return float(score >= threshold)
+    return float(score) if score >= threshold else 0.
 
 
 def _no_divider(pixels, edges, origin, pitch, row, column, vertical):
@@ -477,31 +489,42 @@ def _rewards_at_scale(pixels, geometry):
     groups, used = [], set()
     # The game keeps faint cell dividers beneath large unique gear artwork.
     # Its paired ornate corners establish the outer item rectangle instead.
-    for slot in sorted(frame_cells):
-        if slot in used or top_corners[slot] < .35:
-            continue
-        row, column = divmod(slot - 1, COLUMNS)
-        rectangles = []
-        for height in range(1, min(4, ROWS - row) + 1):
-            for width in range(1, min(2, COLUMNS - column) + 1):
-                cells = {slot + dy * COLUMNS + dx
-                         for dy in range(height) for dx in range(width)}
-                last = slot + (height - 1) * COLUMNS + width - 1
-                if not cells <= frame_cells or cells & used or bottom_corners.get(last, 0) < .35:
-                    continue
-                if any(top_corners[part] >= .35 for part in cells - {slot}):
-                    continue
-                if any(bottom_corners[part] >= .35 for part in cells - {last}):
-                    continue
-                rectangles.append((len(cells), cells))
-        if rectangles:
-            # A narrow rectangle continuing into the next item's lower
-            # corner can have fewer cells than this item's proper rectangle.
-            # The first matching bottom edge closes the current frame.
-            _, cells = min(rectangles, key=lambda pair: (
-                max((part - 1) // COLUMNS for part in pair[1]), pair[0]))
-            groups.append(cells)
-            used.update(cells)
+    # Rectangles whose every cell shows artwork are claimed first. Dark backing
+    # may complete a rectangle only afterwards, so an empty cell cannot carry
+    # one item's frame down to a neighbouring item's lower corner.
+    for allowed in (occupied, frame_cells):
+        for slot in sorted(allowed):
+            if slot in used or top_corners.get(slot, 0) < .35:
+                continue
+            row, column = divmod(slot - 1, COLUMNS)
+            rectangles = []
+            for height in range(1, min(4, ROWS - row) + 1):
+                for width in range(1, min(2, COLUMNS - column) + 1):
+                    cells = {slot + dy * COLUMNS + dx
+                             for dy in range(height) for dx in range(width)}
+                    last = slot + (height - 1) * COLUMNS + width - 1
+                    closing = bottom_corners.get(last, 0)
+                    if not cells <= allowed or cells & used or closing < .35:
+                        continue
+                    if any(top_corners[part] >= .35 for part in cells - {slot}):
+                        continue
+                    inner = [bottom_corners[part] for part in cells - {last} if bottom_corners[part] >= .35]
+                    # Artwork can imitate a weak lower curl inside its own
+                    # item. A strong far corner, with no upper corner between,
+                    # still closes the frame around it.
+                    if inner and not (closing >= STRONG_CORNER and max(inner) < WEAK_CORNER):
+                        continue
+                    rectangles.append((closing < WEAK_CORNER, len(cells), cells))
+            if rectangles:
+                # A narrow rectangle continuing into the next item's lower
+                # corner can have fewer cells than this item's proper rectangle.
+                # The first matching bottom edge closes the current frame,
+                # unless only a weak imitation closes it before a strong one.
+                strong = any(not weak for weak, _size, _cells in rectangles)
+                _, _, cells = min(rectangles, key=lambda entry: (
+                    strong and entry[0], max((part - 1) // COLUMNS for part in entry[2]), entry[1]))
+                groups.append(cells)
+                used.update(cells)
 
     remaining = occupied - used
     components = {slot: {slot} for slot in remaining}

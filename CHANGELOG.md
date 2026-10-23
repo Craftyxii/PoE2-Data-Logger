@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Name deferred and highlighted Ritual Omens whose gold or red frame hid them. After the frame band is blanked, Omen art that leads every rival by more than 600 gets back the 400 points that band costs; unique and currency art keep the ordinary gates. On 33 real pages this names 19 framed Omens (Whittling, Resurgence, Sinistral and Dextral Erasure), each checked against catalog art and glow colour.
+- Default an unnamed Ritual reward to the Omen type when every suggestion is an Omen; the type still waits for confirmation.
+- Keep multi-cell Ritual rewards whole when their corners are partly covered or highlighted. Fully occupied rectangles are claimed before dark backing can stretch a frame, a strong far corner closes a frame past a weak curl in the art, and red-highlighted gear on a gray page keeps its frame. On the real pages this removes 12 phantom single-cell rows (a gauntlet, a robe, an idol twice and an amulet).
 - Stop suggesting Tier XV waystones as "Waystone (Tier 16)": a bundled reference picture of a Tier 15 ring waystone was labelled Tier 16. Ring waystones now suggest the tier whose art they match and still wait for a label.
 - Name an inventory stack when its artwork match is far ahead of every other item (score above −3600 with a lead over 2500), even when count digits or a II/III badge lower the score. On the training captures this names and counts Greater Orb of Augmentation, Greater Jeweller's Orb and Orb of Transmutation stacks that were held with already-read counts; Ritual pages are unchanged.
 - Cache the bundled catalog's item names by file identity, so creating or opening a profile no longer parses the 10 MB icon catalog each time.

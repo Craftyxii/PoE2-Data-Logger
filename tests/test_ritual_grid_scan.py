@@ -33,7 +33,7 @@ class RitualGridScanTests(unittest.TestCase):
         """Create a synthetic reward page and a controlled Omen icon reader."""
         self.page = Image.new("RGB", (480, 400), (26, 26, 40))
         self.reader = SimpleNamespace(
-            icon=lambda cell, count_digits=None: {"family": "omen", "members": ["Omen of Whittling"],
+            icon=lambda cell, count_digits=None, **_options: {"family": "omen", "members": ["Omen of Whittling"],
                                                    "score": .99, "method": "inventory"})
 
     def scan(self, grid, rows=(), markers=(), labels=None, references=()):
@@ -64,7 +64,7 @@ class RitualGridScanTests(unittest.TestCase):
 
     def test_unknown_single_cell_is_visible_with_blank_name_and_uncertain_count(self):
         """Verify an unknown occupied cell retains bounds and explicit name/count uncertainty."""
-        self.reader.icon = lambda cell, count_digits=None: {"family": None, "score": .2, "all": []}
+        self.reader.icon = lambda cell, count_digits=None, **_options: {"family": None, "score": .2, "all": []}
         result = self.scan(reward_grid([[1]]), labels={0: {"count_present": True, "count_verified": False}})
         self.assertEqual(result["reward_count"], 1)
         self.assertEqual(result["unresolved_count"], 1)
@@ -120,7 +120,7 @@ class RitualGridScanTests(unittest.TestCase):
 
     def test_tablets_excluded_from_currency_inventory_are_valid_ritual_rewards(self):
         """Verify tablets ignored by inventory recognition remain valid Ritual items."""
-        self.reader.icon = lambda cell, count_digits=None: {"ignored": True, "score": 0}
+        self.reader.icon = lambda cell, count_digits=None, **_options: {"ignored": True, "score": 0}
         self.reader.inventory_ranked = lambda cell, **kwargs: [
             {"name": "tablet", "score": -2100}, {"name": "other", "score": -3000}]
         self.reader.inventory_members = {"tablet": ["Irradiated Tablet"], "other": ["Other"]}
@@ -131,7 +131,7 @@ class RitualGridScanTests(unittest.TestCase):
 
     def test_ambiguous_local_icon_references_remain_unnamed(self):
         """Verify tied local references leave the reward unnamed with candidate labels."""
-        self.reader.icon = lambda cell, count_digits=None: {"family": None, "score": .1, "all": []}
+        self.reader.icon = lambda cell, count_digits=None, **_options: {"family": None, "score": .1, "all": []}
         self.reader.examples = lambda cell, examples: [
             {"name": "Omen of Bartering", "score": -100}, {"name": "Omen of Recombination", "score": -100}]
         image = Image.new("RGB", (40, 40), (70, 80, 160))
@@ -214,7 +214,7 @@ class RitualGridScanTests(unittest.TestCase):
 
     def test_accepted_weighted_identity_does_not_get_a_second_score_gate(self):
         """A calibrated family match retains its identity proof despite a different score scale."""
-        self.reader.icon = lambda cell, count_digits=None: {
+        self.reader.icon = lambda cell, count_digits=None, **_options: {
             "family": "omen", "members": ["Omen of Whittling"], "score": .82, "method": "inventory"}
         item = self.scan(reward_grid([[1]]))["items"][0]
         self.assertEqual(item["name"], "Omen of Whittling")
@@ -224,7 +224,7 @@ class RitualGridScanTests(unittest.TestCase):
 
     def test_candidate_score_does_not_verify_an_unresolved_identity(self):
         """Even a high suggestion score cannot supply a name without matcher acceptance."""
-        self.reader.icon = lambda cell, count_digits=None: {
+        self.reader.icon = lambda cell, count_digits=None, **_options: {
             "family": None, "score": .999,
             "all": [{"name": "Omen of Whittling", "score": .999}]}
         item = self.scan(reward_grid([[1]]))["items"][0]
@@ -246,7 +246,7 @@ class RitualGridScanTests(unittest.TestCase):
     def test_competing_accepted_item_and_currency_identities_remain_unverified(self):
         """Independent accepted identities cannot override each other through score scales."""
         from PoE2_Data_Logger.ocr import unique_items
-        self.reader.icon = lambda cell, count_digits=None: {
+        self.reader.icon = lambda cell, count_digits=None, **_options: {
             "family": "infuser", "members": ["Vaal Armourer's Infuser"],
             "score": .99, "method": "inventory"}
         match = {"name": "Idol of Uldurn", "score": .99,
@@ -273,7 +273,7 @@ class RitualGridScanTests(unittest.TestCase):
         for present, expected_hint in ((False, None), (True, 1)):
             with self.subTest(marker_present=present):
                 hints = []
-                def icon(cell, count_digits=None):
+                def icon(cell, count_digits=None, **_options):
                     """Record the numeral mask used by direct and full-grid matching."""
                     hints.append(count_digits)
                     return {"family": "omen", "members": ["Omen of Whittling"], "score": .99}

@@ -1662,6 +1662,14 @@ def _ritual_gray_omen_icon(cell, strictness=ocr_sensitivity.DEFAULT):
             "method": "Ritual grayscale artwork"}
 
 
+# Blanking the frame band of a 1x1 Ritual cell costs a correct match about this much
+# weighted score: deferred Omens in real captures score -3004 to -3376 unframed while
+# leading rival art by over 670. A unique amulet also reached a currency that way
+# (lead 957), so the allowance applies only to Omen art leading by UNFRAMED_OMEN_LEAD.
+UNFRAMED_SCORE_ALLOWANCE = 400
+UNFRAMED_OMEN_LEAD = 600
+
+
 def _unframed(cell):
     """Paint the outer band where deferred frames and hover highlights sit as empty backing."""
     pixels = np.asarray(cell.convert("RGB")).copy()
@@ -1791,6 +1799,7 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
         catalog_icon = None
         unique = None
         identity_conflict = []
+        suggested_omen = False
         if not multiple:
             hint = digits(label)
             # Establish shared gray artwork before a reviewed sibling can win.
@@ -1800,6 +1809,15 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
                 # second, unframed look keeps the same matcher gates.
                 icon = (reader.icon(shown_cell, count_digits=hint) if strictness == ocr_sensitivity.DEFAULT else
                         reader.icon(shown_cell, count_digits=hint, strictness=strictness))
+                if shown_cell is not cells[index] and not icon.get("family"):
+                    # Blanking the band costs score but not the lead over rival
+                    # art. Only Omen art with a clear lead gets that score back;
+                    # unique and currency art keep the ordinary gates.
+                    allowed = reader.icon(shown_cell, count_digits=hint, strictness=strictness,
+                                          score_allowance=UNFRAMED_SCORE_ALLOWANCE)
+                    if (allowed.get("family") and allowed.get("margin", 0) > UNFRAMED_OMEN_LEAD and
+                            set(allowed.get("members") or ()) <= set(omen_names)):
+                        icon = allowed
                 if catalog_icon is None or icon.get("family"):
                     catalog_icon = icon
                 if icon.get("family"):
@@ -1836,8 +1854,13 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
             gray = catalog_icon is not None and catalog_icon.get("method", "").startswith("Ritual grayscale")
             name, score, candidates = (None, 0.0, []) if multiple else _ritual_reward_icon(
                 reader, cells[index], label, () if gray else examples, icon=catalog_icon, strictness=strictness)
-            kind = "omen" if (name in omen_names or
-                              catalog_icon and catalog_icon.get("method") == "Ritual grayscale Omen shape") else "item"
+            gray_omen = bool(catalog_icon) and catalog_icon.get("method") == "Ritual grayscale Omen shape"
+            # An unresolved reward whose only suggestions are Omens defaults to
+            # Omen, but that type stays unverified until it is confirmed. Gray
+            # Omen shapes already establish the type.
+            suggested_omen = (not name and not gray_omen and bool(candidates) and
+                              all(entry in omen_names for entry in candidates))
+            kind = "omen" if (name in omen_names or suggested_omen or gray_omen) else "item"
         quantity = 1 if multiple or unique else label.get("count") or label.get("count_candidate") or 1
         deferred = index in deferred_rewards
         item = {"category": "Omen" if kind == "omen" else "Item", "name": name or "",
@@ -1846,7 +1869,8 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
                 "score": round(score, 3), "name_match": 1.0 if name in omen_names else 0.0,
                 "name_needs_review": not bool(name), "unresolved": not bool(name),
                 "identity_verified": bool(name),
-                "category_verified": not identity_conflict and (bool(name) or multiple or kind == "omen" or bool(unique)),
+                "category_verified": not identity_conflict and (bool(name) or multiple or bool(unique) or
+                                                                (kind == "omen" and not suggested_omen)),
                 "count_needs_review": False if multiple or unique else not label.get("count_verified", False),
                 "deferred": deferred, "box": box, "grid_slots": list(reward["slots"])}
         if unique:
