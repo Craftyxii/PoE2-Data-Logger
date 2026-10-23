@@ -2126,6 +2126,9 @@ class LoggerWindow(QMainWindow):
                 widget.currentIndexChanged.connect(self.update_area)
         map_actions = QHBoxLayout()
         map_actions.addWidget(button("Save map settings", lambda: self.run(self.save_map_settings), "primary"))
+        self.reset_map_button = button("Reset map…", lambda: self.run(self.reset_current_map), "danger")
+        self.reset_map_button.setToolTip("Clear every scan and log saved for the current map. Undo restores them.")
+        map_actions.addWidget(self.reset_map_button)
         map_actions.addStretch()
         traits.addLayout(map_actions)
         tablets = self._group("Tablet config", content)
@@ -3526,25 +3529,7 @@ class LoggerWindow(QMainWindow):
             positions.extend((bar, bar.value()) for bar in
                              (page.verticalScrollBar(), page.horizontalScrollBar()))
         saved = logger.undo_last_action()
-        service.HOTKEY.cancel_capture()
-        self._cancel_pending_chain_save()
-        self._overlay_review_token += 1
-        self._overlay_capture_restore = None
-        self._accepted_propagation_requests.clear()
-        self._held_remnant_review = None
-        self._clear_map_review()
-        self.current_file = {"seed": "", "opened": ""}
-        self.found_table.setRowCount(0)
-        self._render_recipe_rows([])
-        self.opened_lines.clear()
-        self.scan_status.hide()
-        self.review_kind.setText("Nothing waiting for review")
-        self.review_kind.setProperty("scanKind", None)
-        self._form_map_context = None
-        self._saved_badge = None
-        self._commit_badge_timer.stop()
-        self.atlas_settings_page.set_settings(saved["state"]["settings"].get("atlas_settings"), force=True)
-        self.refresh()
+        self._retire_scan_work(saved["state"])
         # Undo can restore names and artwork without changing the session totals.
         self.refresh_reference_names()
         self.refresh_reference_examples()
@@ -3565,6 +3550,53 @@ class LoggerWindow(QMainWindow):
         QTimer.singleShot(0, self, restore_position)
         self.note(f"{action} undone.", True)
         return saved
+
+    def _retire_scan_work(self, state):
+        """Drop captures, drafts and reviews made against saved logs that Undo or a map reset replaced."""
+        service.HOTKEY.cancel_capture()
+        self._cancel_pending_chain_save()
+        self._overlay_review_token += 1
+        self._overlay_capture_restore = None
+        self._accepted_propagation_requests.clear()
+        self._held_remnant_review = None
+        self._clear_map_review()
+        self.current_file = {"seed": "", "opened": ""}
+        self.found_table.setRowCount(0)
+        self._render_recipe_rows([])
+        self.opened_lines.clear()
+        self.scan_status.hide()
+        self.review_kind.setText("Nothing waiting for review")
+        self.review_kind.setProperty("scanKind", None)
+        self._form_map_context = None
+        self._saved_badge = None
+        self._commit_badge_timer.stop()
+        self.atlas_settings_page.set_settings(state["settings"].get("atlas_settings"), force=True)
+        self.refresh()
+
+    def reset_current_map(self):
+        """After confirmation, clear the current map's saved logs in one action that Undo restores.
+
+        The map ID, its settings and learned OCR references stay; earlier maps are untouched.
+        """
+        context = logger.scan_context()
+        map_id = context["_capture_map_id"]
+        if not map_id:
+            raise ValueError("Start a map before resetting it.")
+        answer = QMessageBox.question(
+            self, "Reset map",
+            f"Clear every scan and log saved for {map_id}: Currency and Ritual pages, chains, remnants, "
+            "kills and counts?\n\nThe map number, map and Atlas settings, earlier maps and learned OCR "
+            "references stay. Undo restores everything this clears.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel)
+        if answer != QMessageBox.StandardButton.Yes:
+            return None
+        # The captured context refuses the reset if the map changed while the question was open.
+        result = logger.discard_current_map_logs(context)
+        self._retire_scan_work(result["state"])
+        set_message(self.review_summary, f"{map_id} reset. Undo restores its saved logs.", "success")
+        self.note(f"{map_id} reset.", True)
+        return result
 
     def set_expedition(self, widget=None):
         """Save expedition selection from either control, reverting both to persisted state on

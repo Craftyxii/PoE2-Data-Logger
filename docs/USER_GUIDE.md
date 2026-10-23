@@ -38,6 +38,8 @@ Enter Normal, Magic, Rare and Unique monster kills in the compact **Map kills** 
 
 **Undo** reverses the latest saved logger action, including scan approvals, chain changes, counts, settings and starting a map. Undoing **+ New map** reopens the previous map for edits; **+ New map** saves those edits before advancing again. The latest 100 undoable actions survive app restarts.
 
+**Reset map…** on Map / Tablets clears every scan and log saved for the current map — Currency and Ritual pages, chains, remnants, kills and counts — after you confirm. The Map #, map and Atlas settings, earlier maps and learned OCR references stay, and one **Undo** restores everything it cleared.
+
 Finish pending reviews and chains before using **+ New map**. New maps clear waystone settings and carry forward tablets, Atlas Master and general map options. Clear tablets when your tablet setup changes. Existing entries keep the map information and settings saved with them.
 
 The separate **Atlas / Character Settings** tab shows the PoE2 atlas. Click nodes to turn them on or off and hover for their effects. Multiple-choice nodes show the selected option's number; their dropdown uses matching numbers. **Autofill** maximizes allocations while retaining existing choices. Unselected choice effects remain unset. Save gear item rarity alongside the atlas setup.

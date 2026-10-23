@@ -52,7 +52,7 @@ The optional **Ritual** tab records Rite affixes without requiring them for scan
 
 Finish pending reviews and chains before clicking **+ New map**.
 
-**Undo** reverses the last saved action, including scans, chains, settings and New map. The latest 100 actions survive app restarts. Undoing New map reopens the previous map for edits.
+**Undo** reverses the last saved action, including scans, chains, settings and New map. The latest 100 actions survive app restarts. Undoing New map reopens the previous map for edits. **Reset map…** on Map / Tablets clears the current map's saved scans and logs after confirmation; its settings and earlier maps stay, and Undo restores it.
 
 ## Atlas / Character Settings
 
