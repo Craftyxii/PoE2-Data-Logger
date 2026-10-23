@@ -204,11 +204,14 @@ class RitualReviewRowsTests(unittest.TestCase):
                  self.result([first, self.known(grid_slots=[1])], grid_detected=True, grid_reward_count=2),
                  {**base, "grid_reward_count": None}, {**base, "reward_count": 3}]
         cases.extend({**base, key: value} for key, value in
-                     (("unknown", [14]), ("unmatched", ["Unreadable text"]),
-                      ("coverage_uncertain", True), ("needs_review", True), ("unresolved_count", 1)))
+                     (("unknown", [14]), ("coverage_uncertain", True), ("needs_review", True),
+                      ("unresolved_count", 1)))
+        # Leftover text holds a page read from text alone, not a verified complete grid.
+        cases.append({**base, "grid_detected": False, "unmatched": ["Unreadable text"]})
         for result in cases:
             with self.subTest(result=result):
                 self.assertFalse(clear_ritual_read(result, logger.ritual_names()))
+        self.assertTrue(clear_ritual_read({**base, "unmatched": ["Unreadable text"]}, logger.ritual_names()))
 
     def test_row_approval_rejects_invalid_critical_fields_without_partial_page_writes(self):
         """Verify invalid critical fields block local approval without writing a page."""
