@@ -1,8 +1,9 @@
 # PoE2 Data Logger 1.3.2.29 Beta
 
-This beta logs unique Tablets alongside normal ones, fixes general-key hovers
-that opened a Ritual review, and names more Ritual and Currency items without
-review, on top of [1.3.2.28 Beta](RELEASE_1.3.2.28.md).
+This beta logs unique Tablets alongside normal ones, lets you scan a Rite's maps
+ahead of play, keeps hovered, covered and tightly captured Ritual rewards whole,
+names more Ritual and Currency items without review, and fixes general-key
+hovers that opened a Ritual review, on top of [1.3.2.28 Beta](RELEASE_1.3.2.28.md).
 Download the
 [Windows installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.29-beta/PoE2-Data-Logger-Setup-v1.3.2.29-beta.exe)
 or view the [release and checksum](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.29-beta).
@@ -88,3 +89,13 @@ half a second sooner.
 Settings saved on a later map still leave finished maps and their export rows
 unchanged until Undo reopens them. Running 1.3.2.28 Beta and earlier clients are
 protected during installation and removal.
+
+All required Windows gates passed on release source
+`5ed57e6bf97e0a7d4c33a7005b5985fa7d3625d2` in the
+[Windows verification run](https://github.com/Craftyxii/PoE2-Data-Logger/actions/runs/40017610510):
+platform, capture-region, review-navigation and export fixtures; native Windows
+input; the 100-map workflow; the complete regression suite; the frozen build; and
+installation, update and saved-file retention. The
+[publication run](https://github.com/Craftyxii/PoE2-Data-Logger/actions/runs/40027709529)
+reused that verified installer; its SHA-256 is
+`9e4daa9d34e127a31dfe4ca7315c4fc81246d435b3c8eb1ce6460321c8a788c9`.
