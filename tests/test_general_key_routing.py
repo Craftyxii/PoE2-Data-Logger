@@ -69,11 +69,14 @@ class GeneralKeyRoutingTests(unittest.TestCase):
         with Image.open(path) as source:
             tooltip = source.convert("RGB")
         # A stand-in remnant reader skips the Expedition panel scan of the same pixels.
-        manager = HotkeyManager(supported=True, grabber=lambda **_: tooltip.copy(),
-                                readers={"opened": lambda *_, **__: {}}, tooltip_grabber=tooltip.copy,
-                                hover_reader=lambda: None, focused=None)
-        manager.capture("default")
-        return manager.next_event()
+        manager = HotkeyManager(supported=True, readers={"opened": lambda *_, **__: {}},
+                                hover_reader=lambda: None, focused=lambda: True)
+        # Read the captured pixels directly: game-window focus and bounds are
+        # Windows capture concerns that a test runner without the game cannot meet.
+        manager._capture_lock.acquire()
+        manager._capture_revision = manager._capture_owner = 1
+        manager._read_capture("default", "opened", None, tooltip, tooltip, revision=1, strictness_values={})
+        return manager.status()["latest"]
 
     def test_hovered_rite_map_reads_as_a_rite_not_a_ritual_page(self):
         """A Rite map's "Rerolling Favours … Tribute" modifier no longer opens a Ritual review."""
