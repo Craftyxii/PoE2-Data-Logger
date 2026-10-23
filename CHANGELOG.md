@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Remove the optional GPU label setting and its separately built DirectML helper. Count/tier labels use the same CPU OCR engine and exact-reading cache as before; artwork pre-caching is unchanged. This drops a second executable and its runtime from the installer and the build.
+- Add `tools/run_tests.py --jobs N` to run the full suite's isolated batches in parallel.
 - Name gray Ritual rewards whose artwork belongs to one item, including Omens with their own source art, Sacred Bloom, Idols and currency. Gray Omens sharing source art and near ties stay in review with every look-alike suggested. Gray artwork is never matched by color, and Abyss Omens, which never appear in Ritual offers, are not Ritual gray rivals.
 - Retry gold-framed deferred and highlighted Ritual rewards without the frame edge, using the same matcher gates.
 - Name unique items whose artwork has no rival anywhere in the catalog; shared art and close rivals still require a choice.

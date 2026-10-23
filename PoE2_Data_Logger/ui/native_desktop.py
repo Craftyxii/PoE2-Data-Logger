@@ -388,7 +388,6 @@ class LoggerWindow(QMainWindow):
         if not self.state["current_map_id"]:
             self.state = logger.start_map()
         self._ocr_active_threads = ocr_runtime.active_threads()
-        self._ocr_active_gpu_labels = ocr_runtime.active_gpu_labels()
         self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="runeshape-ui")
         self.tasks = Tasks(self)
         self.tasks.completed.connect(self._task_done)
@@ -1794,13 +1793,6 @@ class LoggerWindow(QMainWindow):
         self.ocr_threads_select.setAccessibleName("CPU OCR threads")
         self.ocr_threads_select.currentIndexChanged.connect(lambda: self.run(self.save_ocr_threads))
         thread_row.addWidget(self.ocr_threads_select)
-        self._ocr_saved_gpu_labels = ocr_runtime.saved_gpu_labels()
-        self.ocr_gpu_labels_checkbox = QCheckBox("Use GPU for Currency / Ritual")
-        self.ocr_gpu_labels_checkbox.setAccessibleName("Use GPU for Currency / Ritual")
-        self.ocr_gpu_labels_checkbox.setToolTip("Optional count/tier label acceleration. Restart to apply. Falls back to CPU if unavailable.")
-        self.ocr_gpu_labels_checkbox.setChecked(self._ocr_saved_gpu_labels)
-        self.ocr_gpu_labels_checkbox.toggled.connect(lambda _checked: self.run(self.save_ocr_gpu_labels))
-        thread_row.addWidget(self.ocr_gpu_labels_checkbox)
         thread_row.addStretch()
         performance.addLayout(thread_row)
         self.ocr_threads_status = QLabel()
@@ -1982,11 +1974,6 @@ class LoggerWindow(QMainWindow):
             text += f"Saved: {saved} threads; restart the app to apply."
         else:
             text += "Changes take effect after restarting the app."
-        text += (" GPU for Currency / Ritual: on." if self._ocr_active_gpu_labels else
-                 " GPU for Currency / Ritual: off (default).")
-        if self._ocr_saved_gpu_labels != self._ocr_active_gpu_labels:
-            state = "on" if self._ocr_saved_gpu_labels else "off"
-            text += f" Saved GPU: {state}; restart the app to apply."
         self.ocr_threads_status.setText(text)
 
     def save_ocr_threads(self):
@@ -1995,17 +1982,6 @@ class LoggerWindow(QMainWindow):
             self._ocr_saved_threads = ocr_runtime.save_threads(value(self.ocr_threads_select))
         except Exception:
             select(self.ocr_threads_select, self._ocr_saved_threads)
-            self._update_ocr_threads_status()
-            raise
-        self._update_ocr_threads_status()
-
-    def save_ocr_gpu_labels(self):
-        """Save the optional GPU choice, restoring its checkbox when persistence fails."""
-        try:
-            self._ocr_saved_gpu_labels = ocr_runtime.save_gpu_labels(self.ocr_gpu_labels_checkbox.isChecked())
-        except Exception:
-            with QSignalBlocker(self.ocr_gpu_labels_checkbox):
-                self.ocr_gpu_labels_checkbox.setChecked(self._ocr_saved_gpu_labels)
             self._update_ocr_threads_status()
             raise
         self._update_ocr_threads_status()

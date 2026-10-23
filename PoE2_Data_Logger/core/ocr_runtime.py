@@ -11,10 +11,7 @@ import threading
 DEFAULT_THREADS = 2
 THREAD_OPTIONS = (1, 2, 4, 6)
 _META_KEY = "ocr_cpu_threads"
-DEFAULT_GPU_LABELS = False
-_GPU_META_KEY = "ocr_gpu_labels"
 _ACTIVE_THREADS = None
-_ACTIVE_GPU_LABELS = None
 _ACTIVE_LOCK = threading.Lock()
 
 
@@ -51,36 +48,3 @@ def save_threads(count):
     with logger._connect() as db:
         logger._set_meta(db, _META_KEY, count)
     return count
-
-
-def saved_gpu_labels():
-    """Read the optional Currency/Ritual GPU preference, accepting only a saved boolean."""
-    from PoE2_Data_Logger.core import logger_store as logger
-
-    with logger._connect() as db:
-        try:
-            enabled = logger._meta(db, _GPU_META_KEY, DEFAULT_GPU_LABELS)
-        except (TypeError, ValueError):
-            enabled = DEFAULT_GPU_LABELS
-    return enabled if type(enabled) is bool else DEFAULT_GPU_LABELS
-
-
-def active_gpu_labels():
-    """Freeze the process GPU preference before scanners start; later changes need restart."""
-    global _ACTIVE_GPU_LABELS
-    with _ACTIVE_LOCK:
-        if _ACTIVE_GPU_LABELS is None:
-            _ACTIVE_GPU_LABELS = saved_gpu_labels()
-        return _ACTIVE_GPU_LABELS
-
-
-def save_gpu_labels(enabled):
-    """Persist the next startup's optional GPU setting without changing an active worker."""
-    if type(enabled) is not bool:
-        raise ValueError("GPU OCR must be on or off.")
-    from PoE2_Data_Logger.core import logger_store as logger
-
-    active_gpu_labels()
-    with logger._connect() as db:
-        logger._set_meta(db, _GPU_META_KEY, enabled)
-    return enabled

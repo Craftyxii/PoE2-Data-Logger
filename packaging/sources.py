@@ -39,8 +39,6 @@ OCR_SOURCES = (
     "ocr/artwork_cache.py",
     "ocr/currency_ocr.py",
     "ocr/digit_kernels.py",
-    "ocr/label_gpu.py",
-    "ocr/gpu_label_protocol.py",
     "ocr/inventory_labels.py",
     "ocr/item_ocr.py",
     "ocr/item_text.py",

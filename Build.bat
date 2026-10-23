@@ -6,8 +6,6 @@ py -3.12 -m pip install --upgrade "pip>=26.2"
 if errorlevel 1 exit /b 1
 py -3.12 -m pip install -r requirements-build.txt
 if errorlevel 1 exit /b 1
-py -3.12 tools\build_label_gpu.py
-if errorlevel 1 exit /b 1
 py -3.12 -m PyInstaller --clean --noconfirm packaging\PoE2-Data-Logger.spec
 if errorlevel 1 exit /b 1
 py -3.12 tools\verify_build.py dist\PoE2-Data-Logger\PoE2-Data-Logger.exe

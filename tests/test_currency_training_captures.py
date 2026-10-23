@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from PoE2_Data_Logger.core import logger_store as logger, ocr_runtime, store
+from PoE2_Data_Logger.core import logger_store as logger, store
 from PoE2_Data_Logger.ocr import item_ocr
 from PoE2_Data_Logger.ui.native_desktop import clear_currency_stack
 
@@ -24,8 +24,7 @@ class CurrencyTrainingCapturesTests(unittest.TestCase):
         expected = json.loads((FIXTURES / "expected_quantities.json").read_text())["captures"]
         self.assertEqual(len(expected), 6)
         with tempfile.TemporaryDirectory(prefix="poe2-currency-captures-") as folder, \
-                patch.object(store, "DATA_DIR", Path(folder)), patch.object(logger, "_READY", False), \
-                patch.object(ocr_runtime, "_ACTIVE_GPU_LABELS", False):
+                patch.object(store, "DATA_DIR", Path(folder)), patch.object(logger, "_READY", False):
             for filename, matrix in expected.items():
                 with self.subTest(capture=filename):
                     self.assertEqual([len(row) for row in matrix], [12] * 5)

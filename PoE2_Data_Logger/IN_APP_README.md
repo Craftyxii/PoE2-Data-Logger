@@ -10,8 +10,6 @@ Each scan needs a hotkey press. Scanning pauses when PoE2 is not the active wind
 
 **CPU OCR threads** in Scan settings offers 1, 2, 4 or 6 threads. Restart the app to apply a changed value. Two is the default; higher counts can help large scans but use more CPU.
 
-**Use GPU for Currency / Ritual** beside that selector is off by default and also requires a restart. It accelerates count/tier label recognition where DirectML is available, with CPU fallback.
-
 **OCR Sensitivity** provides a separate **OCR Strictness** slider for each scan type. **0** accepts more tentative recognized matches, **50** keeps the previous behavior, and **100** requires manual confirmation before OCR results save. Higher values require stronger evidence. Each scan keeps its captured settings; quantity, level, family, marked-position and capture-context checks still apply.
 
 ## Map / Tablet Setup

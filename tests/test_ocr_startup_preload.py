@@ -39,7 +39,6 @@ def _identity():
     """Return worker identity and preparation ownership without doing any recognition."""
     return {"pid": os.getpid(), "data_dir": str(store.DATA_DIR),
             "cpu_threads": ocr_runtime.active_threads(),
-            "gpu_labels": ocr_runtime.active_gpu_labels(),
             "prepared": _preparation_count()}
 
 
@@ -66,14 +65,11 @@ class OCRStartupPreloadTests(unittest.TestCase):
         self.previous_data = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)
         self.thread_patch = patch.object(ocr_runtime, "_ACTIVE_THREADS", 4)
-        self.gpu_patch = patch.object(ocr_runtime, "_ACTIVE_GPU_LABELS", False)
         self.thread_patch.start()
-        self.gpu_patch.start()
 
     def tearDown(self):
         """Reap every test child before deleting its profile and restore frozen preferences."""
         ocr_workers.shutdown(wait=True)
-        self.gpu_patch.stop()
         self.thread_patch.stop()
         store.DATA_DIR = self.previous_data
         self.tmp.cleanup()
@@ -81,8 +77,7 @@ class OCRStartupPreloadTests(unittest.TestCase):
     def work(self, function, *args, timeout=10, prepare=False):
         """Build one importable admission with an original absolute deadline."""
         return ocr_workers.Request(function, tuple(args), {}, str(store.DATA_DIR), 4,
-                                   time.monotonic() + timeout, gpu_labels=False,
-                                   prepare_artwork=prepare)
+                                   time.monotonic() + timeout, prepare_artwork=prepare)
 
     def broker(self):
         """Use the global lifecycle so production shutdown also owns direct affinity fixtures."""
@@ -145,12 +140,12 @@ class OCRStartupPreloadTests(unittest.TestCase):
         self.assertFalse(self.work(_identity).prepare_artwork)
         self.assertIsNone(ocr_workers._BROKER)
 
-    def test_new_frozen_profile_thread_or_gpu_context_gets_its_own_startup_pair(self):
+    def test_new_frozen_profile_or_thread_context_gets_its_own_startup_pair(self):
         """Changed contexts prepare replacement children while repeated current contexts reuse futures."""
         broker = self.broker()
         work = self.work(_prepare_once)
         previous = None
-        for changes in ({}, {"cpu_threads": 6}, {"gpu_labels": True},
+        for changes in ({}, {"cpu_threads": 6},
                         {"data_dir": str(Path(self.tmp.name) / "other-profile")}):
             work = replace(work, **changes)
             startup = broker.preload(work)
@@ -161,8 +156,8 @@ class OCRStartupPreloadTests(unittest.TestCase):
             for index in range(2):
                 answer = broker.submit(replace(work, function=_identity), affinity=index).result(timeout=5)
                 self.assertIn(answer["pid"], pids)
-                self.assertEqual((answer["data_dir"], answer["cpu_threads"], answer["gpu_labels"]),
-                                 (work.data_dir, work.cpu_threads, work.gpu_labels))
+                self.assertEqual((answer["data_dir"], answer["cpu_threads"]),
+                                 (work.data_dir, work.cpu_threads))
                 self.assertEqual(answer["prepared"], 1)
             previous = startup
 

@@ -39,7 +39,6 @@ class Request:
     data_dir: str = field(default_factory=_data_directory)
     cpu_threads: int = field(default_factory=ocr_runtime.active_threads)
     deadline: float | None = None
-    gpu_labels: bool = field(default_factory=ocr_runtime.active_gpu_labels)
     prepare_artwork: bool = False
 
     def __call__(self):
@@ -66,7 +65,7 @@ def request(function, *args, **kwargs):
                and getattr(target, "__name__", "") in ("scan_inventory_grid", "scan_ritual_page"))
     return Request(function, tuple(args), dict(kwargs), _data_directory(),
                    ocr_runtime.active_threads(), time.monotonic() + SCAN_TIMEOUT_SECONDS,
-                   gpu_labels=ocr_runtime.active_gpu_labels(), prepare_artwork=artwork)
+                   prepare_artwork=artwork)
 
 
 def run(function, *args, **kwargs):
@@ -85,14 +84,13 @@ def _prepare_artwork():
     return os.getpid()
 
 
-def _child_loop(connection, data_dir, cpu_threads, gpu_labels=False, artwork_preload=None):
+def _child_loop(connection, data_dir, cpu_threads, artwork_preload=None):
     """Own recognition models in one profile-bound child and exchange only small control messages."""
     from PoE2_Data_Logger.core import logger_store as logger
 
     store.DATA_DIR = Path(data_dir)
     logger._READY = False
     ocr_runtime._ACTIVE_THREADS = cpu_threads
-    ocr_runtime._ACTIVE_GPU_LABELS = gpu_labels
     artwork_attempted = False
     artwork_answer = None
     artwork_error = None
@@ -245,9 +243,9 @@ class _Broker:
     def preload(self, work):
         """Prepare each owned child once using bounded admissions with explicit supervisor affinity."""
         with self.condition:
-            context = (work.data_dir, work.cpu_threads, work.gpu_labels)
+            context = (work.data_dir, work.cpu_threads)
             previous = self.preload_work
-            if previous is not None and (previous.data_dir, previous.cpu_threads, previous.gpu_labels) == context:
+            if previous is not None and (previous.data_dir, previous.cpu_threads) == context:
                 return self.preload_futures
             if self.closing or len(self.queue) + len(self.active) + MAX_WORKERS > MAX_WORKERS + MAX_QUEUED:
                 futures = tuple(_OCRFuture(self._cancelled) for _ in range(MAX_WORKERS))
@@ -300,10 +298,10 @@ class _Broker:
                     if time.monotonic() >= deadline:
                         _complete(future, error=TimeoutError("OCR timed out before recognition could start."))
                         continue
-                    next_context = (work.data_dir, work.cpu_threads, work.gpu_labels)
+                    next_context = (work.data_dir, work.cpu_threads)
                     with self.condition:
                         preload = self.preload_work
-                        if preload is not None and (preload.data_dir, preload.cpu_threads, preload.gpu_labels) != next_context:
+                        if preload is not None and (preload.data_dir, preload.cpu_threads) != next_context:
                             preload = None
                     if process is not None and (context != next_context or process_preload is not preload
                                                 or not process.is_alive()):

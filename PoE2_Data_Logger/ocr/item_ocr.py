@@ -516,23 +516,10 @@ def _stack_count(cell, read):
 
 
 def _inventory_patch_readings(patches):
-    """Read labels with an optional isolated GPU, retrying complete requests on failure."""
-    from PoE2_Data_Logger.ocr import label_gpu
-
+    """Read Inventory/Ritual labels with the OCR engine, reusing exact cached readings."""
     with OCR_LOCK:
         engine = _engine()
-        reader = label_gpu.reader_for(engine.text_rec)
-        shape = getattr(reader, "rec_image_shape", ())
-        if (reader is not engine.text_rec and len(shape) == 3
-                and any(patch.shape[1] / patch.shape[0] > shape[2] / shape[1] for patch in patches)):
-            reader = engine.text_rec
-        try:
-            return _cached_inventory_patch_readings(patches, engine, reader)
-        except label_gpu.GPUFallback:
-            # Discard all earlier GPU evidence before retrying, including cache
-            # hits from prior scans. A request never mixes providers' readings.
-            _INVENTORY_TEXT_CACHE.state = None
-            return _cached_inventory_patch_readings(patches, engine, engine.text_rec)
+        return _cached_inventory_patch_readings(patches, engine, engine.text_rec)
 
 
 def _cached_inventory_patch_readings(patches, engine, reader):
