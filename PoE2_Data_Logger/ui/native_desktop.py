@@ -2537,6 +2537,23 @@ class LoggerWindow(QMainWindow):
             logger.new_ritual_rite(name.strip() or None)
             self.refresh()
 
+    def _rite_read(self, result):
+        """Save a scanned map tooltip's modifiers as the current map's Rite stage.
+
+        Rescanning replaces that map's modifiers. Without a selected Rite, one is
+        started so + New map closes this stage and the next map continues it.
+        """
+        state = logger.ritual_rite_state()
+        if not state["selected_rite_id"]:
+            state = logger.new_ritual_rite()
+        logger.save_ritual_rite_affixes(result["affixes"], expected_map_id=state["map_id"],
+                                        expected_generation=state["session_generation"])
+        self._ritual_rite_form_baseline = None
+        self.refresh()
+        new = sum("id" not in row for row in result["affixes"])
+        self.note(f"{state['selected_rite_name']} stage {state['map_ordinal']} ({state['map_id']}): "
+                  f"{len(result['affixes'])} Rite affixes saved" + (f", {new} new." if new else "."), True)
+
     def save_ritual_rite_affixes(self):
         """Save local modifier metadata only after the existing map ownership check succeeds."""
         context = self._ritual_rite_form_context
@@ -6368,6 +6385,8 @@ class LoggerWindow(QMainWindow):
                     self.run(lambda: self._hover_item_read(event["result"], raw, prepared_tablet=prepared))
             elif event["mode"] == "propagation":
                 self.run(lambda: self._propagation_read(event["result"], raw))
+            elif event["mode"] == "rite":
+                self.run(lambda: self._rite_read(event["result"]))
             elif event["mode"] in ("currency", "ritual"):
                 if raw:
                     try:

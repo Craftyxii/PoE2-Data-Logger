@@ -954,6 +954,12 @@ class HotkeyManager:
                     raw = memory.getvalue()
                     event = {"mode": "ritual", "result": {"captured": True, "map_id": capture_map}, "error": ""}
                     return
+                # A hovered atlas map lists its Rite modifiers; its "Requires:
+                # Waystone" line must not be read as a waystone tooltip.
+                rite = item_text.read_rite_tooltip(rows, tooltip_image) if kind == "default" else None
+                if rite is not None:
+                    event = {"mode": "rite", "result": rite, "error": ""}
+                    return
                 item_options = {}
                 if mode in ("waystone", "tablet"):
                     level = strictness_values.get(mode, ocr_sensitivity.DEFAULT)

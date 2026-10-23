@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import math
 import re
+
+import numpy as np
+
 from PoE2_Data_Logger.core import ocr_sensitivity
 from PoE2_Data_Logger.ocr.affix_capture import looks_like_modifier, numeric_token_complete
 
@@ -398,3 +401,88 @@ def read_screen_tooltip(image, affixes=(), ocr_rows=None, strictness=ocr_sensiti
         if level != ocr_sensitivity.DEFAULT:
             parsed["_ocr_strictness"] = level
     return parsed
+
+
+_RITE_LABEL = re.compile(r"^FORETOLD\s+(BOUNTY|PROLIFERATION)\s*:", re.I)
+_RITE_SUBJECT = re.compile(r"FORETOLD\s+(?:BOUNTY|PROLIFERATION)|RITUAL\s+ALTARS|\bRITUALS?\s+CONTAIN", re.I)
+
+
+def _rite_key(text):
+    """Compare Rite wording across OCR spacing, case and a/an/one/1 variants."""
+    return "".join("1" if word in ("a", "an", "one") else word
+                   for word in re.findall(r"[a-z0-9]+", text.lower()))
+
+
+def _flavour_row(image, row):
+    """Recognize the orange flavour text, whose ink is far redder than modifier text."""
+    box = tuple(round(row[key]) for key in ("x", "y", "right", "bottom"))
+    pixels = np.asarray(image.convert("RGB").crop(box)).reshape(-1, 3)
+    ink = pixels[pixels.max(axis=1) > 90]
+    return bool(len(ink)) and float(np.median(ink[:, 0])) > float(np.median(ink[:, 2])) * 1.4
+
+
+def read_rite_tooltip(ocr_rows, image):
+    """Return Rite of the Nameless modifiers from a hovered atlas map tooltip, else None.
+
+    Modifier lines sit between the Biome line and the orange flavour text. A
+    wrapped line rejoins its modifier until a catalog modifier completes, a
+    Foretold label starts the next one, or the previous line ended with room
+    for the next word. Unknown wording is kept as a custom modifier.
+    """
+    from PoE2_Data_Logger.core import ritual_rites_catalog
+
+    texts = [" ".join(row["text"].split()) for row in ocr_rows]
+    biome = next((index for index, text in enumerate(texts) if re.match(r"^BIOME\s*:", text, re.I)), None)
+    if biome is None or not any(_RITE_SUBJECT.search(text) for text in texts[biome + 1:]):
+        return None
+    lines = []
+    for row, text in zip(ocr_rows[biome + 1:], texts[biome + 1:]):
+        if re.match(r"^REQUIRES\b", text, re.I) or _flavour_row(image, row):
+            break
+        lines.append((row, text))
+    if not lines:
+        return None
+    catalog = {_rite_key(row["text"]): row for row in ritual_rites_catalog.affixes()}
+    casing = {word.lower(): word for row in catalog.values()
+              for word in re.findall(r"[A-Za-z']+", row["text"]) if word[0].isupper()}
+    width = max(row["right"] - row["x"] for row, _ in lines)
+    blocks = []
+    for index, (row, text) in enumerate(lines):
+        if blocks and not _RITE_LABEL.match(text):
+            current = blocks[-1]
+            previous = lines[index - 1][0]
+            first = text.split()[0]
+            word = (row["right"] - row["x"]) * (len(first) + 1) / max(1, len(text))
+            # A word that fit at the end of the previous line would be there.
+            wrapped = previous["right"] - previous["x"] + word > width
+            if (wrapped and _rite_key(current) not in catalog and
+                    not re.match(r"^FORETOLD\s+BOUNTY", current, re.I)):
+                blocks[-1] = current + " " + text
+                continue
+        blocks.append(text)
+    affixes = []
+    for block in blocks:
+        known = catalog.get(_rite_key(block))
+        if known is not None:
+            entry = {"id": known["id"]}
+        else:
+            # The tooltip font is small caps; restore catalog capitalization.
+            label = _RITE_LABEL.match(block)
+            bounty = label is not None and label.group(1).upper() == "BOUNTY"
+            words = []
+            for word in block.split():
+                core = word.strip(":,.")
+                cased = casing.get(core.lower(), core.lower())
+                if bounty and len(words) > 1 and cased.islower() and (len(words) == 2 or cased not in ("of", "the")):
+                    # Bounty rewards are item names, written in title case.
+                    cased = cased[:1].upper() + cased[1:]
+                words.append(word.replace(core, cased) if core else word)
+            text = " ".join(words)
+            entry = {"text": text[:1].upper() + text[1:],
+                     "kind": label.group(1).lower() if label else "local"}
+        same = next((row for row in affixes if row.get("id", row.get("text")) == entry.get("id", entry.get("text"))), None)
+        if same is not None:
+            same["count"] += 1
+        else:
+            affixes.append({**entry, "count": 1})
+    return {"kind": "rite", "map_name": texts[0].title() if biome else "", "affixes": affixes}
