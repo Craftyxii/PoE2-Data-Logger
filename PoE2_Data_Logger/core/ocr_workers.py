@@ -75,12 +75,13 @@ def run(function, *args, **kwargs):
 
 
 def _prepare_artwork():
-    """Fill the recognition banks in this child without capturing pixels or loading OCR models."""
+    """Fill the recognition banks and load the text models in this child without capturing pixels."""
     import os
     from PoE2_Data_Logger.core import logger_store as logger
     from PoE2_Data_Logger.ocr import item_ocr
 
     item_ocr.prepare_artwork(logger.inventory_icons(), logger.ritual_icons())
+    item_ocr.warm_text_models()
     return os.getpid()
 
 

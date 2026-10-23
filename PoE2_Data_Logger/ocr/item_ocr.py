@@ -19,7 +19,7 @@ from types import MappingProxyType
 
 import numpy as np
 import cv2
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageOps
 
 from PoE2_Data_Logger.ocr.opened_scan import OCR_LOCK, _engine
 from PoE2_Data_Logger.ocr import currency_ocr
@@ -221,6 +221,18 @@ def prepare_artwork(inventory_references=(), ritual_references=()):
     unique_items.prepare_artwork()
 
 
+
+def warm_text_models():
+    """Load this worker's shared text models and run one throwaway read.
+
+    ONNX sessions finish their one-time setup on first use; doing that at
+    startup keeps it out of the first Currency/Ritual scan. Nothing is parsed,
+    captured or saved.
+    """
+    sample = Image.new("RGB", (240, 48), (24, 22, 30))
+    ImageDraw.Draw(sample).text((12, 16), "Tribute 1234 Favours", fill=(225, 220, 210))
+    with OCR_LOCK:
+        _engine()(sample)
 def _reviewed_match(reader, image, bank, catalog=None, strictness=ocr_sensitivity.DEFAULT):
     """Accept a reviewed-reference override only for an unambiguous score > -450 and lead > 250.
 
