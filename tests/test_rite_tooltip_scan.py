@@ -5,8 +5,10 @@ import csv
 import io
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from PIL import Image
+from PySide6.QtWidgets import QMessageBox
 
 from tests import test_hotkey_presentation_retry as fixtures
 from PoE2_Data_Logger.core import logger_store as logger, ritual_rites_catalog
@@ -23,6 +25,11 @@ EXPECTED = {
                               "Rerolling Favours at Ritual Altars in Area costs 20% reduced Tribute",
                               "Foretold Proliferation: Monsters Sacrificed at Ritual Altars grant 25% increased Tribute"],
 }
+
+
+def texts(affixes):
+    """Show saved Rite modifiers as their catalog wording."""
+    return [ritual_rites_catalog.affix(row["id"])["text"] if row.get("id") else row["text"] for row in affixes]
 
 
 def scan(name, edit=None):
@@ -104,24 +111,61 @@ class RiteTooltipStageTests(unittest.TestCase):
         self.assertEqual(resumed["map_ordinal"], 2)
         self.assertEqual(len(resumed["inherited_sources"]), 1)
 
-    def test_scans_start_a_rite_replace_the_stage_and_new_map_advances_it(self):
+    def test_scans_queue_a_rites_maps_in_order_and_each_new_map_plays_the_next(self):
+        """Scan a Rite's maps one after another, as Tablets fill slots, with no other input."""
         logger.save_settings({"activity_type": "Ritual"})
         self.assertIsNone(logger.ritual_rite_state()["selected_rite_id"])
-        self.window._rite_read(scan("ravine.png"))
-        self.window._rite_read(scan("necropolis_bounty.png"))
+        for name in ("ravine.png", "necropolis_bounty.png", "necropolis_wildwood.png", "necropolis_bounty.png"):
+            self.window._rite_read(scan(name))
         first = logger.ritual_rite_state()
         self.assertTrue(first["selected_rite_id"])
         self.assertEqual(first["map_ordinal"], 1)
-        # Rescanning a map replaces its modifiers rather than adding duplicates.
-        self.assertEqual([row["text"] for row in first["current_affixes"]], EXPECTED["necropolis_bounty.png"])
-        logger.finish_map(1, 2, 3)  # + New map closes this stage.
-        self.window._rite_read(scan("necropolis_wildwood.png"))
+        self.assertEqual(texts(first["current_affixes"]), EXPECTED["ravine.png"])
+        # The same map scanned again replaces its stage; two Necropolis maps stay two stages.
+        self.assertEqual([(stage["map_ordinal"], stage["map_name"], texts(stage["affixes"]))
+                          for stage in first["queued_stages"]],
+                         [(2, "Necropolis", EXPECTED["necropolis_bounty.png"]),
+                          (3, "Necropolis", EXPECTED["necropolis_wildwood.png"])])
+        logger.finish_map(1, 2, 3)  # + New map plays the next queued stage.
+        logger.start_map()
         second = logger.ritual_rite_state()
-        self.assertEqual((second["selected_rite_id"], second["map_ordinal"]), (first["selected_rite_id"], 2))
-        self.assertNotEqual(second["map_id"], first["map_id"])
-        self.assertEqual([row["text"] for row in second["current_affixes"]], EXPECTED["necropolis_wildwood.png"])
+        self.assertEqual((second["map_ordinal"], second["current_from_queue"]), (2, True))
+        self.assertEqual(texts(second["current_affixes"]), EXPECTED["necropolis_bounty.png"])
         self.assertEqual([source["text"] for source in second["inherited_sources"]],
                          ["Monsters Sacrificed at Ritual Altars grant 25% increased Tribute"])
+        logger.finish_map(1, 2, 3)
+        logger.start_map()
+        # A map played outside Ritual leaves the remaining stage queued for the next Ritual map.
+        logger.save_settings({"activity_type": "Expedition"})
+        self.assertFalse(logger.ritual_rite_state()["ritual_activity"])
+        logger.finish_map(1, 2, 3)
+        logger.start_map()
+        logger.save_settings({"activity_type": "Ritual"})
+        third = logger.ritual_rite_state()
+        self.assertEqual((third["map_ordinal"], texts(third["current_affixes"]), third["queued_stages"]),
+                         (3, EXPECTED["necropolis_wildwood.png"], []))
+        rows = {row["Map ID"]: (row["Ritual Rite Map Ordinal"], row["Ritual Rite Affixes JSON"])
+                for row in csv.DictReader(io.StringIO(logger.export_maps_csv().decode("utf-8-sig")))}
+        self.assertEqual([rows[map_id][0] for map_id in ("M0001", "M0002", "M0003", "M0004")], ["1", "2", "", "3"])
+        self.assertIn("Foretold Bounty: Omen of Sinistral Exaltation", rows["M0002"][1])
+        self.assertIn("Wildwood", rows["M0004"][1])
+
+    def test_queued_scans_undo_and_clear_like_other_saved_actions(self):
+        """Undo removes the latest queued scan; Clear queued stages removes the rest."""
+        logger.save_settings({"activity_type": "Ritual"})
+        for name in ("ravine.png", "necropolis_bounty.png", "necropolis_wildwood.png"):
+            self.window._rite_read(scan(name))
+        self.assertEqual(len(logger.ritual_rite_state()["queued_stages"]), 2)
+        table = self.window.ritual_rite_queue_table
+        self.assertEqual([(table.item(row, 0).text(), table.item(row, 1).text()) for row in range(table.rowCount())],
+                         [("2", "Necropolis"), ("3", "Necropolis")])
+        self.assertEqual(logger.undo_last_action()["action"], "Ritual Rite scan")
+        self.assertEqual([texts(stage["affixes"]) for stage in logger.ritual_rite_state()["queued_stages"]],
+                         [EXPECTED["necropolis_bounty.png"]])
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
+            self.window.clear_ritual_rite_queue()
+        state = logger.ritual_rite_state()
+        self.assertEqual((state["queued_stages"], texts(state["current_affixes"])), ([], EXPECTED["ravine.png"]))
 
     def test_waystone_setup_saved_after_map_start_keeps_the_rite_stage_in_exports(self):
         """Saving the new map's waystone rebuilds its setup without dropping the live Rite stage."""

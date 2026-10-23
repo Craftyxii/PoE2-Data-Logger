@@ -22,7 +22,7 @@ META_KEYS = frozenset((
     "reopened_map_id",
     "scan_commit_count", "tablet_auto_next", "selected_tablet_set_id", "finalized_tablet_map_id",
     "active_retired_currency_names", "affix_units",
-    "selected_ritual_rite_id",
+    "selected_ritual_rite_id", "ritual_rite_queue", "ritual_rite_map_names",
 ))
 HISTORY_LIMIT = 100
 _LOCAL = threading.local()

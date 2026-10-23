@@ -2389,6 +2389,23 @@ class LoggerWindow(QMainWindow):
         actions.addStretch()
         actions.addWidget(button("Save", lambda: self.run(self.save_ritual_rite_affixes), "primary"))
         local.addLayout(actions)
+        queued = self._group("Queued stages", content)
+        self.ritual_rite_queue_note = QLabel()
+        self.ritual_rite_queue_note.setWordWrap(True)
+        queued.addWidget(self.ritual_rite_queue_note)
+        self.ritual_rite_queue_table = QTableWidget(0, 3)
+        self.ritual_rite_queue_table.setHorizontalHeaderLabels(["Stage", "Map", "Affixes"])
+        self.ritual_rite_queue_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.ritual_rite_queue_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.ritual_rite_queue_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.ritual_rite_queue_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.ritual_rite_queue_table.setMinimumHeight(120)
+        queued.addWidget(self.ritual_rite_queue_table)
+        queue_actions = QHBoxLayout()
+        queue_actions.addStretch()
+        self.ritual_rite_queue_clear = button("Clear queued stages", lambda: self.run(self.clear_ritual_rite_queue))
+        queue_actions.addWidget(self.ritual_rite_queue_clear)
+        queued.addLayout(queue_actions)
         inherited = self._group("Inherited effects", content)
         self.ritual_rite_inherited_table = QTableWidget(0, 4)
         self.ritual_rite_inherited_table.setHorizontalHeaderLabels(["Effect", "Count", "Map", "Rite"])
@@ -2489,6 +2506,19 @@ class LoggerWindow(QMainWindow):
             for rite in state["available_rites"]:
                 self.ritual_rite_select.addItem(rite["name"], rite["id"])
             select(self.ritual_rite_select, state["selected_rite_id"])
+        stages = state.get("queued_stages", [])
+        self.ritual_rite_queue_table.setRowCount(len(stages))
+        for row, stage in enumerate(stages):
+            affixes = "; ".join(entry.get("text") or entry.get("id", "") for entry in stage["affixes"])
+            for column, text in enumerate((stage["map_ordinal"], stage["map_name"], affixes)):
+                item = QTableWidgetItem(str(text))
+                item.setToolTip(str(text))
+                self.ritual_rite_queue_table.setItem(row, column, item)
+        self.ritual_rite_queue_clear.setEnabled(bool(stages))
+        playing = (f"This map plays stage {state['map_ordinal']}, scanned ahead. " if state.get("current_from_queue") else "")
+        self.ritual_rite_queue_note.setText(
+            playing + ("Each + New map plays the next queued stage." if stages else
+                       "Scan a Rite's maps in order to queue the stages after this map."))
         table = self.ritual_rite_inherited_table
         table.setRowCount(len(state["inherited_sources"]))
         names = {rite["id"]: rite["name"] for rite in state["available_rites"]}
@@ -2520,11 +2550,12 @@ class LoggerWindow(QMainWindow):
             self.refresh()
 
     def _rite_read(self, result):
-        """Save a scanned map tooltip's modifiers as the current map's Rite stage.
+        """Save a scanned map tooltip's modifiers as a Rite stage, like Tablets fill their slots.
 
-        Only a Ritual activity map records Rite modifiers. Rescanning replaces
-        that map's modifiers. Without a selected Rite, one is started so + New
-        map closes this stage and the next Ritual map continues it.
+        Only a Ritual activity map records Rite modifiers. The first scan is
+        the current map's stage; each different map queues the next stage,
+        which + New map plays in turn. Scanning the same map again replaces
+        its stage. Without a selected Rite, one is started.
         """
         state = logger.ritual_rite_state()
         if not state["ritual_activity"]:
@@ -2532,13 +2563,28 @@ class LoggerWindow(QMainWindow):
                              "Select Ritual for this map, then scan the map again.")
         if not state["selected_rite_id"]:
             state = logger.new_ritual_rite()
-        logger.save_ritual_rite_affixes(result["affixes"], expected_map_id=state["map_id"],
-                                        expected_generation=state["session_generation"])
+        saved = logger.scan_ritual_rite_stage(result["affixes"], result.get("map_name", ""),
+                                              expected_map_id=state["map_id"],
+                                              expected_generation=state["session_generation"])
         self._ritual_rite_form_baseline = None
         self.refresh()
         new = sum("id" not in row for row in result["affixes"])
-        self.note(f"{state['selected_rite_name']} stage {state['map_ordinal']} ({state['map_id']}): "
-                  f"{len(result['affixes'])} Rite affixes saved" + (f", {new} new." if new else "."), True)
+        where = (f"queued for a later map ({len(saved['queued_stages'])} queued)" if saved["scanned_queued"] else
+                 f"saved for {state['map_id']}")
+        self.note(f"{state['selected_rite_name']} stage {saved['scanned_stage']}"
+                  + (f" · {result['map_name']}" if result.get("map_name") else "")
+                  + f": {len(result['affixes'])} Rite affixes {where}" + (f", {new} new." if new else "."), True)
+
+    def clear_ritual_rite_queue(self):
+        """Remove the Rite stages scanned ahead of play after confirmation; Undo restores them."""
+        answer = QMessageBox.question(
+            self, "Clear queued stages", "Remove every Rite stage scanned ahead of play?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        logger.clear_ritual_rite_queue()
+        self.refresh()
+        self.note("Queued Rite stages cleared.", True)
 
     def save_ritual_rite_affixes(self):
         """Save local modifier metadata only after the existing map ownership check succeeds."""

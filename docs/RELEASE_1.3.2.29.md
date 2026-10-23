@@ -25,6 +25,16 @@ or view the [release and checksum](https://github.com/Craftyxii/PoE2-Data-Logger
 - On the four captured uniques (Freedom of Faith, Visions of Paradise and both
   Mastered Domains) every modifier is read, learned and auto-saved.
 
+## Rite stages scanned ahead
+
+Hover each map of a Rite on the Atlas and press the general scan key, one map
+after another, the way Tablets fill their slots. The first scan is the current
+map's stage; each different map queues the next stage, listed under
+**Queued stages** on the Ritual page. Every **+ New map** then plays the next
+queued stage, with no other input. Scanning the same map again replaces its
+stage, a map played outside Ritual leaves the queue untouched, and Undo or
+**Clear queued stages** removes scans.
+
 ## Ritual pages
 
 - **More uniques named.** The catalog lists every shield, one-hand mace, staff

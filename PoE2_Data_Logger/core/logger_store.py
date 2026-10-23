@@ -699,6 +699,17 @@ def save_ritual_rite_affixes(values, *, expected_map_id=None, expected_generatio
                                                    expected_generation=expected_generation)
 
 
+def scan_ritual_rite_stage(values, map_name="", *, expected_map_id=None, expected_generation=None):
+    """Save a scanned Rite map as the current stage, or queue it for the maps that follow."""
+    return ritual_rite_store.scan_ritual_rite_stage(values, map_name, expected_map_id=expected_map_id,
+                                                  expected_generation=expected_generation)
+
+
+def clear_ritual_rite_queue():
+    """Remove the selected Rite's scanned-ahead stages."""
+    return ritual_rite_store.clear_ritual_rite_queue()
+
+
 def _initialize_tablet_sets(db):
     """Adopt the existing tablet configuration as Set 1 without altering saved maps."""
     config = _meta(db, "settings")
