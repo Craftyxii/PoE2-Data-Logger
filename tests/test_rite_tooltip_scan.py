@@ -1,6 +1,8 @@
 """Scan Rite modifiers from actual atlas map tooltips into the current map's Rite stage."""
 
 import copy
+import csv
+import io
 from pathlib import Path
 import unittest
 
@@ -120,6 +122,23 @@ class RiteTooltipStageTests(unittest.TestCase):
         self.assertEqual([row["text"] for row in second["current_affixes"]], EXPECTED["necropolis_wildwood.png"])
         self.assertEqual([source["text"] for source in second["inherited_sources"]],
                          ["Monsters Sacrificed at Ritual Altars grant 25% increased Tribute"])
+
+    def test_waystone_setup_saved_after_map_start_keeps_the_rite_stage_in_exports(self):
+        """Saving the new map's waystone rebuilds its setup without dropping the live Rite stage."""
+        logger.save_settings({"activity_type": "Ritual"})
+        self.window._rite_read(scan("ravine.png"))
+        logger.finish_map(1, 2, 3)
+        logger.start_map()
+        self.window._rite_read(scan("necropolis_wildwood.png"))
+        logger.save_settings({"tier": 16, "waystone": 0, "map_mods": 0})
+
+        def rite_columns():
+            rows = csv.DictReader(io.StringIO(logger.export_maps_csv().decode("utf-8-sig")))
+            return {row["Map ID"]: (row["Tier"], row["Ritual Rite Name"], row["Ritual Rite Map Ordinal"])
+                    for row in rows}
+        self.assertEqual(rite_columns()["M0002"], ("16", "Rite 1", "2"))
+        logger.save_settings({"activity_type": "Expedition"})
+        self.assertEqual(rite_columns()["M0002"], ("16", "", ""))
 
 
 if __name__ == "__main__":

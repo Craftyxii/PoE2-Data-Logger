@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep the current map's Rite stage in its export row when its waystone or other setup is saved after the map starts. The rebuilt setup dropped the Rite name, stage and modifiers until + New map restored them.
+- Fix general-key hovers being taken for a Ritual page. A Rite map whose modifier mentions "Rerolling Favours … Tribute", or a Ritual Tablet such as Freedom of Faith, opened a Ritual reward review instead of saving the Rite stage or Tablet. The Ritual window is now recognized by its own rows: a Tribute counter, or a standalone Favours title or Defer/Reroll/Offer Tribute control. Atlas-map, Tablet and waystone tooltips never count as one. On 34 real Ritual windows this finds all 34 (previously 31).
 - Scan unique Tablets. An orange unique title bounds the modifiers between the uses-remaining line and the orange flavour text, rejoins a wrapped short ending, and reads number-free modifiers such as "Map also counts as a Desert Map" as a flag of 1. Copied unique text is bounded the same way by its sections. Unknown wording is added to Affix DB, as for Rites and waystones, so normal and unique Tablets log together in one set. On the four captured uniques (Freedom of Faith, Visions of Paradise and both Mastered Domains) every modifier is read and auto-saved.
 - Keep flags honest: wording that implies a value (increased, chance, additional, seconds) is never read as a flag, so a roll OCR dropped stays in review. A unique title without its flavour boundary is held for review, and rare-coloured titles keep the existing reader.
 - Remember the scanned unit of a learned affix, so picking a learned flag by hand in the Tablet form saves a flag rather than a percentage. Undo removes the unit with the name.

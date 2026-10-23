@@ -259,13 +259,30 @@ def _reviewed_match(reader, image, bank, catalog=None, strictness=ocr_sensitivit
 
 
 def is_ritual_page(lines):
-    """Recognize Ritual UI wording from .75+ rows without claiming reward-grid completeness."""
-    text = " ".join(str(row.get("text", "")) for row in lines
-                    if isinstance(row, dict) and row.get("score", 0) >= .75).casefold()
-    title = bool(re.search(r"\bfavou?rs\b", text))
-    tribute = bool(re.search(r"\btribute\b", text))
-    controls = bool(re.search(r"\bdefer(?:red|\s+mode)?\b|\breroll\s+favou?rs\b|offer\s+tribute", text))
-    return tribute and (title or controls)
+    """Recognize the Ritual window from its own .75+ rows without claiming reward-grid completeness.
+
+    The window shows a "<number> Tribute" counter or price, a standalone Favours
+    title and Defer/Reroll/Offer Tribute controls. Rite, Tablet and waystone
+    modifiers only mention Favours and Tribute inside sentences, and their
+    tooltips carry Biome, uses-remaining or waystone-tier anchors instead.
+    """
+    read = [(" ".join(str(row.get("text", "")).split()), row.get("score", 0)) for row in lines
+            if isinstance(row, dict)]
+    rows = [text for text, score in read if score >= .75]
+    if any(re.match(r"^(?:biome\s*:|waystone\s*(?:\(\s*tier|tier\s*:))", row, re.I) or
+           re.search(r"\buses?\s+remaining\b", row, re.I) for row in rows):
+        return False
+
+    def counter(floor):
+        """Find a Tribute counter or price row read at the given confidence."""
+        return any(score >= floor and re.match(r"^\d[\d,.]*\s*tribute\b", text, re.I) for text, score in read)
+
+    title = any(re.fullmatch(r"favou?rs", row, re.I) for row in rows)
+    controls = any(re.fullmatch(r"defer(?:red|\s+mode|\s+item)?|reroll(?:\s+favou?rs)?|offer\s+tribute\b.*",
+                                row, re.I) for row in rows)
+    tribute = any(re.search(r"\btribute\b", row, re.I) for row in rows)
+    # A standalone title or control confirms a counter OCR read less clearly.
+    return counter(.75) or (title or controls) and (tribute or counter(.5))
 
 
 def ocr_lines(image):

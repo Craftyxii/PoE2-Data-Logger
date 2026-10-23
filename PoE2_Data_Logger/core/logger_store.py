@@ -1333,8 +1333,10 @@ def _save_settings(db, data, *, confirmed_affixes=()):
                        _map_has_only_start_inventory(db, mid))
         reopened = bool(prior) and _meta(db, "reopened_map_id") == mid and bool(MAP_SETUP_FIELDS & data.keys())
         if not _map_has_activity(db, mid) or first_setup or reopened:
+            # A rebuilt setup keeps the map's live Rite stage, as at map start.
             context = (_correct_reopened_map_setup(db, prior, c,
-                       (MAP_SETUP_FIELDS | {"activity_type"}) & data.keys()) if reopened else _snapshot(c))
+                       (MAP_SETUP_FIELDS | {"activity_type"}) & data.keys()) if reopened else
+                       ritual_rite_store.attach_context(db, mid, _snapshot(c)))
             if first_setup and not reopened:
                 context = _bind_atlas_context(db, mid, context)
             if "waystone_setup_saved" in prior:
