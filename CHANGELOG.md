@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Stop suggesting Tier XV waystones as "Waystone (Tier 16)": a bundled reference picture of a Tier 15 ring waystone was labelled Tier 16. Ring waystones now suggest the tier whose art they match and still wait for a label.
+- Name an inventory stack when its artwork match is far ahead of every other item (score above −3600 with a lead over 2500), even when count digits or a II/III badge lower the score. On the training captures this names and counts Greater Orb of Augmentation, Greater Jeweller's Orb and Orb of Transmutation stacks that were held with already-read counts; Ritual pages are unchanged.
 - Cache the bundled catalog's item names by file identity, so creating or opening a profile no longer parses the 10 MB icon catalog each time.
 - Build the Session Currency cards when the Currency page first shows them. Totals, groups, search and the summary stay current meanwhile, and the page looks the same once opened.
 - Together they make app startup about half a second faster. In the test suite, a fresh profile drops from about 0.57 to 0.20 seconds and opening the app window from about 0.60 to 0.35 seconds.

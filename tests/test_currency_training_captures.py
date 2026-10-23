@@ -20,9 +20,9 @@ class CurrencyTrainingCapturesTests(unittest.TestCase):
     """Check sourced artwork and real count readers against visible quantities."""
 
     def test_every_stack_skipping_review_matches_its_visible_quantity(self):
-        """Exercise six complete captures without accepting guessed labels or holding everything."""
+        """Exercise seven complete captures without accepting guessed labels or holding everything."""
         expected = json.loads((FIXTURES / "expected_quantities.json").read_text())["captures"]
-        self.assertEqual(len(expected), 6)
+        self.assertEqual(len(expected), 7)
         with tempfile.TemporaryDirectory(prefix="poe2-currency-captures-") as folder, \
                 patch.object(store, "DATA_DIR", Path(folder)), patch.object(logger, "_READY", False):
             for filename, matrix in expected.items():
@@ -44,6 +44,38 @@ class CurrencyTrainingCapturesTests(unittest.TestCase):
                         self.assertIsNotNone(quantities[slot - 1], (filename, slot, item))
                         self.assertEqual(item["quantity"], quantities[slot - 1], (filename, slot, item))
                     self.assertEqual((source.tobytes(), dict(source.info)), before)
+
+    def scan(self, filename):
+        """Scan one capture in a disposable profile and index rows by slot."""
+        with tempfile.TemporaryDirectory(prefix="poe2-currency-captures-") as folder, \
+                patch.object(store, "DATA_DIR", Path(folder)), patch.object(logger, "_READY", False):
+            result = item_ocr.scan_inventory_grid(FIXTURES / filename)
+        return ({item["slot"]: item for item in result["items"]},
+                {item["slot"]: item for item in result["unknown"]})
+
+    def test_decisive_artwork_names_badged_and_count_covered_stacks(self):
+        """A far-ahead artwork match names stacks whose digits and II badge cost score.
+
+        Slots 38 and 50 carry a II badge and slot 52 is a 16-stack; each was
+        held with an unused count before the lower-score/larger-lead gate.
+        """
+        items, _unknown = self.scan("inventory_120330.png")
+        for slot, name, quantity in ((38, "Greater Orb of Augmentation", 30),
+                                     (50, "Greater Orb of Augmentation", 23),
+                                     (52, "Greater Jeweller's Orb", 16)):
+            with self.subTest(slot=slot):
+                self.assertEqual((items[slot]["name"], items[slot]["quantity"]), (name, quantity))
+                self.assertTrue(clear_currency_stack(items[slot]))
+        # The unbadged neighbour of slot 38 keeps its base tier.
+        self.assertEqual((items[39]["name"], items[39]["quantity"]), ("Orb of Augmentation", 30))
+
+    def test_tier_fifteen_waystones_are_never_suggested_as_tier_sixteen(self):
+        """Ring waystones marked XV suggest Tier 15 and still wait for a label."""
+        _items, unknown = self.scan("inventory_115801.png")
+        for slot in (13, 50):
+            with self.subTest(slot=slot):
+                self.assertEqual(unknown[slot]["candidate"], "Waystone (Tier 15)")
+                self.assertEqual(unknown[slot]["reason"], "label if tracked")
 
 
 if __name__ == "__main__":

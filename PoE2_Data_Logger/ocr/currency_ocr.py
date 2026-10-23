@@ -336,8 +336,9 @@ class CurrencyReader:
     def icon(self, image: Image.Image, count_digits=None, strictness=ocr_sensitivity.DEFAULT):
         """Identify an icon, separating empty, ignored and uncertain inventory matches.
 
-        A weighted match needs score > -3000 with margin > 300, or score > -3200
-        with margin > 1500; fallback recognition must also pass its score/margin gates.
+        A weighted match needs score > -3000 with margin > 300, score > -3200 with
+        margin > 1500, or score > -3600 with margin > 2500; fallback recognition
+        must also pass its score/margin gates.
         Strictness adjusts identity confidence and candidate admission around those
         defaults. Count and tier checks retain their separate evidence requirements.
         """
@@ -353,8 +354,11 @@ class CurrencyReader:
             if ranked:
                 top = ranked[0]
                 margin = top["score"] - ranked[1]["score"] if len(ranked) > 1 else float("inf")
+                # A lower score needs a larger lead: count digits and tier
+                # badges on small cells cost score but not the lead.
                 clear_match = ((top["score"] > clear(-3000, 800) and margin > clear(300, 200)) or
-                               (top["score"] > clear(-3200, 800) and margin > clear(1500, 500)))
+                               (top["score"] > clear(-3200, 800) and margin > clear(1500, 500)) or
+                               (top["score"] > clear(-3600, 800) and margin > clear(2500, 500)))
                 if top["name"] in self.inventory_ignored and clear_match:
                     return {"family": None, "members": [], "score": 0,
                             "margin": margin, "all": [], "ignored": True,
