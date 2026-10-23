@@ -21,6 +21,8 @@ ROWS = 10
 # and a genuine unobstructed corner scores at least STRONG_CORNER.
 WEAK_CORNER = .75
 STRONG_CORNER = .9
+# A capture may end this fraction of a cell short of the grid's lower frame.
+CLIPPED_EDGE = .1
 
 
 def _line_groups(lines, horizontal, tolerance=2.5):
@@ -84,20 +86,45 @@ def _locate(pixels, header_box):
     horizontal = _line_groups(lines[:, 0], True, max(2.5, min(6., min(width, height) * .003)))
     if len(horizontal) < ROWS - 2:
         return None
-    # A region ending exactly at the lower grid frame has no outside pixel
-    # for Canny to compare.  Accept only that missing divider, established by
-    # all ten preceding regularly spaced dividers; a clipped row cannot pass.
+    # A region ending at the lower grid frame has no outside pixel for Canny
+    # to compare.  Accept only that missing divider, established by all ten
+    # preceding regularly spaced dividers. The capture may also end a few
+    # pixels short of it, but never by enough to hide a row of artwork.
     for first in horizontal:
         for last in horizontal:
             edge_pitch = (last["at"] - first["at"]) / (ROWS - 1)
-            if edge_pitch < 12 or abs(first["at"] + ROWS * edge_pitch - height) > 1:
+            boundary = first["at"] + ROWS * edge_pitch
+            if edge_pitch < 12 or not -1 <= boundary - height <= max(1., edge_pitch * CLIPPED_EDGE):
                 continue
             observed = _hits(horizontal, first["at"], edge_pitch, ROWS - 1,
                              max(1.8, min(3., edge_pitch * .045)))
             if len(observed) == ROWS and not any(
                     abs(line["at"] - height) <= 3 for line in horizontal):
                 horizontal.append({
-                    "at": float(height),
+                    "at": float(max(boundary, height)),
+                    "start": float(np.median([line["start"] for _, line in observed])),
+                    "end": float(np.median([line["end"] for _, line in observed])),
+                    "image_boundary": True,
+                })
+                break
+        else:
+            continue
+        break
+    # A region can also start a few pixels inside the upper grid frame. A
+    # cut edge can leave short artefact lines at the very top; only a line
+    # at the lattice's own upper position counts as the frame.
+    for first in list(horizontal):
+        for last in horizontal:
+            edge_pitch = (last["at"] - first["at"]) / (ROWS - 1)
+            boundary = first["at"] - edge_pitch
+            if edge_pitch < 12 or not -max(1., edge_pitch * CLIPPED_EDGE) <= boundary <= 1:
+                continue
+            tolerance = max(1.8, min(3., edge_pitch * .045))
+            observed = _hits(horizontal, first["at"], edge_pitch, ROWS - 1, tolerance)
+            if len(observed) == ROWS and not any(abs(line["at"] - boundary) <= tolerance
+                                                 for line in horizontal):
+                horizontal.append({
+                    "at": float(min(boundary, 0.)),
                     "start": float(np.median([line["start"] for _, line in observed])),
                     "end": float(np.median([line["end"] for _, line in observed])),
                     "image_boundary": True,
@@ -121,7 +148,8 @@ def _locate(pixels, header_box):
     for top, pitch, at_edge in candidates:
         tolerance = max(1.8, min(3., pitch * .045))
         bottom = top + ROWS * pitch
-        if top < -.5 or bottom > height + .5:
+        clip = max(.5, pitch * CLIPPED_EDGE)
+        if top < -clip or bottom > height + clip:
             continue
         y_matches = _hits(horizontal, top, pitch, ROWS, tolerance,
                           height if at_edge else None)
@@ -164,20 +192,20 @@ def _locate(pixels, header_box):
             starts.add(0.)
         for left in sorted(starts):
             right = left + COLUMNS * pitch
-            if left < -.5 or right > width + .5:
+            if left < -clip or right > width + clip:
                 continue
             x_matches = []
             edge_score = 0.
             for index in range(COLUMNS + 1):
                 at = left + index * pitch
                 low, high = max(0, round(at - tolerance)), min(width, round(at + tolerance) + 1)
-                if high <= low:
-                    continue
-                nearest = low + int(np.argmax(raw_profile[low:high]))
-                if profile[nearest] >= .78:
+                nearest = low + int(np.argmax(raw_profile[low:high])) if high > low else None
+                if nearest is not None and profile[nearest] >= .78:
                     x_matches.append((index, {"at": float(nearest), "start": top, "end": bottom}))
                     edge_score += float(raw_profile[nearest])
-                elif at_edge and min(abs(at), abs(at - width)) <= 1.5:
+                elif ((at_edge and min(abs(at), abs(at - width)) <= 1.5) or
+                      (index in (0, COLUMNS) and (-clip <= at <= 1.5 or width - 1.5 <= at <= width + clip))):
+                    # The outer frame lies at, or just beyond, the captured edge.
                     x_matches.append((index, {"at": at, "start": top, "end": bottom,
                                               "image_boundary": True}))
             positions = {place for place, _ in x_matches}
@@ -225,8 +253,8 @@ def _locate(pixels, header_box):
     _, _, left, top, pitch, x_matches, y_matches, at_edge = best
     # Refine the origin from all observed dividers, rather than one Hough edge.
     if not at_edge:
-        x_real = [(index, line["at"]) for index, line in x_matches]
-        y_real = [(index, line["at"]) for index, line in y_matches]
+        x_real = [(index, line["at"]) for index, line in x_matches if not line.get("image_boundary")]
+        y_real = [(index, line["at"]) for index, line in y_matches if not line.get("image_boundary")]
         x_pitch, _ = np.polyfit(*zip(*x_real), 1)
         y_pitch, _ = np.polyfit(*zip(*y_real), 1)
         if abs(x_pitch - y_pitch) > pitch * .025:
@@ -235,14 +263,16 @@ def _locate(pixels, header_box):
         left = float(np.median([at - index * pitch for index, at in x_real]))
         top = float(np.median([at - index * pitch for index, at in y_real]))
     right, bottom = left + COLUMNS * pitch, top + ROWS * pitch
-    if left < -1 or top < -1 or right > width + 1 or bottom > height + 1:
+    clip = max(1., pitch * CLIPPED_EDGE)
+    if left < -clip or top < -clip or right > width + clip or bottom > height + clip:
         return None
     return {
-        "origin": (max(0., left), max(0., top)), "pitch": pitch,
+        # A frame just outside the capture keeps its true, slightly negative origin.
+        "origin": (left, top), "pitch": pitch,
         "bounds": (max(0, round(left)), max(0, round(top)),
                    min(width, round(right)), min(height, round(bottom))),
         "horizontal_hits": ROWS + 1, "vertical_hits": len(x_matches),
-        "image_boundary": at_edge or any(line.get("image_boundary") for _, line in y_matches),
+        "image_boundary": at_edge or any(line.get("image_boundary") for _, line in (*x_matches, *y_matches)),
         "edges": edges,
     }
 
@@ -309,6 +339,25 @@ def _corner_strength(pixels, box, pitch, bottom_right=False):
                           (template_size, template_size), interpolation=cv2.INTER_AREA)
     radius = max(1, round(pitch * .055))
     x, y = ((right - template_size, bottom - template_size) if bottom_right else (left, top))
+    height, width = pixels.shape[:2]
+    if min(x, y) < 0 or x + template_size > width or y + template_size > height:
+        # The capture ends a few pixels inside the grid frame. Match the
+        # visible part of the curl, which must keep the frame's colour.
+        part = template[max(0, -y):max(0, min(template_size, height - y)),
+                        max(0, -x):max(0, min(template_size, width - x))]
+        if min(part.shape[:2]) < 3:
+            return 0.
+        top_left = (max(0, y - 2 * bottom_right), max(0, x - 2 * bottom_right))
+        search = pixels[top_left[0]:top_left[0] + part.shape[0] + 2, top_left[1]:top_left[1] + part.shape[1] + 2]
+        if min(search.shape[0] - part.shape[0], search.shape[1] - part.shape[1]) < 0:
+            return 0.
+        _, score, _, at = cv2.minMaxLoc(cv2.matchTemplate(search, part, cv2.TM_CCOEFF_NORMED))
+        patch = search[at[1]:at[1] + part.shape[0], at[0]:at[0] + part.shape[1]].astype(np.float32)
+        red, green, blue = patch.transpose(2, 0, 1)
+        ornate = float(((red > green * 1.17) & (green > blue * 1.15) & (red > 65) & (blue < red * .65)).mean())
+        # Cutting off the outer rows weakens the shape most. Cells at a cut
+        # edge without a frame corner show none of its colour (at most .31).
+        return float(score) if (score >= .55 and ornate >= .5) or (score >= .35 and ornate >= .6) else 0.
     search = pixels[max(0, y - radius):y + template_size + radius,
                     max(0, x - radius):x + template_size + radius]
     if min(search.shape[:2]) < template_size:
@@ -383,6 +432,13 @@ def _corner_strength(pixels, box, pitch, bottom_right=False):
     # Icon artwork sometimes overlaps the lower ornament.  At small capture
     # scales the upper eight-pixel ornament also loses detail to resampling.
     threshold = .60 if bottom_right else (.65 if pitch < 35 else .72)
+    if (bottom_right and score < threshold and score >= .40 and float(ornate.mean()) >= .35 and
+            max(abs(at[0] - min(radius, x)), abs(at[1] - min(radius, y))) <= 1):
+        # A pendant or dark base can cover half of a lower curl. Its frame
+        # colour still sits exactly on the cell corner, which artwork details
+        # inside a larger item do not match (at most .28 on real pages). It
+        # stays a weak corner, so a strong frame edge still takes precedence.
+        return float(score)
     # Compression can blur a partly covered upper curl below the ordinary
     # shape floor. Require three quarters of its matched patch to have the
     # frame's gold color before using the modestly lower shape threshold.
@@ -390,6 +446,30 @@ def _corner_strength(pixels, box, pitch, bottom_right=False):
     if not bottom_right and float(ornate.mean()) >= .75:
         threshold = min(threshold, .68)
     return float(score) if score >= threshold else 0.
+
+
+def _hover_frame(pixels, origin, pitch, cells):
+    """Recognize the hovered reward's gold highlight along a footprint's lower and right edges.
+
+    The highlight replaces the ornate lower corner of the item under the
+    cursor. Both full-length edge lines must be gold, so a smaller or larger
+    rectangle inside or around the same item cannot match.
+    """
+    row, column = divmod(min(cells) - 1, COLUMNS)
+    width = max((part - 1) % COLUMNS for part in cells) - column + 1
+    height = max((part - 1) // COLUMNS for part in cells) - row + 1
+    left, top, right, bottom = _cell_box(origin, pitch, column, row, width, height)
+    inset = max(2, round(pitch * .08))
+    if min(left, top) + inset < 0 or bottom + 3 > pixels.shape[0] or right + 3 > pixels.shape[1]:
+        return False
+
+    def gold(strip):
+        red, green, blue = strip.astype(np.int32).T
+        return (red > 140) & (green > 110) & (blue < green * .8) & (red >= green)
+
+    lower = max(float(gold(pixels[at, left + inset:right - inset]).mean()) for at in range(bottom - 3, bottom + 3))
+    side = max(float(gold(pixels[top + inset:bottom - inset, at]).mean()) for at in range(right - 3, right + 3))
+    return lower >= .6 and side >= .6
 
 
 def _no_divider(pixels, edges, origin, pitch, row, column, vertical):
@@ -446,8 +526,8 @@ def _footprint_pixels(pixels, geometry):
     """
     # Origin/pitch also describe the normalized image; stored capture bounds
     # deliberately remain in original-image coordinates after resizing.
-    left, top, right, bottom = _cell_box(geometry["origin"], geometry["pitch"],
-                                        0, 0, COLUMNS, ROWS)
+    left, top, right, bottom = (max(0, value) for value in _cell_box(
+        geometry["origin"], geometry["pitch"], 0, 0, COLUMNS, ROWS))
     grid = pixels[top:bottom, left:right].astype(np.float32)
     if not grid.size:
         return pixels
@@ -486,7 +566,23 @@ def _rewards_at_scale(pixels, geometry):
     top_corners = {slot: _corner_strength(pixels, boxes[slot], pitch) for slot in frame_cells}
     bottom_corners = {slot: _corner_strength(pixels, boxes[slot], pitch, True)
                       for slot in frame_cells}
-    groups, used = [], set()
+    groups, used, hovered = [], set(), set()
+
+    def closing(cells, last):
+        """Return the lower-corner score, or a strong score for the hovered reward's highlight."""
+        score = bottom_corners.get(last, 0)
+        return STRONG_CORNER if score < .35 and _hover_frame(pixels, origin, pitch, cells) else score
+
+    def closes_alone(slot, allowed):
+        """Check whether an upper corner can close a frame in its own column."""
+        for height in range(1, min(4, ROWS - (slot - 1) // COLUMNS) + 1):
+            cells = {slot + dy * COLUMNS for dy in range(height)}
+            if (cells <= allowed and not cells & used and
+                    not any(top_corners[part] >= .35 for part in cells - {slot}) and
+                    closing(cells, slot + (height - 1) * COLUMNS) >= .35):
+                return True
+        return False
+
     # The game keeps faint cell dividers beneath large unique gear artwork.
     # Its paired ornate corners establish the outer item rectangle instead.
     # Rectangles whose every cell shows artwork are claimed first. Dark backing
@@ -503,28 +599,37 @@ def _rewards_at_scale(pixels, geometry):
                     cells = {slot + dy * COLUMNS + dx
                              for dy in range(height) for dx in range(width)}
                     last = slot + (height - 1) * COLUMNS + width - 1
-                    closing = bottom_corners.get(last, 0)
-                    if not cells <= allowed or cells & used or closing < .35:
+                    if not cells <= allowed or cells & used:
                         continue
-                    if any(top_corners[part] >= .35 for part in cells - {slot}):
+                    closed = closing(cells, last)
+                    if closed < .35 or any(top_corners[part] >= .35 for part in cells - {slot}):
                         continue
                     inner = [bottom_corners[part] for part in cells - {last} if bottom_corners[part] >= .35]
                     # Artwork can imitate a weak lower curl inside its own
                     # item. A strong far corner, with no upper corner between,
                     # still closes the frame around it.
-                    if inner and not (closing >= STRONG_CORNER and max(inner) < WEAK_CORNER):
+                    if inner and not (closed >= STRONG_CORNER and max(inner) < WEAK_CORNER):
                         continue
-                    rectangles.append((closing < WEAK_CORNER, len(cells), cells))
+                    # A cell beside an upper corner that cannot close in its
+                    # own column is that item's second column, not this one's.
+                    if any((part - 1) % COLUMNS and part - 1 not in cells and part - 1 not in used and
+                           top_corners.get(part - 1, 0) >= .35 and not closes_alone(part - 1, allowed)
+                           for part in cells - {slot}):
+                        continue
+                    rectangles.append((closed < WEAK_CORNER, len(cells), cells,
+                                       bottom_corners.get(last, 0) < .35))
             if rectangles:
                 # A narrow rectangle continuing into the next item's lower
                 # corner can have fewer cells than this item's proper rectangle.
                 # The first matching bottom edge closes the current frame,
                 # unless only a weak imitation closes it before a strong one.
-                strong = any(not weak for weak, _size, _cells in rectangles)
-                _, _, cells = min(rectangles, key=lambda entry: (
+                strong = any(not entry[0] for entry in rectangles)
+                _, _, cells, highlight = min(rectangles, key=lambda entry: (
                     strong and entry[0], max((part - 1) // COLUMNS for part in entry[2]), entry[1]))
                 groups.append(cells)
                 used.update(cells)
+                if highlight:
+                    hovered.add(min(cells))
 
     remaining = occupied - used
     components = {slot: {slot} for slot in remaining}
@@ -565,7 +670,8 @@ def _rewards_at_scale(pixels, geometry):
         width = max((part - 1) % COLUMNS for part in cells) - column + 1
         height = max((part - 1) // COLUMNS for part in cells) - row + 1
         rewards.append({"slots": sorted(cells),
-                        "box": _cell_box(origin, pitch, column, row, width, height)})
+                        "box": _cell_box(origin, pitch, column, row, width, height),
+                        **({"hovered": True} if min(cells) in hovered else {})})
     return rewards
 
 

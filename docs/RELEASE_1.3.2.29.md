@@ -25,6 +25,23 @@ or view the [release and checksum](https://github.com/Craftyxii/PoE2-Data-Logger
 - On the four captured uniques (Freedom of Faith, Visions of Paradise and both
   Mastered Domains) every modifier is read, learned and auto-saved.
 
+## Ritual pages
+
+- **More uniques named.** The catalog lists every shield, one-hand mace, staff
+  and focus at its class's largest size, but the game shows a unique at its
+  sprite's size. 56 such uniques, including Frostbreath, Brynhand's Mark,
+  Crest of Ardura and Dusk Vigil, were never compared with their own art. On
+  46 real pages 25 more rewards are now named, each checked against the art.
+- **The reward under the cursor stays whole** and is named, instead of being
+  split into one unnamed reward per cell.
+- **Partly covered items stay whole**, and an amulet is no longer joined to the
+  armour below it.
+- **Tight capture regions work.** A Ritual region that ends a few pixels inside
+  the grid frame reads the same rewards; it used to lose the whole page.
+- **Clean pages save themselves.** A complete page with nothing to review is
+  saved automatically even when a reward's tooltip or the Tribute counter is
+  left over on screen.
+
 ## Fixes
 
 - **General-key hovers.** A Rite map whose modifier mentions Favours and

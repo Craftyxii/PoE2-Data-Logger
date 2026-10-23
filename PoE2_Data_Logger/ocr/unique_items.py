@@ -115,10 +115,27 @@ def _catalog():
                     any(not _label(name) for name in row.get("shared_names", []))):
                 raise ValueError("Invalid unique catalog entry.")
             ids.add(row["id"])
-            items.append(dict(row))
+            items.append({**row, "footprints": _footprints(row)})
         _CATALOG = _Catalog(root, signature + (digest,),
                             data["source"]["revision"], tuple(items))
         return _CATALOG
+
+
+def _footprints(row):
+    """Return the metadata footprint and, when it differs, the sprite's own cell footprint.
+
+    The catalog gives some classes their largest footprint (a 2x4 shield or
+    mace, a 2x4 staff), but the game sizes such a unique to its sprite: cell
+    textures measure 104 pixels per cell plus a 4-pixel border.
+    """
+    shapes = {(row["columns"], row["rows"])}
+    width, height = row.get("image_width"), row.get("image_height")
+    if type(width) is int and type(height) is int:
+        cells = tuple(round((size - 4) / 104) for size in (width, height))
+        if (1 <= cells[0] <= 2 and 1 <= cells[1] <= 4 and
+                all(abs(size - (104 * count + 4)) <= 24 for size, count in zip((width, height), cells))):
+            shapes.add(cells)
+    return tuple(sorted(shapes))
 
 
 def names():
@@ -143,7 +160,7 @@ def prepare_artwork():
     integrity fallback. Valid sibling footprints can still be prepared.
     """
     try:
-        shapes = sorted({(row["columns"], row["rows"]) for row in _catalog().items})
+        shapes = sorted({shape for row in _catalog().items for shape in row["footprints"]})
     except (OSError, ValueError, TypeError):
         return 0
     prepared = 0
@@ -165,7 +182,7 @@ def _bank(shape):
     catalog = _catalog()
     groups = OrderedDict()
     for row in catalog.items:
-        if (row["columns"], row["rows"]) != shape:
+        if shape not in row["footprints"]:
             continue
         group = groups.setdefault(row["image_sha256"], {"row": row, "names": set()})
         group["names"].add(row["name"])
@@ -200,9 +217,9 @@ def _bank(shape):
                 if (image.mode != "RGBA" or min(image.size) < 1 or max(image.size) > 1024 or
                         image.width * image.height > 1_000_000):
                     raise ValueError("Unsupported unique artwork.")
-                # Source sprites can occupy less than the metadata footprint
-                # (for example a 2x3 sprite assigned to a 2x4 shield). Retain
-                # their aspect and alpha rather than stretching into cells.
+                # A sprite can occupy less than a metadata footprint (a 2x3
+                # sprite listed as a 2x4 shield); it also joins its own 2x3
+                # bank. Retain aspect and alpha rather than stretching into cells.
                 scale = min(width / image.width, height / image.height)
                 sizes = {(max(1, round(image.width * scale)),
                           max(1, round(image.height * scale))),
@@ -319,6 +336,12 @@ def _rank(bank, image):
         # Reject a match that explains a small piece of a different item.
         border = np.concatenate((query[0], query[-1], query[:, 0], query[:, -1]))
         background = np.median(border, axis=0)
+        if float(background.max()) > 40:
+            # A hovered reward's gold and gray highlight band runs along every
+            # edge. The item's dark backing still fills the rest of its cells.
+            pixels = query.reshape(-1, 3)
+            brightness = pixels.max(axis=1)
+            background = np.median(pixels[brightness <= np.percentile(brightness, 25)], axis=0)
         foreground = (np.square(query.astype(np.float32) - background).sum(axis=2) > 900)
         foreground[:2] = foreground[-2:] = False
         foreground[:, :2] = foreground[:, -2:] = False

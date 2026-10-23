@@ -281,8 +281,12 @@ def clear_ritual_read(result, omen_names):
     if strictness == 100:
         return False
     items = result.get("items") or []
+    # A verified complete grid establishes every reward; leftover screen text
+    # (a hovered tooltip, the Tribute counter) cannot add or change one.
+    grid_complete = bool(result.get("grid_detected")) and not result.get("coverage_uncertain")
     if (not items or any(result.get(flag) for flag in
-            ("unmatched", "unknown", "coverage_uncertain", "needs_review", "unresolved_count"))):
+            ("unknown", "coverage_uncertain", "needs_review", "unresolved_count")) or
+            (result.get("unmatched") and not grid_complete)):
         return False
     if result.get("reward_count") is not None and result["reward_count"] != len(items):
         return False

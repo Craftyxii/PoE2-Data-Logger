@@ -1762,6 +1762,31 @@ def _ritual_reward_icon(reader, cell, label, examples, icon=None, strictness=ocr
     return name, float(icon.get("score", 0)), candidates
 
 
+def _without_hover(image, box, pitch):
+    """Paint the hover highlight band and the dividers it reveals with the reward's own backing.
+
+    A hovered reward shows a gold-and-gray band inside its edge and the cell
+    dividers beneath its artwork; neither belongs to the catalog art. Only
+    dark divider pixels are painted, so artwork crossing a divider stays.
+    """
+    left, top, right, bottom = box
+    pixels = np.asarray(image.crop(box).convert("RGB")).copy()
+    brightness = pixels.max(axis=2)
+    backing = np.median(pixels[brightness <= np.percentile(brightness, 25)], axis=0).astype(np.uint8)
+    band = max(2, round(pitch * .114))
+    pixels[:band] = pixels[-band:] = backing
+    pixels[:, :band] = pixels[:, -band:] = backing
+    for step in range(1, round((right - left) / pitch)):
+        at = round(step * pitch)
+        strip = pixels[:, at - 1:at + 2]
+        strip[strip.max(axis=2) < 90] = backing
+    for step in range(1, round((bottom - top) / pitch)):
+        at = round(step * pitch)
+        strip = pixels[at - 1:at + 2]
+        strip[strip.max(axis=2) < 90] = backing
+    return Image.fromarray(pixels)
+
+
 def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, strictness=ocr_sensitivity.DEFAULT):
     """Identify each verified reward footprint without including its frame.
 
@@ -1822,6 +1847,7 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
         unique = None
         identity_conflict = []
         suggested_omen = False
+        unframed_family = False
         if not multiple:
             hint = digits(label)
             # Establish shared gray artwork before a reviewed sibling can win.
@@ -1843,6 +1869,7 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
                 if catalog_icon is None or icon.get("family"):
                     catalog_icon = icon
                 if icon.get("family"):
+                    unframed_family = shown_cell is not cells[index]
                     break
         if shape is not None:
             if shape not in reviewed:
@@ -1852,10 +1879,17 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
             if multiple or (not catalog_icon.get("shared_icon") and
                             not (type(label.get("count")) is int and label["count"] > 1)):
                 unique = unique_items.match(shown, shape, strictness=strictness)
-            if unique and not multiple and catalog_icon.get("family"):
+                if unique is None and reward.get("hovered"):
+                    # The item under the cursor: match its art without the highlight.
+                    unique = unique_items.match(_without_hover(image, box, grid["pitch"]), shape,
+                                                strictness=strictness)
+            if (unique and not multiple and catalog_icon.get("family") and
+                    not (unframed_family and unique.get("name"))):
                 # Match Inventory's cross-catalog safeguard before certifying
                 # identity. These matchers have incomparable diagnostic scores;
                 # credible competing artwork must remain a choice, not a winner.
+                # Currency art seen only after blanking the cell edge cannot
+                # veto a confident unique name: the full cell matched no currency.
                 item_names = unique.get("candidate_names") or [unique.get("name")]
                 currency_names = catalog_icon.get("members") or []
                 if not set(item_names).issubset(currency_names):
