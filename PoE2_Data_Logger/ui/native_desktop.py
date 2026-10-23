@@ -51,7 +51,7 @@ from PoE2_Data_Logger.core.export_files import write_export_files
 
 
 HERE = Path(__file__).resolve().parent.parent
-WINDOW_TITLE = "PoE2 Data Logger 1.3.2.27 Beta"
+WINDOW_TITLE = "PoE2 Data Logger 1.3.2.28 Beta"
 SCAN_TIMEOUT_MS = 90000
 SCAN_PRESENTATION_RETRY_MS = 100
 SCAN_PRESENTATION_WAIT_SECONDS = 10

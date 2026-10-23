@@ -1,7 +1,12 @@
 # Changelog
 
-## Unreleased
+## 1.3.2.28 Beta
 
+- Add **Reset map…** to Map / Tablets. After confirmation it clears every scan and log saved for the current map in one action that Undo restores, keeping the Map #, map and Atlas settings, earlier maps and learned OCR references.
+- Load the OCR text models while each worker prepares artwork at startup, so the first Currency/Ritual scan no longer pays the model setup.
+- Remove the unreachable map-only `undo_empty_map` backend and its restore-only metadata; the Undo button's universal undo already restores the previous map's waystone, expedition and Biome, and those scenarios are now tested against it.
+- Test that every setting saved on a later map leaves finished maps and their export rows unchanged until Undo reopens them.
+- Protect running 1.3.2.27 Beta clients during installation and removal, retaining the earlier-client guards.
 - Remove the optional GPU label setting and its separately built DirectML helper. Count/tier labels use the same CPU OCR engine and exact-reading cache as before; artwork pre-caching is unchanged. This drops a second executable and its runtime from the installer and the build.
 - Add `tools/run_tests.py --jobs N` to run the full suite's isolated batches in parallel.
 - Name gray Ritual rewards whose artwork belongs to one item, including Omens with their own source art, Sacred Bloom, Idols and currency. Gray Omens sharing source art and near ties stay in review with every look-alike suggested. Gray artwork is never matched by color, and Abyss Omens, which never appear in Ritual offers, are not Ritual gray rivals.
