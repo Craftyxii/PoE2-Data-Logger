@@ -2539,10 +2539,14 @@ class LoggerWindow(QMainWindow):
     def _rite_read(self, result):
         """Save a scanned map tooltip's modifiers as the current map's Rite stage.
 
-        Rescanning replaces that map's modifiers. Without a selected Rite, one is
-        started so + New map closes this stage and the next map continues it.
+        Only a Ritual activity map records Rite modifiers. Rescanning replaces
+        that map's modifiers. Without a selected Rite, one is started so + New
+        map closes this stage and the next Ritual map continues it.
         """
         state = logger.ritual_rite_state()
+        if not state["ritual_activity"]:
+            raise ValueError("Rite modifiers are recorded only when Activity Type is Ritual. "
+                             "Select Ritual for this map, then scan the map again.")
         if not state["selected_rite_id"]:
             state = logger.new_ritual_rite()
         logger.save_ritual_rite_affixes(result["affixes"], expected_map_id=state["map_id"],

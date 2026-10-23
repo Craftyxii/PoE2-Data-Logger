@@ -21,6 +21,9 @@ class RitualRiteUiTests(unittest.TestCase):
         self.fixture.setUp()
         self.window = self.fixture.window
         self.catalog = ritual_rites_catalog.affixes()
+        # Rites apply only while Ritual is the selected Activity Type.
+        logger.save_settings({"activity_type": "Ritual"})
+        self.window.refresh()
 
     def tearDown(self):
         self.fixture.tearDown()

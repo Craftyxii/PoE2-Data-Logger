@@ -99,6 +99,8 @@ class RiteWorkbookStorageTests(unittest.TestCase):
         logger._READY = False
         logger.initialize()
         logger.clear_export_and_reset_ids()
+        # Rites apply only while Ritual is the selected Activity Type.
+        logger.save_settings({"activity_type": "Ritual"})
 
     def tearDown(self):
         store.DATA_DIR = self.previous

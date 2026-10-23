@@ -7,6 +7,7 @@
 - Name unique items whose artwork has no rival anywhere in the catalog; shared art and close rivals still require a choice.
 - Accept a stack count read once at high confidence when its digits match the separately counted label glyphs; conflicting and clipped counts stay in review.
 - Scan Rite of the Nameless modifiers from a hovered Atlas map with the general scan key and save them as the current map's Rite stage; unknown wording becomes a custom affix of its Foretold kind, and + New map advances the stage.
+- Apply Rites only while Ritual is the selected Activity Type: other maps keep the remembered Rite selection but record no Rite metadata, take no stage and inherit no Foretold Proliferation effects.
 - Read kill counters at every game resolution and UI scale, treating resampled cell dividers and border lines as UI strokes rather than digits.
 
 ## 1.3.2.27 Beta

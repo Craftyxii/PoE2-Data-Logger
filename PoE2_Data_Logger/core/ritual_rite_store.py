@@ -80,11 +80,16 @@ def _inherited_sources(db, rite_id, map_id):
 
 
 def _live_state(db, map_id):
-    """Assemble this map's Rite draft, ordinal and completed-map sources without writing."""
+    """Assemble this map's Rite draft, ordinal and completed-map sources without writing.
+
+    Rites apply only while Ritual is the selected Activity Type; other maps keep
+    the remembered selection but join no Rite stage and inherit nothing.
+    """
+    ritual = (_meta(db, "settings") or {}).get("activity_type") == "Ritual"
     rite = _selected_rite(db)
     selected = rite["rite_id"] if rite else None
     ordinal = None
-    if selected is not None:
+    if selected is not None and ritual:
         prior = db.execute("SELECT ordinal FROM ritual_rite_completions WHERE map_id=? AND rite_id=?",
                            (map_id, selected)).fetchone()
         ordinal = prior[0] if prior else db.execute(
@@ -93,8 +98,8 @@ def _live_state(db, map_id):
     draft = db.execute("SELECT affixes_json FROM ritual_rite_map_settings WHERE map_id=?", (map_id,)).fetchone()
     return {"selected_rite_id": selected, "selected_rite_name": rite["name"] if rite else "",
             "map_id": map_id, "map_ordinal": ordinal, "session_generation": _meta(db, "session_generation", 0),
-            "current_affixes": json.loads(draft[0]) if draft else [],
-            "inherited_sources": _inherited_sources(db, selected, map_id),
+            "current_affixes": json.loads(draft[0]) if draft else [], "ritual_activity": ritual,
+            "inherited_sources": _inherited_sources(db, selected, map_id) if ritual else [],
             "available_rites": [{"id": row["rite_id"], "name": row["name"]}
                                 for row in db.execute("SELECT rite_id,name FROM ritual_rites ORDER BY rowid")]}
 
@@ -106,7 +111,8 @@ def state(db):
 
 def _context_from_state(value):
     """Project optional Rite state into observation fields, omitting wholly empty metadata."""
-    if not (value["selected_rite_id"] or value["current_affixes"] or value["inherited_sources"]):
+    if not value["ritual_activity"] or not (value["selected_rite_id"] or value["current_affixes"] or
+                                             value["inherited_sources"]):
         return {}
     return {"ritual_rite_id": value["selected_rite_id"], "ritual_rite_name": value["selected_rite_name"],
             "ritual_rite_map_ordinal": value["map_ordinal"], "ritual_rite_affixes": value["current_affixes"],

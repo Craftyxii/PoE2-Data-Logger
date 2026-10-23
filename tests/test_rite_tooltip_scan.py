@@ -81,7 +81,29 @@ class RiteTooltipStageTests(unittest.TestCase):
     def tearDown(self):
         self.fixture.tearDown()
 
+    def test_rites_stay_inactive_unless_ritual_is_the_selected_activity(self):
+        logger.save_settings({"activity_type": "Expedition"})
+        with self.assertRaisesRegex(ValueError, "Activity Type is Ritual"):
+            self.window._rite_read(scan("ravine.png"))
+        self.assertEqual(logger.ritual_rite_state()["available_rites"], [])
+        # An already selected Rite does not take a stage from a non-Ritual map.
+        logger.save_settings({"activity_type": "Ritual"})
+        self.window._rite_read(scan("ravine.png"))
+        logger.finish_map(1, 2, 3)
+        logger.start_map()
+        logger.save_settings({"activity_type": "Expedition"})
+        idle = logger.ritual_rite_state()
+        self.assertTrue(idle["selected_rite_id"])
+        self.assertFalse(idle["ritual_activity"])
+        self.assertEqual((idle["map_ordinal"], idle["inherited_sources"]), (None, []))
+        logger.finish_map(1, 2, 3)
+        logger.save_settings({"activity_type": "Ritual"})
+        resumed = logger.ritual_rite_state()
+        self.assertEqual(resumed["map_ordinal"], 2)
+        self.assertEqual(len(resumed["inherited_sources"]), 1)
+
     def test_scans_start_a_rite_replace_the_stage_and_new_map_advances_it(self):
+        logger.save_settings({"activity_type": "Ritual"})
         self.assertIsNone(logger.ritual_rite_state()["selected_rite_id"])
         self.window._rite_read(scan("ravine.png"))
         self.window._rite_read(scan("necropolis_bounty.png"))
