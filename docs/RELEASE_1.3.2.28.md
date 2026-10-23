@@ -48,8 +48,8 @@ with no wrong accepted count out of 285.
   Labels use the same CPU engine and caches as before; artwork pre-caching is
   unchanged, and the installer is smaller.
 - Dead review flags, test-only wrappers and the unreachable map-only undo
-  backend are removed. The full suite can run its isolated batches in parallel,
-  roughly halving release test time.
+  backend are removed. The full suite runs its isolated batches two at a time,
+  cutting the Windows release suite from about 58 to 39 minutes.
 
 Settings saved on a later map, including Atlas, waystone, master, tablet,
 activity, Rite and OCR settings, leave finished maps and their export rows
