@@ -69,6 +69,15 @@ class CurrencyTrainingCapturesTests(unittest.TestCase):
         # The unbadged neighbour of slot 38 keeps its base tier.
         self.assertEqual((items[39]["name"], items[39]["quantity"]), ("Orb of Augmentation", 30))
 
+    def test_ten_stacks_on_pale_art_suggest_ten_and_stay_held(self):
+        """Pale crystal art seen through the 0 no longer turns a held 10 into a suggested 1."""
+        items, _unknown = self.scan("inventory_121810.png")
+        for slot, name in ((18, "Perfect Essence of Thawing"), (30, "Perfect Essence of Thawing"),
+                           (43, "Perfect Essence of Thawing"), (55, "Perfect Essence of Ice")):
+            with self.subTest(slot=slot):
+                self.assertEqual((items[slot]["name"], items[slot]["quantity"]), (name, 10))
+                self.assertTrue(items[slot]["count_needs_review"])
+
     def test_tier_fifteen_waystones_are_never_suggested_as_tier_sixteen(self):
         """Ring waystones marked XV suggest Tier 15 and still wait for a label."""
         _items, unknown = self.scan("inventory_115801.png")

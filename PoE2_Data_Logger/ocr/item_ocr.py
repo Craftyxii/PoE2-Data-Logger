@@ -657,18 +657,26 @@ def _inventory_labels(image):
     fallback_images, fallback_positions = [], []
     for slot in labels:
         if labels[slot].get("count") in (None, 1) and labels[slot]["count_present"]:
-            for kind, patch in fallback_crops(inventory_cell(image, slot)):
+            cell = inventory_cell(image, slot)
+            for kind, patch in fallback_crops(cell):
                 fallback_images.append(np.asarray(patch))
                 fallback_positions.append((slot, kind))
+            if labels[slot].get("count") is None:
+                # Pale artwork showing through a 0 can leave a stray part beside
+                # the aligned digits, so no complete crop exists. The aligned
+                # digits alone still suggest the held count.
+                for patch in count_crops(cell)[0]:
+                    fallback_images.append(np.asarray(patch))
+                    fallback_positions.append((slot, "aligned"))
     if fallback_images:
         readings = _inventory_patch_readings(fallback_images)
         alternatives = {}
         for (slot, kind), (raw, score) in zip(fallback_positions, readings):
             text = raw.strip().replace(" ", "").rstrip(".,:;")
             if re.fullmatch(r"\d{1,6}", text) and float(score) >= .85 and 0 < int(text) <= 1000000:
-                alternatives.setdefault(slot, {"mask": [], "raw": []})[kind].append(int(text))
+                alternatives.setdefault(slot, {"mask": [], "raw": [], "aligned": []})[kind].append(int(text))
         for slot, readings in alternatives.items():
-            masked, raw = readings["mask"], readings["raw"]
+            masked, raw, aligned = readings["mask"], readings["raw"], readings["aligned"]
             if labels[slot].get("count") == 1:
                 # Retain the complete-crop result when a wider retry proposes
                 # another value, so the independent native reader can resolve
@@ -688,6 +696,10 @@ def _inventory_labels(image):
                 value = 11
             elif len(raw) >= 2 and len(set(raw)) == 1 and raw[0] != value:
                 value = raw[0]
+            if (len(aligned) >= 2 and len(set(aligned)) == 1 and
+                    len(str(aligned[0])) > len(str(value or ""))):
+                # Wider crops that include the artwork can drop a trailing digit.
+                value = aligned[0]
             if value is not None:
                 labels[slot]["count_candidate"] = value
     return labels
