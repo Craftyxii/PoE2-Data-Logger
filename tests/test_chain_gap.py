@@ -78,21 +78,21 @@ class ChainGapTests(unittest.TestCase):
         """Retained Chain audit events do not turn a fully discarded chain into a live one."""
         self.append()
         logger.discard_chain()
-        self.assertFalse(chain_gap.needs_confirmation(logger.scan_context(), self.entered + timedelta(days=1)))
+        self.assertFalse(chain_gap.inspect_gap(logger.scan_context(), self.entered + timedelta(days=1)).needs_prompt)
 
     def test_completed_chain_does_not_prompt_when_selected_again(self):
         """A completed chain retains its history without being treated as an open continuation."""
         self.append()
         logger.complete_chain(logger.scan_context())
         logger.save_settings({"expedition": 1})
-        self.assertFalse(chain_gap.needs_confirmation(logger.scan_context(), self.entered + timedelta(days=1)))
+        self.assertFalse(chain_gap.inspect_gap(logger.scan_context(), self.entered + timedelta(days=1)).needs_prompt)
 
     def test_restart_uses_persisted_entry_time(self):
         """The interval survives process-style logger reinitialization without a memory clock."""
         self.append()
         logger._READY = False
         logger.initialize()
-        self.assertTrue(chain_gap.needs_confirmation(logger.scan_context(), self.entered + timedelta(seconds=61)))
+        self.assertTrue(chain_gap.inspect_gap(logger.scan_context(), self.entered + timedelta(seconds=61)).needs_prompt)
 
     def test_imported_style_rows_without_a_chain_audit_keep_timing_unknown(self):
         """Missing historical entry times never become an invented timeout interval."""
@@ -107,10 +107,10 @@ class ChainGapTests(unittest.TestCase):
         """Only this map's selected captured expedition can establish entry timing."""
         self.append()
         logger.save_settings({"expedition": 2})
-        self.assertFalse(chain_gap.needs_confirmation(logger.scan_context(), self.entered + timedelta(days=1)))
+        self.assertFalse(chain_gap.inspect_gap(logger.scan_context(), self.entered + timedelta(days=1)).needs_prompt)
         logger.finish_map(0, 0, 0)
         logger.start_map()
-        self.assertFalse(chain_gap.needs_confirmation(logger.scan_context(), self.entered + timedelta(days=1)))
+        self.assertFalse(chain_gap.inspect_gap(logger.scan_context(), self.entered + timedelta(days=1)).needs_prompt)
 
     def test_stale_generation_map_expedition_and_revision_are_rejected(self):
         """The question cannot validate a capture after its saved ownership changes."""
@@ -120,28 +120,28 @@ class ChainGapTests(unittest.TestCase):
                            ("_capture_map_id", "M0999"), ("_capture_expedition", 2),
                            ("_capture_map_pending", True), ("_capture_chain_revision", 1)):
             with self.subTest(key=key), self.assertRaises(ValueError):
-                chain_gap.needs_confirmation({**context, key: value}, self.entered + timedelta(seconds=61))
+                chain_gap.inspect_gap({**context, key: value}, self.entered + timedelta(seconds=61)).needs_prompt
 
     def test_equivalent_timezones_and_backward_clock_do_not_invent_a_gap(self):
         """UTC normalization compares instants, while an earlier wall clock is not a timeout."""
         self.append()
         shifted = (self.entered + timedelta(seconds=61)).astimezone(timezone(timedelta(hours=-6)))
-        self.assertTrue(chain_gap.needs_confirmation(logger.scan_context(), shifted))
-        self.assertFalse(chain_gap.needs_confirmation(logger.scan_context(), self.entered - timedelta(days=1)))
+        self.assertTrue(chain_gap.inspect_gap(logger.scan_context(), shifted).needs_prompt)
+        self.assertFalse(chain_gap.inspect_gap(logger.scan_context(), self.entered - timedelta(days=1)).needs_prompt)
 
     def test_missing_context_and_ambiguous_clock_are_rejected(self):
         """Ownership and the timing reference must both be explicit and unambiguous."""
         with self.assertRaisesRegex(ValueError, "capture context"):
-            chain_gap.needs_confirmation(None, self.entered)
+            chain_gap.inspect_gap(None, self.entered).needs_prompt
         with self.assertRaisesRegex(ValueError, "timezone-aware"):
-            chain_gap.needs_confirmation(logger.scan_context(), self.entered.replace(tzinfo=None))
+            chain_gap.inspect_gap(logger.scan_context(), self.entered.replace(tzinfo=None)).needs_prompt
 
     def test_inspection_does_not_change_saved_history_or_settings(self):
         """The question helper only reads; it cannot complete, append, or alter the chain."""
         self.append()
         with logger._connect() as db:
             before = list(db.iterdump())
-        self.assertTrue(chain_gap.needs_confirmation(logger.scan_context(), self.entered + timedelta(seconds=61)))
+        self.assertTrue(chain_gap.inspect_gap(logger.scan_context(), self.entered + timedelta(seconds=61)).needs_prompt)
         with logger._connect() as db:
             self.assertEqual(list(db.iterdump()), before)
 

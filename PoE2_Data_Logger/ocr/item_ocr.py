@@ -821,11 +821,6 @@ def _inventory_equipment_footprints(image):
     return [tuple(item["slots"]) for item in inventory_item_footprints(image)]
 
 
-def _inventory_equipment_slots(image):
-    """Retain the existing equipment exclusion as a set of occupied cells."""
-    return {slot for group in _inventory_equipment_footprints(image) for slot in group}
-
-
 def _inventory_unique_footprints(image, labels, cells):
     """Find full equipment candidates without treating a matched stack as part of gear.
 

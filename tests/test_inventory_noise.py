@@ -13,6 +13,11 @@ from PoE2_Data_Logger.core import store, logger_store as logger
 from PoE2_Data_Logger.ocr import currency_ocr, inventory_labels, item_ocr
 
 
+def equipment_slots(image):
+    """Collect the occupied cells of proven whole-item equipment footprints."""
+    return {slot for group in item_ocr._inventory_equipment_footprints(image) for slot in group}
+
+
 class InventoryNoiseTests(unittest.TestCase):
     """Check inventory occupancy, equipment footprints and ambiguous count or tier evidence stay reviewable."""
     @classmethod
@@ -92,7 +97,7 @@ class InventoryNoiseTests(unittest.TestCase):
         """A whole unknown armour needs its name once, with quantity one preserved."""
         image = self.grid()
         image.paste(self.source.crop((1425, 284, 1524, 431)).resize((80, 120)), (200, 40))
-        self.assertEqual(item_ocr._inventory_equipment_slots(image), {18, 19, 30, 31, 42, 43})
+        self.assertEqual(equipment_slots(image), {18, 19, 30, 31, 42, 43})
         with patch.object(currency_ocr, "get_reader", return_value=self.reader):
             result = item_ocr.scan_inventory_grid(image)
         self.assertEqual(len(result["items"]), 1)
@@ -107,7 +112,7 @@ class InventoryNoiseTests(unittest.TestCase):
         """The supplied Mageblood art now reaches review once, with both cells intact."""
         image = self.grid()
         image.paste(self.source.crop((1424, 450, 1525, 501)).resize((80, 40)), (40, 120))
-        self.assertEqual(item_ocr._inventory_equipment_slots(image), {38, 39})
+        self.assertEqual(equipment_slots(image), {38, 39})
         with patch.object(currency_ocr, "get_reader", return_value=self.reader):
             result = item_ocr.scan_inventory_grid(image)
         self.assertEqual(len(result["items"]), 1)
@@ -137,7 +142,7 @@ class InventoryNoiseTests(unittest.TestCase):
         for index, name in enumerate(("Chaos Orb", "Exalted Orb", "Orb of Annulment", "Runic Alloy")):
             entry = next(entry for entry in self.entries if name in entry["members"])
             image.paste(self.art(entry), (40 * index, 0))
-        self.assertEqual(item_ocr._inventory_equipment_slots(image), set())
+        self.assertEqual(equipment_slots(image), set())
 
     def test_isolated_white_pixel_does_not_create_a_stack_count(self):
         """Verify isolated white pixel does not create a stack count."""

@@ -53,8 +53,3 @@ def inspect_gap(context, now=None):
             raise ValueError("The saved chain entry time has no timezone.")
         elapsed = (current_time.astimezone(timezone.utc) - recorded_at.astimezone(timezone.utc)).total_seconds()
         return ChainGap(mid, eid, row["number"], row["recorded_at"], elapsed, elapsed > 60)
-
-
-def needs_confirmation(context, now=None):
-    """Return whether this captured open chain needs the same-chain question."""
-    return inspect_gap(context, now).needs_prompt

@@ -49,7 +49,6 @@ class RitualVerifiedIdentityTests(unittest.TestCase):
                    {"tribute": -1}, {"deferred": None}, {"deferred": "false"},
                    {"needs_review": True}, {"unresolved": True},
                    {"name_needs_review": True}, {"count_needs_review": True},
-                   {"deferred_needs_review": True}, {"deferred_uncertain": True},
                    {"score": float("nan")}, {"score": float("inf")},
                    {"score": -.01}, {"score": 1.01}, {"score": "invalid"},
                    {"category": "Currency"}, {"source": "Legacy x2 reading"})

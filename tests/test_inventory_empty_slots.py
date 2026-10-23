@@ -11,6 +11,11 @@ from PIL import Image
 from PoE2_Data_Logger.ocr import currency_ocr, item_ocr
 
 
+def equipment_slots(image):
+    """Collect the occupied cells of proven whole-item equipment footprints."""
+    return {slot for group in item_ocr._inventory_equipment_footprints(image) for slot in group}
+
+
 class InventoryEmptySlotTests(unittest.TestCase):
     """Check empty-slot rejection and occupied-item matching beside multicell equipment."""
     @classmethod
@@ -107,7 +112,7 @@ class InventoryEmptySlotTests(unittest.TestCase):
         image = self.grid((480, 200))
         image.paste(self.source.crop((1425, 284, 1524, 431)).resize((80, 120)), (200, 40))
         image.paste(self.source.crop((1352, 322, 1402, 378)).resize((40, 40)), (40, 120))
-        self.assertNotIn(38, item_ocr._inventory_equipment_slots(image))
+        self.assertNotIn(38, equipment_slots(image))
         result = self.scan(image)
         # The ring stays its own row rather than joining the armour footprint.
         ring = next(row for row in result["items"] if row["slot"] == 38)
@@ -121,7 +126,7 @@ class InventoryEmptySlotTests(unittest.TestCase):
         image.paste(self.source.crop((1425, 284, 1524, 431)).resize((80, 120)), (200, 40))
         image.paste(self.art("Chaos Orb"), (160, 40))
         image.paste(self.art("Runic Alloy"), (280, 80))
-        self.assertFalse({17, 32} & item_ocr._inventory_equipment_slots(image))
+        self.assertFalse({17, 32} & equipment_slots(image))
         result = self.scan(image)
         self.assertEqual([(row["slot"], row["name"]) for row in result["items"]],
                          [(17, "Chaos Orb"), (18, ""), (32, "Runic Alloy")])

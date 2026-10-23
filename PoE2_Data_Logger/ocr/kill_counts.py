@@ -24,7 +24,6 @@ EXAMPLE = Path(__file__).resolve().parent.parent / "region_examples" / "kills.jp
 # Half-open bounds in the unchanged 1919x1079 user capture, not drawn artwork.
 SKULL_BOUNDS = ((1705, 301, 1723, 322), (1759, 301, 1777, 322),
                 (1815, 301, 1833, 322), (1869, 301, 1887, 322))
-DEFAULT_REGION = (.85, .24, .15, .12)
 
 
 @lru_cache(maxsize=1)

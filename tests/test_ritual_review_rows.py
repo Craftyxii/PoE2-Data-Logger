@@ -185,7 +185,6 @@ class RitualReviewRowsTests(unittest.TestCase):
                    {"name_needs_review": True}, {"count_needs_review": True},
                    {"quantity": 0}, {"quantity": 1.5}, {"quantity": True},
                    {"quantity": 1000001}, {"deferred": None}, {"deferred": "false"},
-                   {"deferred_needs_review": True}, {"deferred_uncertain": True},
                    {"score": .93}, {"score": float("nan")})
         for change in changes:
             with self.subTest(change=change):
@@ -206,9 +205,7 @@ class RitualReviewRowsTests(unittest.TestCase):
                  {**base, "grid_reward_count": None}, {**base, "reward_count": 3}]
         cases.extend({**base, key: value} for key, value in
                      (("unknown", [14]), ("unmatched", ["Unreadable text"]),
-                      ("coverage_uncertain", True), ("needs_review", True), ("unresolved_count", 1),
-                      ("tribute_needs_review", True), ("rerolls_needs_review", True),
-                      ("totals_needs_review", True)))
+                      ("coverage_uncertain", True), ("needs_review", True), ("unresolved_count", 1)))
         for result in cases:
             with self.subTest(result=result):
                 self.assertFalse(clear_ritual_read(result, logger.ritual_names()))

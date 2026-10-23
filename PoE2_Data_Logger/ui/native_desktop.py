@@ -271,7 +271,7 @@ def clear_ritual_reward(item, omen_names, strictness=ocr_sensitivity.DEFAULT):
          (type(item["tribute"]) is not int or not 0 <= item["tribute"] <= 1000000000)) or
         type(item.get("deferred", False)) is not bool or
         any(item.get(flag) for flag in ("needs_review", "unresolved", "name_needs_review",
-            "count_needs_review", "deferred_needs_review", "deferred_uncertain")) or
+            "count_needs_review")) or
         re.search(r"\b[x×]\s*\d+\b", str(item.get("source", "")), re.I))
 
 
@@ -282,8 +282,7 @@ def clear_ritual_read(result, omen_names):
         return False
     items = result.get("items") or []
     if (not items or any(result.get(flag) for flag in
-            ("unmatched", "unknown", "coverage_uncertain", "needs_review", "unresolved_count",
-             "tribute_needs_review", "rerolls_needs_review", "totals_needs_review"))):
+            ("unmatched", "unknown", "coverage_uncertain", "needs_review", "unresolved_count"))):
         return False
     if result.get("reward_count") is not None and result["reward_count"] != len(items):
         return False
@@ -7439,8 +7438,7 @@ class LoggerWindow(QMainWindow):
                     pass
             deferred = QTableWidgetItem()
             deferred.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
-            unknown_deferred = (item.get("deferred_needs_review") or item.get("deferred_uncertain") or
-                                type(item.get("deferred", False)) is not bool)
+            unknown_deferred = type(item.get("deferred", False)) is not bool
             if unknown_deferred:
                 deferred.setFlags(deferred.flags() | Qt.ItemFlag.ItemIsUserTristate)
                 deferred.setCheckState(Qt.CheckState.PartiallyChecked)
