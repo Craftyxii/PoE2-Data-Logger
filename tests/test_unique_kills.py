@@ -98,8 +98,8 @@ class UniqueKillsTests(unittest.TestCase):
         logger.start_map()
         self.assertIsNone(logger.get_state()["unique_kills"])
 
-    def test_unique_only_activity_blocks_first_waystone_exception_and_undo(self):
-        """Verify a saved unique count blocks empty-map undo and late waystone replacement."""
+    def test_unique_only_activity_blocks_first_waystone_exception(self):
+        """Verify a saved unique count blocks late waystone replacement."""
         logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 1}])
         logger.save_kills(None, None, None, unique=0)
         with logger._connect() as db:
@@ -107,20 +107,6 @@ class UniqueKillsTests(unittest.TestCase):
         logger.save_settings({"tier": 16, "waystone": 87, "map_mods": 5})
         with logger._connect() as db:
             self.assertEqual(db.execute("SELECT snapshot_json FROM maps WHERE map_id='M0001'").fetchone()[0], original)
-        with self.assertRaisesRegex(ValueError, "saved activity"):
-            logger.undo_empty_map()
-
-    def test_undo_checks_unique_table_even_without_commit_and_cleans_empty_row(self):
-        """Verify unique-table activity blocks undo while an unknown row is removable."""
-        with logger._connect() as db:
-            db.execute("INSERT INTO map_unique_kills VALUES('M0001',0)")
-        with self.assertRaisesRegex(ValueError, "saved activity"):
-            logger.undo_empty_map()
-        with logger._connect() as db:
-            db.execute("UPDATE map_unique_kills SET unique_kills=NULL")
-        self.assertEqual(logger.undo_empty_map()["current_map_id"], "")
-        with logger._connect() as db:
-            self.assertEqual(db.execute("SELECT count(*) FROM map_unique_kills").fetchone()[0], 0)
 
     def test_schema_upgrade_leaves_existing_map_history_unknown_and_unchanged(self):
         """Verify schema upgrade preserves old map records and leaves unique kills unknown."""

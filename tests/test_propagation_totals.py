@@ -238,8 +238,6 @@ class PropagationTotalsTests(unittest.TestCase):
             snapshots = [json.loads(row[0]) for row in db.execute(
                 "SELECT snapshot_json FROM commits WHERE kind='Propagation' ORDER BY number")]
         self.assertEqual([item["gear_item_rarity"] for item in snapshots], [100, 100])
-        with self.assertRaisesRegex(ValueError, "saved activity"):
-            logger.undo_empty_map()
         logger.clear_export_and_reset_ids()
         logger.start_map()
         before = self.records()

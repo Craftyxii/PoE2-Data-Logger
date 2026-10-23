@@ -617,7 +617,7 @@ class ChainReviewVisibilityTests(unittest.TestCase):
         logger.start_map()
         self.window.refresh()
         self.assertEqual(self.window.header_remnant_id.text(), "—")
-        logger.undo_empty_map()
+        self.assertEqual(logger.undo_last_action()["action"], "New map")
         self.window.refresh()
         self.assertEqual(self.window.header_remnant_id.text(), "#2")
 

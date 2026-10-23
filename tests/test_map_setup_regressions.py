@@ -390,7 +390,7 @@ class MapSetupRegressionTests(unittest.TestCase):
 
     def test_canceling_pending_marker_or_undo_invalidates_preparation_and_restores_old_values(self):
         """Verify canceling pending marker or undo invalidates preparation and restores old values."""
-        for cancel in (lambda: logger.mark_next_map(False), logger.undo_empty_map):
+        for cancel in (lambda: logger.mark_next_map(False), logger.undo_last_action):
             with self.subTest(cancel=cancel):
                 logger.clear_export_and_reset_ids()
                 logger.start_map()
@@ -415,7 +415,7 @@ class MapSetupRegressionTests(unittest.TestCase):
         # No commit yet: this prepared empty map can still be undone.
         logger.save_settings({"tier": 16, "waystone": 99, "map_mods": 6})
         logger.start_map()
-        logger.undo_empty_map()
+        self.assertEqual(logger.undo_last_action()["action"], "New map")
         self.assertEqual(logger.get_state()["settings"]["waystone"], 87)
         self.assertEqual(self.snapshot(), closed)
         logger.mark_next_map(True)

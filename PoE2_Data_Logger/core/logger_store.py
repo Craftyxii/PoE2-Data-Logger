@@ -2977,9 +2977,6 @@ def start_map():
         mid = _map_id(number)
         config = _meta(db, "settings")
         prepared = _prepared_waystone(db, mid)
-        _set_meta(db, "previous_expedition", config["expedition"])
-        # Empty-map cancellation also reverses the classification applied below.
-        _set_meta(db, "previous_biome", config.get("biome", "None"))
         _set_meta(db, "previous_waystone_settings", _waystone_settings(
             prepared["previous_settings"] if prepared and current else config))
         if prepared:
@@ -3006,44 +3003,6 @@ def start_map():
     return get_state()
 
 
-def undo_empty_map():
-    """Cancel a next-map marker or remove an activity-free map and restore its previous selection settings."""
-    with _connect() as db:
-        db.execute("BEGIN IMMEDIATE")
-        if _meta(db, "ocr_pending"):
-            raise ValueError("Save or discard the scanned remnant first.")
-        number = _meta(db, "current_map_number", 0)
-        if not number:
-            raise ValueError("There is no active map to undo.")
-        if _meta(db, "pending_new_map"):
-            _cancel_prepared_waystone(db)
-            _set_meta(db, "pending_new_map", False)
-        else:
-            mid = _map_id(number)
-            if (any(db.execute(f"SELECT 1 FROM {table} WHERE map_id=? LIMIT 1", (mid,)).fetchone()
-                    for table in ("legacy_export", "new_export", "currency_snapshots", "ritual_pages"))
-                    or db.execute("SELECT 1 FROM maps WHERE map_id=? AND kills_json!=?", (mid, _dump([None]*3))).fetchone()
-                    or _unique_kills_for_map(db, mid) is not None
-                    or db.execute("SELECT 1 FROM expeditions WHERE map_id=? AND detonated IS NOT NULL", (mid,)).fetchone()
-                    or db.execute("SELECT 1 FROM commits WHERE map_id=? LIMIT 1", (mid,)).fetchone()):
-                raise ValueError("This map has saved activity. It cannot be undone.")
-            db.execute("DELETE FROM expeditions WHERE map_id=?", (mid,))
-            db.execute("DELETE FROM map_unique_kills WHERE map_id=?", (mid,))
-            db.execute("DELETE FROM maps WHERE map_id=?", (mid,))
-            _set_meta(db, "prepared_waystone_setup", None)
-            _set_meta(db, "current_map_number", number - 1)
-            config = _meta(db, "settings")
-            config["expedition"] = _meta(db, "previous_expedition", 1) if number > 1 else 1
-            previous = _meta(db, "previous_waystone_settings")
-            if number > 1 and previous:
-                config.update(_waystone_settings(previous))
-            previous_biome = _meta(db, "previous_biome")
-            if previous_biome in BIOMES:
-                config["biome"] = previous_biome
-            _set_meta(db, "settings", config)
-    return get_state()
-
-
 def clear_export_and_reset_ids():
     """Clear session records and frozen chain origins atomically, retaining catalogs and settings.
 
@@ -3067,9 +3026,7 @@ def clear_export_and_reset_ids():
         _set_meta(db, "pending_new_map", False)
         _set_meta(db, "ocr_pending", None)
         _set_meta(db, "ocr_pending_mode", None)
-        _set_meta(db, "previous_expedition", 1)
         _set_meta(db, "previous_waystone_settings", None)
-        _set_meta(db, "previous_biome", None)
         _set_meta(db, "prepared_waystone_setup", None)
         _set_meta(db, "reopened_map_id", None)
         _set_meta(db, "scan_commit_count", 0)

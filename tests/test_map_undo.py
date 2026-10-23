@@ -1,4 +1,4 @@
-"""Storage checks restricting new-map undo and preserving prior recorded activity and counters."""
+"""Storage checks for undoing New map while preserving prior recorded activity and counters."""
 
 import json
 from pathlib import Path
@@ -9,7 +9,7 @@ from PoE2_Data_Logger.core import logger_store as logger, store
 
 
 class MapUndoTests(unittest.TestCase):
-    """Exercise empty-map undo and legacy settings repair without rewriting recorded map history."""
+    """Exercise Undo of New map and legacy settings repair without rewriting recorded map history."""
     def setUp(self):
         """Create an isolated database and start the map used by undo checks."""
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-map-undo-")
@@ -42,7 +42,9 @@ class MapUndoTests(unittest.TestCase):
         logger.finish_map(0, 0, 0, 0)
         before = self.history()
         self.assertEqual(logger.start_map()["current_map_id"], "M0002")
-        state = logger.undo_empty_map()
+        undone = logger.undo_last_action()
+        self.assertEqual(undone["action"], "New map")
+        state = undone["state"]
         self.assertEqual(state["current_map_id"], "M0001")
         for key, value in logger.WAYSTONE_DEFAULTS.items():
             self.assertEqual(state["settings"][key], value)
@@ -61,7 +63,11 @@ class MapUndoTests(unittest.TestCase):
         before = self.history()
         logger.start_map()
         logger.save_settings({"tier": 15, "waystone": 42, "waystone_mods": ["Next map modifier"]})
-        state = logger.undo_empty_map()
+        # The Undo button steps back through the next map's setting edit, then New map.
+        logger.undo_last_action()
+        undone = logger.undo_last_action()
+        self.assertEqual(undone["action"], "New map")
+        state = undone["state"]
         self.assertEqual(state["current_map_id"], "M0001")
         self.assertEqual(state["settings"]["expedition"], 3)
         self.assertEqual(state["settings"]["biome"], "Forest")
@@ -85,7 +91,9 @@ class MapUndoTests(unittest.TestCase):
             previous["item_rarity"] = 0
             previous.pop("effectiveness")
             logger._set_meta(db, "previous_waystone_settings", previous)
-        settings = logger.undo_empty_map()["settings"]
+        undone = logger.undo_last_action()
+        self.assertEqual(undone["action"], "New map")
+        settings = undone["state"]["settings"]
         self.assertEqual((settings["tier"], settings["waystone"], settings["map_mods"]), (16, 87, 4))
         self.assertEqual(settings["waystone_mods"], [])
         self.assertEqual(settings["waystone_name"], "")

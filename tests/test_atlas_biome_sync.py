@@ -150,8 +150,8 @@ class AtlasBiomeSyncTests(AtlasBiomeProfile):
         self.assertEqual(state["settings"]["atlas_settings"], original["atlas_settings"])
         self.assertEqual(self.snapshot(), original_snapshot)
 
-    def test_empty_map_undo_restores_prior_manual_biome_after_restart(self):
-        """The legacy backend cancellation restores tags changed by map creation without rewriting history."""
+    def test_new_map_undo_restores_prior_manual_biome_after_restart(self):
+        """Undo of New map restores tags changed by map creation without rewriting history."""
         logger.save_atlas_settings(self.atlas())
         logger.save_settings({"city_type": "Faridun"})
         logger.save_currency_snapshot("start", [{"name": "Chaos Orb", "quantity": 3}])
@@ -161,29 +161,24 @@ class AtlasBiomeSyncTests(AtlasBiomeProfile):
         self.assertEqual(logger.start_map()["settings"]["biome"], "Desert")
         logger._READY = False
         logger.initialize()
-        restored = logger.undo_empty_map()
+        undone = logger.undo_last_action()
+        self.assertEqual(undone["action"], "New map")
+        restored = undone["state"]
         self.assertEqual(restored["current_map_id"], "M0001")
         self.assertEqual(restored["settings"]["biome"], "Island")
         self.assertEqual(self.snapshot(), frozen)
 
-    def test_empty_first_map_undo_restores_the_pre_map_manual_biome(self):
-        """Cancelling an empty first map reverses its automatic classification as well."""
+    def test_first_map_undo_restores_the_pre_map_manual_biome(self):
+        """Undoing the first New map reverses its automatic classification as well."""
         logger.clear_export_and_reset_ids()
         logger.save_settings({"atlas_settings": self.atlas(), "city_type": "Faridun"})
         logger.save_settings({"biome": "Island"})
         self.assertEqual(logger.start_map()["settings"]["biome"], "Desert")
-        restored = logger.undo_empty_map()
+        undone = logger.undo_last_action()
+        self.assertEqual(undone["action"], "New map")
+        restored = undone["state"]
         self.assertEqual(restored["current_map_id"], "")
         self.assertEqual(restored["settings"]["biome"], "Island")
-
-    def test_empty_map_undo_without_new_metadata_keeps_legacy_biome(self):
-        """An older profile without the new restoration key cannot invent a previous selection."""
-        logger.save_settings({"biome": "Island"})
-        logger.finish_map(1, 0, 0, 0)
-        logger.start_map()
-        with logger._connect() as db:
-            db.execute("DELETE FROM meta WHERE key='previous_biome'")
-        self.assertEqual(logger.undo_empty_map()["settings"]["biome"], "Island")
 
     def test_atlas_and_automatic_biome_are_one_undo_action(self):
         """Undo a saved Atlas effect returns the editable tags and map snapshot to their previous state."""

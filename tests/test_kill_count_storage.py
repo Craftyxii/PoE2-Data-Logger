@@ -315,10 +315,8 @@ class KillCountStorageTests(unittest.TestCase):
                 self.save(**options)
             self.assertEqual(self.records(), before)
 
-    def test_saved_observations_are_activity_and_do_not_allow_empty_map_undo(self):
+    def test_saved_observations_are_map_activity(self):
         self.save()
-        with self.assertRaisesRegex(ValueError, "saved activity"):
-            logger.undo_empty_map()
         with logger._connect() as db:
             self.assertTrue(logger._map_has_activity(db, "M0001"))
 
