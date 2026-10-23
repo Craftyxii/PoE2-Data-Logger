@@ -1740,6 +1740,17 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
             # Keep the game icon's cell proportions, excluding the frame line.
             cells[index] = image.crop((left + frame_inset, top + frame_inset, right, bottom)).convert("RGB")
     labels = _ritual_cell_labels(cells)
+
+    def digits(label):
+        """Use the same count-mask hint as identification, so prefetched ranks are reused exactly."""
+        count = ((label.get("count") or label.get("count_candidate"))
+                 if label.get("count_present", True) else None)
+        return len(str(count)) if count is not None else None
+
+    # Rank catalog artwork for the whole page together, as Currency does;
+    # identification below then reads the same ranks from the cache.
+    currency_ocr.prefetch_catalog_ranks(reader, ((cell, digits(labels.get(index, {})))
+                                                 for index, cell in cells.items()))
     examples = _prepared_reference_bank(reader, references, (1, 1), reviewed=False)[0]
     deferred_rewards = set()
     for marker in markers:
@@ -1769,16 +1780,14 @@ def _ritual_grid_items(image, grid, parsed, markers, omen_names, references, str
         unique = None
         identity_conflict = []
         if not multiple:
-            count = ((label.get("count") or label.get("count_candidate"))
-                     if label.get("count_present", True) else None)
-            digits = len(str(count)) if count is not None else None
+            hint = digits(label)
             # Establish shared gray artwork before a reviewed sibling can win.
             catalog_icon = _ritual_gray_omen_icon(cells[index], strictness=strictness)
             for shown_cell in ((cells[index], _unframed(cells[index])) if catalog_icon is None else ()):
                 # Deferred frames and hover highlights cover the cell edge; a
                 # second, unframed look keeps the same matcher gates.
-                icon = (reader.icon(shown_cell, count_digits=digits) if strictness == ocr_sensitivity.DEFAULT else
-                        reader.icon(shown_cell, count_digits=digits, strictness=strictness))
+                icon = (reader.icon(shown_cell, count_digits=hint) if strictness == ocr_sensitivity.DEFAULT else
+                        reader.icon(shown_cell, count_digits=hint, strictness=strictness))
                 if catalog_icon is None or icon.get("family"):
                     catalog_icon = icon
                 if icon.get("family"):
