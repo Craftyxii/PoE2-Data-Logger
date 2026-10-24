@@ -1,4 +1,4 @@
-"""Validate the offline Ritual eligibility evidence that Ritual scans read."""
+"""Validate the offline Ritual eligibility evidence without altering scanner behavior."""
 
 import hashlib
 import json
@@ -24,7 +24,7 @@ class RitualCatalogDataTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """Read the same bundled evidence the offline Ritual reader consumes."""
+        """Read the same bundled evidence a future offline Ritual reader will consume."""
         cls.catalog = json.loads((ASSETS / "catalog.json").read_bytes())
         cls.provenance = json.loads((ASSETS / "provenance.json").read_bytes())
         cls.omens = json.loads((ASSETS / "repoe-omens.json").read_bytes())

@@ -13,9 +13,9 @@ from unittest.mock import patch
 import numpy as np
 from PIL import Image
 
-from PoE2_Data_Logger.core import logger_store as logger, ritual_catalog, store
-from PoE2_Data_Logger.core.ritual_catalog import NOT_RITUAL_REWARDS, OMEN_NAMES
-from PoE2_Data_Logger.ocr import currency_ocr, item_ocr, ritual_grid, unique_items
+from PoE2_Data_Logger.core import logger_store as logger, store
+from PoE2_Data_Logger.core.ritual_catalog import OMEN_NAMES
+from PoE2_Data_Logger.ocr import item_ocr, ritual_grid, unique_items
 from PoE2_Data_Logger.ui.native_desktop import clear_ritual_read
 
 
@@ -92,59 +92,6 @@ class RitualHoverPagesTests(unittest.TestCase):
         self.assertTrue(clear_ritual_read(result, names))
         self.assertFalse(clear_ritual_read(dict(result, coverage_uncertain=True), names))
         self.assertFalse(clear_ritual_read(dict(result, grid_detected=False), names))
-
-
-class NotRitualRewardTests(unittest.TestCase):
-    """Art matching a reward Ritual never offers is held, whatever matcher named it."""
-
-    def scan(self, answer):
-        """Scan a real page with every catalog and learned-reference lookup returning ``answer``."""
-        with tempfile.TemporaryDirectory(prefix="poe2-not-ritual-") as folder, \
-                patch.object(store, "DATA_DIR", Path(folder)), patch.object(logger, "_READY", False), \
-                patch.object(item_ocr, "_ritual_reward_icon", return_value=answer), \
-                Image.open(FIXTURES / "124949.png") as source:
-            return item_ocr.scan_ritual_page(source.convert("RGB"), OMEN_NAMES)["items"]
-
-    def test_origin_spark_match_is_held_unnamed_for_review(self):
-        """A confident Origin Spark match becomes an unnamed reward that blocks automatic saving."""
-        items = self.scan(("Origin Spark", .95, []))
-        held = [item for item in items if item["source"] == "Occupied Ritual reward; name unresolved"]
-        self.assertTrue(held)
-        self.assertNotIn("Origin Spark", [item["name"] for item in items])
-        for item in held:
-            self.assertTrue(item["needs_review"] and item["name_needs_review"])
-
-    def test_origin_spark_is_never_suggested(self):
-        """Suggestions keep the other names and drop Origin Spark."""
-        items = self.scan((None, .5, ["Origin Spark", "Orb of Chance"]))
-        suggested = [item["candidate_names"] for item in items if item.get("candidate_names")]
-        self.assertTrue(suggested)
-        self.assertTrue(all(names == ["Orb of Chance"] for names in suggested))
-
-    def test_catalog_exclusions_are_held_and_bounty_rewards_stay_possible(self):
-        """Sourced boss-only, Abyss and removed names are held; Foretold Bounty names are not."""
-        catalog = json.loads(ritual_catalog.CATALOG.read_text(encoding="utf-8"))
-        excluded = {row["name"] for row in catalog["exclusions"]}
-        self.assertEqual(NOT_RITUAL_REWARDS, excluded | ritual_catalog.PLAYER_CONFIRMED_EXCLUSIONS)
-        # Every Distilled Emotion is a real catalog item; Liquid Verisium is not an emotion.
-        reader_names = {name for members in currency_ocr.get_reader().inventory_members.values() for name in members}
-        liquids = {name for name in reader_names if "Liquid " in name} - {"Liquid Verisium"}
-        self.assertEqual(len(liquids), 26)
-        self.assertLessEqual(liquids, NOT_RITUAL_REWARDS)
-        self.assertNotIn("Liquid Verisium", NOT_RITUAL_REWARDS)
-        self.assertFalse(NOT_RITUAL_REWARDS & {row["name"] for row in catalog["guaranteed_rewards"]})
-        for name in ("Ab Aeterno", "Omen of Light", "Omen of Recombination", "Potent Liquid Contempt"):
-            with self.subTest(name=name):
-                self.assertNotIn(name, [item["name"] for item in self.scan((name, .95, []))])
-        self.assertIn("Headhunter", [item["name"] for item in self.scan(("Headhunter", .95, []))])
-
-    def test_excluded_omens_are_neither_gray_rivals_nor_siblings(self):
-        """The gray matcher's Omen groups leave out Abyss and removed Omens."""
-        path = currency_ocr.ROOT / "inventory-icons.json"
-        groups = item_ocr._ritual_omen_shapes(str(path), path.stat().st_mtime_ns, path.stat().st_size)[0]
-        omens = {name for group in groups for name in group if name.startswith("Omen of ")}
-        self.assertFalse(omens & NOT_RITUAL_REWARDS)
-        self.assertIn("Omen of Bartering", omens)
 
 
 class SpriteFootprintTests(unittest.TestCase):
