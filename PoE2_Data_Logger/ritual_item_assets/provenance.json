@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "captured_at_utc": "2026-10-23T23:45:55Z",
+  "snapshots": [
+    {
+      "id": "exiledb_uniques",
+      "path": "exiledb-uniques.json",
+      "url": "https://exiledb.com/raw/uniques.json",
+      "sha256": "f85b85a579efe82a57961ac1a981e2636f956620bb3573820f8ff535c0f8543c",
+      "bytes": 233931,
+      "response_headers": {
+        "Content-Type": "application/json",
+        "ETag": "\"86553215fbc06f47e3ab43b31b31dfd7\""
+      }
+    },
+    {
+      "id": "exiledb_index",
+      "path": "exiledb-index.json",
+      "url": "https://exiledb.com/raw/index.json",
+      "sha256": "9b3af34156f5d3a21b136b4969db641d633aa644ed58074dd71f6dc598ed02a8",
+      "bytes": 10666,
+      "response_headers": {
+        "Content-Type": "application/json",
+        "ETag": "\"309cf898d735d1cc932c24255af5927e\""
+      }
+    },
+    {
+      "id": "repoe_omens",
+      "path": "repoe-omens.json",
+      "url": "https://raw.githubusercontent.com/repoe-fork/poe2/75885a099f2e9be1619aa3c793fe6ab0754a511f/data/base_items/Omen.json",
+      "sha256": "7165fd745c1e25b0b3cf847dad387ebf0d75ee283ed83750eea2f85622549016",
+      "bytes": 79832,
+      "response_headers": {
+        "Content-Type": "text/plain; charset=utf-8",
+        "ETag": "\"410324a665e96f0666ec89afcfed874add7f550a413aa1e3761a0a480bc42384\""
+      }
+    },
+    {
+      "id": "repoe_version",
+      "path": "repoe-version.txt",
+      "url": "https://raw.githubusercontent.com/repoe-fork/poe2/75885a099f2e9be1619aa3c793fe6ab0754a511f/version.txt",
+      "sha256": "0f0dc147ae1195274ffa9f46c1913b8bfdfb4e449676450b7b153e0c22214d71",
+      "bytes": 9,
+      "response_headers": {
+        "Content-Type": "text/plain; charset=utf-8",
+        "ETag": "\"c2f07b458a6e212ab34a83b385e8d14816920964333c0ef1910e9f7d208c938d\""
+      }
+    },
+    {
+      "id": "repoe_exported_version",
+      "path": "repoe-exported-version.txt",
+      "url": "https://raw.githubusercontent.com/repoe-fork/poe2/75885a099f2e9be1619aa3c793fe6ab0754a511f/exported-version.txt",
+      "sha256": "c1eb3c1d79366a4c44f637fd90b28f29aac122393df284ff8f9d90fbc00925e5",
+      "bytes": 10,
+      "response_headers": {
+        "Content-Type": "text/plain; charset=utf-8",
+        "ETag": "\"9dc4d71b9b63ea948632705f166cba23512bcd9a5240cf032b1b01611a59a261\""
+      }
+    },
+    {
+      "id": "bundled_beta29_rites",
+      "path": "ritual-rites-beta29.json",
+      "sha256": "2e503dbcfa0008a50af156c550d5a1e9d46b5c15f318f2678541e7cc3b07ee0b",
+      "revision": "5ed57e6bf97e0a7d4c33a7005b5985fa7d3625d2",
+      "bounty_rows_reviewed": 60,
+      "url": "https://raw.githubusercontent.com/Craftyxii/PoE2-Data-Logger/v1.3.2.29-beta/PoE2_Data_Logger/ritual_rites_catalog.json",
+      "bytes": 63867,
+      "origin": "Unchanged local file from released beta29 source; no HTTP response transformed."
+    }
+  ],
+  "base_release": {
+    "tag": "v1.3.2.29-beta",
+    "revision": "5ed57e6bf97e0a7d4c33a7005b5985fa7d3625d2"
+  },
+  "catalog": {
+    "path": "catalog.json",
+    "sha256": "e27e97797f7cd515a1639d749213c9570254376b37ae5cb91a9fa5cd50465b6c"
+  },
+  "sources": {
+    "exiledb": {
+      "about_url": "https://exiledb.com/about",
+      "patch": "0.5.5",
+      "build": "0.5.5.4.2",
+      "source": "Names, base types and art from the game files (UniqueStashLayout, Words, BaseItemTypes); modifiers from the Path of Building Community unique list.",
+      "terms": "Free to read and quote with a link to the page the number came from. Game data and art are © Grinding Gear Games; ExileDB is not affiliated with GGG.",
+      "maintainer_update_claim": "The about page describes patch-server checks every 20 minutes; this snapshot records only the captured result."
+    },
+    "repoe": {
+      "repository": "https://github.com/repoe-fork/poe2",
+      "revision": "75885a099f2e9be1619aa3c793fe6ab0754a511f",
+      "version": "0.5.5.4.2",
+      "exported_version": "0.5.5.4.2",
+      "source_path": "data/base_items/Omen.json",
+      "rights": "Generated game data and artwork copyright Grinding Gear Games; a software license does not license game artwork."
+    },
+    "path_of_building": {
+      "repository": "https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2",
+      "reviewed_revision": "bb52d6b368307457eb9c54bb13f1829993d390b1",
+      "reviewed_commit_date": "2026-10-01",
+      "role": "Acquisition annotations corroborated during review; ExileDB includes normalized source text. No software copied into this directory.",
+      "license_url": "https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2/blob/dev/LICENSE.md"
+    },
+    "official_patch": {
+      "url": "https://www.pathofexile.com/forum/view-thread/3932540",
+      "patch": "0.5.0",
+      "role": "Removal of Omen of Recombination; conflicting bounty evidence is retained."
+    }
+  },
+  "local_inputs": {
+    "unique_art_manifest": {
+      "path": "../unique_item_assets/manifest.json",
+      "sha256": "4e71e5f8b74218dfcceab69592ffd7cceb3081fc4665b5d1bc7c7219f6de8a7e",
+      "records": 449,
+      "modified": false
+    },
+    "ritual_rites_catalog": {
+      "path": "../ritual_rites_catalog.json",
+      "sha256": "2e503dbcfa0008a50af156c550d5a1e9d46b5c15f318f2678541e7cc3b07ee0b",
+      "revision": "5ed57e6bf97e0a7d4c33a7005b5985fa7d3625d2",
+      "bounty_rows_reviewed": 60,
+      "modified": false
+    }
+  },
+  "review": {
+    "unique_source_restrictions": 57,
+    "abyss_omen_restrictions": 8,
+    "official_removed_omens": 1,
+    "named_bounty_exceptions": 25,
+    "source:null_means": "unconfirmed",
+    "runtime_network_required": false
+  }
+}

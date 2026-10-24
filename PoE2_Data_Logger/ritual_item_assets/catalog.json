@@ -1,0 +1,1493 @@
+{
+  "schema_version": 1,
+  "catalog_version": "2026-10-23-beta29-ritual-1",
+  "scope": "ritual_reward_identity",
+  "default_status": "unknown",
+  "unknown_behavior": "preserve_existing_recognition",
+  "source_patch": "0.5.5",
+  "source_build": "0.5.5.4.2",
+  "base_release_revision": "5ed57e6bf97e0a7d4c33a7005b5985fa7d3625d2",
+  "source_snapshots": {
+    "exiledb_uniques": {
+      "path": "exiledb-uniques.json",
+      "url": "https://exiledb.com/raw/uniques.json",
+      "sha256": "f85b85a579efe82a57961ac1a981e2636f956620bb3573820f8ff535c0f8543c",
+      "bytes": 233931
+    },
+    "exiledb_index": {
+      "path": "exiledb-index.json",
+      "url": "https://exiledb.com/raw/index.json",
+      "sha256": "9b3af34156f5d3a21b136b4969db641d633aa644ed58074dd71f6dc598ed02a8",
+      "bytes": 10666
+    },
+    "repoe_omens": {
+      "path": "repoe-omens.json",
+      "url": "https://raw.githubusercontent.com/repoe-fork/poe2/75885a099f2e9be1619aa3c793fe6ab0754a511f/data/base_items/Omen.json",
+      "sha256": "7165fd745c1e25b0b3cf847dad387ebf0d75ee283ed83750eea2f85622549016",
+      "bytes": 79832
+    },
+    "repoe_version": {
+      "path": "repoe-version.txt",
+      "url": "https://raw.githubusercontent.com/repoe-fork/poe2/75885a099f2e9be1619aa3c793fe6ab0754a511f/version.txt",
+      "sha256": "0f0dc147ae1195274ffa9f46c1913b8bfdfb4e449676450b7b153e0c22214d71",
+      "bytes": 9
+    },
+    "repoe_exported_version": {
+      "path": "repoe-exported-version.txt",
+      "url": "https://raw.githubusercontent.com/repoe-fork/poe2/75885a099f2e9be1619aa3c793fe6ab0754a511f/exported-version.txt",
+      "sha256": "c1eb3c1d79366a4c44f637fd90b28f29aac122393df284ff8f9d90fbc00925e5",
+      "bytes": 10
+    },
+    "bundled_beta29_rites": {
+      "path": "ritual-rites-beta29.json",
+      "sha256": "2e503dbcfa0008a50af156c550d5a1e9d46b5c15f318f2678541e7cc3b07ee0b",
+      "revision": "5ed57e6bf97e0a7d4c33a7005b5985fa7d3625d2",
+      "bounty_rows_reviewed": 60,
+      "url": "https://raw.githubusercontent.com/Craftyxii/PoE2-Data-Logger/v1.3.2.29-beta/PoE2_Data_Logger/ritual_rites_catalog.json",
+      "bytes": 63867
+    }
+  },
+  "coverage": {
+    "full_unique_source_records": 446,
+    "full_omen_class_source_records": 50,
+    "omen_named_records": 45,
+    "existing_unique_artwork_records_preserved": 449,
+    "unique_exclusions": 57,
+    "omen_exclusions": 9,
+    "guaranteed_named_bounty_exceptions": 25,
+    "guaranteed_unique_bounty_exceptions": 10,
+    "bounty_exclusion_intersection": []
+  },
+  "exclusions": [
+    {
+      "name": "Ab Aeterno",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Arbiter of Ash in The Burning Monolith",
+      "legacy": false,
+      "manifest_ids": [
+        "228"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/ab-aeterno",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Against the Darkness",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Zarokh, the Temporal",
+      "legacy": false,
+      "manifest_ids": [
+        "267"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/against-the-darkness",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Assailum",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Kosis, The Revelation",
+      "legacy": false,
+      "manifest_ids": [
+        "244"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/assailum",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Atziri's Contempt",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Atziri's Vault in Vaal Temple",
+      "legacy": false,
+      "manifest_ids": [
+        "399"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/atziris-contempt",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Atziri's Rule",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Atziri's Vault in Vaal Temple",
+      "legacy": false,
+      "manifest_ids": [
+        "393"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/atziris-rule",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Atziri's Splendour",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Atziri's Vault in Vaal Temple",
+      "legacy": false,
+      "manifest_ids": [
+        "396"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/atziris-splendour",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Atziri's Step",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Atziri's Vault in Vaal Temple",
+      "legacy": false,
+      "manifest_ids": [
+        "397"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/atziris-step",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Beetlebite",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from The King in the Mists in Crux of Nothingness",
+      "legacy": false,
+      "manifest_ids": [
+        "249"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/beetlebite",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Beyond Reach",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Xesht, We That Are One in Twisted Domain",
+      "legacy": false,
+      "manifest_ids": [
+        "254"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/beyond-reach",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Blessed Bonds",
+      "item_kind": "unique",
+      "reason": "unobtainable",
+      "acquisition": "No longer obtainable",
+      "legacy": false,
+      "manifest_ids": [
+        "232"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/blessed-bonds",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Explicit unavailable/legacy acquisition status in the source snapshot."
+    },
+    {
+      "name": "Choir of the Storm",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Xesht, We That Are One in Twisted Domain",
+      "legacy": false,
+      "manifest_ids": [
+        "256"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/choir-of-the-storm",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Collapsing Horizon",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Kosis, The Revelation",
+      "legacy": false,
+      "manifest_ids": [
+        "247"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/collapsing-horizon",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Controlled Metamorphosis",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Xesht, We That Are One in Twisted Domain",
+      "legacy": false,
+      "manifest_ids": [
+        "264"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/controlled-metamorphosis",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Drillneck",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Atziri's Vault in Vaal Temple",
+      "legacy": false,
+      "manifest_ids": [
+        "398"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/drillneck",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Eshtera's Path",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Zarokh, the Temporal",
+      "legacy": false,
+      "manifest_ids": [
+        "234"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/eshteras-path",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Flesh Crucible",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Atziri's Vault in Vaal Temple",
+      "legacy": false,
+      "manifest_ids": [
+        "402"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/flesh-crucible",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Forbidden Gaze",
+      "item_kind": "unique",
+      "reason": "unobtainable",
+      "acquisition": "No longer obtainable",
+      "legacy": false,
+      "manifest_ids": [
+        "58"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/forbidden-gaze",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Explicit unavailable/legacy acquisition status in the source snapshot."
+    },
+    {
+      "name": "From Nothing",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from The King in the Mists in Crux of Nothingness",
+      "legacy": false,
+      "manifest_ids": [
+        "263"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/from-nothing",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Glimpse of Chaos",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Trialmaster in The Trial of Chaos",
+      "legacy": false,
+      "manifest_ids": [
+        "236"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/glimpse-of-chaos",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Guiding Palm",
+      "item_kind": "unique",
+      "reason": "legacy_only",
+      "acquisition": null,
+      "legacy": true,
+      "manifest_ids": [
+        "364",
+        "365",
+        "366"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/guiding-palm",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Explicit unavailable/legacy acquisition status in the source snapshot."
+    },
+    {
+      "name": "Hand of Wisdom and Action",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Xesht, We That Are One in Twisted Domain",
+      "legacy": false,
+      "manifest_ids": [
+        "253"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/hand-of-wisdom-and-action",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Hateforge",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Trialmaster in The Trial of Chaos",
+      "legacy": false,
+      "manifest_ids": [
+        "239"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/hateforge",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Heroic Tragedy",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Olroth, Origin of the Fall",
+      "legacy": false,
+      "manifest_ids": [
+        "262"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/heroic-tragedy",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Infernoclasp",
+      "item_kind": "unique",
+      "reason": "unobtainable",
+      "acquisition": "No longer obtainable",
+      "legacy": false,
+      "manifest_ids": [
+        "186"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/infernoclasp",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Explicit unavailable/legacy acquisition status in the source snapshot."
+    },
+    {
+      "name": "Ingenuity",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from The King in the Mists in Crux of Nothingness",
+      "legacy": false,
+      "manifest_ids": [
+        "250"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/ingenuity",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Keeper of the Arc",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Olroth, Origin of the Fall",
+      "legacy": false,
+      "manifest_ids": [
+        "241"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/keeper-of-the-arc",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Mahuxotl's Machination",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Trialmaster in The Trial of Chaos",
+      "legacy": false,
+      "manifest_ids": [
+        "238"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/mahuxotls-machination",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Megalomaniac",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Kosis, The Revelation",
+      "legacy": false,
+      "manifest_ids": [
+        "261"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/megalomaniac",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Melting Maelstrom",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Kosis, The Revelation",
+      "legacy": false,
+      "manifest_ids": [
+        "246"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/melting-maelstrom",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Merit of Service",
+      "item_kind": "unique",
+      "reason": "unobtainable",
+      "acquisition": "No longer obtainable",
+      "legacy": false,
+      "manifest_ids": [
+        "126"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/merit-of-service",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Explicit unavailable/legacy acquisition status in the source snapshot."
+    },
+    {
+      "name": "Morior Invictus",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Arbiter of Ash in The Burning Monolith",
+      "legacy": false,
+      "manifest_ids": [
+        "225"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/morior-invictus",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Olroth's Resolve",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Olroth, Origin of the Fall",
+      "legacy": false,
+      "manifest_ids": [
+        "242"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/olroths-resolve",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Olrovasara",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Olroth, Origin of the Fall",
+      "legacy": false,
+      "manifest_ids": [
+        "243"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/olrovasara",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Omen of Abyssal Echoes",
+      "item_kind": "omen",
+      "reason": "abyss_only",
+      "acquisition": "Abyss reward outside the reviewed Ritual Omen pool.",
+      "metadata_id": "Metadata/Items/Currency/OmenOnAbyssRerollOptions",
+      "evidence_urls": [
+        "https://poe2db.tw/us/Abyss",
+        "https://raw.githubusercontent.com/repoe-fork/poe2/75885a099f2e9be1619aa3c793fe6ab0754a511f/data/base_items/Omen.json"
+      ],
+      "source_snapshot": "repoe_omens",
+      "basis": "Reviewed Abyss acquisition and existing beta29 grayscale Ritual exclusion; the source released flag alone does not imply Ritual availability."
+    },
+    {
+      "name": "Omen of Dextral Necromancy",
+      "item_kind": "omen",
+      "reason": "abyss_only",
+      "acquisition": "Abyss reward outside the reviewed Ritual Omen pool.",
+      "metadata_id": "Metadata/Items/Currency/OmenOnAbyssAddSuffixes",
+      "evidence_urls": [
+        "https://poe2db.tw/us/Abyss",
+        "https://raw.githubusercontent.com/repoe-fork/poe2/75885a099f2e9be1619aa3c793fe6ab0754a511f/data/base_items/Omen.json"
+      ],
+      "source_snapshot": "repoe_omens",
+      "basis": "Reviewed Abyss acquisition and existing beta29 grayscale Ritual exclusion; the source released flag alone does not imply Ritual availability."
+    },
+    {
+      "name": "Omen of Light",
+      "item_kind": "omen",
+      "reason": "abyss_only",
+      "acquisition": "Abyss reward outside the reviewed Ritual Omen pool.",
+      "metadata_id": "Metadata/Items/Currency/OmenOnAnnulRemoveAbyssMod",
+      "evidence_urls": [
+        "https://poe2db.tw/us/Abyss",
+        "https://raw.githubusercontent.com/repoe-fork/poe2/75885a099f2e9be1619aa3c793fe6ab0754a511f/data/base_items/Omen.json"
+      ],
+      "source_snapshot": "repoe_omens",
+      "basis": "Reviewed Abyss acquisition and existing beta29 grayscale Ritual exclusion; the source released flag alone does not imply Ritual availability."
+    },
+    {
+      "name": "Omen of Putrefaction",
+      "item_kind": "omen",
+      "reason": "abyss_only",
+      "acquisition": "Abyss reward outside the reviewed Ritual Omen pool.",
+      "metadata_id": "Metadata/Items/Currency/OmenOnAbyssVeilAllAndCorrupt",
+      "evidence_urls": [
+        "https://poe2db.tw/us/Abyss",
+        "https://raw.githubusercontent.com/repoe-fork/poe2/75885a099f2e9be1619aa3c793fe6ab0754a511f/data/base_items/Omen.json"
+      ],
+      "source_snapshot": "repoe_omens",
+      "basis": "Reviewed Abyss acquisition and existing beta29 grayscale Ritual exclusion; the source released flag alone does not imply Ritual availability."
+    },
+    {
+      "name": "Omen of Recombination",
+      "item_kind": "omen",
+      "reason": "removed",
+      "acquisition": "Removed in game patch 0.5.0; existing copies are deleted on login.",
+      "metadata_id": "Metadata/Items/Currency/OmenRecombination",
+      "evidence_urls": [
+        "https://www.pathofexile.com/forum/view-thread/3932540",
+        "https://raw.githubusercontent.com/repoe-fork/poe2/75885a099f2e9be1619aa3c793fe6ab0754a511f/data/base_items/Omen.json"
+      ],
+      "source_snapshot": "repoe_omens",
+      "basis": "Official patch rule overrides the exported released flag."
+    },
+    {
+      "name": "Omen of Sinistral Necromancy",
+      "item_kind": "omen",
+      "reason": "abyss_only",
+      "acquisition": "Abyss reward outside the reviewed Ritual Omen pool.",
+      "metadata_id": "Metadata/Items/Currency/OmenOnAbyssAddPrefixes",
+      "evidence_urls": [
+        "https://poe2db.tw/us/Abyss",
+        "https://raw.githubusercontent.com/repoe-fork/poe2/75885a099f2e9be1619aa3c793fe6ab0754a511f/data/base_items/Omen.json"
+      ],
+      "source_snapshot": "repoe_omens",
+      "basis": "Reviewed Abyss acquisition and existing beta29 grayscale Ritual exclusion; the source released flag alone does not imply Ritual availability."
+    },
+    {
+      "name": "Omen of the Blackblooded",
+      "item_kind": "omen",
+      "reason": "abyss_only",
+      "acquisition": "Abyss reward outside the reviewed Ritual Omen pool.",
+      "metadata_id": "Metadata/Items/Currency/OmenOnAbyssGuarenteeLichTypeMod3",
+      "evidence_urls": [
+        "https://poe2db.tw/us/Abyss",
+        "https://raw.githubusercontent.com/repoe-fork/poe2/75885a099f2e9be1619aa3c793fe6ab0754a511f/data/base_items/Omen.json"
+      ],
+      "source_snapshot": "repoe_omens",
+      "basis": "Reviewed Abyss acquisition and existing beta29 grayscale Ritual exclusion; the source released flag alone does not imply Ritual availability."
+    },
+    {
+      "name": "Omen of the Liege",
+      "item_kind": "omen",
+      "reason": "abyss_only",
+      "acquisition": "Abyss reward outside the reviewed Ritual Omen pool.",
+      "metadata_id": "Metadata/Items/Currency/OmenOnAbyssGuarenteeLichTypeMod2",
+      "evidence_urls": [
+        "https://poe2db.tw/us/Abyss",
+        "https://raw.githubusercontent.com/repoe-fork/poe2/75885a099f2e9be1619aa3c793fe6ab0754a511f/data/base_items/Omen.json"
+      ],
+      "source_snapshot": "repoe_omens",
+      "basis": "Reviewed Abyss acquisition and existing beta29 grayscale Ritual exclusion; the source released flag alone does not imply Ritual availability."
+    },
+    {
+      "name": "Omen of the Sovereign",
+      "item_kind": "omen",
+      "reason": "abyss_only",
+      "acquisition": "Abyss reward outside the reviewed Ritual Omen pool.",
+      "metadata_id": "Metadata/Items/Currency/OmenOnAbyssGuarenteeLichTypeMod1",
+      "evidence_urls": [
+        "https://poe2db.tw/us/Abyss",
+        "https://raw.githubusercontent.com/repoe-fork/poe2/75885a099f2e9be1619aa3c793fe6ab0754a511f/data/base_items/Omen.json"
+      ],
+      "source_snapshot": "repoe_omens",
+      "basis": "Reviewed Abyss acquisition and existing beta29 grayscale Ritual exclusion; the source released flag alone does not imply Ritual availability."
+    },
+    {
+      "name": "Perfidy",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Kosis, The Revelation",
+      "legacy": false,
+      "manifest_ids": [
+        "245"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/perfidy",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Pragmatism",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from The King in the Mists in Crux of Nothingness",
+      "legacy": false,
+      "manifest_ids": [
+        "251"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/pragmatism",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Prism of Belief",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Arbiter of Ash in The Burning Monolith",
+      "legacy": false,
+      "manifest_ids": [
+        "265"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/prism-of-belief",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Sacred Flame",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Arbiter of Ash in The Burning Monolith",
+      "legacy": false,
+      "manifest_ids": [
+        "229"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/sacred-flame",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Safrin's Resolve",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Zarokh, the Temporal",
+      "legacy": false,
+      "manifest_ids": [
+        "233"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/safrins-resolve",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Sandstorm Visage",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Zarokh, the Temporal",
+      "legacy": false,
+      "manifest_ids": [
+        "231"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/sandstorm-visage",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Sine Aequo",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Arbiter of Ash in The Burning Monolith",
+      "legacy": false,
+      "manifest_ids": [
+        "227"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/sine-aequo",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Skin of the Loyal",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Xesht, We That Are One in Twisted Domain",
+      "legacy": false,
+      "manifest_ids": [
+        "252"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/skin-of-the-loyal",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Solus Ipse",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Arbiter of Ash in The Burning Monolith",
+      "legacy": false,
+      "manifest_ids": [
+        "226"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/solus-ipse",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Svalinn",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Olroth, Origin of the Fall",
+      "legacy": false,
+      "manifest_ids": [
+        "240"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/svalinn",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Temporalis",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Zarokh, the Temporal",
+      "legacy": false,
+      "manifest_ids": [
+        "230"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/temporalis",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "The Adorned",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Trialmaster in The Trial of Chaos",
+      "legacy": false,
+      "manifest_ids": [
+        "266"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/the-adorned",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "The Burden of Shadows",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from The King in the Mists in Crux of Nothingness",
+      "legacy": false,
+      "manifest_ids": [
+        "248"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/the-burden-of-shadows",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "The Deepest Tower",
+      "item_kind": "unique",
+      "reason": "unobtainable",
+      "acquisition": "No longer obtainable",
+      "legacy": false,
+      "manifest_ids": [
+        "296"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/the-deepest-tower",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Explicit unavailable/legacy acquisition status in the source snapshot."
+    },
+    {
+      "name": "The Fallen Formation",
+      "item_kind": "unique",
+      "reason": "unobtainable",
+      "acquisition": "No longer obtainable",
+      "legacy": false,
+      "manifest_ids": [
+        "284"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/the-fallen-formation",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Explicit unavailable/legacy acquisition status in the source snapshot."
+    },
+    {
+      "name": "The Pandemonius",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Xesht, We That Are One in Twisted Domain",
+      "legacy": false,
+      "manifest_ids": [
+        "257"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/the-pandemonius",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "The Road Warrior",
+      "item_kind": "unique",
+      "reason": "unobtainable",
+      "acquisition": "No longer obtainable",
+      "legacy": false,
+      "manifest_ids": [
+        "3"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/the-road-warrior",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Explicit unavailable/legacy acquisition status in the source snapshot."
+    },
+    {
+      "name": "The Wailing Wall",
+      "item_kind": "unique",
+      "reason": "unobtainable",
+      "acquisition": "No longer obtainable",
+      "legacy": false,
+      "manifest_ids": [
+        "122"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/the-wailing-wall",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Explicit unavailable/legacy acquisition status in the source snapshot."
+    },
+    {
+      "name": "Thunderstep",
+      "item_kind": "unique",
+      "reason": "unobtainable",
+      "acquisition": "No longer obtainable",
+      "legacy": false,
+      "manifest_ids": [
+        "106"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/thunderstep",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Explicit unavailable/legacy acquisition status in the source snapshot."
+    },
+    {
+      "name": "Undying Hate",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Vessel of Kulemak",
+      "legacy": false,
+      "manifest_ids": [
+        "389"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/undying-hate",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Wylund's Stake",
+      "item_kind": "unique",
+      "reason": "unobtainable",
+      "acquisition": "No longer obtainable",
+      "legacy": false,
+      "manifest_ids": [
+        "192"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/wylunds-stake",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Explicit unavailable/legacy acquisition status in the source snapshot."
+    },
+    {
+      "name": "Xoph's Blood",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Xesht, We That Are One in Twisted Domain",
+      "legacy": false,
+      "manifest_ids": [
+        "255"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/xophs-blood",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Zaida's Longevity",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Zarokh, the Temporal",
+      "legacy": false,
+      "manifest_ids": [
+        "235"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/zaidas-longevity",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    },
+    {
+      "name": "Zerphi's Genesis",
+      "item_kind": "unique",
+      "reason": "boss_restricted",
+      "acquisition": "Drops from Trialmaster in The Trial of Chaos",
+      "legacy": false,
+      "manifest_ids": [
+        "237"
+      ],
+      "evidence_urls": [
+        "https://exiledb.com/uniques/zerphis-genesis",
+        "https://exiledb.com/raw/uniques.json"
+      ],
+      "source_snapshot": "exiledb_uniques",
+      "basis": "Acquisition restriction is the documented basis for an inferred Ritual exclusion, not an authoritative server reward-pool export."
+    }
+  ],
+  "guaranteed_rewards": [
+    {
+      "name": "Alpha's Howl",
+      "kind": "foretold_bounty",
+      "item_kind": "unique",
+      "bounty_ids": [
+        "rite:bounty:c51538ad4cb71a7d5399c721"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Astramentis",
+      "kind": "foretold_bounty",
+      "item_kind": "unique",
+      "bounty_ids": [
+        "rite:bounty:741b854145530d95d592ad0b"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Defiance of Destiny",
+      "kind": "foretold_bounty",
+      "item_kind": "unique",
+      "bounty_ids": [
+        "rite:bounty:2dfdaf828116dbfb168546a4"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Dream Fragments",
+      "kind": "foretold_bounty",
+      "item_kind": "unique",
+      "bounty_ids": [
+        "rite:bounty:a300f6dd4752adea34453457"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Headhunter",
+      "kind": "foretold_bounty",
+      "item_kind": "unique",
+      "bounty_ids": [
+        "rite:bounty:5e14e8a206179906bb3e6635"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Kalandra's Touch",
+      "kind": "foretold_bounty",
+      "item_kind": "unique",
+      "bounty_ids": [
+        "rite:bounty:b8a12f48108a60080d659980"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Mageblood",
+      "kind": "foretold_bounty",
+      "item_kind": "unique",
+      "bounty_ids": [
+        "rite:bounty:302bcb1233e33978bddd56df"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Omen of Amelioration",
+      "kind": "foretold_bounty",
+      "item_kind": "omen",
+      "bounty_ids": [
+        "rite:bounty:6ae840e601af75b126ec967e"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Omen of Chance",
+      "kind": "foretold_bounty",
+      "item_kind": "omen",
+      "bounty_ids": [
+        "rite:bounty:864d15d03b7bed24a0234157"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Omen of Corruption",
+      "kind": "foretold_bounty",
+      "item_kind": "omen",
+      "bounty_ids": [
+        "rite:bounty:0fb830ab6dd2a97bdc2a8dfa"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Omen of Dextral Annulment",
+      "kind": "foretold_bounty",
+      "item_kind": "omen",
+      "bounty_ids": [
+        "rite:bounty:77467ccdc89c698bdba2e760"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Omen of Dextral Crystallisation",
+      "kind": "foretold_bounty",
+      "item_kind": "omen",
+      "bounty_ids": [
+        "rite:bounty:0deceec3f6d2b74ae4102bbc"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Omen of Dextral Erasure",
+      "kind": "foretold_bounty",
+      "item_kind": "omen",
+      "bounty_ids": [
+        "rite:bounty:93eb8a1498b796c78d58c4b7"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Omen of Dextral Exaltation",
+      "kind": "foretold_bounty",
+      "item_kind": "omen",
+      "bounty_ids": [
+        "rite:bounty:c283fff930a901393325bb87"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Omen of Greater Annulment",
+      "kind": "foretold_bounty",
+      "item_kind": "omen",
+      "bounty_ids": [
+        "rite:bounty:259c700d33add8eacbe7524a"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Omen of Sanctification",
+      "kind": "foretold_bounty",
+      "item_kind": "omen",
+      "bounty_ids": [
+        "rite:bounty:dde2642184847da7933cc421"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Omen of Sinistral Annulment",
+      "kind": "foretold_bounty",
+      "item_kind": "omen",
+      "bounty_ids": [
+        "rite:bounty:9705a1b90e2f9d256ed7ba95"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Omen of Sinistral Crystallisation",
+      "kind": "foretold_bounty",
+      "item_kind": "omen",
+      "bounty_ids": [
+        "rite:bounty:f9dfc692842d885992e23d41"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Omen of Sinistral Erasure",
+      "kind": "foretold_bounty",
+      "item_kind": "omen",
+      "bounty_ids": [
+        "rite:bounty:98922b717e79f2ebe47cfcd5"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Omen of Sinistral Exaltation",
+      "kind": "foretold_bounty",
+      "item_kind": "omen",
+      "bounty_ids": [
+        "rite:bounty:5e102f0cee65d9c783d8fac0"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Omen of the Blessed",
+      "kind": "foretold_bounty",
+      "item_kind": "omen",
+      "bounty_ids": [
+        "rite:bounty:56394ca712ccb9a66c016ec3"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Omen of Whittling",
+      "kind": "foretold_bounty",
+      "item_kind": "omen",
+      "bounty_ids": [
+        "rite:bounty:503dfbffcfc39562237dee0e"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Original Sin",
+      "kind": "foretold_bounty",
+      "item_kind": "unique",
+      "bounty_ids": [
+        "rite:bounty:40e6eadcb7636c275013769d"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Queen of the Forest",
+      "kind": "foretold_bounty",
+      "item_kind": "unique",
+      "bounty_ids": [
+        "rite:bounty:4d0bd275b5bda05607bbb1e9"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    },
+    {
+      "name": "Yoke of Suffering",
+      "kind": "foretold_bounty",
+      "item_kind": "unique",
+      "bounty_ids": [
+        "rite:bounty:312a1d05703eb97dc30cb802"
+      ],
+      "evidence_urls": [
+        "https://poe2db.tw/us/Rite_of_the_Nameless",
+        "https://poe2ref.com/mechanics/ritual"
+      ],
+      "source_snapshot": "bundled_beta29_rites",
+      "note": "Published bundled bounty choice; possible reward evidence does not claim its current roll weight."
+    }
+  ],
+  "aliases": [
+    {
+      "manifest_name": "Byrnabas",
+      "source_name": "Brynabas",
+      "purpose": "Source join only; do not rename inventory or historical items."
+    },
+    {
+      "manifest_name": "Splinter of Lorrata",
+      "source_name": "Splinter of Loratta",
+      "purpose": "Source join only; do not rename inventory or historical items."
+    }
+  ],
+  "unresolved": [
+    {
+      "name": "Omen of Corruption",
+      "status": "unknown",
+      "reason": "The 0.5.0 patch limits exchange availability to Standard while the bundled Rite catalog publishes this named bounty. Retain the possible bounty without inferring global removal.",
+      "evidence_urls": [
+        "https://www.pathofexile.com/forum/view-thread/3932540",
+        "https://poe2db.tw/us/Rite_of_the_Nameless"
+      ]
+    },
+    {
+      "name": "Grip of Kulemak",
+      "status": "unknown",
+      "reason": "The complete source record has no acquisition annotation. Missing annotation is not proof of Ritual eligibility."
+    },
+    {
+      "name": "Heart of the Well",
+      "status": "unknown",
+      "reason": "The complete source record has no acquisition annotation. Missing annotation is not proof of Ritual eligibility."
+    },
+    {
+      "name": "Loreweave",
+      "status": "unknown",
+      "reason": "The complete source record has no acquisition annotation. Missing annotation is not proof of Ritual eligibility."
+    }
+  ],
+  "notes": [
+    "This is a bounded set of reviewed exclusions, not an exhaustive positive server-side Ritual drop list.",
+    "All shared unique artwork and existing catalog labels remain available to inventory recognition and historical records.",
+    "Unknown items retain existing recognition behavior; source:null does not mean eligible.",
+    "Published Foretold Bounty evidence takes precedence over general acquisition assumptions.",
+    "No broad family rule is applied: campaign rewards, named bounties, Queen rewards, currency conversion and Sacred Bloom may extend ordinary endgame offers.",
+    "RePoE release_state does not establish active Ritual eligibility.",
+    "The full Omen class snapshot includes five Expedition Sagas plus 45 Omen-named records; source presence alone is not an eligibility claim."
+  ]
+}
