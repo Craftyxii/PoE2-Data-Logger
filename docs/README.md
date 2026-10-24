@@ -20,6 +20,7 @@ Release notes and validation reports describe their named version or tested sour
 
 | Scope | Documents |
 | --- | --- |
+| Current source, unpublished 1.3.2.31 Beta candidate | [Candidate release notes](RELEASE_1.3.2.31.md) |
 | Latest published beta, 1.3.2.30 Beta | [Release notes](RELEASE_1.3.2.30.md) |
 | 1.3.2.29 Beta | [Release notes](RELEASE_1.3.2.29.md) |
 | 1.3.2.28 Beta | [Release notes](RELEASE_1.3.2.28.md) |
