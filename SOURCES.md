@@ -110,12 +110,13 @@ Reusable artwork preparation starts in `core/ocr_workers._prepare_artwork` and d
 - [tools/verify_build.py](tools/verify_build.py) checks the packaged Windows runtime.
 - [tools/build_atlas_catalog.py](tools/build_atlas_catalog.py) rebuilds the bundled atlas from its versioned source data.
 - [tools/build_unique_item_catalog.py](tools/build_unique_item_catalog.py) rebuilds the pinned [unique artwork catalog](PoE2_Data_Logger/unique_item_assets/NOTICE.txt), retaining source images, inventory dimensions and shared-art alternatives.
-- [tools/run_tests.py](tools/run_tests.py) runs targeted tests or full discovery in isolated batches.
+- [tools/run_tests.py](tools/run_tests.py) runs targeted tests or full discovery in isolated batches, optionally one shard of them, and verifies that a set of shards ran every module once.
 - [tools/audit_propagation_crowns.py](tools/audit_propagation_crowns.py) and [tools/audit_propagation_prefill.py](tools/audit_propagation_prefill.py) measure captured-image mark recognition and family filling.
 - [tools/native_hud_input.py](tools/native_hud_input.py) exercises native Windows input for HUD validation.
 - [tools/verify_installer.py](tools/verify_installer.py) checks installation, updates and saved-file retention.
-- [tools/publish_verified_beta.py](tools/publish_verified_beta.py) validates exact-source release artifacts before publication.
-- [.github/workflows/release.yml](.github/workflows/release.yml) defines the required Windows release gates.
+- [tools/publish_verified_beta.py](tools/publish_verified_beta.py) validates exact-source release artifacts and every gate job before publication.
+- [.github/workflows/release.yml](.github/workflows/release.yml) defines the required Windows release gates and runs them as parallel jobs.
+- [.github/actions/python-deps/action.yml](.github/actions/python-deps/action.yml) installs the same Python and build requirements for every gate job.
 
 Regression tests are in [tests/](tests/). See [CONTRIBUTING.md](CONTRIBUTING.md) for execution and environment limits and [docs/README.md](docs/README.md) for documentation navigation.
 

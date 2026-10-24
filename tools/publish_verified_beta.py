@@ -11,17 +11,22 @@ import tempfile
 import zipfile
 
 
-REQUIRED_STEPS = {
-    "Check release version", "Check Windows display and export fixtures",
-    "Check native Windows HUD interaction", "Verify 100-map user workflow",
-    "Run regression tests", "Build and verify installer",
-    "Check installer, update and saved-file retention", "Create checksum",
+# The gates run as parallel jobs; each must pass with every one of its steps.
+REQUIRED_JOBS = {
+    "build": {"Check release version", "Build and verify installer",
+              "Check installer, update and saved-file retention", "Create checksum"},
+    "windows-checks": {"Check Windows display and export fixtures", "Check native Windows HUD interaction"},
+    "session": {"Verify 100-map user workflow"},
+    "regression": {"Verify every test module ran once and passed"},
 }
+# Regression shards are matrix jobs; the regression job proves together they ran every module.
+SHARD_JOB = re.compile(r"regression shard [0-9]+")
+SHARD_STEPS = {"Run regression tests"}
 ARTIFACTS = {"native-windows-hud-verification", "release-session-verification", "windows-installer"}
 
 
 def validate_provenance(run, jobs, artifacts, *, repository, run_id, sha, workflow_id):
-    """Require one successful first attempt, its build gates and uniquely attributable artifacts."""
+    """Require one successful first attempt, all its gate jobs and uniquely attributable artifacts."""
     if (not re.fullmatch(r"[0-9a-f]{40}", sha) or run["id"] != run_id
             or run["repository"]["full_name"] != repository
             or run["head_repository"]["full_name"] != repository
@@ -30,14 +35,25 @@ def validate_provenance(run, jobs, artifacts, *, repository, run_id, sha, workfl
             or run["status"] != "completed" or run["conclusion"] != "success"
             or run["run_attempt"] != 1):
         raise ValueError("Run is not the requested successful installer source/first attempt.")
-    builds = [job for job in jobs["jobs"] if job["name"] == "build"]
-    if (len(builds) != 1 or builds[0]["status"] != "completed" or builds[0]["conclusion"] != "success"
-            or builds[0]["run_attempt"] != 1):
-        raise ValueError("Require a single successful build job from the selected attempt.")
-    for name in REQUIRED_STEPS:
-        matching = [step for step in builds[0]["steps"] if step["name"] == name]
-        if len(matching) != 1 or matching[0]["status"] != "completed" or matching[0]["conclusion"] != "success":
-            raise ValueError(f"Required gate did not pass: {name}")
+    def passed(job, steps):
+        """Require the job and each named gate step to have completed successfully in this attempt."""
+        if job["status"] != "completed" or job["conclusion"] != "success" or job["run_attempt"] != 1:
+            raise ValueError(f"Required job did not pass in the selected attempt: {job['name']}")
+        for name in steps:
+            matching = [step for step in job["steps"] if step["name"] == name]
+            if len(matching) != 1 or matching[0]["status"] != "completed" or matching[0]["conclusion"] != "success":
+                raise ValueError(f"Required gate did not pass: {name}")
+
+    for name, steps in REQUIRED_JOBS.items():
+        matching = [job for job in jobs["jobs"] if job["name"] == name]
+        if len(matching) != 1:
+            raise ValueError(f"Require a single {name} job from the selected attempt.")
+        passed(matching[0], steps)
+    shards = [job for job in jobs["jobs"] if SHARD_JOB.fullmatch(job["name"])]
+    if not shards:
+        raise ValueError("Require the regression shard jobs from the selected attempt.")
+    for job in shards:
+        passed(job, SHARD_STEPS)
     if artifacts["total_count"] != len(artifacts["artifacts"]):
         raise ValueError("Artifact listing is incomplete.")
     verified = {}

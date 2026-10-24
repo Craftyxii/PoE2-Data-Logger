@@ -1,4 +1,6 @@
 # Build and verify a Windows installer, or publish artifacts from a verified run.
+# The gates run side by side on separate runners; a run passes only when every
+# gate job passes, and the regression job proves the shards ran every module once.
 name: Windows installer
 
 on:
@@ -27,26 +29,24 @@ on:
 permissions:
   contents: read
 
+env:
+  QT_QPA_PLATFORM: offscreen
+  PYTHONUTF8: '1'
+
 jobs:
   build:
+    name: build
     if: ${{ !inputs.verified_run_id }}
     runs-on: windows-latest
-    permissions:
-      contents: write
-    env:
-      QT_QPA_PLATFORM: offscreen
-      PYTHONUTF8: '1'
+    timeout-minutes: 40
+    outputs:
+      installer: ${{ steps.version.outputs.installer }}
+      display_version: ${{ steps.version.outputs.display_version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          architecture: x64
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-build.txt
       - name: Check release version
+        id: version
         shell: pwsh
         run: |
           $match = Select-String -Path packaging/installer.nsi -Pattern '^!define APP_VERSION "([0-9]+\.[0-9]+(?:\.[0-9]+){0,2})"$'
@@ -61,14 +61,51 @@ jobs:
           "INSTALLER=PoE2-Data-Logger-Setup-v$releaseVersion.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "DISPLAY_VERSION=$displayVersion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "PRERELEASE=$([bool]$channel)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - name: Install dependencies
+          "installer=PoE2-Data-Logger-Setup-v$releaseVersion.exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "display_version=$displayVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "prerelease=$([bool]$channel)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+      - uses: ./.github/actions/python-deps
+      - name: Prepare NSIS
+        shell: pwsh
         run: |
-          python -m pip install --upgrade "pip>=26.2"
-          if ($LASTEXITCODE -ne 0) { throw 'Build tool update failed.' }
-          python -m pip install -r requirements-build.txt
+          $nsis = Get-Command makensis -ErrorAction SilentlyContinue
+          if (-not $nsis) {
+            $path = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+            if (-not (Test-Path $path)) {
+              choco install nsis --yes --no-progress
+              if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed.' }
+            }
+            if (-not (Test-Path $path)) { throw 'NSIS compiler was not found.' }
+            Split-Path $path | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+      - name: Build and verify installer
+        run: python tools/run_build.py
+      - name: Check installer, update and saved-file retention
+        run: python tools/verify_installer.py $env:INSTALLER
+      - name: Create checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash $env:INSTALLER -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $env:INSTALLER" | Out-File -FilePath "$env:INSTALLER.sha256" -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            PoE2-Data-Logger-Setup-v*.exe
+            PoE2-Data-Logger-Setup-v*.exe.sha256
+          if-no-files-found: error
+
+  windows-checks:
+    name: windows-checks
+    if: ${{ !inputs.verified_run_id }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/python-deps
       - name: Check Windows display and export fixtures
-        # Fail platform-specific fixture mismatches before the longer session
-        # and complete suite; native-coordinate guards remain covered here.
+        # Platform-specific fixtures run single-process here, beside the session
+        # and the sharded suite; native-coordinate guards remain covered here.
         run: |
           python tools/run_tests.py --pattern 'test_region_*.py'
           if ($LASTEXITCODE -ne 0) { throw 'Region fixture checks failed.' }
@@ -108,6 +145,15 @@ jobs:
           name: native-windows-hud-verification
           path: ${{ runner.temp }}/poe2-native-hud
           if-no-files-found: ignore
+
+  session:
+    name: session
+    if: ${{ !inputs.verified_run_id }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/python-deps
       - name: Verify 100-map user workflow
         # This simulation injects scan results at the UI boundary; capture OCR
         # regressions are separate checks, not evidence from this simulation.
@@ -123,44 +169,69 @@ jobs:
           name: release-session-verification
           path: ${{ runner.temp }}/poe2-release-session
           if-no-files-found: ignore
+
+  regression-shard:
+    name: regression shard ${{ matrix.shard }}
+    if: ${{ !inputs.verified_run_id }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/python-deps
       - name: Run regression tests
-        # Batches are isolated processes; two at once fit the runner's memory.
-        run: python tools/run_tests.py --jobs 2
-      - name: Prepare NSIS
-        shell: pwsh
-        run: |
-          $nsis = Get-Command makensis -ErrorAction SilentlyContinue
-          if (-not $nsis) {
-            $path = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
-            if (-not (Test-Path $path)) {
-              choco install nsis --yes --no-progress
-              if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed.' }
-            }
-            if (-not (Test-Path $path)) { throw 'NSIS compiler was not found.' }
-            Split-Path $path | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-          }
-      - name: Build and verify installer
-        run: python tools/run_build.py
-      - name: Check installer, update and saved-file retention
-        run: python tools/verify_installer.py $env:INSTALLER
-      - name: Create checksum
-        shell: pwsh
-        run: |
-          $hash = (Get-FileHash $env:INSTALLER -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $env:INSTALLER" | Out-File -FilePath "$env:INSTALLER.sha256" -Encoding ascii
+        # Each shard runs every sixth batch of 20 modules. Batches are isolated
+        # processes; two at once fit the runner's memory.
+        run: python tools/run_tests.py --jobs 2 --shard ${{ matrix.shard }}/${{ strategy.job-total }} --summary-file regression-shard-${{ matrix.shard }}.json
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-installer
-          path: |
-            PoE2-Data-Logger-Setup-v*.exe
-            PoE2-Data-Logger-Setup-v*.exe.sha256
+          name: regression-shard-${{ matrix.shard }}
+          path: regression-shard-${{ matrix.shard }}.json
           if-no-files-found: error
+
+  regression:
+    name: regression
+    if: ${{ !inputs.verified_run_id }}
+    needs: regression-shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: regression-shard-*
+          path: shard-reports
+          merge-multiple: true
+      - name: Verify every test module ran once and passed
+        run: python tools/run_tests.py --verify-shards shard-reports/*.json
+
+  publish:
+    name: publish tagged release
+    needs: [build, windows-checks, session, regression]
+    if: ${{ github.ref_type == 'tag' }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      INSTALLER: ${{ needs.build.outputs.installer }}
+      DISPLAY_VERSION: ${{ needs.build.outputs.display_version }}
+      PRERELEASE: ${{ needs.build.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
       - name: Publish release
-        # The earlier version check binds installer metadata to the release tag.
-        if: github.ref_type == 'tag'
+        # The build's version check binds installer metadata to the release tag.
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           $releaseArgs = @('release', 'create', $env:GITHUB_REF_NAME, $env:INSTALLER, "$env:INSTALLER.sha256", '--verify-tag', '--target', 'main', '--title', "PoE2 Data Logger $($env:DISPLAY_VERSION)")
           if ($env:PRERELEASE -eq 'True') { $releaseArgs += @('--prerelease', '--latest=false', '--notes-file', 'docs/RELEASE_1.3.2.30.md') }

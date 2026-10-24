@@ -1,0 +1,20 @@
+# Every release gate job installs the same Python and pinned build requirements.
+name: Python and build requirements
+description: Set up the release Python and install the pinned build requirements.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        architecture: x64
+        cache: pip
+        cache-dependency-path: |
+          requirements.txt
+          requirements-build.txt
+    - name: Install dependencies
+      shell: pwsh
+      run: |
+        python -m pip install --upgrade "pip>=26.2"
+        if ($LASTEXITCODE -ne 0) { throw 'Build tool update failed.' }
+        python -m pip install -r requirements-build.txt

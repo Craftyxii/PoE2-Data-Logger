@@ -119,6 +119,74 @@ class RunnerBatchTests(unittest.TestCase):
             with self.subTest(modules=modules, batch_size=batch_size), self.assertRaises(ValueError):
                 self.run_quietly(Path("unused"), modules, batch_size=batch_size)
 
+    def run_shards(self, root, modules, count, *, batch_size=2, failing=()):
+        """Run every shard of one discovery with simulated children and return their summaries."""
+        launched = []
+
+        def child(command, **_arguments):
+            """Record each launched batch and report it passed unless its first module should fail."""
+            names = command[command.index("--modules") + 1:command.index("--summary-file")]
+            launched.append(names)
+            failed = int(names[0] in failing)
+            Path(command[-1]).write_text(json.dumps({"tests": len(names), "failures": failed, "errors": 0,
+                                                     "skipped": 0, "successful": not failed}), encoding="utf-8")
+            return subprocess.CompletedProcess(command, failed)
+
+        with patch.object(run_tests.subprocess, "run", side_effect=child):
+            summaries = [self.run_quietly(root, modules, batch_size=batch_size, shard=(index, count))
+                         for index in range(1, count + 1)]
+        return summaries, launched
+
+    def verify_quietly(self, root, summaries):
+        """Write shard summaries as the shard jobs upload them and check them together."""
+        reports = []
+        for summary in summaries:
+            report = root / f"shard-{summary['shard'][0]}.json"
+            report.write_text(json.dumps(summary), encoding="utf-8")
+            reports.append(report)
+        with redirect_stderr(io.StringIO()):
+            return run_tests.verify_shards(root, reports)
+
+    def test_shards_together_run_every_batch_once_and_verification_proves_it(self):
+        """Every count-th batch per shard: the shards partition discovery, and only all of them pass."""
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "tests").mkdir()
+            modules = [f"test_fixture_{index}.py" for index in range(7)]
+            for name in modules:
+                (root / "tests" / name).write_text("", encoding="utf-8")
+            summaries, launched = self.run_shards(root, modules, 3)
+            # Seven modules in pairs make four batches: shard 1 runs batches 1 and 4.
+            self.assertEqual([summary["modules"] for summary in summaries],
+                             [modules[:2] + modules[6:], modules[2:4], modules[4:6]])
+            self.assertEqual(sorted(name for names in launched for name in names), modules)
+            self.assertEqual(self.verify_quietly(root, summaries),
+                             {"tests": 7, "skipped": 0, "modules": 7, "shards": 3})
+            rejected = {
+                "a missing shard": summaries[:2],
+                "a repeated shard": summaries[:2] + [dict(summaries[1], shard=[3, 3])],
+                "a failed shard": summaries[:2] + [self.run_shards(root, modules, 3, failing={modules[4]})[0][2]],
+                "another shard count": summaries[:2] + [dict(summaries[2], shard=[3, 4])],
+                "another discovery": summaries[:2] + [dict(summaries[2], discovered_modules=modules[:6])],
+                "a dropped module": summaries[:2] + [dict(summaries[2], modules=modules[4:5])],
+                "a module run twice": summaries[:2] + [dict(summaries[2], modules=modules[3:6])],
+            }
+            for case, reports in rejected.items():
+                with self.subTest(case=case), self.assertRaises(ValueError):
+                    self.verify_quietly(root, reports)
+            (root / "tests" / "test_fixture_new.py").write_text("", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                self.verify_quietly(root, summaries)
+
+    def test_out_of_range_or_empty_shards_are_rejected(self):
+        """A shard outside 1..N, or one left without batches, cannot pass by running nothing."""
+        modules = [f"test_fixture_{index}.py" for index in range(4)]
+        for shard in ((0, 2), (3, 2), (5, 5)):
+            with self.subTest(shard=shard), self.assertRaises(ValueError):
+                self.run_quietly(Path("unused"), modules, batch_size=1, shard=shard)
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            run_tests.main(["--shard", "2-6"])
+
     def test_explicit_pattern_keeps_original_single_process_routing(self):
         """Preserve existing native, session and wildcard targeted invocations without launching child batches."""
         passed = {"tests": 1, "failures": 0, "errors": 0, "skipped": 0, "successful": True}

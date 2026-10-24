@@ -22,7 +22,7 @@ On Linux, use `python3.12 -m venv .venv` and `.venv/bin/python` for the same com
 .venv\Scripts\python.exe tools/run_tests.py
 ```
 
-Full discovery runs modules in bounded subprocess batches. A selector matching zero tests fails. Check the runner's exit code and actual passed/failed/skipped counts. Record which revision and environment were tested; an older report does not validate newer edits.
+Full discovery runs modules in bounded subprocess batches. `--shard K/N` runs every Nth batch from batch K, so N shards together run each module once; `--verify-shards` then checks their summary files (`--summary-file`) prove exactly that, with every shard passing. A selector matching zero tests fails. Check the runner's exit code and actual passed/failed/skipped counts. Record which revision and environment were tested; an older report does not validate newer edits.
 
 When changing logger behavior, trace the upstream input, captured map/expedition/generation, writer transaction and exported result. Add a regression that fails on the original defect. For contention, use a real second SQLite connection. UI timing checks must include event-loop delivery and retain review drafts. Replaying a whole completion callback after a partial save can duplicate records.
 
@@ -51,6 +51,6 @@ These are navigation pointers, not substitutes for the full release gates or cap
 
 Run [Build.bat](Build.bat) on Windows with Python 3.12 and NSIS. It stops on failed packaging, runtime/model verification or installer compilation. Installer, executable and window version metadata must agree before release.
 
-Publication uses artifacts from an exact verified source revision. Full regression, captured-image recognition checks, native Windows HUD, 100-map workflow, and installer/update/file-retention checks are required by the existing release process. Do not describe skipped native tests or a local build as a verified release.
+Publication uses artifacts from an exact verified source revision. Full regression, captured-image recognition checks, native Windows HUD, 100-map workflow, and installer/update/file-retention checks are required by the existing release process. They run side by side as separate Windows jobs of one workflow run, the full suite as six shards whose coverage the `regression` job verifies; publication requires every job and its gate steps to pass in that run's first attempt. Do not describe skipped native tests or a local build as a verified release.
 
 Keep [CHANGELOG.md](CHANGELOG.md) and release notes focused on final behavior and validation. Put pending work under **Unreleased** and retain historical reports with their original scope. A documentation cleanup must not relabel old test evidence as proof for current source.

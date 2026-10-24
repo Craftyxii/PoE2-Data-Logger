@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Release builds run their checks side by side instead of one after another: the installer build, the Windows fixture and HUD checks, the 100-map session and six shards of the full test suite each get their own Windows runner. A final job checks that the shards together ran every test module exactly once and all passed, and publication still requires every job and gate step to pass on the same source. No check was removed; a build takes about 20–25 minutes instead of 62–75.
+
 ## 1.3.2.30 Beta
 
 - Kill-count readings now fill the Map Kills fields. Each complete reading is also saved as the map's kill totals (Maps and Export kill columns), replacing an older reading or draft; a later manual save replaces it in turn, and one Undo removes the reading and restores the previous totals. Every reading is still kept on the Kill Count Readings sheet. Previously readings were stored only on that sheet, so the fields never changed.

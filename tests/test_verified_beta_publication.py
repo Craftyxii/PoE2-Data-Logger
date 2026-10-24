@@ -13,15 +13,17 @@ from tools import publish_verified_beta as publisher
 
 class VerifiedBetaPublicationTests(unittest.TestCase):
     def setUp(self):
-        """Create a first-attempt successful run with all gates in its one build job."""
+        """Create a first-attempt successful run whose parallel gate jobs and shards all passed."""
         self.sha = "a" * 40
         self.run = {"id": 12, "repository": {"full_name": "owner/repo", "id": 7},
                     "head_repository": {"full_name": "owner/repo", "id": 7},
                     "workflow_id": 9, "path": ".github/workflows/release.yml", "event": "workflow_dispatch",
                     "head_sha": self.sha, "status": "completed", "conclusion": "success", "run_attempt": 1}
-        self.jobs = {"jobs": [{"name": "build", "status": "completed", "conclusion": "success", "run_attempt": 1,
-                              "steps": [{"name": name, "status": "completed", "conclusion": "success"}
-                                        for name in publisher.REQUIRED_STEPS]}]}
+        gates = {**publisher.REQUIRED_JOBS,
+                 **{f"regression shard {index}": publisher.SHARD_STEPS for index in range(1, 7)}}
+        self.jobs = {"jobs": [{"name": job, "status": "completed", "conclusion": "success", "run_attempt": 1,
+                               "steps": [{"name": name, "status": "completed", "conclusion": "success"}
+                                         for name in steps]} for job, steps in gates.items()]}
         self.artifacts = {"total_count": 3, "artifacts": [
             {"name": name, "id": i, "expired": False, "size_in_bytes": 10,
              "workflow_run": {"id": 12, "head_sha": self.sha, "repository_id": 7, "head_repository_id": 7}}
@@ -58,6 +60,35 @@ class VerifiedBetaPublicationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.check()
         self.jobs["jobs"].append(copy.deepcopy(self.jobs["jobs"][0]))
+        with self.assertRaises(ValueError):
+            self.check()
+
+    def test_every_parallel_gate_job_and_shard_must_pass_once(self):
+        """A missing, skipped, repeated or rerun gate job, or any failed shard, blocks publication."""
+        self.check()
+        original = copy.deepcopy(self.jobs)
+        names = [job["name"] for job in original["jobs"]]
+        for name in names:
+            with self.subTest(missing=name):
+                self.jobs = {"jobs": [job for job in copy.deepcopy(original)["jobs"] if job["name"] != name]}
+                if name.startswith("regression shard"):
+                    # Shard coverage is proven by the regression job; a failed shard never reaches it.
+                    self.check()
+                else:
+                    with self.assertRaises(ValueError):
+                        self.check()
+            for field, value in (("conclusion", "skipped"), ("conclusion", "failure"), ("run_attempt", 2)):
+                with self.subTest(job=name, field=field, value=value):
+                    self.jobs = copy.deepcopy(original)
+                    self.jobs["jobs"][names.index(name)][field] = value
+                    with self.assertRaises(ValueError):
+                        self.check()
+        self.jobs = {"jobs": [job for job in copy.deepcopy(original)["jobs"]
+                              if not job["name"].startswith("regression shard")]}
+        with self.assertRaises(ValueError):
+            self.check()
+        self.jobs = copy.deepcopy(original)
+        self.jobs["jobs"].append(copy.deepcopy(self.jobs["jobs"][names.index("session")]))
         with self.assertRaises(ValueError):
             self.check()
 
