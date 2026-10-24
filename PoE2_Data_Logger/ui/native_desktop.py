@@ -275,13 +275,14 @@ def clear_ritual_reward(item, omen_names, strictness=ocr_sensitivity.DEFAULT):
         re.search(r"\b[x×]\s*\d+\b", str(item.get("source", "")), re.I))
 
 
-def skipped_deferred_reward(item, omen_names, strictness=ocr_sensitivity.DEFAULT):
-    """Leave out a deferred reward that is not read with certainty, rather than review it.
+def skipped_deferred_reward(item):
+    """Leave out every deferred reward: it is never reviewed or logged.
 
-    A deferred reward adds no new find; it was offered on an earlier page. Only
-    a reward whose deferred state itself is unknown may be new, so it still asks.
+    A deferred reward was logged on the page that first offered it; deferring
+    only keeps it for a later purchase. A reward whose deferred state itself is
+    unknown may be new, so it is still reviewed.
     """
-    return item.get("deferred") is True and not clear_ritual_reward(item, omen_names, strictness)
+    return item.get("deferred") is True
 
 
 def clear_ritual_read(result, omen_names):
@@ -290,12 +291,14 @@ def clear_ritual_read(result, omen_names):
     if strictness == 100:
         return False
     items = result.get("items") or []
-    kept = [item for item in items if not skipped_deferred_reward(item, omen_names, strictness)]
+    kept = [item for item in items if not skipped_deferred_reward(item)]
     # A verified complete grid establishes every reward; leftover screen text
     # (a hovered tooltip, the Tribute counter) cannot add or change one.
     grid_complete = bool(result.get("grid_detected")) and not result.get("coverage_uncertain")
     left_out = sum(bool(item.get("unresolved")) for item in items if item not in kept)
-    if (not kept or any(result.get(flag) for flag in ("unknown", "coverage_uncertain", "needs_review")) or
+    # An empty read may have missed every reward, so it waits for approval; a
+    # page whose rewards are all deferred has nothing to review.
+    if (not items or any(result.get(flag) for flag in ("unknown", "coverage_uncertain", "needs_review")) or
             (result.get("unresolved_count") or 0) > left_out or
             (result.get("unmatched") and not grid_complete)):
         return False
@@ -2521,12 +2524,16 @@ class LoggerWindow(QMainWindow):
         self.ritual_rite_queue_table.setRowCount(len(stages))
         for row, stage in enumerate(stages):
             affixes = "; ".join(entry.get("text") or entry.get("id", "") for entry in stage["affixes"])
-            for column, text in enumerate((stage["map_ordinal"], stage["map_name"], affixes)):
+            # The biome shown is the one + New map applies when this stage is played.
+            where = " · ".join(part for part in (stage["map_name"], stage.get("biome", "")) if part)
+            for column, text in enumerate((stage["map_ordinal"], where, affixes)):
                 item = QTableWidgetItem(str(text))
                 item.setToolTip(str(text))
                 self.ritual_rite_queue_table.setItem(row, column, item)
         self.ritual_rite_queue_clear.setEnabled(bool(stages))
-        playing = (f"This map plays stage {state['map_ordinal']}, scanned ahead. " if state.get("current_from_queue") else "")
+        where = " · ".join(part for part in (state.get("current_map_name"), state.get("current_biome")) if part)
+        playing = (f"This map plays stage {state['map_ordinal']}" + (f" ({where})" if where else "") + ", scanned ahead. "
+                   if state.get("current_from_queue") else "")
         self.ritual_rite_queue_note.setText(
             playing + ("Each + New map plays the next queued stage." if stages else
                        "Scan a Rite's maps in order to queue the stages after this map."))
@@ -2575,6 +2582,7 @@ class LoggerWindow(QMainWindow):
         if not state["selected_rite_id"]:
             state = logger.new_ritual_rite()
         saved = logger.scan_ritual_rite_stage(result["affixes"], result.get("map_name", ""),
+                                              biome=result.get("biome", ""),
                                               expected_map_id=state["map_id"],
                                               expected_generation=state["session_generation"])
         self._ritual_rite_form_baseline = None
@@ -3532,8 +3540,13 @@ class LoggerWindow(QMainWindow):
         set_message(self.review_summary, "Waystone settings cleared. Scan or enter the new map's waystone.")
         if previous:
             self._set_commit_badge(state["scan_commit_count"])
+        rite = logger.ritual_rite_state()
+        biome = rite["current_biome"] if rite["map_ordinal"] is not None else ""
+        applied = (f" Biome from Rite stage {rite['map_ordinal']}"
+                   + (f" ({rite['current_map_name']})" if rite["current_map_name"] else "") + f": {biome}."
+                   if logger._rite_biome_settings(biome) else "")
         self.note(f"Map {state['current_map_id']} started."
-                  + (" Previous map totals saved." if previous else ""), True)
+                  + (" Previous map totals saved." if previous else "") + applied, True)
 
     def _clear_map_review(self):
         """Discard map-specific drafts and cancel their stale recognition work when the map context changes."""
@@ -7427,8 +7440,8 @@ class LoggerWindow(QMainWindow):
             self._scan_failed("ritual", capture, error)
             raise
 
-    def _discard_repeat_ritual_scan(self):
-        """Drop a repeat scan of an unchanged Ritual page without saving, reviewing or reporting it."""
+    def _end_ritual_scan_quietly(self):
+        """End a Ritual scan with nothing to log, without saving, reviewing or reporting it."""
         self.pending_review_kind = None
         self._failed_review = False
         self._ritual_reading = self._pending_ritual_map = None
@@ -7458,7 +7471,7 @@ class LoggerWindow(QMainWindow):
         if type(rerolls) is int and rerolls == logger.last_ritual_rerolls(map_id):
             # Integrity safeguard: the roll count is unchanged since the map's
             # last saved page, so the page was not rerolled and this scan repeats it.
-            self._discard_repeat_ritual_scan()
+            self._end_ritual_scan_quietly()
             return
         self._ritual_reading = None
         self._pending_ritual_map = map_id
@@ -7472,7 +7485,7 @@ class LoggerWindow(QMainWindow):
         strictness = capture["strictness"] if capture else result.get("_ocr_strictness", ocr_sensitivity.DEFAULT)
         skipped = 0
         for item in result["items"]:
-            if skipped_deferred_reward(item, omen_names, strictness):
+            if skipped_deferred_reward(item):
                 skipped += 1
                 continue
             # Saving and visibility share the capture's acceptance decision;
@@ -7487,16 +7500,22 @@ class LoggerWindow(QMainWindow):
         summary = (f"{len(result['items']) - skipped} Ritual rewards · {review_count} need review. "
                    "Correct and approve each reward to include it. Unapproved rows are rejected when you Approve.")
         if skipped:
-            summary += (f" {skipped} deferred reward{'s' if skipped > 1 else ''} not read with certainty "
-                        f"{'were' if skipped > 1 else 'was'} left out; deferred rewards add no new finds.")
+            summary += (f" {skipped} deferred reward{'s' if skipped > 1 else ''} left out; a deferred reward "
+                        "was logged on the page that first offered it.")
         if result.get("coverage_uncertain"):
             summary = ("The complete reward grid could not be verified. " + summary +
                        " Check for missing rewards or capture the full grid again.")
+        clear = clear_ritual_read(dict(result, _ocr_strictness=strictness), omen_names)
+        if (clear and not self.ritual_table.rowCount() and result.get("tribute_available") is None
+                and result.get("rerolls_remaining") is None):
+            # Every reward was deferred and no counter was read: the page logs nothing.
+            self._end_ritual_scan_quietly()
+            return
         set_message(self.ritual_status,
                     summary)
         self._review_pending("ritual", summary)
         if live and self.state["settings"].get("ocr_auto_commit"):
-            if clear_ritual_read(dict(result, _ocr_strictness=strictness), omen_names):
+            if clear:
                 saved = self.run(self.save_ritual)
                 if saved is not None:
                     set_message(self.ritual_status,
@@ -7834,6 +7853,9 @@ class LoggerWindow(QMainWindow):
                     self._set_ritual_review(controls, "rejected", unnamed=not text)
                 continue
             reward = self._ritual_row_values(row)
+            if reward["deferred"]:
+                # Confirmed deferred: logged when first offered, so neither saved nor learned.
+                continue
             rows.append(reward)
             accepted_rows.append(row)
             capture = self._ritual_capture_context if self.pending_review_kind == "ritual" else None

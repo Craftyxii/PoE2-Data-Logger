@@ -65,19 +65,24 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual([tuple(row) for row in before], [tuple(row) for row in after])
         self.assertEqual(json.loads(before[0][1])["waystone"], 87)
 
-    def test_deferred_rewards_have_zero_new_find_quantity(self):
-        """Verify deferred rewards have zero new find quantity."""
+    def test_deferred_rewards_are_never_saved(self):
+        """A deferred reward was logged when first offered: the page keeps its other rewards and counters."""
         logger.save_ritual_page([{"category": "Omen", "name": "Omen of Whittling", "quantity": 3,
-                                 "deferred": True, "tribute": 4000}], tribute_available=1234, rerolls_remaining=2)
-        rows = list(csv.DictReader(io.StringIO(logger.export_all_csv().decode("utf-8-sig"))))
-        row = next(row for row in rows if row.get("New Find Quantity") == "0")
-        self.assertEqual(row["Quantity"], "3")
-        self.assertEqual(row["Deferred"], "True")
+                                 "deferred": True, "tribute": 4000},
+                                {"category": "Item", "name": "Chaos Orb", "quantity": 2}],
+                                tribute_available=1234, rerolls_remaining=2)
+        logger.save_ritual_page([{"category": "Omen", "name": "Omen of Whittling", "quantity": 1, "deferred": True}],
+                                tribute_available=900, rerolls_remaining=1)
+        self.assertEqual([[item["name"] for item in page["items"]] for page in logger.ritual_pages_for_map("M0001")],
+                         [["Chaos Orb"], []])
+        self.assertNotIn("Omen of Whittling", logger.export_all_csv().decode("utf-8-sig"))
+        with self.assertRaisesRegex(ValueError, "at least one Ritual reward"):
+            logger.save_ritual_page([{"category": "Omen", "name": "Omen of Whittling", "deferred": True}])
 
     def test_workbook_numeric_research_fields_and_atlas_sheet(self):
         """Verify numeric research fields and preserve data-sheet indices beside analysis notes."""
         logger.save_ritual_page([{"category": "Omen", "name": "Omen of Whittling", "quantity": 3,
-                                 "deferred": True, "tribute": 4000}], tribute_available=1234, rerolls_remaining=2)
+                                 "tribute": 4000}], tribute_available=1234, rerolls_remaining=2)
         with ZipFile(io.BytesIO(workbook_export.export_xlsx())) as archive:
             self.assertIsNone(archive.testzip())
             ns = {"s": workbook_export.NS}
@@ -94,7 +99,7 @@ class WorkflowTests(unittest.TestCase):
                     key = headers[cell.get("r").rstrip("0123456789")]
                     if key in ("New Find Quantity", "Ritual Tribute Available", "Ritual Rerolls Remaining"):
                         found[key] = (cell.get("t"), cell.findtext("s:v", namespaces=ns))
-            self.assertEqual(found, {"New Find Quantity": (None, "0"),
+            self.assertEqual(found, {"New Find Quantity": (None, "3"),
                                      "Ritual Tribute Available": (None, "1234"),
                                      "Ritual Rerolls Remaining": (None, "2")})
         self.assertTrue(workbook_export._numeric_column("Visible Seed Sockets"))

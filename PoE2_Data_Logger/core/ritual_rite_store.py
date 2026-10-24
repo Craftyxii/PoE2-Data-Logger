@@ -16,10 +16,12 @@ from PoE2_Data_Logger.core.ritual_rites_catalog import normalize_affixes
 
 CONTEXT_FIELDS = ("ritual_rite_id", "ritual_rite_name", "ritual_rite_map_ordinal",
                   "ritual_rite_affixes", "ritual_rite_inherited_sources")
-# Stages scanned ahead of play, per Rite, in scan order: {rite_id: [{map_name, affixes}]}.
+# Stages scanned ahead of play, per Rite, in scan order: {rite_id: [{map_name, biome, affixes}]}.
 QUEUE_KEY = "ritual_rite_queue"
 # Map names of the current maps' own scanned stages, for recognizing a rescan.
 NAMES_KEY = "ritual_rite_map_names"
+# Biomes read with the maps' own scanned stages; + New map applies the one a map plays.
+BIOMES_KEY = "ritual_rite_map_biomes"
 
 
 def _dump(value):
@@ -125,12 +127,18 @@ def _live_state(db, map_id):
     queued = _queued(db, selected) if ordinal is not None else []
     from_queue = draft is None and bool(queued)
     upcoming = queued[1:] if from_queue else queued
+    # The name and biome read with the stage this map plays.
+    stage = (queued[0] if from_queue else
+             {"map_name": (_meta(db, NAMES_KEY, {}) or {}).get(map_id, ""),
+              "biome": (_meta(db, BIOMES_KEY, {}) or {}).get(map_id, "")} if draft else {})
     return {"selected_rite_id": selected, "selected_rite_name": rite["name"] if rite else "",
             "map_id": map_id, "map_ordinal": ordinal, "session_generation": _meta(db, "session_generation", 0),
             "current_affixes": json.loads(draft[0]) if draft else queued[0]["affixes"] if from_queue else [],
             "current_from_queue": from_queue,
+            "current_map_name": stage.get("map_name", ""), "current_biome": stage.get("biome", ""),
             "queued_stages": [{"map_ordinal": ordinal + index, "map_name": stage.get("map_name", ""),
-                               "affixes": stage["affixes"]} for index, stage in enumerate(upcoming, 1)],
+                               "biome": stage.get("biome", ""), "affixes": stage["affixes"]}
+                              for index, stage in enumerate(upcoming, 1)],
             "ritual_activity": ritual,
             "inherited_sources": _inherited_sources(db, selected, map_id) if ritual else [],
             "available_rites": [{"id": row["rite_id"], "name": row["name"]}
@@ -206,6 +214,13 @@ def _take_queued_stage(db, live):
     db.execute("INSERT INTO ritual_rite_map_settings VALUES(?,?) ON CONFLICT(map_id) "
                "DO UPDATE SET affixes_json=excluded.affixes_json", (live["map_id"], _dump(stages[0]["affixes"])))
     _set_meta(db, NAMES_KEY, {**(_meta(db, NAMES_KEY, {}) or {}), live["map_id"]: stages[0].get("map_name", "")})
+    _set_meta(db, BIOMES_KEY, {**(_meta(db, BIOMES_KEY, {}) or {}), live["map_id"]: stages[0].get("biome", "")})
+
+
+def stage_biome(db, map_id):
+    """Return the biome read with the Rite stage this map plays, or "" when none was read."""
+    live = _live_state(db, map_id)
+    return live["current_biome"] if live["map_ordinal"] is not None else ""
 
 
 def clear_session(db):
@@ -214,6 +229,7 @@ def clear_session(db):
     db.execute("DELETE FROM ritual_rite_completions")
     _set_meta(db, QUEUE_KEY, {})
     _set_meta(db, NAMES_KEY, {})
+    _set_meta(db, BIOMES_KEY, {})
 
 
 def discard_completion(db, map_id):
@@ -283,17 +299,19 @@ def save_ritual_rite_affixes(values, *, expected_map_id=None, expected_generatio
         return state(db)
 
 
-def scan_ritual_rite_stage(values, map_name="", *, expected_map_id=None, expected_generation=None):
+def scan_ritual_rite_stage(values, map_name="", *, biome="", expected_map_id=None, expected_generation=None):
     """Save a scanned Rite map as the current map's stage or queue it as the next stage.
 
     Scan a Rite's maps in order, as Tablets fill their slots: the first scan
     is the current map's stage and each different map queues the next stage,
     which + New map plays in turn. Scanning the same map again (same name and
-    modifiers) replaces that stage instead of adding another.
+    modifiers) replaces that stage instead of adding another. The map's biome
+    is kept with its stage for + New map to apply.
     """
     from PoE2_Data_Logger.core import logger_store as logger
     normalized = normalize_affixes(values)
     name = str(map_name or "").strip()[:80]
+    biome = str(biome or "").strip()[:40]
     with logger._connect(undo_label="Ritual Rite scan") as db:
         db.execute("BEGIN IMMEDIATE")
         target = target_map_id(db)
@@ -318,15 +336,17 @@ def scan_ritual_rite_stage(values, map_name="", *, expected_map_id=None, expecte
             db.execute("INSERT INTO ritual_rite_map_settings VALUES(?,?) ON CONFLICT(map_id) "
                        "DO UPDATE SET affixes_json=excluded.affixes_json", (target, _dump(normalized)))
             _set_meta(db, NAMES_KEY, {**(_meta(db, NAMES_KEY, {}) or {}), target: name})
+            _set_meta(db, BIOMES_KEY, {**(_meta(db, BIOMES_KEY, {}) or {}), target: biome})
             return {**state(db), "scanned_stage": live["map_ordinal"], "scanned_queued": False}
         first = 1 if live["current_from_queue"] else 0
         position = next((index for index in range(first, len(stages))
                          if same(stages[index].get("map_name", ""), stages[index]["affixes"])), None)
         if position is None:
-            stages.append({"map_name": name, "affixes": normalized})
+            stages.append({"map_name": name, "biome": biome, "affixes": normalized})
             position = len(stages) - 1
         else:
-            stages[position] = {"map_name": name or stages[position].get("map_name", ""), "affixes": normalized}
+            stages[position] = {"map_name": name or stages[position].get("map_name", ""),
+                                "biome": biome or stages[position].get("biome", ""), "affixes": normalized}
         _set_queued(db, rite, stages)
         return {**state(db), "scanned_stage": live["map_ordinal"] + position + 1 - first, "scanned_queued": True}
 

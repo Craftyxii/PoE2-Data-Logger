@@ -191,17 +191,17 @@ class MetricExportAuditTests(unittest.TestCase):
                          (row["Currency"] == name or row["Item Name"] == name))
             self.assertEqual([found[key] for key in ("Start Count", "End Count", "Net Change")], [start, end, net])
         ritual_rows = [row for row in main if row["Scan Commit #"] == str(ritual["scan_commit_number"])]
-        self.assertEqual(len(ritual_rows), 3)
-        expected = [("False", "3", "0", "3"), ("True", "2", "999", "0"), ("False", "1", "", "1")]
+        # The deferred reward was logged when first offered, so it is not saved again.
+        self.assertEqual(len(ritual_rows), 2)
+        expected = [("False", "3", "0", "3"), ("False", "1", "", "1")]
         for row, values in zip(ritual_rows, expected):
             self.assertEqual(tuple(row[key] for key in ("Deferred", "Quantity", "Tribute", "New Find Quantity")), values)
             self.assertEqual(row["Ritual Tribute Available"], "1200")
             self.assertEqual(row["Ritual Rerolls Remaining"], "0")
         self.assertEqual(ritual_rows[0]["Item: Audit Equipment"], "3")
-        self.assertEqual(ritual_rows[1]["Item: Audit Equipment"], "0")
         separate = self.csv_rows(logger.export_ritual_csv())
-        self.assertEqual([row["Tribute"] for row in separate], ["0", "999", ""])
-        self.assertEqual([row["New Find Quantity"] for row in separate], ["3", "0", "1"])
+        self.assertEqual([row["Tribute"] for row in separate], ["0", ""])
+        self.assertEqual([row["New Find Quantity"] for row in separate], ["3", "1"])
         workbook, _ = self.workbook_rows()
         for row in main:
             identity = (row["Scan Commit #"], row["Currency"], row["Item Name"], row["OCR Source"])

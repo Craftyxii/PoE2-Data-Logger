@@ -89,8 +89,9 @@ class ReviewLearningExportTests(unittest.TestCase):
         self.assertEqual([row[columns[0]] for row in currency], ["5", "8"])
         self.assertEqual(currency[-1]["Net Change"], "3")
         ritual = [row for row in rows if row["Scan Commit #"] == str(saved["scan_commit_number"])]
-        self.assertEqual([row[columns[1]] for row in ritual], ["4", "0", ""])
-        self.assertEqual([row[columns[2]] for row in ritual], ["", "", "2"])
+        # The deferred Omen offer was logged when first offered, so it is not saved again.
+        self.assertEqual([row[columns[1]] for row in ritual], ["4", ""])
+        self.assertEqual([row[columns[2]] for row in ritual], ["", "2"])
         self.assertTrue(all(row["Map ID"] == "M0001" for row in rows))
         self.assert_workbook_matches(headers, rows, columns)
 

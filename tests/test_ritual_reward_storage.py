@@ -59,8 +59,8 @@ class RitualRewardStorageTests(unittest.TestCase):
                                      "tribute": 750, "deferred": False,
                                      "source": "Occupied reward; name not resolved"})
 
-    def test_currency_equipment_omen_and_deferred_metrics_preserve_order(self):
-        """Verify currency equipment omen and deferred metrics preserve order."""
+    def test_currency_and_equipment_metrics_preserve_order_and_deferred_offers_are_not_saved(self):
+        """Verify reward metrics keep page order; deferred offers, logged when first offered, are dropped."""
         rewards = [
             {"category": "Item", "name": "Chaos Orb", "quantity": 5, "tribute": 0},
             {"category": "Item", "name": "Unregistered rare helmet", "quantity": 1, "tribute": None},
@@ -72,16 +72,16 @@ class RitualRewardStorageTests(unittest.TestCase):
         separate = self.rows(logger.export_ritual_csv)
         main = [row for row in self.rows(logger.export_all_csv)
                 if row["Scan Commit #"] == str(saved["scan_commit_number"])]
-        self.assertEqual([row["Name"] for row in separate], [item["name"] for item in rewards])
-        self.assertEqual([row["Reward Name"] for row in main], [item["name"] for item in rewards])
+        kept = [item["name"] for item in rewards if not item.get("deferred")]
+        self.assertEqual([row["Name"] for row in separate], kept)
+        self.assertEqual([row["Reward Name"] for row in main], kept)
         for rows in (separate, main):
-            self.assertEqual([row["New Find Quantity"] for row in rows], ["5", "1", "0", "0"])
-            self.assertEqual([row["Tribute"] for row in rows], ["0", "", "400", "800"])
-            self.assertEqual([row["Deferred"] for row in rows], ["False", "False", "True", "True"])
+            self.assertEqual([row["New Find Quantity"] for row in rows], ["5", "1"])
+            self.assertEqual([row["Tribute"] for row in rows], ["0", ""])
+            self.assertEqual([row["Deferred"] for row in rows], ["False", "False"])
             self.assertTrue(all(row["Ritual Tribute Available"] == "0" and
                                 row["Ritual Rerolls Remaining"] == "0" for row in rows))
-        self.assertEqual([row["Item Name"] for row in main],
-                         ["Chaos Orb", "Unregistered rare helmet", "", "Unregistered rare belt"])
+        self.assertEqual([row["Item Name"] for row in main], ["Chaos Orb", "Unregistered rare helmet"])
 
     def test_invalid_manual_rows_fail_without_creating_partial_pages(self):
         """Verify invalid manual rows fail without creating partial pages."""
@@ -95,15 +95,15 @@ class RitualRewardStorageTests(unittest.TestCase):
 
     def test_full_120_slot_page_saves_all_rewards_and_121_is_rejected_atomically(self):
         """Verify a 120-reward page saves in order and an overflow page leaves storage unchanged."""
-        items = [{"category": "Item", "name": f"Reward {index + 1}", "quantity": 1,
-                  "tribute": index, "deferred": index % 2 == 0} for index in range(120)]
+        items = [{"category": "Item", "name": f"Reward {index + 1}", "quantity": 1 + index % 2,
+                  "tribute": index} for index in range(120)]
         saved = logger.save_ritual_page(items, scan_hash="a" * 64)
         self.assertEqual(saved["count"], 120)
         self.assertEqual(len(logger.ritual_pages_for_map("M0001")[0]["items"]), 120)
         separate = self.rows(logger.export_ritual_csv)
         self.assertEqual(len(separate), 120)
         self.assertEqual([row["Name"] for row in separate], [item["name"] for item in items])
-        self.assertEqual(sum(int(row["New Find Quantity"]) for row in separate), 60)
+        self.assertEqual(sum(int(row["New Find Quantity"]) for row in separate), 180)
         before = self.records()
         with self.assertRaisesRegex(ValueError, "up to 120"):
             logger.save_ritual_page([*items, {"name": "Overflow reward"}], scan_hash="a" * 64)
@@ -122,7 +122,7 @@ class RitualRewardStorageTests(unittest.TestCase):
             original_page_id = db.execute("SELECT id FROM ritual_pages").fetchone()[0]
         atlas["gear_item_rarity"] = 200
         logger.save_atlas_settings(atlas)
-        second = logger.save_ritual_page([{"name": "Corrected unique helmet", "quantity": 2, "deferred": True}],
+        second = logger.save_ritual_page([{"name": "Corrected unique helmet", "quantity": 2}],
             scan_hash="a" * 64, expected_map_id="M0001", tribute_available=20, rerolls_remaining=0)
         self.assertTrue(second["updated"])
         self.assertEqual(second["page_number"], first["page_number"])
@@ -138,7 +138,7 @@ class RitualRewardStorageTests(unittest.TestCase):
         exported = self.rows(logger.export_ritual_csv)
         self.assertEqual(len(exported), 1)
         self.assertEqual((exported[0]["Name"], exported[0]["Quantity"], exported[0]["New Find Quantity"],
-                          exported[0]["Ritual Rerolls Remaining"]), ("Corrected unique helmet", "2", "0", "0"))
+                          exported[0]["Ritual Rerolls Remaining"]), ("Corrected unique helmet", "2", "2", "0"))
         self.assertEqual(exported[0]["Scan Commit #"], str(second["scan_commit_number"]))
 
     def test_capture_identity_is_map_scoped_and_old_map_cannot_be_overwritten(self):

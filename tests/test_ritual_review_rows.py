@@ -229,20 +229,43 @@ class RitualReviewRowsTests(unittest.TestCase):
                 self.assertEqual(self.window.pending_review_kind, "ritual")
                 self.window.reject_review()
 
-    def test_deferred_rewards_never_wait_for_review(self):
-        """Deferred offers add no new finds: an uncertain one is left out, a certain one saves as deferred."""
-        name = logger.ritual_names()[0]
-        uncertain = self.known(category="Omen", name="Deferred omen", tribute=None, deferred=True,
-                               needs_review=True, unresolved=True, source="deferred marker", grid_slots=[1])
-        certain = self.known(category="Omen", name=name, name_match=1, identity_verified=True,
-                             tribute=None, deferred=True, grid_slots=[2])
-        self.read(self.result([uncertain, certain, self.known(grid_slots=[3])], grid_detected=True,
-                              grid_reward_count=3, unresolved_count=1), live=True, auto=True)
+    def deferred(self, slot, *, certain):
+        """Build a deferred offer, read with certainty or not."""
+        if certain:
+            return self.known(category="Omen", name=logger.ritual_names()[0], name_match=1,
+                              identity_verified=True, tribute=None, deferred=True, grid_slots=[slot])
+        return self.known(category="Omen", name="Deferred omen", tribute=None, deferred=True, needs_review=True,
+                          unresolved=True, source="deferred marker", grid_slots=[slot])
+
+    def test_deferred_rewards_are_never_reviewed_or_logged(self):
+        """A deferred offer was logged on the page that first offered it, certain or not."""
+        self.read(self.result([self.deferred(1, certain=False), self.deferred(2, certain=True),
+                               self.known(grid_slots=[3])], grid_detected=True, grid_reward_count=3,
+                              unresolved_count=1), live=True, auto=True)
         self.assertIsNone(self.window.pending_review_kind)
         rows = list(csv.DictReader(io.StringIO(logger.export_ritual_csv().decode("utf-8-sig"))))
         self.assertEqual([(row["Name"], row["Deferred"], row["New Find Quantity"]) for row in rows],
-                         [(name, "True", "0"), ("Chaos Orb", "False", "1")])
-        self.assertNotIn("Deferred omen", logger.export_ritual_csv().decode("utf-8-sig"))
+                         [("Chaos Orb", "False", "1")])
+
+    def test_page_of_only_deferred_rewards_saves_its_counters_without_review(self):
+        """Nothing on such a page needs approval: its counters save, or with none read it ends quietly."""
+        for certain in (False, True):
+            with self.subTest(certain=certain):
+                before = len(logger.ritual_pages_for_map("M0001"))
+                self.page.putpixel((0, 0), (before, 0, 0))  # another capture, not a correction of the last
+                self.read(self.result([self.deferred(1, certain=certain), self.deferred(2, certain=certain)],
+                                      grid_detected=True, grid_reward_count=2, unresolved_count=0 if certain else 2,
+                                      rerolls_remaining=4 - before), live=True, auto=True)
+                self.assertIsNone(self.window.pending_review_kind)
+                pages = logger.ritual_pages_for_map("M0001")
+                self.assertEqual((len(pages), pages[-1]["items"]), (before + 1, []))
+                self.assertNotIn("held", self.window.ritual_status.text())
+        commits = logger.get_state()["scan_commit_count"]
+        self.read(self.result([self.deferred(1, certain=True)], grid_detected=True, grid_reward_count=1,
+                              tribute_available=None, rerolls_remaining=None), live=True, auto=True)
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertEqual(logger.get_state()["scan_commit_count"], commits)
+        self.assertEqual((self.window.review_summary.text(), self.window.ritual_status.text()), ("", ""))
 
     def test_reward_whose_deferred_state_is_unknown_still_asks(self):
         """A reward that may not be deferred could be a new find, so it is reviewed."""

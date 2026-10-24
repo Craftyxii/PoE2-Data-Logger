@@ -86,9 +86,8 @@ class RitualGrayscaleWorkflowTests(unittest.TestCase):
         self.assertEqual(self.window.pending_review_kind, "ritual")
         table = self.window.ritual_table
         rows = self.slot_rows()
-        # Deferred offers add no new finds; ones not read with certainty are left out, never reviewed.
-        skipped = [tuple(item["grid_slots"]) for item in result["items"]
-                   if skipped_deferred_reward(item, logger.ritual_names())]
+        # Deferred offers were logged when first offered: left out, never reviewed.
+        skipped = [tuple(item["grid_slots"]) for item in result["items"] if skipped_deferred_reward(item)]
         self.assertEqual(len(skipped), 3)
         self.assertTrue(set(skipped).isdisjoint(rows))
         self.assertEqual(table.rowCount(), 11 - len(skipped))

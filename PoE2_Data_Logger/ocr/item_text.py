@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 import re
+import string
 
 import numpy as np
 
@@ -523,13 +524,32 @@ def _rollless_ink(image, row):
                                    colour[0] > colour[2] * 1.4 and colour[1] < colour[0] * .7)
 
 
+def _rite_map_title(ocr_rows, texts, biome):
+    """Return the map name: the centred title line directly above the Biome line, else "".
+
+    The capture is the whole game window, so the first text read can be anything
+    on screen, such as an FPS counter; only the tooltip's own title names the map.
+    """
+    line = ocr_rows[biome]
+    height = line["bottom"] - line["y"]
+    centre = (line["x"] + line["right"]) / 2
+    above = [(row, text) for row, text in zip(ocr_rows[:biome], texts[:biome])
+             if line["y"] - height * 1.5 <= row["bottom"] <= line["y"] + height * .5
+             and abs((row["x"] + row["right"]) / 2 - centre) <= max(height, (line["right"] - line["x"]) * .25)]
+    if not above:
+        return ""
+    title = max(above, key=lambda pair: pair[0]["bottom"])[1]
+    return string.capwords(title) if re.fullmatch(r"[A-Za-z][A-Za-z' -]*", title) else ""
+
+
 def read_rite_tooltip(ocr_rows, image):
     """Return Rite of the Nameless modifiers from a hovered atlas map tooltip, else None.
 
     Modifier lines sit between the Biome line and the orange flavour text. A
     wrapped line rejoins its modifier until a catalog modifier completes, a
     Foretold label starts the next one, or the previous line ended with room
-    for the next word. Unknown wording is kept as a custom modifier.
+    for the next word. Unknown wording is kept as a custom modifier. The map's
+    name and biome come from its title and Biome lines.
     """
     from PoE2_Data_Logger.core import ritual_rites_catalog
 
@@ -587,4 +607,6 @@ def read_rite_tooltip(ocr_rows, image):
             same["count"] += 1
         else:
             affixes.append({**entry, "count": 1})
-    return {"kind": "rite", "map_name": texts[0].title() if biome else "", "affixes": affixes}
+    region = re.match(r"^BIOME\s*:\s*([A-Za-z][A-Za-z' -]*)$", texts[biome], re.I)
+    return {"kind": "rite", "map_name": _rite_map_title(ocr_rows, texts, biome),
+            "biome": string.capwords(region.group(1)) if region else "", "affixes": affixes}

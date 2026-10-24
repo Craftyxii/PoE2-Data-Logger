@@ -1,0 +1,4 @@
+Unaltered Favours window captures from user-provided Path of Exile 2
+screenshots (2026-10-23, Ritual_8: Screenshot 2026-10-23 095256/095316/
+132427/132459), used as regression fixtures for the Ritual repeat-page
+safeguard. Game UI artwork copyright Grinding Gear Games.

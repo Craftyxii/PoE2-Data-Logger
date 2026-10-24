@@ -219,7 +219,8 @@ class UniqueCatalogExportTests(unittest.TestCase):
                 if saved["kind"] == "Currency":
                     self.assertEqual(details["item_kinds"], dict.fromkeys(maps[saved["map_id"]], "Item"))
                 else:
-                    self.assertEqual(len(details["items"]), len(maps[saved["map_id"]]) * 2)
+                    # Each name's deferred copy was logged when first offered, so it is not saved.
+                    self.assertEqual(len(details["items"]), len(maps[saved["map_id"]]))
                     self.assertTrue(all(item["category"] == "Item" and item["quantity"] == 1
                                         for item in details["items"]))
             pages = list(db.execute("SELECT map_id,items_json FROM ritual_pages"))
@@ -244,12 +245,12 @@ class UniqueCatalogExportTests(unittest.TestCase):
             self.assertEqual(row["End Currency Scan #"], "3")
 
         _, ritual = self.csv_rows(logger.export_ritual_csv())
-        self.assertEqual(len(ritual), len(names) * 2)
+        self.assertEqual(len(ritual), len(names))
         self.assertEqual({row["Name"] for row in ritual}, set(names))
         for row in ritual:
             self.assertIn(row["Name"], maps[row["Map ID"]])
             self.assertEqual((row["Type"], row["Quantity"]), ("Item", "1"))
-            self.assertEqual(row["New Find Quantity"], "0" if row["Deferred"] == "True" else "1")
+            self.assertEqual((row["Deferred"], row["New Find Quantity"]), ("False", "1"))
 
         headers, history = self.csv_rows(logger.export_all_csv())
         for name in names:
@@ -275,7 +276,7 @@ class UniqueCatalogExportTests(unittest.TestCase):
                              ["False", "False", "True"], name)
             self.assertEqual([row["Session Found Quantity"] for row in readings["inventory"]],
                              ["0", "0", "3"], name)
-            self.assertEqual([row["Item: " + name] for row in readings["offers"]], ["1", "0"], name)
+            self.assertEqual([row["Item: " + name] for row in readings["offers"]], ["1"], name)
 
         primary_headers, primary = self.csv_rows(logger.export_primary_csv())
         self.assertEqual(len(primary), len(maps))

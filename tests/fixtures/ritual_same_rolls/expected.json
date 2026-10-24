@@ -1,0 +1,9 @@
+{
+  "description": "Pairs of Favours pages read with the same rolls left and Tribute but different rewards. The user reports 132427 and 132459 came from different maps; the repeat-page safeguard compares rolls only within the current map, so each must save on its own map.",
+  "pages": {
+    "132427.png": {"rerolls_remaining": 7, "tribute_available": 61426, "first_rewards": ["Seeing Stars", "Amor Mandragora"]},
+    "132459.png": {"rerolls_remaining": 7, "tribute_available": 61426, "first_rewards": ["Saffell's Frame", "Omen of Greater Exaltation"]},
+    "095256.png": {"rerolls_remaining": 4, "tribute_available": 22431, "first_rewards": ["Crown of Thorns", "Revered Resin"]},
+    "095316.png": {"rerolls_remaining": 4, "tribute_available": 22431, "first_rewards": ["The Everlasting Gaze", "Crest of Ardura"]}
+  }
+}

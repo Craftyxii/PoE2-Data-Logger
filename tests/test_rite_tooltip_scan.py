@@ -7,15 +7,17 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from PySide6.QtWidgets import QMessageBox
 
 from tests import test_hotkey_presentation_retry as fixtures
 from PoE2_Data_Logger.core import logger_store as logger, ritual_rites_catalog
 from PoE2_Data_Logger.ocr.item_ocr import ocr_lines
 from PoE2_Data_Logger.ocr.item_text import read_rite_tooltip
+from PoE2_Data_Logger.ui.native_desktop import value
 
 FIXTURES = Path(__file__).parent / "fixtures/rite_tooltips"
+FONT = Path(__file__).parents[1] / "PoE2_Data_Logger/fonts/DejaVuSans-Bold.ttf"
 EXPECTED = {
     "ravine.png": ["Rerolling Favours at Ritual Altars in Area costs 20% reduced Tribute",
                    "Foretold Proliferation: Monsters Sacrificed at Ritual Altars grant 25% increased Tribute"],
@@ -24,12 +26,37 @@ EXPECTED = {
     "necropolis_bounty.png": ["Foretold Bounty: Omen of Sinistral Exaltation",
                               "Rerolling Favours at Ritual Altars in Area costs 20% reduced Tribute",
                               "Foretold Proliferation: Monsters Sacrificed at Ritual Altars grant 25% increased Tribute"],
+    "savannah.png": ["Foretold Bounty: 4 Chaos Orbs"],
+    "seepage.png": ["Foretold Bounty: Omen of Dextral Exaltation"],
+    "channel.png": ["Foretold Proliferation: Rerolling Favours at Ritual Altars in your Maps costs 20% reduced Tribute"],
+    "oasis.png": ["Foretold Proliferation: Rerolling Favours at Ritual Altars in your Maps costs 20% reduced Tribute"],
 }
+# Each tooltip's title and Biome line, as the game shows them.
+MAPS = {"ravine.png": ("Ravine", "Forest"), "necropolis_wildwood.png": ("Necropolis", "Ezomyte City"),
+        "necropolis_bounty.png": ("Necropolis", "Ezomyte City"), "savannah.png": ("Savannah", "Grass"),
+        "seepage.png": ("Seepage", "Grass"), "channel.png": ("Channel", "Faridun City"),
+        "oasis.png": ("Oasis", "Faridun City")}
 
 
 def texts(affixes):
     """Show saved Rite modifiers as their catalog wording."""
     return [ritual_rites_catalog.affix(row["id"])["text"] if row.get("id") else row["text"] for row in affixes]
+
+
+def full_window(name, fps="94 FPS"):
+    """Place an actual tooltip in a game-window capture, as the hotkey grabs it, with an FPS counter."""
+    with Image.open(FIXTURES / name) as source:
+        tooltip = source.convert("RGB")
+    frame = Image.new("RGB", (1920, 1080), (18, 16, 14))
+    frame.paste(tooltip, (760, 300))
+    ImageDraw.Draw(frame).text((1830, 8), fps, font=ImageFont.truetype(str(FONT), 18), fill=(235, 220, 60))
+    return frame
+
+
+def scan_window(name, fps="94 FPS"):
+    """Read one actual tooltip from a whole game-window capture."""
+    image = full_window(name, fps)
+    return read_rite_tooltip(ocr_lines(image), image)
 
 
 def scan(name, edit=None):
@@ -52,6 +79,25 @@ class RiteTooltipParsingTests(unittest.TestCase):
                 self.assertEqual([ritual_rites_catalog.affix(row["id"])["text"] for row in result["affixes"]],
                                  expected)
                 self.assertTrue(all(row["count"] == 1 for row in result["affixes"]))
+
+    def test_whole_window_capture_names_the_map_from_its_title_not_other_screen_text(self):
+        """The hotkey grabs the game window; an FPS counter read first is not the map's name."""
+        for name, (title, biome) in MAPS.items():
+            with self.subTest(name=name):
+                result = scan_window(name)
+                self.assertEqual((result["map_name"], result["biome"]), (title, biome))
+                self.assertEqual(result["affixes"], scan(name)["affixes"])
+                self.assertEqual((scan(name)["map_name"], scan(name)["biome"]), (title, biome))
+
+    def test_tooltip_biomes_map_to_the_biome_and_city_type_fields(self):
+        """A city map sets City Type, leaving its biome to the Atlas; unknown wording sets nothing."""
+        self.assertEqual(logger._rite_biome_settings("Grass"), {"biome": "Grass", "city_type": "None"})
+        self.assertEqual(logger._rite_biome_settings("Forest"), {"biome": "Forest", "city_type": "None"})
+        self.assertEqual(logger._rite_biome_settings("Faridun City"), {"city_type": "Faridun", "biome": "None"})
+        self.assertEqual(logger._rite_biome_settings("Ezomyte City"), {"city_type": "Ezomyte", "biome": "None"})
+        for unknown in ("", "Gras5", "Atlantis City", "None"):
+            with self.subTest(unknown=unknown):
+                self.assertEqual(logger._rite_biome_settings(unknown), {})
 
     def test_unknown_wording_is_added_as_custom_modifiers_of_the_labelled_kind(self):
         def edit(rows):
@@ -158,7 +204,7 @@ class RiteTooltipStageTests(unittest.TestCase):
         self.assertEqual(len(logger.ritual_rite_state()["queued_stages"]), 2)
         table = self.window.ritual_rite_queue_table
         self.assertEqual([(table.item(row, 0).text(), table.item(row, 1).text()) for row in range(table.rowCount())],
-                         [("2", "Necropolis"), ("3", "Necropolis")])
+                         [("2", "Necropolis · Ezomyte City"), ("3", "Necropolis · Ezomyte City")])
         self.assertEqual(logger.undo_last_action()["action"], "Ritual Rite scan")
         self.assertEqual([texts(stage["affixes"]) for stage in logger.ritual_rite_state()["queued_stages"]],
                          [EXPECTED["necropolis_bounty.png"]])
@@ -166,6 +212,35 @@ class RiteTooltipStageTests(unittest.TestCase):
             self.window.clear_ritual_rite_queue()
         state = logger.ritual_rite_state()
         self.assertEqual((state["queued_stages"], texts(state["current_affixes"])), ([], EXPECTED["ravine.png"]))
+
+    def test_new_map_shows_the_biome_of_the_rite_map_it_plays_ready_to_correct(self):
+        """Scanned ahead from whole-window captures, each + New map sets and shows that map's biome."""
+        logger.save_settings({"activity_type": "Ritual", "biome": "Mountain"})
+        self.window.refresh()
+        for name, fps in (("savannah.png", "94 FPS"), ("channel.png", "98 FPS"), ("ravine.png", "81 FPS"),
+                          ("ravine.png", "85 FPS")):
+            self.window._rite_read(scan_window(name, fps))
+        # Ravine rescanned under another FPS reading replaces its stage instead of adding one.
+        table = self.window.ritual_rite_queue_table
+        self.assertEqual([(table.item(row, 0).text(), table.item(row, 1).text()) for row in range(table.rowCount())],
+                         [("2", "Channel · Faridun City"), ("3", "Ravine · Forest")])
+        shown = []
+        for _ in range(2):
+            self.window.finish_map()
+            shown.append((value(self.window.header_biome), value(self.window.header_city_type),
+                          self.window.statusBar().currentMessage()))
+        self.assertEqual(shown[0][:2], ("None", "Faridun"))
+        self.assertIn("Biome from Rite stage 2 (Channel): Faridun City.", shown[0][2])
+        self.assertEqual(shown[1][:2], ("Forest", "None"))
+        self.assertIn("Biome from Rite stage 3 (Ravine): Forest.", shown[1][2])
+        self.assertIn("This map plays stage 3 (Ravine · Forest)", self.window.ritual_rite_queue_note.text())
+        # The map that was current when scanning keeps the biome it was given.
+        rows = {row["Map ID"]: row for row in csv.DictReader(io.StringIO(logger.export_maps_csv().decode("utf-8-sig")))}
+        self.assertEqual(rows["M0001"]["Biome"], "Mountain")
+        # A wrong biome is corrected in the header and saved on the new map.
+        self.window.header_biome.setCurrentText("Swamp")
+        rows = {row["Map ID"]: row for row in csv.DictReader(io.StringIO(logger.export_maps_csv().decode("utf-8-sig")))}
+        self.assertEqual((rows["M0002"]["City Type"], rows["M0003"]["Biome"]), ("Faridun", "Swamp"))
 
     def test_waystone_setup_saved_after_map_start_keeps_the_rite_stage_in_exports(self):
         """Saving the new map's waystone rebuilds its setup without dropping the live Rite stage."""

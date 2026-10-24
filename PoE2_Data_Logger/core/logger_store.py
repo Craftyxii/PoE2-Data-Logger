@@ -699,10 +699,23 @@ def save_ritual_rite_affixes(values, *, expected_map_id=None, expected_generatio
                                                    expected_generation=expected_generation)
 
 
-def scan_ritual_rite_stage(values, map_name="", *, expected_map_id=None, expected_generation=None):
+def scan_ritual_rite_stage(values, map_name="", *, biome="", expected_map_id=None, expected_generation=None):
     """Save a scanned Rite map as the current stage, or queue it for the maps that follow."""
-    return ritual_rite_store.scan_ritual_rite_stage(values, map_name, expected_map_id=expected_map_id,
+    return ritual_rite_store.scan_ritual_rite_stage(values, map_name, biome=biome, expected_map_id=expected_map_id,
                                                   expected_generation=expected_generation)
+
+
+def _rite_biome_settings(biome):
+    """Map a Rite map tooltip's biome to the Biome and City type fields, or {} when it names neither.
+
+    A city map has no natural biome; its Atlas keystone decides what it also counts as.
+    """
+    words = str(biome or "").split()
+    if len(words) == 2 and words[1].casefold() == "city":
+        city = next((name for name in CITY_TYPES[1:] if name.casefold() == words[0].casefold()), None)
+        return {"city_type": city, "biome": "None"} if city else {}
+    match = next((name for name in BIOMES[1:] if name.casefold() == " ".join(words).casefold()), None)
+    return {"biome": match, "city_type": "None"} if match else {}
 
 
 def clear_ritual_rite_queue():
@@ -2995,7 +3008,8 @@ def start_map():
     """Create the next map and first expedition in one immediate transaction.
 
     Apply staged waystone fields or clear prior-map fields, retain earlier Atlas
-    binding and remember settings needed to undo an empty map.
+    binding and remember settings needed to undo an empty map. A map playing a
+    scanned Rite stage takes that map's biome.
      Saved changes remain undoable."""
     with _connect(undo_label='New map') as db:
         db.execute("BEGIN IMMEDIATE")
@@ -3015,6 +3029,8 @@ def start_map():
         elif current:
             config.update(_waystone_settings({}))
         config["expedition"] = 1
+        # A Ritual map playing a scanned Rite stage takes the biome read with that map.
+        config.update(_rite_biome_settings(ritual_rite_store.stage_biome(db, mid)))
         context = _bind_atlas_context(db, mid, _snapshot(config))
         context["biome"] = _atlas_city_biome(db, context)
         config["biome"] = context["biome"]
@@ -3733,7 +3749,8 @@ def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
 
     A repeated capture hash replaces its page; otherwise append a page.
     Readable page counters can be saved without any reward rows. Optionally
-    register accepted labels and teach their icons.
+    register accepted labels and teach their icons. A deferred reward was
+    logged when it was first offered, so it is never saved again.
      Saved changes remain undoable."""
     if not isinstance(items, list) or len(items) > MAX_RITUAL_REWARDS:
         raise ValueError(f"Review up to {MAX_RITUAL_REWARDS} Ritual rewards on a page.")
@@ -3761,8 +3778,10 @@ def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
         deferred = item.get("deferred", False)
         if type(deferred) is not bool:
             raise ValueError("Deferred must be checked or unchecked.")
+        if deferred:
+            continue
         cleaned.append({"category": category, "name": name, "quantity": quantity,
-                        "tribute": tribute, "source": source, "deferred": deferred})
+                        "tribute": tribute, "source": source, "deferred": False})
     if not cleaned and tribute_available is None and rerolls_remaining is None:
         raise ValueError("Add or review at least one Ritual reward before saving a page.")
     with _connect(undo_label='Ritual approval') as db:

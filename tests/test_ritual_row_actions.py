@@ -309,22 +309,25 @@ class RitualRowActionTests(unittest.TestCase):
                 self.window.save_ritual()
         self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
 
-    def test_approved_deferred_and_repeated_pages_preserve_occurrence_quantities(self):
-        """Row decisions do not merge different pages or turn deferred offers into finds.
+    def test_deferred_offers_are_never_logged_and_repeated_pages_stay_separate(self):
+        """Row decisions do not merge different pages; a deferred offer is never reviewed or logged.
 
-        A deferred offer read with certainty needs no row approval.
+        It was logged on the page that first offered it, so its page keeps only its counters.
         """
         for deferred in (False, True, False):
             self.image.putpixel((0, 0), (int(deferred), 0, len(logger.ritual_pages_for_map("M0001"))))
             self.read([self.reward(name="Repeated Ritual item", quantity=3,
                                    deferred=deferred, needs_review=not deferred)])
-            if not deferred:
+            if deferred:
+                self.assertEqual(self.window.ritual_table.rowCount(), 0)
+            else:
                 self.approve(0)
             self.window.approve_review()
         pages = logger.ritual_pages_for_map("M0001")
-        self.assertEqual([page["items"][0]["quantity"] for page in pages], [3, 3, 3])
+        self.assertEqual([[item["quantity"] for item in page["items"]] for page in pages], [[3], [], [3]])
         rows = list(csv.DictReader(io.StringIO(logger.export_ritual_csv().decode("utf-8-sig"))))
-        self.assertEqual([int(row["New Find Quantity"]) for row in rows], [3, 0, 3])
+        self.assertEqual([(row["Name"], row["New Find Quantity"]) for row in rows],
+                         [("Repeated Ritual item", "3"), ("", ""), ("Repeated Ritual item", "3")])
 
 
 if __name__ == "__main__":

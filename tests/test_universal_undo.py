@@ -275,7 +275,7 @@ class UniversalUndoTests(unittest.TestCase):
         tables = ("currency_items", "item_names", "ritual_names", "review_icon_examples")
         before_rows, before_catalog, before_exports = self.rows(), self.rows(tables), self.exports()
         logger.save_ritual_page([{"category": "Omen", "name": "Omen of Mistaken Undo", "quantity": 1,
-                                  "tribute": 500, "deferred": True}],
+                                  "tribute": 500}],
             scan_hash="a" * 64, tribute_available=300, rerolls_remaining=1, register_names=True,
             icon_examples=[self.example("Omen of Mistaken Undo", "Omen")])
         self.undo()

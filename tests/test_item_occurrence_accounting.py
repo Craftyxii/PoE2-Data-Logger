@@ -263,9 +263,9 @@ class ItemOccurrenceAccountingTests(unittest.TestCase):
         self.assertEqual(self.raw_commits("Currency"), commits)
 
     def test_ritual_duplicate_items_follow_the_same_deferred_rule_as_omens(self):
-        """Each nondeferred footprint contributes one New Find, even with an identical name."""
-        for first_deferred, expected in ((True, ["0", "1", "0", "1"]),
-                                         (False, ["1", "1", "1", "1"])):
+        """Each footprint contributes one New Find, even with an identical name; a deferred one is not saved."""
+        for first_deferred in (True, False):
+            kept = 2 if first_deferred else 4
             with self.subTest(first_deferred=first_deferred):
                 rewards = [self.equipment(deferred=first_deferred, slot=1), self.equipment(slot=5),
                            {"category": "Omen", "name": "Omen of Whittling", "quantity": 1,
@@ -275,12 +275,12 @@ class ItemOccurrenceAccountingTests(unittest.TestCase):
                 for exporter in (logger.export_ritual_csv, logger.export_record_history_csv, logger.export_all_csv):
                     rows = [row for row in self.rows(exporter())
                             if row["Scan Commit #"] == str(saved["scan_commit_number"])]
-                    self.assertEqual([row["Quantity"] for row in rows], ["1"] * 4)
-                    self.assertEqual([row["New Find Quantity"] for row in rows], expected)
+                    self.assertEqual([row["Quantity"] for row in rows], ["1"] * kept)
+                    self.assertEqual([row["New Find Quantity"] for row in rows], ["1"] * kept)
                 main = [row for row in self.rows(logger.export_all_csv())
                         if row["Scan Commit #"] == str(saved["scan_commit_number"])]
-                self.assertEqual([row["Item: Headhunter"] for row in main[:2]], expected[:2])
-                self.assertEqual([row["Omen: Omen of Whittling"] for row in main[2:]], expected[2:])
+                self.assertEqual([row["Item: Headhunter"] for row in main[:kept // 2]], ["1"] * (kept // 2))
+                self.assertEqual([row["Omen: Omen of Whittling"] for row in main[kept // 2:]], ["1"] * (kept // 2))
         self.assertEqual(self.totals(), {})
         self.assertFalse(any(int(row["Headhunter"] or 0) for row in self.rows(logger.export_primary_csv())))
         self.assert_workbook_matches_csv()
@@ -302,14 +302,15 @@ class ItemOccurrenceAccountingTests(unittest.TestCase):
         self.assertEqual(len(logger.ritual_pages_for_map("M0001")), 1)
         self.assertEqual(self.raw_commits("Ritual")[0], original)
         history = [row for row in self.rows(logger.export_all_csv()) if row["Type"] == "Ritual"]
-        self.assertEqual([row["Item: Headhunter"] for row in history], ["0", "1", "1", "1"])
+        # The first approval did not save its deferred occurrence.
+        self.assertEqual([row["Item: Headhunter"] for row in history], ["1", "1", "1"])
         with logger._connect() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM ritual_pages").fetchone()[0], 1)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM commits WHERE kind='Ritual'").fetchone()[0], 2)
         self.assert_workbook_matches_csv()
         self.assertEqual(logger.undo_last_action()["action"], "Ritual approval")
         self.reopen()
-        self.assertEqual([row["New Find Quantity"] for row in self.rows(logger.export_ritual_csv())], ["0", "1"])
+        self.assertEqual([row["New Find Quantity"] for row in self.rows(logger.export_ritual_csv())], ["1"])
         self.assertEqual(self.raw_commits("Ritual"), [original])
         self.assertEqual(self.totals(), {})
 

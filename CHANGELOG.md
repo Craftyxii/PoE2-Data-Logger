@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Never review or log a deferred Ritual reward, read with certainty or not: a deferred offer was logged on the page that first offered it, and deferring only keeps it for a later purchase. A row confirmed as Deferred in review is not saved either. A page whose rewards are all deferred saves its Tribute and rerolls automatically instead of stopping at "Auto-commit held", and one with no readable counter ends quietly. A reward whose deferred state is unknown is still reviewed.
+- Read a scanned Rite map's name from its tooltip title. The hotkey captures the whole game window, and the first text on screen (an FPS counter) was taken as the name, so a rescan of the same map looked like a new stage and was queued again.
+- Apply each Rite map's biome on + New map. The biome is read with each scanned stage and shown in Queued stages ("Savannah · Grass"); the map that plays a stage takes its Biome, or for a city map its City Type with the Atlas keystone's additional biome. The BIOME and CITY TYPE pickers show it straight away, the status line names the stage it came from, and a wrong value is corrected in the picker.
 - Release builds run their checks side by side instead of one after another: the installer build, the Windows fixture and HUD checks, the 100-map session and six shards of the full test suite each get their own Windows runner. A final job checks that the shards together ran every test module exactly once and all passed, and publication still requires every job and gate step to pass on the same source. No check was removed. The first such build took 12 minutes, the 100-map session being the longest job; a build took 62–75 minutes before. Runner speed varies, so some builds will take longer.
 
 ## 1.3.2.30 Beta

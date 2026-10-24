@@ -1,4 +1,5 @@
 Unaltered atlas map tooltips from user-provided Path of Exile 2 screenshots
-(2026-10-22, Rite.zip: Screenshot 2026-10-22 133102/133130/133148), used as
+(2026-10-22, Rite.zip: Screenshot 2026-10-22 133102/133130/133148; 2026-10-24,
+Rite.zip: Screenshot 2026-10-24 144415/144520/144545/144609), used as
 regression fixtures for Rite of the Nameless modifier scanning. Game UI
 artwork copyright Grinding Gear Games.

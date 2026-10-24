@@ -122,7 +122,10 @@ class SavedSnapshotReviewTests(unittest.TestCase):
         self.assert_inventory_saved_preview(14)
 
     def test_manual_ritual_save_locks_preview_and_next_scan_restores_editing(self):
-        """Verify manual Ritual save locks its preview and the next scan allows quantity and deferred edits."""
+        """Verify manual Ritual save locks its preview and the next scan allows quantity and deferred edits.
+
+        A row confirmed as deferred is not logged; its page keeps only its counters.
+        """
         self.ritual()
         self.window.approve_scan_button.click()
         self.assert_ritual_saved_preview(1)
@@ -141,8 +144,8 @@ class SavedSnapshotReviewTests(unittest.TestCase):
         self.assertEqual(controls.property("reviewStatus"), "approved")
         self.window.approve_scan_button.click()
         pages = logger.ritual_pages_for_map("M0001")
-        self.assertEqual(pages[-1]["items"][0]["quantity"], 3)
-        self.assertTrue(pages[-1]["items"][0]["deferred"])
+        self.assertEqual((len(pages), pages[-1]["items"]), (2, []))
+        self.assertEqual(logger.last_ritual_rerolls("M0001"), 1)
 
     def test_auto_ritual_save_locks_preview(self):
         """Verify automatic Ritual save locks the resulting preview."""
