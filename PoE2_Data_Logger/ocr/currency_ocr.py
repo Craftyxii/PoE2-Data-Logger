@@ -440,11 +440,15 @@ class CurrencyReader:
 
         Some families draw one shape in different colours (Essences, Liquid
         emotions). A sub-pixel shift can let the wrong colour win on shape, so
-        the strongly coloured pixels must also sit clearly nearer the top family.
+        when such a rival scores within 1000 the strongly coloured pixels must
+        also sit clearly nearer the top family. Wrong colours never led by more
+        than about 600 on every catalog item drawn at 1080p, 1440p and as JPEG.
         """
         top = ranked[0]["name"]
         rivals = []
         for row in ranked[1:]:
+            if ranked[0]["score"] - row["score"] >= 1000:
+                continue
             pair = frozenset((top, row["name"]))
             if pair not in self._same_shapes:
                 self._same_shapes[pair] = _same_shape(self.calibrated_rgba[top], self.calibrated_rgba[row["name"]])

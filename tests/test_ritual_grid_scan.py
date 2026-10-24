@@ -133,15 +133,15 @@ class RitualGridScanTests(unittest.TestCase):
         """Verify tied local references leave the reward unnamed with candidate labels."""
         self.reader.icon = lambda cell, count_digits=None, **_options: {"family": None, "score": .1, "all": []}
         self.reader.examples = lambda cell, examples: [
-            {"name": "Omen of Bartering", "score": -100}, {"name": "Omen of Recombination", "score": -100}]
+            {"name": "Omen of Bartering", "score": -100}, {"name": "Omen of Gambling", "score": -100}]
         image = Image.new("RGB", (40, 40), (70, 80, 160))
         raw = io.BytesIO(); image.save(raw, format="PNG")
-        references = [{"name": name, "image": raw.getvalue()} for name in ("Omen of Bartering", "Omen of Recombination")]
+        references = [{"name": name, "image": raw.getvalue()} for name in ("Omen of Bartering", "Omen of Gambling")]
         result = self.scan(reward_grid([[1]]), references=references)
         item = result["items"][0]
         self.assertEqual(item["name"], "")
         self.assertTrue(item["unresolved"])
-        self.assertEqual(item["candidate_names"], ["Omen of Bartering", "Omen of Recombination"])
+        self.assertEqual(item["candidate_names"], ["Omen of Bartering", "Omen of Gambling"])
 
     def test_real_local_reference_reader_resolves_unique_art_but_holds_shared_art(self):
         """Verify real local matching resolves unique artwork and holds shared labels for review."""
@@ -154,11 +154,11 @@ class RitualGridScanTests(unittest.TestCase):
         result = self.scan(reward_grid([[1]]), references=unique)
         self.assertEqual(result["items"][0]["name"], "Omen of Bartering")
         self.assertFalse(result["items"][0]["unresolved"])
-        shared = unique + [{"name": "Omen of Recombination", "image": raw.getvalue()}]
+        shared = unique + [{"name": "Omen of Gambling", "image": raw.getvalue()}]
         result = self.scan(reward_grid([[1]]), references=shared)
         self.assertEqual(result["items"][0]["name"], "")
         self.assertTrue(result["items"][0]["unresolved"])
-        self.assertEqual(result["items"][0]["candidate_names"], ["Omen of Bartering", "Omen of Recombination"])
+        self.assertEqual(result["items"][0]["candidate_names"], ["Omen of Bartering", "Omen of Gambling"])
 
     def test_clipped_or_unsupported_ritual_grid_holds_page_and_keeps_deferred_unknown(self):
         """Verify unsupported grids preserve deferred unknown rewards and flag incomplete coverage."""
