@@ -6256,7 +6256,7 @@ class LoggerWindow(QMainWindow):
         self.note(f"{saved['remnant_id']} logged to {saved['map_id']}.", True)
 
     def _queue_kill_count_reading(self, payload):
-        """Persist independent OCR snapshots without replacing manual count drafts or other reviews."""
+        """Persist OCR snapshots as the map's kill totals without disturbing other reviews."""
         if not isinstance(payload, dict):
             return
         result = payload.get("result")
@@ -6310,9 +6310,12 @@ class LoggerWindow(QMainWindow):
             self.note("Kill counts not saved: " + str(error))
             return
         self._pending_kill_count_saves.pop(request_id, None)
+        # The reading is now the map's totals; show it rather than an older draft.
+        self._counts_form_baseline = None
+        self.refresh()
         self._set_commit_badge(saved["scan_commit_number"])
         label = {"map_final": "Final map", "chain_stage": "Chain stage"}.get(saved["scope"], "Map stage")
-        self.note(f"{label} kill reading saved to {saved['map_id']}.", True)
+        self.note(f"{label} kill reading saved to {saved['map_id']} Map Kills.", True)
 
     def poll(self):
         """Consume new hotkey events on the GUI thread, route activity captures and maintain

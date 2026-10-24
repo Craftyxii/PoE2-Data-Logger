@@ -61,18 +61,23 @@ class KillCountStorageTests(unittest.TestCase):
         Image.new("RGB", (16, 8), (73, 92, 111)).save(output, format="PNG")
         return output.getvalue()
 
-    def test_stage_and_final_save_without_chain_and_preserve_manual_totals(self):
+    def test_stage_and_final_save_without_chain_and_become_the_map_totals(self):
         logger.save_counts(800, 40, 8, 9, unique=2)
-        before = {table: self.rows(table) for table in ("maps", "map_unique_kills", "expeditions", "new_export")}
+        expeditions = self.rows("expeditions")
         stage = self.save(scope="chain_stage")
         final = self.save(self.reading(120, 25, 4, 2), source_mode="kills", scope="map_final")
         self.assertEqual((stage["scope"], stage["expedition_id"]), ("map_stage", ""))
         self.assertEqual((final["scope"], final["expedition_id"]), ("map_final", ""))
-        self.assertEqual({table: self.rows(table) for table in before}, before)
+        # The latest reading or saved entry is the map total; detonations stay.
+        self.assertEqual(self.rows("expeditions"), expeditions)
         state = logger.get_state()
         self.assertEqual((state["kills"], state["unique_kills"], state["detonated"], state["chain"]),
-                         ([800, 40, 8], 2, 9, []))
+                         ([120, 25, 4], 2, 9, []))
         self.assertEqual(len(self.csv_rows()), 2)
+        # One Undo removes the final reading and restores the previous totals.
+        logger.undo_last_action()
+        self.assertEqual((logger.get_state()["kills"], logger.get_state()["unique_kills"]), ([100, 20, 3], 1))
+        self.assertEqual(len(self.csv_rows()), 1)
 
     def test_two_chain_stages_and_final_keep_independent_observations(self):
         logger.commit_chain("Rage")
@@ -84,7 +89,7 @@ class KillCountStorageTests(unittest.TestCase):
         self.assertEqual([first["expedition_id"], second["expedition_id"], final["expedition_id"]],
                          ["M0001-E01", "M0001-E02", ""])
         self.assertEqual([row["Normal Kills (Observed)"] for row in self.csv_rows()], ["100", "150", "200"])
-        self.assertEqual(logger.get_state()["kills"], [None, None, None])
+        self.assertEqual(logger.get_state()["kills"], [200, 45, 8])
 
     def test_default_expedition_is_not_chain_but_remnant_capture_is_associated(self):
         self.assertFalse(kill_counts.capture_context()["_capture_chain_associated"])
@@ -155,17 +160,17 @@ class KillCountStorageTests(unittest.TestCase):
             self.save(context=context, source_mode="kills", scope="map_final")
         self.assertEqual(self.records(), before)
 
-    def test_final_after_manual_finish_saves_same_map_without_changing_manual_state(self):
+    def test_final_after_manual_finish_sets_the_finished_maps_totals(self):
         logger.finish_map(11, 22, 33, unique=4)
-        before = {table: self.rows(table) for table in ("maps", "map_unique_kills", "expeditions", "new_export")}
+        expeditions = self.rows("expeditions")
         context = kill_counts.capture_context("kills")
         self.assertTrue(context["_capture_map_pending"])
         saved = self.save(self.reading(100, 20, 3, 1), context=context, source_mode="kills", scope="map_final")
         self.assertEqual((saved["map_id"], saved["expedition_id"], saved["scope"]), ("M0001", "", "map_final"))
-        self.assertEqual({table: self.rows(table) for table in before}, before)
+        self.assertEqual(self.rows("expeditions"), expeditions)
         state = logger.get_state()
         self.assertEqual((state["kills"], state["unique_kills"], state["pending_new_map"], state["chain"]),
-                         ([11, 22, 33], 4, True, []))
+                         ([100, 20, 3], 1, True, []))
         for scope in ("map_stage", "chain_stage"):
             before_attempt = self.records()
             with self.subTest(scope=scope), self.assertRaisesRegex(ValueError, "Start the next map"):

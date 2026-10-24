@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Kill-count readings now fill the Map Kills fields. Each complete reading is also saved as the map's kill totals (Maps and Export kill columns), replacing an older reading or draft; a later manual save replaces it in turn, and one Undo removes the reading and restores the previous totals. Every reading is still kept on the Kill Count Readings sheet. Previously readings were stored only on that sheet, so the fields never changed.
+- Read a first kill counter wider than one skull's spacing. A four-digit Normal count (1498) was refused because its leading digit fell outside the assumed cell; the cell now extends over adjacent digits up to a clear gap, and a number cut off by the capture edge is still refused. All four user-selected counter captures read exactly.
+
 - Deferred Ritual rewards never wait for review or approval. A deferred offer adds no new find (it was offered on an earlier page), so one read with certainty is saved as deferred and one that is not is left out of the page, with a note, instead of holding it. A reward whose deferred state itself is unknown may be new and is still reviewed.
 
 - Never name an item by shape alone when another catalog item draws the same shape in a different colour (Essences, Liquid emotions, some Runes and Soul Cores). When such a look-alike scores within 1000 of the named item, its strongly coloured pixels must also sit clearly nearer the named item; otherwise it is held with each look-alike as a choice, keeping a verified count. Every catalog item was scanned on synthetic Ritual pages at 1080p, at 1440p and as JPEG, and on a synthetic inventory: Potent Liquid Ferocity and Contempt were named as each other on Ritual pages and no other item was named wrongly; with this check no item is. `tools/sweep_item_names.py` re-runs this sweep. On real captures the 1,223 Ritual rewards are unchanged, and one of 511 inventory stacks (a Potent Liquid Melancholy) now waits for its name to be picked.

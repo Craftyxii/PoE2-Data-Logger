@@ -39,17 +39,14 @@ class MapKillReadingTests(unittest.TestCase):
 
     def test_ten_then_twenty_selects_twenty_and_retains_both_snapshots(self):
         logger.save_kills(1, 2, 3, unique=4)
-        with logger._connect() as db:
-            manual = [tuple(row) for row in db.execute('SELECT * FROM maps')]
         first = self.save((10, 0, 0, 0))
         second = self.save((20, 0, 0, 0))
         self.assertNotEqual(first['snapshot_id'], second['snapshot_id'])
         self.assertEqual([row['Total Kills (Observed)'] for row in self.rows()], ['10', '20'])
         self.assertEqual([row['Total Kills (Observed)'] for row in self.current()], ['20'])
         self.assertTrue(all(row['Expedition ID'] == '' for row in self.rows()))
-        with logger._connect() as db:
-            self.assertEqual([tuple(row) for row in db.execute('SELECT * FROM maps')], manual)
-        self.assertEqual((logger.get_state()['kills'], logger.get_state()['unique_kills']), ([1, 2, 3], 4))
+        # The latest reading is the map's kill total.
+        self.assertEqual((logger.get_state()['kills'], logger.get_state()['unique_kills']), ([20, 0, 0], 0))
 
     def test_all_four_categories_use_latest_values_not_sums_or_maxima(self):
         self.save((10, 20, 30, 4))

@@ -1,0 +1,9 @@
+{
+  "description": "User-selected kill counter regions from 2026-10-23, values read from each screenshot by eye.",
+  "rows": {
+    "102241.png": [1498, 237, 25, 1],
+    "103638.png": [347, 96, 23, 1],
+    "103943.png": [679, 138, 19, 3],
+    "104343.png": [271, 38, 6, 5]
+  }
+}

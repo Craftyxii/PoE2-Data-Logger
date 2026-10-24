@@ -117,18 +117,31 @@ class KillCountOCRTests(unittest.TestCase):
     def test_clipped_first_count_is_not_read_as_its_visible_suffix(self):
         self.assertFalse(kill_counts.scan(self.image.crop((1682, 290, 1905, 334)))["complete"])
 
-    def test_widened_first_number_is_not_read_as_its_cropped_suffix(self):
-        # Controlled derivatives only: prepend the actual captured Magic 7 to
-        # the unchanged Normal 984. This does not assert a real four-digit layout.
-        for left in (1654, 1662):
-            with self.subTest(left=left):
-                derivative = self.image.copy()
-                derivative.paste(self.image.crop((1725, 303, 1734, 323)), (left, 303))
-                with patch.object(kill_counts, "_read_numbers") as reader:
-                    result = kill_counts.scan(derivative)
-                self.assertFalse(result["complete"])
-                self.assertIsNone(result["normal"])
-                reader.assert_not_called()
+    def test_widened_first_number_is_never_read_as_its_cropped_suffix(self):
+        # Controlled derivatives: prepend the actual captured Magic 7 to the
+        # unchanged Normal 984. At digit spacing the whole 7984 is read; one
+        # digit gap further it is a separate token, so the row stays held.
+        derivative = self.image.copy()
+        derivative.paste(self.image.crop((1725, 303, 1734, 323)), (1662, 303))
+        result = kill_counts.scan(derivative)
+        self.assertEqual([result[key] for key in kill_counts.CATEGORIES], [7984, 719, 656, 4])
+        derivative = self.image.copy()
+        derivative.paste(self.image.crop((1725, 303, 1734, 323)), (1654, 303))
+        with patch.object(kill_counts, "_read_numbers") as reader:
+            result = kill_counts.scan(derivative)
+        self.assertFalse(result["complete"])
+        self.assertIsNone(result["normal"])
+        reader.assert_not_called()
+
+    def test_real_selected_rows_including_a_four_digit_count(self):
+        """The first count runs wider than one skull pitch in 1498; every row reads whole."""
+        folder = Path(__file__).parent / "fixtures" / "kill_count_rows"
+        expected = json.loads((folder / "expected.json").read_text(encoding="utf-8"))["rows"]
+        for name, values in expected.items():
+            with self.subTest(capture=name), Image.open(folder / name) as source:
+                result = kill_counts.scan(source.convert("RGB"), is_crop=True)
+                self.assertTrue(result["complete"], result["status"])
+                self.assertEqual([result[key] for key in kill_counts.CATEGORIES], values)
 
     def test_region_without_first_numeric_gutter_cannot_certify_a_complete_number(self):
         # All visible digits remain, but there is no captured left context to

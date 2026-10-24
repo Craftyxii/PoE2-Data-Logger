@@ -70,7 +70,7 @@ class KillCountExportTests(unittest.TestCase):
             decoded.append(values)
         return root, decoded
 
-    def test_stage_and_final_readings_without_chain_do_not_replace_manual_totals(self):
+    def test_stage_and_final_readings_without_chain_become_the_map_totals(self):
         manual = logger.save_kills(11, 22, 33, unique=4)
         before_headers, before_maps = self.csv_rows(logger.export_maps_csv())
         stage, _, _ = self.save_reading(scope="chain_stage")
@@ -87,8 +87,10 @@ class KillCountExportTests(unittest.TestCase):
         self.assertEqual(readings[1]["Image SHA256"], hashlib.sha256(self.evidence).hexdigest())
         self.assertEqual(readings[1]["Scan Commit #"], str(final["scan_commit_number"]))
         self.assertNotEqual(stage["snapshot_id"], final["snapshot_id"])
-        # Existing map exports project their latest event link; manual metric values stay exact.
+        # The latest reading is the map's total; earlier manual history stays exact.
         before_maps[0]["Last Commit #"] = str(final["scan_commit_number"])
+        before_maps[0].update({"Normal Kills": "999", "Magic Kills": "720", "Rare Kills": "660",
+                               "Unique Kills": "5", "Total Kills": "2384"})
         self.assertEqual(self.csv_rows(logger.export_maps_csv()), (before_headers, before_maps))
         _, history = self.csv_rows(logger.export_all_csv())
         saved_manual = [row for row in history if row["Scan Commit #"] == str(manual["scan_commit_number"])]

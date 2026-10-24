@@ -1072,7 +1072,7 @@ COLUMN_GUIDANCE += (
      "percentages automatically. Blank means that historical snapshot is unavailable."),
 )
 
-# Keep screenshot observations separate from the established manual map metrics.
+# Screenshot observations: every reading is kept, and the latest one sets the map's kill totals.
 ENTRIES += (
     ("kill_count_readings", "Kill counts", "Kill Count Readings: screenshot observations",
      "Kill Count Readings is an independent sequence of screenshot observations, with one row per saved "
@@ -1081,8 +1081,9 @@ ENTRIES += (
      "visible at capture time, not kills gained since the previous reading. Total Kills (Observed) is "
      "the sum of those four categories within that single reading. Never sum rows, scopes or repeated "
      "readings to calculate map kills. An image alone does not establish when the game counters reset "
-     "or whether the observation covers the whole map. These observations do not change existing manual end-map totals, "
-     "their save behavior or the established Export/Scan History kill fields."),
+     "or whether the observation covers the whole map. Each saved reading also becomes the map's kill "
+     "totals (the Map Kills fields, Maps and Export kill columns) until a later reading or a manual save "
+     "replaces them; one Undo removes the reading and restores the previous totals."),
     ("kill_count_scopes", "Kill counts", "Optional chain links and final map readings",
      "Current screenshot capture uses only the dedicated kill-count key, has map-only ownership, and records "
      "map_final as a compatibility scope label for each cumulative snapshot; Currency, "
@@ -1097,7 +1098,7 @@ ENTRIES += (
      "Multiple readings per map are allowed. Current Map Kill Reading selects the latest surviving "
      "approval by Scan Commit # for that Map ID, independently of expedition. Counts of 10 then 20 "
      "mean 20 observed kills, not 30. Select the latest row, not the largest count or a sum of readings. "
-     "Keep these observations and the existing manual end-map record separate; neither overwrites the other."),
+     "The map's kill totals hold the latest reading or manual save, whichever came last; this sheet keeps every reading."),
     ("kill_count_provenance", "Kill counts", "Capture provenance and missing readings",
      "Each saved observation retains its Map ID, optional Expedition ID, stable Kill Snapshot ID, "
      "request identity, source mode, capture/recording times, image hash and JSON recognition/capture "

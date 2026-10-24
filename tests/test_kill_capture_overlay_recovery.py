@@ -170,8 +170,8 @@ class KillCaptureOverlayRecoveryTests(unittest.TestCase):
                 "SELECT kills_json FROM maps WHERE map_id='M0001'").fetchone()[0]), [31, 4, 2])
         self.assert_no_observation()
 
-    def test_successful_snapshot_keeps_hud_hidden_and_manual_drafts_untouched(self):
-        """Successful observations remain unobtrusive and separate from manual map totals."""
+    def test_successful_snapshot_keeps_hud_hidden_and_fills_map_kills(self):
+        """A successful reading stays unobtrusive and becomes the map's kill totals."""
         event = self.capture("complete")
         self.assertTrue(event["kill_counts"]["result"]["complete"])
         self.deliver()
@@ -181,7 +181,9 @@ class KillCaptureOverlayRecoveryTests(unittest.TestCase):
         with logger._connect() as db:
             rows = list(db.execute("SELECT normal,magic,rare,unique_kills FROM kill_count_snapshots"))
         self.assertEqual([tuple(row) for row in rows], [(10, 2, 3, 1)])
-        self.assert_manual_counts()
+        state = logger.get_state()
+        self.assertEqual((state["kills"], state["unique_kills"]), ([10, 2, 3], 1))
+        self.assertEqual(tuple(field.text() for field in self.fields), ("10", "2", "3", "1"))
 
     def test_incomplete_snapshot_keeps_current_unobtrusive_hidden_behavior(self):
         """A normal incomplete OCR result remains a note without revealing or saving."""

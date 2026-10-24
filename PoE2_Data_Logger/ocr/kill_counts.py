@@ -153,18 +153,28 @@ def _number_crops(image, skulls):
         if min(box[:2]) < 0 or box[2] > image.width or box[3] > image.height:
             return None
         if not index:
-            # Agreement between two crops cannot detect a prefix excluded from
-            # both. Require captured context to the left of the first inferred
-            # number cell, and reject additional character bodies there. This
-            # holds widened/unsupported counters instead of accepting a suffix.
-            gutter_left = left - (x - left)
-            if gutter_left < 0:
+            # No skull bounds the first number on the left, and a four-digit
+            # count (1498) is wider than one skull pitch. Extend its cell over
+            # adjacent digits until a gap wider than digit spacing. Agreement
+            # between two crops cannot detect a prefix excluded from both, so
+            # that gap must be captured; otherwise the counter stays held.
+            gap = max(2, round(height * .32))
+            ink = _gold_ink(image.crop((0, box[1], x, box[3])))
+            count, labels, stats, _ = cv2.connectedComponentsWithStats(ink.astype(np.uint8))
+            for component in range(1, count):
+                if _ui_stroke(stats[component], width, height, ink.shape[0]):
+                    ink[labels == component] = False
+            columns = ink.any(axis=0)
+            column, empty = left - 1, 0
+            while column >= 0 and empty <= gap:
+                if columns[column]:
+                    left, empty = column, 0
+                else:
+                    empty += 1
+                column -= 1
+            if empty <= gap:
                 return None
-            gutter = _gold_ink(image.crop((gutter_left, box[1], left, box[3])))
-            count, _labels, stats, _ = cv2.connectedComponentsWithStats(gutter.astype(np.uint8))
-            if not all(_ui_stroke(stats[component], width, height, gutter.shape[0])
-                       for component in range(1, count)):
-                return None
+            box = (left, *box[1:])
         patch = image.crop(box)
         ink = _gold_ink(patch)
         # The capture has thin vertical cell dividers, which are not digits.

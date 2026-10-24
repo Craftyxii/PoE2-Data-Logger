@@ -179,6 +179,10 @@ class KillCountSnapshotUITests(unittest.TestCase):
     def assert_draft(self, values):
         self.assertEqual(tuple(field.text() for field in self.manual_fields()), values)
 
+    def assert_reading_shown(self):
+        """A saved reading is the map's kill totals and replaces any draft in Map Kills."""
+        self.assert_draft(("984", "719", "656", "4"))
+
     def map_rows(self):
         return list(csv.DictReader(io.StringIO(logger.export_maps_csv().decode("utf-8-sig"))))
 
@@ -194,10 +198,9 @@ class KillCountSnapshotUITests(unittest.TestCase):
                    **logger.scan_context()}
         self.window._propagation_read(reading, self.evidence)
 
-    def test_final_without_chain_saves_evidence_but_preserves_manual_fields_and_totals(self):
+    def test_final_without_chain_saves_evidence_and_fills_map_kills(self):
         logger.save_counts(1, 2, 3, unique=4)
-        draft = self.draft(("101", "", "not yet entered", "7"))
-        before = self.map_rows()[0]
+        self.draft(("101", "", "not yet entered", "7"))
         self.window._queue_kill_count_reading(self.payload())
         rows = self.rows()
         self.assertEqual(len(rows), 1)
@@ -206,15 +209,15 @@ class KillCountSnapshotUITests(unittest.TestCase):
         self.assertIsNone(rows[0]["expedition_id"])
         self.assertEqual([rows[0][key] for key in ("normal", "magic", "rare", "unique_kills")], [984, 719, 656, 4])
         self.assertEqual(rows[0]["image_png"], self.evidence)
-        self.assert_draft(draft)
+        self.assert_reading_shown()
         after = self.map_rows()[0]
-        for key in ("Normal Kills", "Magic Kills", "Rare Kills", "Unique Kills", "Total Kills"):
-            self.assertEqual(after[key], before[key])
+        self.assertEqual([after[key] for key in ("Normal Kills", "Magic Kills", "Rare Kills", "Unique Kills", "Total Kills")],
+                         ["984", "719", "656", "4", "2363"])
         self.assertEqual(logger.get_state()["chain"], [])
 
     def test_snapshot_leaves_pending_propagation_dropdowns_and_screenshot_untouched(self):
         self.propagation_review()
-        draft = self.draft()
+        self.draft()
         before = logger.get_state()
         reading = copy.deepcopy(self.window._propagation_reading)
         table = self.window.propagation_recipe_table
@@ -232,7 +235,7 @@ class KillCountSnapshotUITests(unittest.TestCase):
             self.assertEqual([box.itemText(i) for i in range(box.count())], options)
             self.assertEqual(box.currentText(), chosen)
         self.assertEqual(self.window.preview.pixmap().toImage(), picture)
-        self.assert_draft(draft)
+        self.assert_reading_shown()
         after = logger.get_state()
         for key in ("chain", "detonated", "current_expedition_id"):
             self.assertEqual(after[key], before[key])
@@ -241,7 +244,7 @@ class KillCountSnapshotUITests(unittest.TestCase):
 
     def test_dedicated_final_event_does_not_route_to_or_clear_other_reviews(self):
         self.propagation_review()
-        draft = self.draft()
+        self.draft()
         event = {"id": 10001, "mode": "kills", "error": "", "result": None,
                  "kill_counts": self.payload()}
         with patch.object(self.window, "show_result", side_effect=AssertionError("primary routing")), \
@@ -250,17 +253,17 @@ class KillCountSnapshotUITests(unittest.TestCase):
             self.poll_event(event)
         self.assertEqual(len(self.rows()), 1)
         self.assertEqual(self.window.pending_review_kind, "propagation")
-        self.assert_draft(draft)
+        self.assert_reading_shown()
 
     def test_primary_capture_error_does_not_discard_complete_auxiliary_reading(self):
-        draft = self.draft()
+        self.draft()
         event = {"id": 10002, "mode": "currency", "error": "Primary inventory failed", "result": None,
                  "kill_counts": self.payload(source="currency", scope="map_stage")}
         self.poll_event(event)
         self.assertEqual(len(self.rows()), 1)
         self.assertEqual(self.rows()[0]["scope"], "map_stage")
         self.assertIn("Primary inventory failed", self.window.statusBar().currentMessage())
-        self.assert_draft(draft)
+        self.assert_reading_shown()
 
     def test_uncertain_or_malformed_auxiliary_reading_does_not_block_propagation_review(self):
         detonated = logger.get_state()["detonated"]
@@ -328,7 +331,7 @@ class KillCountSnapshotUITests(unittest.TestCase):
         self.assertEqual(len(self.rows()), 1)
         self.assertEqual(self.rows()[0]["request_id"], payload["request_id"])
         self.assertEqual(self.window._pending_kill_count_saves, {})
-        self.assert_draft(draft)
+        self.assert_reading_shown()
 
     def test_manual_save_and_finish_map_still_use_exact_entered_values(self):
         self.window._queue_kill_count_reading(self.payload())

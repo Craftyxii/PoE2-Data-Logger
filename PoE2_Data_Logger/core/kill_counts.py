@@ -1,7 +1,9 @@
-"""Save pixel-read kill counters as independent, undoable map observations.
+"""Save pixel-read kill counters as undoable map observations and map totals.
 
-These readings do not replace manual map totals, create game activities or
-derive increments. A chain is an optional association, never a save prerequisite.
+The game's counters are the map's running totals, so each complete reading
+also becomes the map's kill totals (the Map Kills fields); Undo reverts both.
+Readings never create game activities or derive increments. A chain is an
+optional association, never a save prerequisite.
 """
 
 from contextlib import nullcontext
@@ -142,7 +144,7 @@ def _saved_result(row, *, already_saved):
 
 
 def save_snapshot(result, *, context, request_id, source_mode="", scope="map_stage", image_bytes=None):
-    """Atomically save one complete observed reading without changing manual totals.
+    """Atomically save one complete observed reading and make it the map's kill totals.
 
     A request UUID deduplicates callbacks; reusing it for different pixels,
     ownership or OCR results is rejected. Incomplete or noninteger readings are
@@ -207,6 +209,10 @@ def save_snapshot(result, *, context, request_id, source_mode="", scope="map_sta
             "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
                 request_id, context["_scan_generation"], mid, eid, scope, *counts, number, source_mode,
                 context["captured_at"], recorded_at, image_sha256, image_png, ocr_json, context_json, payload_sha256))
+        # The counters are the map's running totals: show them in Map Kills.
+        logger._save_unique_kills(db, mid, counts[3])
+        db.execute("UPDATE maps SET kills_json=? WHERE map_id=?", (logger._dump(counts[:3]), mid))
+        logger._patch_first(db, "map_id", mid, {28 + i: value for i, value in enumerate(counts[:3])})
         row = db.execute("SELECT * FROM kill_count_snapshots WHERE snapshot_id=?", (cursor.lastrowid,)).fetchone()
         return _saved_result(row, already_saved=False)
 
