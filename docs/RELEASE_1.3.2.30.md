@@ -63,3 +63,13 @@ or view the [release and checksum](https://github.com/Craftyxii/PoE2-Data-Logger
 
 Running 1.3.2.29 Beta and earlier clients are protected during installation and
 removal.
+
+All required Windows gates passed on release source
+`dcd7486af1dfea7aacd82ab65d30c29cd2028c75` in the
+[Windows verification run](https://github.com/Craftyxii/PoE2-Data-Logger/actions/runs/40116586140):
+platform, capture-region, review-navigation and export fixtures; native Windows
+input; the 100-map workflow; the complete regression suite; the frozen build; and
+installation, update and saved-file retention. The
+[publication run](https://github.com/Craftyxii/PoE2-Data-Logger/actions/runs/40122717451)
+reused that verified installer; its SHA-256 is
+`1121417da3e46f7c7b58fa2d2028f0348685702bacac8c42f5b72b36de8f86a9`.
