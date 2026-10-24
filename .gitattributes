@@ -1,2 +1,4 @@
 # This source catalog is pinned by byte hash in runtime and build verification.
 PoE2_Data_Logger/unique_item_assets/manifest.json -text
+# Ritual catalog evidence is pinned by byte hash; Windows checkouts must not add CR.
+PoE2_Data_Logger/ritual_item_assets/** -text
