@@ -13,9 +13,9 @@ from unittest.mock import patch
 import numpy as np
 from PIL import Image
 
-from PoE2_Data_Logger.core import logger_store as logger, store
-from PoE2_Data_Logger.core.ritual_catalog import OMEN_NAMES
-from PoE2_Data_Logger.ocr import item_ocr, ritual_grid, unique_items
+from PoE2_Data_Logger.core import logger_store as logger, ritual_catalog, store
+from PoE2_Data_Logger.core.ritual_catalog import NOT_RITUAL_REWARDS, OMEN_NAMES
+from PoE2_Data_Logger.ocr import currency_ocr, item_ocr, ritual_grid, unique_items
 from PoE2_Data_Logger.ui.native_desktop import clear_ritual_read
 
 
@@ -120,6 +120,25 @@ class NotRitualRewardTests(unittest.TestCase):
         suggested = [item["candidate_names"] for item in items if item.get("candidate_names")]
         self.assertTrue(suggested)
         self.assertTrue(all(names == ["Orb of Chance"] for names in suggested))
+
+    def test_catalog_exclusions_are_held_and_bounty_rewards_stay_possible(self):
+        """Sourced boss-only, Abyss and removed names are held; Foretold Bounty names are not."""
+        catalog = json.loads(ritual_catalog.CATALOG.read_text(encoding="utf-8"))
+        excluded = {row["name"] for row in catalog["exclusions"]}
+        self.assertEqual(NOT_RITUAL_REWARDS, excluded | {"Origin Spark"})
+        self.assertFalse(NOT_RITUAL_REWARDS & {row["name"] for row in catalog["guaranteed_rewards"]})
+        for name in ("Ab Aeterno", "Omen of Light", "Omen of Recombination"):
+            with self.subTest(name=name):
+                self.assertNotIn(name, [item["name"] for item in self.scan((name, .95, []))])
+        self.assertIn("Headhunter", [item["name"] for item in self.scan(("Headhunter", .95, []))])
+
+    def test_excluded_omens_are_neither_gray_rivals_nor_siblings(self):
+        """The gray matcher's Omen groups leave out Abyss and removed Omens."""
+        path = currency_ocr.ROOT / "inventory-icons.json"
+        groups = item_ocr._ritual_omen_shapes(str(path), path.stat().st_mtime_ns, path.stat().st_size)[0]
+        omens = {name for group in groups for name in group if name.startswith("Omen of ")}
+        self.assertFalse(omens & NOT_RITUAL_REWARDS)
+        self.assertIn("Omen of Bartering", omens)
 
 
 class SpriteFootprintTests(unittest.TestCase):

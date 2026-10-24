@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QTableWidget
 
 from PoE2_Data_Logger.core import logger_store as logger, store
+from PoE2_Data_Logger.core.ritual_catalog import NOT_RITUAL_REWARDS
 from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, clear_ritual_read
 
 
@@ -230,11 +231,13 @@ class RitualReviewRowsTests(unittest.TestCase):
                 self.window.reject_review()
 
     def test_reward_ritual_never_offers_cannot_be_confirmed(self):
-        """Origin Spark cannot be typed into a Ritual row; the reward shown can."""
+        """Origin Spark or a sourced exclusion cannot be typed into a Ritual row; the reward shown can."""
         self.read(self.result([self.unknown()]))
-        self.correct(0, "Origin Spark", quantity=1)
-        with self.assertRaisesRegex(ValueError, "never a Ritual reward"):
-            self.approve_row(0)
+        for name in ("Origin Spark", "Ab Aeterno", "Omen of Light"):
+            with self.subTest(name=name):
+                self.correct(0, name, quantity=1)
+                with self.assertRaisesRegex(ValueError, "never a Ritual reward"):
+                    self.approve_row(0)
         self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
         self.correct(0, "Orb of Chance", quantity=1)
         self.approve_row(0)
@@ -248,7 +251,7 @@ class RitualReviewRowsTests(unittest.TestCase):
                   live=True, auto=True)
         self.assertEqual(self.window.ritual_table.item(0, 1).text(), "")
         self.assertEqual(self.window.ritual_table.item(0, 2).text(), "")
-        name = logger.ritual_names()[0]
+        name = next(name for name in logger.ritual_names() if name not in NOT_RITUAL_REWARDS)
         self.correct(0, name=name, category="Omen", quantity=1, deferred=True)
         self.approve_row(0)
         self.window.approve_review()
@@ -259,7 +262,7 @@ class RitualReviewRowsTests(unittest.TestCase):
 
     def test_named_icon_without_tribute_is_held_but_explicit_approval_can_confirm_blank_price(self):
         """Verify a named icon with no price waits for approval, which can confirm a blank price."""
-        name = logger.ritual_names()[0]
+        name = next(name for name in logger.ritual_names() if name not in NOT_RITUAL_REWARDS)
         item = self.known(category="Omen", name=name, tribute=None, name_match=1,
                           source="icon reference: " + name, needs_review=True)
         self.read(self.result([item]), live=True, auto=True)

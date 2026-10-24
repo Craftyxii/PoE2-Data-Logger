@@ -1,8 +1,12 @@
 """Bundled Omen names used to initialize the editable Ritual name database.
 
 Initialization filters retired defaults; this tuple is seed input rather than
-the current display catalog or a record of previously logged rewards.
+the current display catalog or a record of previously logged rewards. Names a
+Ritual altar never offers come from the sourced ``ritual_item_assets`` catalog.
 """
+
+import json
+from pathlib import Path
 
 OMEN_NAMES = (
     "Omen of Refreshment",
@@ -52,7 +56,20 @@ OMEN_NAMES = (
     "Omen of Dextral Necromancy",
 )
 
+CATALOG = Path(__file__).resolve().parents[1] / "ritual_item_assets" / "catalog.json"
+# Reported by players and not yet in the sourced catalog.
+PLAYER_CONFIRMED_EXCLUSIONS = frozenset({"Origin Spark"})
+
+
+def _not_ritual_rewards():
+    """Read the sourced exclusions; a Foretold Bounty name always stays possible."""
+    catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
+    possible = {row["name"] for row in catalog["guaranteed_rewards"]}
+    return frozenset({row["name"] for row in catalog["exclusions"]} - possible) | PLAYER_CONFIRMED_EXCLUSIONS
+
+
 # Rewards a Ritual altar never offers. Their artwork can still be the closest
-# match for an uncatalogued reward, so a Ritual scan holds such a match for
-# review instead of naming it, and a reviewed Ritual row cannot use the name.
-NOT_RITUAL_REWARDS = frozenset({"Origin Spark"})
+# match for another reward, so a Ritual scan holds such a match for review
+# instead of naming it, and a reviewed Ritual row cannot use the name. Every
+# other name keeps its existing recognition.
+NOT_RITUAL_REWARDS = _not_ritual_rewards()

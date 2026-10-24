@@ -1591,10 +1591,12 @@ def _ritual_omen_shapes(path, modified, size):
     for entry in entries:
         names = entry["members"]
         omen = not entry.get("ignored") and names and all(name.startswith("Omen of ") for name in names)
-        if omen and "Abyss" in entry.get("url", "").rsplit("/", 1)[-1]:
-            # Abyss Omens (Light, Necromancy, Lich types...) never appear in
-            # Ritual offers; they are Currency-only and cannot be gray rivals.
-            continue
+        if omen:
+            # Abyss and removed Omens never appear in Ritual offers, so they
+            # are neither gray rivals nor siblings of a Ritual Omen's art.
+            names = [name for name in names if name not in NOT_RITUAL_REWARDS]
+            if not names:
+                continue
         source = re.search(r"/(VoodooOmens\d+)(?:Blue|Green|Dark|Purple|Red|Yellow)\.png$",
                            entry.get("url", "")) if omen else None
         key = ("omen", source[1]) if source else ("catalog", entry["family"])

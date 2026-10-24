@@ -4,10 +4,14 @@ This directory contains the complete reviewed source data and a small Ritual-onl
 exclusion overlay. It preserves the shared inventory artwork catalog, existing
 labels and historical records.
 
-This change adds source data only. The .29 scan code does not yet consume
-`catalog.json`; copying these files into an existing installation does not
-activate the exclusions. Runtime integration requires a separate change to the
-Ritual reader.
+Ritual scans read `catalog.json` through `core/ritual_catalog.py`, from 1.3.2.30
+Beta on. A name on its exclusion list, or on that module's short list of
+player-confirmed exclusions (Origin Spark), is never named or suggested on a
+Ritual page, and a reviewed Ritual row cannot use it; the art match is held for
+review instead. A Foretold Bounty name always stays possible, and every other
+name keeps its existing recognition. Currency and inventory scans do not use
+this catalog. Copying these files into a 1.3.2.29 installation does not
+activate the exclusions.
 
 ## Contents
 

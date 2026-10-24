@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Never name a Ritual reward the altar cannot offer. The bundled Ritual catalog (`ritual_item_assets`) lists 66 sourced exclusions: 57 boss-only, unobtainable or legacy uniques, the eight Abyss Omens and the removed Omen of Recombination. Origin Spark, reported as impossible in Ritual, is added. A Ritual art match to any of them is held for review as an unnamed reward, the name is never suggested, and a reviewed Ritual row cannot be confirmed with it. Foretold Bounty rewards always stay possible, and every other name keeps its recognition. Currency scans are unchanged. On 106 real Ritual pages no named reward is on the list.
+- Suggest 10, not 1, for a held stack whose 0 sits on pale artwork. Crystal art showing through the 0 left a stray part beside the digits, and wider crops including the art read 1. Four Perfect Essence 10-stacks in the training captures now suggest 10; they stay held for confirmation.
+
 ## 1.3.2.29 Beta
 
 - Scan a Rite's maps in a row before playing them, as Tablets fill their slots. The first scan is the current map's stage and each different map queues the next stage, shown under **Queued stages** on the Ritual page; every **+ New map** plays the next one. Scanning the same map again replaces its stage, two maps with one name stay two stages, a map played outside Ritual leaves the queue untouched, and Undo or **Clear queued stages** removes scans.
