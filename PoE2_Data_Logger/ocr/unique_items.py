@@ -172,6 +172,19 @@ def prepare_artwork():
     return prepared
 
 
+def _flask_liquid(rgba):
+    """Mark a flask sprite's strongly coloured red, blue or purple liquid; gold frames stay."""
+    rgb = rgba[:, :, :3].astype(np.float32)
+    brightest = rgb.max(axis=2)
+    saturation = (brightest - rgb.min(axis=2)) / np.maximum(brightest, 1)
+    hue = cv2.cvtColor(np.ascontiguousarray(rgba[:, :, :3]), cv2.COLOR_RGB2HSV)[:, :, 0].astype(int)
+    liquid_hue = (hue <= 8) | (hue >= 90)  # red, then blue through purple
+    liquid = ((saturation > .5) & (brightest > 25) & liquid_hue & (rgba[:, :, 3] > 50)).astype(np.uint8)
+    # The liquid is one body: close its specular gaps and take in its darker rim.
+    liquid = cv2.dilate(cv2.morphologyEx(liquid, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8)), np.ones((3, 3), np.uint8))
+    return liquid.astype(bool) & (rgba[:, :, 3] > 50)
+
+
 def _bank(shape):
     """Build or reuse a bounded footprint bank without separating shared-art names.
 
@@ -241,11 +254,18 @@ def _bank(shape):
                     canvas.paste(fitted, ((width - fitted.width) // 2,
                                           (height - fitted.height) // 2))
                     variants.append(np.asarray(canvas, dtype=np.uint8))
-            for rgba in variants:
+            # Each variant is compared over its weighted pixels and keeps the sprite's outline.
+            variants = [(rgba, rgba[:, :, 3]) for rgba in variants]
+            if group["row"].get("item_class") == "Flask":
+                # Ritual pages draw a flask empty while the source art is full:
+                # an empty variant ignores the liquid but keeps the whole flask's outline.
+                variants += [(rgba, np.where(_flask_liquid(rgba), 0, rgba[:, :, 3]).astype(np.uint8))
+                             for rgba, _ in list(variants) if _flask_liquid(rgba).mean() >= .02]
+            for rgba, compared in variants:
                 rgb = rgba[:, :, :3].copy().reshape(-1, 3)
                 alpha = rgba[:, :, 3].astype(np.float32) / 255
-                weight = np.square(alpha)
-                weight[alpha < .2] = 0
+                weight = np.square(compared.astype(np.float32) / 255)
+                weight[compared < 51] = 0
                 if float(weight.sum()) < 12:
                     raise ValueError("Unique artwork has no usable foreground.")
                 grey = cv2.cvtColor(rgba[:, :, :3], cv2.COLOR_RGB2GRAY).astype(np.float32).reshape(-1)

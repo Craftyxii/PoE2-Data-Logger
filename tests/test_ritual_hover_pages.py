@@ -47,7 +47,7 @@ class RitualHoverPagesTests(unittest.TestCase):
         cls.folder.cleanup()
 
     def test_every_page_keeps_whole_footprints_and_verified_names(self):
-        """A hovered 2x3, an amulet beside a 2x3 armour, a 1x2 and a clipped page each read whole."""
+        """A hovered 2x3, an amulet beside a 2x3 armour, a 1x2, empty unique flasks and a clipped page each read whole."""
         self.assertEqual(len(self.cases), 6)
         for case in self.cases:
             with self.subTest(page=case["file"]):

@@ -137,6 +137,20 @@ class SourcedUniqueArtworkTests(unittest.TestCase):
                     self.assertIn(result["name"], ("", name))
         self.assertEqual(len(shapes), 8)
 
+    def test_flasks_drawn_empty_on_ritual_pages_match_their_full_source_art(self):
+        """Ritual pages draw a unique flask without its liquid; the source art shows it full."""
+        pages = ROOT / "tests/fixtures/ritual_pages_hover"
+        for page, box, name in (("123830.png", (6, 164, 59, 270), "Blood of the Warrior"),
+                                ("130520.png", (6, 6, 59, 112), "Lavianga's Spirits")):
+            with self.subTest(name=name), Image.open(pages / page) as source:
+                result = unique.match(source.convert("RGB").crop(box), (1, 2))
+                self.assertEqual((result["name"], result["candidate_names"]), (name, [name]))
+        for row in self.rows:
+            if row["item_class"] == "Flask":
+                with self.subTest(name=row["name"], look="full"):
+                    _, image = self.source_image(row["name"])
+                    self.assertEqual(unique.match(image, (1, 2))["name"], row["name"])
+
     def test_source_sprite_aspect_is_retained_inside_larger_footprint(self):
         row, image = self.source_image("Rise of the Phoenix")
         self.assertEqual((row["columns"], row["rows"]), (2, 4))

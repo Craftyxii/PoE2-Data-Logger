@@ -279,8 +279,8 @@ def skipped_deferred_reward(item):
     """Leave out every deferred reward: it is never reviewed or logged.
 
     A deferred reward was logged on the page that first offered it; deferring
-    only keeps it for a later purchase. A reward whose deferred state itself is
-    unknown may be new, so it is still reviewed.
+    costs Tribute and lowers its price for a later purchase. A reward whose
+    deferred state itself is unknown may be new, so it is still reviewed.
     """
     return item.get("deferred") is True
 

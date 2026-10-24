@@ -64,6 +64,8 @@ class StableRitualCurrencyAudit(unittest.TestCase):
                         if case["file"] == "08.png")
         with Image.open(folder / "08.png") as source:
             image = source.convert("RGB")
+        # A deferred reward was logged on the page that first offered it: never shown or saved again.
+        shown = [slots for slots in expected["footprints"] if slots[0] not in expected["deferred_anchors"]]
         raw_evidence = None
         for scan in range(2):
             self.window._ritual_captured(image, live=False)
@@ -72,10 +74,9 @@ class StableRitualCurrencyAudit(unittest.TestCase):
             self.assertEqual([item["grid_slots"] for item in result["items"]], expected["footprints"])
             callback(result)
             table = self.window.ritual_table
-            self.assertEqual(table.rowCount(), len(expected["footprints"]))
-            self.assertEqual([table.item(row, 5).checkState() == Qt.CheckState.Checked
-                              for row in range(table.rowCount())],
-                             [slots[0] in expected["deferred_anchors"] for slots in expected["footprints"]])
+            self.assertEqual(table.rowCount(), len(shown))
+            self.assertEqual([table.item(row, 5).checkState() for row in range(table.rowCount())],
+                             [Qt.CheckState.Unchecked] * len(shown))
             for row in range(table.rowCount()):
                 if not table.item(row, 1).text():
                     table.item(row, 1).setText(f"Audit equipment {row}")
@@ -89,7 +90,8 @@ class StableRitualCurrencyAudit(unittest.TestCase):
             self.assertIsNone(self.window.pending_review_kind)
             pages = logger.ritual_pages_for_map("M0001")
             self.assertEqual(len(pages), 1)
-            self.assertEqual(len(pages[0]["items"]), len(expected["footprints"]))
+            self.assertEqual(len(pages[0]["items"]), len(shown))
+            self.assertFalse(any(item["deferred"] for item in pages[0]["items"]))
             self.assertEqual(sum(item["name"] == "Omen of Resurgence" for item in pages[0]["items"]), 2)
             export = list(csv.DictReader(io.StringIO(logger.export_ritual_csv().decode("utf-8-sig"))))
             self.assertTrue(all(row["Page OCR Text"] == raw_evidence for row in export))
@@ -143,8 +145,11 @@ class StableRitualCurrencyAudit(unittest.TestCase):
         items = logger.ritual_pages_for_map("M0001")[0]["items"]
         self.assertEqual(sum(item["name"] == "Omen of Refreshment" for item in items), 3)
         self.assertEqual(sum(item["name"] == "Audit repeated ring" for item in items), min(repeated, 2))
-        for name in ("Omen of Sinistral Annulment", "Omen of Dextral Annulment", "Edyrn's Tusks", "Dreadfist"):
+        for name in ("Edyrn's Tusks", "Dreadfist"):
             self.assertIn(name, [item["name"] for item in items])
+        # Both Annulment Omens on this page are deferred, so neither is logged again.
+        for name in ("Omen of Sinistral Annulment", "Omen of Dextral Annulment"):
+            self.assertNotIn(name, [item["name"] for item in items])
         rows = list(csv.DictReader(io.StringIO(logger.export_ritual_csv().decode("utf-8-sig"))))
         self.assertTrue(rows)
         self.assertEqual(rows[0]["Page OCR Text"], result["raw_text"])
@@ -182,7 +187,8 @@ class StableRitualCurrencyAudit(unittest.TestCase):
         self.assertEqual(logger.currency_for_map("M0002")["end"], {})
 
     def test_injected_uncertain_deferred_state_cannot_commit_until_confirmed(self):
-        """Injected OCR; real partially checked Deferred row and final approval."""
+        """Injected OCR; a partially checked Deferred row blocks approval until confirmed, and a row
+        confirmed Deferred is not saved, while the page's counters are."""
         self.window._ritual_read({"items": [{"category": "Item", "name": "Chaos Orb",
             "quantity": 1, "tribute": 0, "source": "Injected audit evidence", "deferred": None}],
             "raw_text": "Injected audit raw", "unmatched": [],
@@ -196,7 +202,7 @@ class StableRitualCurrencyAudit(unittest.TestCase):
         self.approve_pending_ritual_rows()
         self.window.approve_scan_button.click()
         self.assertIsNone(self.window.pending_review_kind)
-        self.assertTrue(logger.ritual_pages_for_map("M0001")[0]["items"][0]["deferred"])
+        self.assertEqual(logger.ritual_pages_for_map("M0001")[0]["items"], [])
         self.assertFalse(deferred.flags() & Qt.ItemFlag.ItemIsUserCheckable)
 
 

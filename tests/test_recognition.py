@@ -106,7 +106,7 @@ class RecognitionTests(unittest.TestCase):
                          [(names[0], 4000), (names[1], None)])
 
     def test_deferred_marker_attaches_to_recognized_named_omen(self):
-        """Verify a deferred marker augments the named Omen and preserves save eligibility."""
+        """Verify a deferred marker augments the named Omen; the page saves without logging it again."""
         name = "Omen of Whittling"
         rng = np.random.default_rng(7)
         icon = Image.fromarray(rng.integers(40, 230, (40, 40, 3), dtype=np.uint8))
@@ -123,8 +123,11 @@ class RecognitionTests(unittest.TestCase):
         self.assertTrue(result["items"][0]["deferred"])
         self.assertTrue(clear_ritual_read(result, [name]))
         logger.start_map()
-        logger.save_ritual_page(result["items"])
-        self.assertIn(b",0,", logger.export_all_csv())
+        # A deferred reward was logged when first offered, so it alone is nothing to save.
+        with self.assertRaisesRegex(ValueError, "at least one Ritual reward"):
+            logger.save_ritual_page(result["items"])
+        self.assertEqual(logger.save_ritual_page(result["items"], rerolls_remaining=3)["count"], 0)
+        self.assertEqual(logger.ritual_pages_for_map("M0001")[0]["items"], [])
 
     def partial(self):
         """Construct a confident partial Family 3 reading using database socket expectations."""
