@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Release builds run their checks side by side instead of one after another: the installer build, the Windows fixture and HUD checks, the 100-map session and six shards of the full test suite each get their own Windows runner. A final job checks that the shards together ran every test module exactly once and all passed, and publication still requires every job and gate step to pass on the same source. No check was removed; a build takes about 20–25 minutes instead of 62–75.
+- Release builds run their checks side by side instead of one after another: the installer build, the Windows fixture and HUD checks, the 100-map session and six shards of the full test suite each get their own Windows runner. A final job checks that the shards together ran every test module exactly once and all passed, and publication still requires every job and gate step to pass on the same source. No check was removed. The first such build took 12 minutes, the 100-map session being the longest job; a build took 62–75 minutes before. Runner speed varies, so some builds will take longer.
 
 ## 1.3.2.30 Beta
 
