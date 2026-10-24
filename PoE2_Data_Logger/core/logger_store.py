@@ -3734,12 +3734,26 @@ def ritual_pages_for_map(map_id):
                                       "WHERE map_id=? ORDER BY page_number", (map_id,))]
 
 
+def last_ritual_page(map_id):
+    """Return the map's last saved Ritual page as rerolls remaining, page and Scan Commit #, or None.
+
+    Only this map's commits count, so a previous map's pages never match."""
+    if not map_id:
+        return None
+    with _connect() as db:
+        row = db.execute("SELECT number,details_json FROM commits WHERE kind='Ritual' AND map_id=? "
+                         "ORDER BY number DESC LIMIT 1", (map_id,)).fetchone()
+    if not row:
+        return None
+    details = _load(row["details_json"])
+    return {"map_id": map_id, "rerolls_remaining": details.get("rerolls_remaining"),
+            "page_number": details.get("page"), "scan_commit_number": row["number"]}
+
+
 def last_ritual_rerolls(map_id):
     """Return the rerolls remaining read with the map's last saved Ritual page, or None."""
-    with _connect() as db:
-        row = db.execute("SELECT details_json FROM commits WHERE kind='Ritual' AND map_id=? "
-                         "ORDER BY number DESC LIMIT 1", (map_id,)).fetchone()
-    return _load(row[0]).get("rerolls_remaining") if row else None
+    page = last_ritual_page(map_id)
+    return page["rerolls_remaining"] if page else None
 
 
 def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,

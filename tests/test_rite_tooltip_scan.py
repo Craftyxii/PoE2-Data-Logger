@@ -242,6 +242,47 @@ class RiteTooltipStageTests(unittest.TestCase):
         rows = {row["Map ID"]: row for row in csv.DictReader(io.StringIO(logger.export_maps_csv().decode("utf-8-sig")))}
         self.assertEqual((rows["M0002"]["City Type"], rows["M0003"]["Biome"]), ("Faridun", "Swamp"))
 
+    def test_maps_sharing_a_biome_stay_separate_stages(self):
+        """Biome never identifies a stage: Savannah and Seepage are both Grass and stay two stages."""
+        logger.save_settings({"activity_type": "Ritual"})
+        for name in ("ravine.png", "savannah.png", "seepage.png", "savannah.png"):
+            self.window._rite_read(scan_window(name))
+        table = self.window.ritual_rite_queue_table
+        self.assertEqual([(table.item(row, 0).text(), table.item(row, 1).text()) for row in range(table.rowCount())],
+                         [("2", "Savannah · Grass"), ("3", "Seepage · Grass")])
+        for ordinal, name in ((2, "savannah.png"), (3, "seepage.png")):
+            self.window.finish_map()
+            state = logger.ritual_rite_state()
+            self.assertEqual((state["map_ordinal"], state["current_map_name"], texts(state["current_affixes"])),
+                             (ordinal, MAPS[name][0], EXPECTED[name]))
+            self.assertEqual(value(self.window.header_biome), "Grass")
+
+    def test_city_stage_takes_its_city_type_and_the_atlas_keystone_biome(self):
+        """A Faridun City stage sets City Type Faridun and, with the keystone allocated, its Atlas biome."""
+        from tests.test_atlas_biome_sync import RULES
+        from PoE2_Data_Logger.core.atlas_catalog import catalog
+        logger.save_settings({"activity_type": "Ritual", "biome": "Mountain"})
+        self.window._rite_read(scan_window("ravine.png"))  # the current map's own stage
+        for (_, node, choice, biome), name in zip(RULES[:2], ("channel.png", "oasis.png")):
+            with self.subTest(biome=biome):
+                logger.save_atlas_settings({"catalog_version": catalog()["version"], "allocated": [node],
+                                            "choices": {node: choice}, "gear_item_rarity": None})
+                self.window._rite_read(scan_window(name))
+                self.window.finish_map()
+                self.assertEqual(logger.ritual_rite_state()["current_map_name"], MAPS[name][0])
+                self.assertEqual((value(self.window.header_city_type), value(self.window.header_biome)),
+                                 ("Faridun", biome))
+                self.assertEqual((value(self.window.city_type), value(self.window.biome)), ("Faridun", biome))
+                settings = logger.get_state()["settings"]
+                self.assertEqual((settings["city_type"], settings["biome"]), ("Faridun", biome))
+        # Without the keystone a city map has no biome of its own.
+        logger.save_atlas_settings({"catalog_version": catalog()["version"], "allocated": [],
+                                    "choices": {}, "gear_item_rarity": None})
+        self.window._rite_read(scan_window("channel.png"))
+        self.window.finish_map()
+        self.assertEqual(logger.ritual_rite_state()["current_map_name"], "Channel")
+        self.assertEqual((value(self.window.header_city_type), value(self.window.header_biome)), ("Faridun", "None"))
+
     def test_waystone_setup_saved_after_map_start_keeps_the_rite_stage_in_exports(self):
         """Saving the new map's waystone rebuilds its setup without dropping the live Rite stage."""
         logger.save_settings({"activity_type": "Ritual"})

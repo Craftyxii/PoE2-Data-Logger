@@ -7440,8 +7440,10 @@ class LoggerWindow(QMainWindow):
             self._scan_failed("ritual", capture, error)
             raise
 
-    def _end_ritual_scan_quietly(self):
-        """End a Ritual scan with nothing to log, without saving, reviewing or reporting it."""
+    def _end_ritual_scan_quietly(self, message):
+        """End a Ritual scan with nothing to log: no save, review, window or input, only a
+        confirmation under the capture preview and in the status bar.
+        """
         self.pending_review_kind = None
         self._failed_review = False
         self._ritual_reading = self._pending_ritual_map = None
@@ -7450,8 +7452,9 @@ class LoggerWindow(QMainWindow):
         self._review_controls(None)
         self.ritual_review_group.hide()
         self.found_label.hide()
-        for widget in (self.review_summary, self.ritual_status):
-            set_message(widget, "")
+        set_message(self.review_summary, message, "success")
+        set_message(self.ritual_status, message, "success")
+        self.note(message, True)
         if self._overlay_auto_review:
             self.hide_overlay()
 
@@ -7467,11 +7470,21 @@ class LoggerWindow(QMainWindow):
         map_id = logger.get_state()["current_map_id"]
         if expected_map_id is not None and expected_map_id != map_id:
             raise ValueError(f"The Ritual scan belongs to {expected_map_id}. Scan {map_id} again.")
+        # A scan belongs only to the map shown when it was taken; validation above
+        # proved that map is still current. A finished map takes no more pages,
+        # and the next map exists only after + New map.
+        context = capture["context"] if capture is not None else logger.scan_context()
+        map_id = context["_capture_map_id"]
+        if context.get("_capture_map_pending"):
+            raise ValueError(f"{map_id} is finished; press + New map, then scan this Ritual page again")
         rerolls = result.get("rerolls_remaining")
-        if type(rerolls) is int and rerolls == logger.last_ritual_rerolls(map_id):
-            # Integrity safeguard: the roll count is unchanged since the map's
+        last = logger.last_ritual_page(map_id)
+        if type(rerolls) is int and last and rerolls == last["rerolls_remaining"]:
+            # Integrity safeguard: the roll count is unchanged since this map's
             # last saved page, so the page was not rerolled and this scan repeats it.
-            self._end_ritual_scan_quietly()
+            self._end_ritual_scan_quietly(
+                f"✓ Already saved: {map_id} page {last['page_number']} had {rerolls} "
+                f"roll{'' if rerolls == 1 else 's'} left (Scan Commit #{last['scan_commit_number']}).")
             return
         self._ritual_reading = None
         self._pending_ritual_map = map_id
@@ -7509,7 +7522,7 @@ class LoggerWindow(QMainWindow):
         if (clear and not self.ritual_table.rowCount() and result.get("tribute_available") is None
                 and result.get("rerolls_remaining") is None):
             # Every reward was deferred and no counter was read: the page logs nothing.
-            self._end_ritual_scan_quietly()
+            self._end_ritual_scan_quietly("✓ Ritual page read: every reward is deferred, nothing new to log.")
             return
         set_message(self.ritual_status,
                     summary)

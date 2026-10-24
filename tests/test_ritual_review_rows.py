@@ -248,7 +248,7 @@ class RitualReviewRowsTests(unittest.TestCase):
                          [("Chaos Orb", "False", "1")])
 
     def test_page_of_only_deferred_rewards_saves_its_counters_without_review(self):
-        """Nothing on such a page needs approval: its counters save, or with none read it ends quietly."""
+        """Nothing on such a page needs approval: its counters save, or with none read it says so."""
         for certain in (False, True):
             with self.subTest(certain=certain):
                 before = len(logger.ritual_pages_for_map("M0001"))
@@ -265,7 +265,9 @@ class RitualReviewRowsTests(unittest.TestCase):
                               tribute_available=None, rerolls_remaining=None), live=True, auto=True)
         self.assertIsNone(self.window.pending_review_kind)
         self.assertEqual(logger.get_state()["scan_commit_count"], commits)
-        self.assertEqual((self.window.review_summary.text(), self.window.ritual_status.text()), ("", ""))
+        read = "✓ Ritual page read: every reward is deferred, nothing new to log."
+        self.assertEqual((self.window.review_summary.text(), self.window.ritual_status.text()), (read, read))
+        self.assertEqual(self.window.statusBar().currentMessage(), read)
 
     def test_reward_whose_deferred_state_is_unknown_still_asks(self):
         """A reward that may not be deferred could be a new find, so it is reviewed."""
