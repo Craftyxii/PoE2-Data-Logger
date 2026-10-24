@@ -226,6 +226,31 @@ def _rank_inventory(state, rgb, weights, calibrated):
                   key=lambda row: row["score"], reverse=True)[:3]
 
 
+def _gray_art(rgba):
+    """Composite catalog RGBA on the inventory backing as grayscale shape."""
+    pixels = np.asarray(rgba, dtype=np.float32).reshape(40, 40, 4)
+    alpha = pixels[:, :, 3:4] / 255
+    return (pixels[:, :, :3] * alpha + np.array([26, 26, 40]) * (1 - alpha)).mean(axis=2).astype(np.float32)
+
+
+def _same_shape(first, second):
+    """Whether two catalog arts draw one shape within the matcher's 4-pixel shift."""
+    first, second = _gray_art(first), _gray_art(second)
+    return all(float(cv2.matchTemplate(cv2.copyMakeBorder(whole, 4, 4, 4, 4, cv2.BORDER_REPLICATE),
+                                       part[4:36, 4:36], cv2.TM_CCOEFF_NORMED).max()) > .9
+               for whole, part in ((first, second), (second, first)))
+
+
+def _colour(rgb, weights):
+    """Average chromaticity of the strongly coloured matched pixels, or None for gray art."""
+    spread = rgb.max(axis=2) - rgb.min(axis=2)
+    keep = (weights > 0) & (spread > 40)
+    if int(keep.sum()) < 8:
+        return None
+    pixels = rgb[keep]
+    return (pixels / (pixels.sum(axis=1, keepdims=True) + 1e-6)).mean(axis=0)
+
+
 def _cache_inventory_rank(reader, key, ranked):
     """Publish copied numeric rankings on the owning reader's serial thread only."""
     reader._rank_cache[key] = tuple(dict(row) for row in ranked)
@@ -254,6 +279,7 @@ class CurrencyReader:
     def __init__(self):
         """Load offline recognizers/catalogs into a memory-limited context and prepare icon assets."""
         self._rank_cache = OrderedDict()
+        self._same_shapes = {}
         self._scaled_candidates = {}
         self._example_atlases = OrderedDict()
         self._example_rank_cache = OrderedDict()
@@ -366,6 +392,12 @@ class CurrencyReader:
                             "margin": margin, "all": [], "ignored": True,
                             "candidate": " / ".join(self.inventory_members[top["name"]]),
                             "shared_icon": len(self.inventory_members[top["name"]]) > 1}
+                doubtful = self.look_alikes(image, count_digits, ranked) if clear_match else []
+                if doubtful:
+                    names = [name for family in (top["name"], *doubtful) for name in self.inventory_members[family]]
+                    return {"family": None, "members": [], "score": max(0, 1 + top["score"] / 8000),
+                            "margin": margin, "all": [{"name": " / ".join(names)}], "look_alikes": names,
+                            "uncertain": True}
                 if clear_match:
                     return {"family": top["name"], "members": self.inventory_members[top["name"]],
                             "score": max(0, 1 + top["score"] / 8000), "margin": margin,
@@ -402,6 +434,38 @@ class CurrencyReader:
         if result.get("family") and (result["score"] < clear(.50, .20) or result["margin"] < clear(.12, .08)):
             result["family"], result["members"] = None, []
         return result
+
+    def look_alikes(self, image, count_digits, ranked):
+        """Return ranked same-shape families whose colour the top match does not clearly beat.
+
+        Some families draw one shape in different colours (Essences, Liquid
+        emotions). A sub-pixel shift can let the wrong colour win on shape, so
+        the strongly coloured pixels must also sit clearly nearer the top family.
+        """
+        top = ranked[0]["name"]
+        rivals = []
+        for row in ranked[1:]:
+            pair = frozenset((top, row["name"]))
+            if pair not in self._same_shapes:
+                self._same_shapes[pair] = _same_shape(self.calibrated_rgba[top], self.calibrated_rgba[row["name"]])
+            if self._same_shapes[pair]:
+                rivals.append(row["name"])
+        if not rivals:
+            return []
+        rgb, weights, _ = _inventory_query(image, True, count_digits)
+        colour = lambda family: _colour(_inventory_candidate(self.calibrated_rgba[family])[4:44, 4:44], weights)
+        query, own = _colour(rgb, weights), colour(top)
+        doubtful = []
+        for rival in rivals:
+            other = colour(rival)
+            if query is None or own is None:
+                # Gray art can only be told from a coloured sibling, never from gray.
+                clear = query is None and own is None and other is not None
+            else:
+                clear = other is None or np.linalg.norm(query - own) < .75 * np.linalg.norm(query - other)
+            if not clear:
+                doubtful.append(rival)
+        return doubtful
 
     def inventory_ranked(self, image, calibrated=False, count_digits=None):
         """Rank distinct icon families by weighted pixel error with translation tolerance.

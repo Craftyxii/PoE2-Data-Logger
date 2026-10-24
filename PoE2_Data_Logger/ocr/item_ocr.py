@@ -1139,8 +1139,14 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
             if strictness == 100:
                 found[-1]["name_needs_review"] = True
         elif slot not in equipment and icon.get("all") and (icon.get("uncertain") or score >= .55):
-            unknown.append({"slot": slot, "candidate": icon["all"][0]["name"],
-                            "score": round(score, 3)})
+            held = {"slot": slot, "candidate": icon["all"][0]["name"], "score": round(score, 3)}
+            count = labels[slot].get("count") if labels is not None else None
+            if (icon.get("look_alikes") and type(count) is int and not count_geometry_uncertain and
+                    slot not in clipped_count_slots and len(str(count)) >= (complete_count_glyphs(cell) or 0) and
+                    reader.count(cell) in (None, count)):
+                # Only the look-alike colour is in doubt; the verified count stays.
+                held.update(quantity=count, count_verified=True, count_needs_review=False)
+            unknown.append(held)
         elif slot not in equipment and icon.get("ignored"):
             unknown.append({"slot": slot, "candidate": icon.get("candidate", "Unrecognized item"),
                             "score": round(score, 3), "reason": "label if tracked"})
@@ -1748,7 +1754,11 @@ def _ritual_reward_icon(reader, cell, label, examples, icon=None, strictness=ocr
                       margin > ocr_sensitivity.clear_threshold(300, strictness, 200)) or
                      (top["score"] > ocr_sensitivity.clear_threshold(-3200, strictness, 800) and
                       margin > ocr_sensitivity.clear_threshold(1500, strictness, 500)))
-            if clear:
+            doubtful = reader.look_alikes(cell, count_digits, ranked) if clear and hasattr(reader, "look_alikes") else []
+            if doubtful:
+                icon = {"score": max(0, 1 + top["score"] / 8000), "look_alikes": [
+                    name for family in (top["name"], *doubtful) for name in reader.inventory_members[family]]}
+            elif clear:
                 icon = {"family": top["name"], "members": reader.inventory_members[top["name"]],
                         "score": max(0, 1 + top["score"] / 8000), "method": "inventory"}
     name = None
@@ -1760,7 +1770,9 @@ def _ritual_reward_icon(reader, cell, label, examples, icon=None, strictness=ocr
             name = currency_ocr.resolve_tier(members, cell,
                                             lambda unused: [{"text": tier, "score": 1}] if tier else [])
     else:
-        candidates = [row["name"] for row in icon.get("all") or [] if row.get("name")]
+        # Same-shape look-alikes stay separate choices for review.
+        candidates = list(icon.get("look_alikes") or
+                          [row["name"] for row in icon.get("all") or [] if row.get("name")])
         if examples:
             ranked = reader.examples(cell, examples)
             if ranked:
