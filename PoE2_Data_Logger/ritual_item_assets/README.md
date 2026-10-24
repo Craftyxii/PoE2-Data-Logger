@@ -6,12 +6,12 @@ labels and historical records.
 
 Ritual scans read `catalog.json` through `core/ritual_catalog.py`, from 1.3.2.30
 Beta on. A name on its exclusion list, or on that module's short list of
-player-confirmed exclusions (Origin Spark), is never named or suggested on a
-Ritual page, and a reviewed Ritual row cannot use it; the art match is held for
-review instead. A Foretold Bounty name always stays possible, and every other
-name keeps its existing recognition. Currency and inventory scans do not use
-this catalog. Copying these files into a 1.3.2.29 installation does not
-activate the exclusions.
+player-confirmed exclusions (Origin Spark and every Distilled Emotion), is never
+named or suggested on a Ritual page, and a reviewed Ritual row cannot use it;
+the art match is held for review instead. A Foretold Bounty name always stays
+possible, and every other name keeps its existing recognition. Currency and
+inventory scans do not use this catalog. Copying these files into a 1.3.2.29
+installation does not activate the exclusions.
 
 ## Contents
 

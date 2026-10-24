@@ -57,8 +57,14 @@ OMEN_NAMES = (
 )
 
 CATALOG = Path(__file__).resolve().parents[1] / "ritual_item_assets" / "catalog.json"
-# Reported by players and not yet in the sourced catalog.
-PLAYER_CONFIRMED_EXCLUSIONS = frozenset({"Origin Spark"})
+# Reported by players and not yet in the sourced catalog: Origin Spark and
+# Delirium's Distilled Emotions, every Liquid at every tier.
+_EMOTIONS = {"Diluted ": ("Ire", "Guilt", "Greed"), "": ("Paranoia", "Envy", "Disgust", "Despair"),
+             "Concentrated ": ("Fear", "Suffering", "Isolation"),
+             "Potent ": ("Contempt", "Ferocity", "Melancholy")}
+PLAYER_CONFIRMED_EXCLUSIONS = frozenset({"Origin Spark"} | {
+    f"{ancient}{tier}Liquid {emotion}" for tier, emotions in _EMOTIONS.items()
+    for emotion in emotions for ancient in ("", "Ancient ")})
 
 
 def _not_ritual_rewards():

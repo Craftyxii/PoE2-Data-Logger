@@ -125,9 +125,15 @@ class NotRitualRewardTests(unittest.TestCase):
         """Sourced boss-only, Abyss and removed names are held; Foretold Bounty names are not."""
         catalog = json.loads(ritual_catalog.CATALOG.read_text(encoding="utf-8"))
         excluded = {row["name"] for row in catalog["exclusions"]}
-        self.assertEqual(NOT_RITUAL_REWARDS, excluded | {"Origin Spark"})
+        self.assertEqual(NOT_RITUAL_REWARDS, excluded | ritual_catalog.PLAYER_CONFIRMED_EXCLUSIONS)
+        # Every Distilled Emotion is a real catalog item; Liquid Verisium is not an emotion.
+        reader_names = {name for members in currency_ocr.get_reader().inventory_members.values() for name in members}
+        liquids = {name for name in reader_names if "Liquid " in name} - {"Liquid Verisium"}
+        self.assertEqual(len(liquids), 26)
+        self.assertLessEqual(liquids, NOT_RITUAL_REWARDS)
+        self.assertNotIn("Liquid Verisium", NOT_RITUAL_REWARDS)
         self.assertFalse(NOT_RITUAL_REWARDS & {row["name"] for row in catalog["guaranteed_rewards"]})
-        for name in ("Ab Aeterno", "Omen of Light", "Omen of Recombination"):
+        for name in ("Ab Aeterno", "Omen of Light", "Omen of Recombination", "Potent Liquid Contempt"):
             with self.subTest(name=name):
                 self.assertNotIn(name, [item["name"] for item in self.scan((name, .95, []))])
         self.assertIn("Headhunter", [item["name"] for item in self.scan(("Headhunter", .95, []))])
