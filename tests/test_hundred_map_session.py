@@ -494,16 +494,25 @@ class HundredMapSession(unittest.TestCase):
         self.check(logger.get_state()["scan_commit_count"], before, "auto:unclear-ritual-held")
         self.check(self.w.pending_review_kind, "ritual", "auto:unclear-ritual-review")
         self.coverage["unclear Ritual held with auto-all enabled"] += 1
+        # A deferred offer adds no new find: one not read with certainty is left
+        # out of the page instead of waiting for review.
+        shown = [row for row in rows if not row["deferred"]]
+        self.check(self.w.ritual_table.rowCount(), len(shown) + 1, "ritual:uncertain-deferred-left-out")
+        if len(shown) < len(rows):
+            self.coverage["uncertain deferred Ritual offer left out of review"] += 1
+        session = shown.index(rows[1])
         # Editing actual counters and reward cells exercises the review form.
         self.w.ritual_tribute.setText(str(20000 + n))
         self.w.ritual_rerolls.setText(str(n % 4))
-        self.w.ritual_table.item(1, 2).setText(str(rows[1]["quantity"] + 1))
+        self.w.ritual_table.item(session, 2).setText(str(rows[1]["quantity"] + 1))
         rows[1]["quantity"] += 1
-        self.w.ritual_table.item(1, 5).setCheckState(Qt.CheckState.Checked if n % 3 == 0 else Qt.CheckState.Unchecked)
+        self.w.ritual_table.item(session, 5).setCheckState(
+            Qt.CheckState.Checked if n % 3 == 0 else Qt.CheckState.Unchecked)
         rows[1]["deferred"] = n % 3 == 0
+        rows = shown
         # Match Currency's two-stage review: accept named rewards individually,
-        # then commit the complete page once; the unnamed third row stays out.
-        for row in (0, 1):
+        # then commit the complete page once; the unnamed last row stays out.
+        for row in range(len(rows)):
             controls = self.w.ritual_table.cellWidget(row, 6)
             controls.findChild(QPushButton, "approveRitual").click()
             self.check(controls.property("reviewStatus"), "approved", "ritual:individual-row-approved")
