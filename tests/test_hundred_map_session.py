@@ -503,7 +503,8 @@ class HundredMapSession(unittest.TestCase):
         session = shown.index(rows[1])
         # Editing actual counters and reward cells exercises the review form.
         self.w.ritual_tribute.setText(str(20000 + n))
-        self.w.ritual_rerolls.setText(str(n % 4))
+        # Page 1 is offered first, so it has one roll more than page 2.
+        self.w.ritual_rerolls.setText(str(n % 4 + 1))
         self.w.ritual_table.item(session, 2).setText(str(rows[1]["quantity"] + 1))
         rows[1]["quantity"] += 1
         self.w.ritual_table.item(session, 5).setCheckState(
@@ -520,7 +521,7 @@ class HundredMapSession(unittest.TestCase):
         self.w.approve_scan_button.click()
         context = {**self.expected[f"M{n:04}"]["snapshot"], "expedition": self.expedition}
         self.record("Ritual", {"page": 1, "items": rows, "raw_text": raw,
-                               "tribute_available": 20000 + n, "rerolls_remaining": n % 4}, context, reference="Page 1")
+                               "tribute_available": 20000 + n, "rerolls_remaining": n % 4 + 1}, context, reference="Page 1")
         self.expected[f"M{n:04}"]["ritual"] = rows
         pages = logger.ritual_pages_for_map(f"M{n:04}")
         self.check(len(pages), 1, "ritual:page-count")
@@ -542,6 +543,13 @@ class HundredMapSession(unittest.TestCase):
         self.check(pages[1]["items"], automatic_rows, "ritual:automatic-offer-fields-exact")
         self.expected[f"M{n:04}"]["ritual"] += automatic_rows
         self.coverage["clear live Ritual automatic commit"] += 1
+        # Scanning page 2 again, its rolls unchanged, is dropped without a trace.
+        saved = logger.get_state()["scan_commit_count"]
+        self.w._ritual_read(clear, live=True)
+        self.check(logger.get_state()["scan_commit_count"], saved, "ritual:repeat-page-not-saved")
+        self.check(len(logger.ritual_pages_for_map(f"M{n:04}")), 2, "ritual:repeat-page-discarded")
+        self.check(self.w.pending_review_kind, None, "ritual:repeat-page-no-review")
+        self.coverage["repeat Ritual page discarded by unchanged rolls"] += 1
         self.verify_totals()
 
     def remnant(self, n, seed=False):
@@ -863,8 +871,8 @@ class HundredMapSession(unittest.TestCase):
             self.check(first.get("Ritual Reading Count"), "2", "exports:ritual-reading-count")
             self.check(first.get("Ritual First Tribute Available"), str(20000 + map_number), "exports:ritual-first-tribute")
             self.check(first.get("Ritual Final Tribute Available"), str(30000 + map_number), "exports:ritual-final-tribute")
-            for boundary in ("First", "Final"):
-                self.check(first.get(f"Ritual {boundary} Rerolls Remaining"), str(map_number % 4),
+            for boundary, rerolls in (("First", map_number % 4 + 1), ("Final", map_number % 4)):
+                self.check(first.get(f"Ritual {boundary} Rerolls Remaining"), str(rerolls),
                            "exports:ritual-boundary-rerolls")
             self.check(all(row.get(key) == "" for row in rows[1:] for key in logger.RITUAL_COUNTER_HEADERS),
                        True, "exports:ritual-counters-once-per-map")
@@ -964,7 +972,8 @@ class HundredMapSession(unittest.TestCase):
                 print(f"100-map GUI progress: {n}/100, {len(self.commit_log)} commits, {len(self.failures)} mismatches", flush=True)
         for activity in ("Atlas settings", "clear live waystone automatic commit",
                          "clear live tablet automatic commit", "clear live currency automatic commit",
-                         "clear live Ritual automatic commit", "clear live opened remnant automatic commit",
+                         "clear live Ritual automatic commit", "repeat Ritual page discarded by unchanged rolls",
+                         "clear live opened remnant automatic commit",
                          "clear live seed manual confirmation", "paired chain parts and order", "Map totals"):
             self.check(self.coverage[activity] >= 100, True, "coverage:at-least-100:" + activity)
         self.check(self.coverage["propagation manual recipe approvals"], 200,

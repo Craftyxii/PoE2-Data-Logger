@@ -50,11 +50,16 @@ class RitualGrayscaleWorkflowTests(unittest.TestCase):
         logger._READY = False
         self.temporary.cleanup()
 
-    def read_actual_capture(self):
-        """Run the production request's recognizer on its captured pixels and references."""
+    def read_actual_capture(self, rerolls=None):
+        """Run the production request's recognizer on its captured pixels and references.
+
+        ``rerolls`` stands in a later page's roll count for the captured one.
+        """
         self.window._ritual_captured(self.image, live=True)
         request, deliver = self.jobs[-1]
         result = request.function(*request.args, **request.kwargs)
+        if rerolls is not None:
+            result["rerolls_remaining"] = rerolls
         deliver(result)
         self.app.processEvents()
         return result
@@ -148,7 +153,12 @@ class RitualGrayscaleWorkflowTests(unittest.TestCase):
         finally:
             workbook.close()
 
-        repeated = self.read_actual_capture()
+        # The same page scanned again, its 13 rolls unchanged, is dropped without a review.
+        self.read_actual_capture()
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
+        # A later page offering the same artwork after a reroll still waits for its names.
+        repeated = self.read_actual_capture(rerolls=12)
         self.assertEqual(logger.get_state()["scan_commit_count"], 1)
         self.assertEqual(len(logger.ritual_pages_for_map("M0001")), 1)
         self.assertEqual([item["grid_slots"] for item in repeated["items"]],

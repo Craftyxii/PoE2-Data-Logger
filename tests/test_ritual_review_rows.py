@@ -320,7 +320,8 @@ class RitualReviewRowsTests(unittest.TestCase):
         self.assertTrue(table.item(0, 0).data(Qt.ItemDataRole.UserRole + 1))
         self.assertTrue(table.item(0, 0).data(Qt.ItemDataRole.UserRole)["unresolved"])
 
-        self.read(self.result([self.unknown(15)]))
+        # A rerolled page: one roll fewer than the saved page.
+        self.read(self.result([self.unknown(15)], rerolls_remaining=1))
 
         self.assertNotIn("Saved", table.item(0, 6).text())
         self.assertIn("Confirm", table.item(0, 6).text())

@@ -109,8 +109,10 @@ class RitualRowActionTests(unittest.TestCase):
         """Deliver a captured result through the normal pending-review callback."""
         self.window._ritual_captured(self.image.copy(), live=live,
                                      expected_strictness=strictness)
+        # Each page saved on the map took one reroll, so a new page has one fewer.
+        rerolls = 3 - len(logger.ritual_pages_for_map(logger.get_state()["current_map_id"]))
         result = {"items": copy.deepcopy(items), "raw_text": "Ritual evidence",
-                  "unmatched": [], "tribute_available": 5430, "rerolls_remaining": 3,
+                  "unmatched": [], "tribute_available": 5430, "rerolls_remaining": rerolls,
                   "grid_detected": True, "grid_reward_count": len(items)}
         if strictness != 50 and include_strictness:
             result["_ocr_strictness"] = strictness

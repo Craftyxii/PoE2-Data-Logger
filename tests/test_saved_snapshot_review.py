@@ -50,13 +50,13 @@ class SavedSnapshotReviewTests(unittest.TestCase):
             "unknown": []}, live=live)
         self.app.processEvents()
 
-    def ritual(self, quantity=1, live=False):
+    def ritual(self, quantity=1, live=False, rerolls=2):
         """Deliver a confident Chaos Orb Ritual page at the requested quantity."""
         self.window._ritual_read({"items": [
             {"category": "Item", "name": "Chaos Orb", "quantity": quantity,
              "tribute": 100, "source": "Chaos Orb", "score": 1}],
             "raw_text": "Chaos Orb", "unmatched": [],
-            "tribute_available": 5430, "rerolls_remaining": 2}, live=live)
+            "tribute_available": 5430, "rerolls_remaining": rerolls}, live=live)
         self.app.processEvents()
 
     def assert_inventory_saved_preview(self, quantity):
@@ -126,7 +126,7 @@ class SavedSnapshotReviewTests(unittest.TestCase):
         self.ritual()
         self.window.approve_scan_button.click()
         self.assert_ritual_saved_preview(1)
-        self.ritual(2)
+        self.ritual(2, rerolls=1)
         table = self.window.ritual_table
         self.assertNotEqual(table.editTriggers(), QTableWidget.EditTrigger.NoEditTriggers)
         self.assertTrue(self.window.ritual_add_row_button.isEnabled())

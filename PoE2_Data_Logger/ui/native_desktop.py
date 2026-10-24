@@ -7427,6 +7427,21 @@ class LoggerWindow(QMainWindow):
             self._scan_failed("ritual", capture, error)
             raise
 
+    def _discard_repeat_ritual_scan(self):
+        """Drop a repeat scan of an unchanged Ritual page without saving, reviewing or reporting it."""
+        self.pending_review_kind = None
+        self._failed_review = False
+        self._ritual_reading = self._pending_ritual_map = None
+        self._retire_obsolete_scan_tasks()
+        self.approve_scan_button.setEnabled(False)
+        self._review_controls(None)
+        self.ritual_review_group.hide()
+        self.found_label.hide()
+        for widget in (self.review_summary, self.ritual_status):
+            set_message(widget, "")
+        if self._overlay_auto_review:
+            self.hide_overlay()
+
     def _ritual_read(self, result, live=True, expected_map_id=None, capture=None):
         """Ignore superseded captures and validate map ownership before filling Ritual reward
         drafts. Hide verified rewards, retain them for saving, and report incomplete coverage.
@@ -7439,6 +7454,12 @@ class LoggerWindow(QMainWindow):
         map_id = logger.get_state()["current_map_id"]
         if expected_map_id is not None and expected_map_id != map_id:
             raise ValueError(f"The Ritual scan belongs to {expected_map_id}. Scan {map_id} again.")
+        rerolls = result.get("rerolls_remaining")
+        if type(rerolls) is int and rerolls == logger.last_ritual_rerolls(map_id):
+            # Integrity safeguard: the roll count is unchanged since the map's
+            # last saved page, so the page was not rerolled and this scan repeats it.
+            self._discard_repeat_ritual_scan()
+            return
         self._ritual_reading = None
         self._pending_ritual_map = map_id
         if capture is not None:
