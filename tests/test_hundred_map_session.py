@@ -487,8 +487,11 @@ class HundredMapSession(unittest.TestCase):
                 {"category": "Item", "name": f"Session reward {n % 7}", "quantity": 2 + n % 4,
                  "tribute": 900 + n, "source": f"Ritual map {n}", "deferred": False}]
         raw = f"Synthetic Ritual evidence {n}"
+        # The first page of each map arrives with the previous map's last roll
+        # count: the safeguard compares only within the map, so it must save.
+        first_rolls = (n - 1) % 4
         result = {"items": rows + [{"name": "", "category": "Item", "quantity": 1, "tribute": 0, "deferred": False}],
-                  "raw_text": raw, "tribute_available": 10000 + n, "rerolls_remaining": n % 5}
+                  "raw_text": raw, "tribute_available": 10000 + n, "rerolls_remaining": first_rolls}
         before = len(self.commit_log)
         self.w._ritual_read(result, live=True)
         self.check(logger.get_state()["scan_commit_count"], before, "auto:unclear-ritual-held")
@@ -503,14 +506,15 @@ class HundredMapSession(unittest.TestCase):
         session = shown.index(rows[1])
         # Editing actual counters and reward cells exercises the review form.
         self.w.ritual_tribute.setText(str(20000 + n))
-        # Page 1 is offered first, so it has one roll more than page 2.
-        self.w.ritual_rerolls.setText(str(n % 4 + 1))
+        self.w.ritual_rerolls.setText(str(first_rolls))
         self.w.ritual_table.item(session, 2).setText(str(rows[1]["quantity"] + 1))
         rows[1]["quantity"] += 1
         self.w.ritual_table.item(session, 5).setCheckState(
             Qt.CheckState.Checked if n % 3 == 0 else Qt.CheckState.Unchecked)
         rows[1]["deferred"] = n % 3 == 0
         rows = shown
+        # A reward confirmed Deferred was logged when first offered, so it is not saved again.
+        saved_rows = [row for row in rows if not row["deferred"]]
         # Match Currency's two-stage review: accept named rewards individually,
         # then commit the complete page once; the unnamed last row stays out.
         for row in range(len(rows)):
@@ -520,12 +524,14 @@ class HundredMapSession(unittest.TestCase):
         self.check(logger.get_state()["scan_commit_count"], before, "ritual:row-approvals-no-commit")
         self.w.approve_scan_button.click()
         context = {**self.expected[f"M{n:04}"]["snapshot"], "expedition": self.expedition}
-        self.record("Ritual", {"page": 1, "items": rows, "raw_text": raw,
-                               "tribute_available": 20000 + n, "rerolls_remaining": n % 4 + 1}, context, reference="Page 1")
-        self.expected[f"M{n:04}"]["ritual"] = rows
+        self.record("Ritual", {"page": 1, "items": saved_rows, "raw_text": raw,
+                               "tribute_available": 20000 + n, "rerolls_remaining": first_rolls}, context, reference="Page 1")
+        self.expected[f"M{n:04}"]["ritual"] = saved_rows
         pages = logger.ritual_pages_for_map(f"M{n:04}")
         self.check(len(pages), 1, "ritual:page-count")
-        self.check(pages[0]["items"], rows, "ritual:persisted-rewards")
+        self.check(pages[0]["items"], saved_rows, "ritual:persisted-rewards")
+        if n > 1:
+            self.coverage["first Ritual page with the previous map's roll count saved"] += 1
         self.coverage["Ritual quantities/cost/deferred/counters"] += 1
         automatic_rows = [{"category": "Omen", "name": "Omen of Whittling", "quantity": 2,
                            "tribute": 500 + n, "source": f"Clear Ritual offer {n}", "deferred": n % 2 == 0}]
@@ -534,19 +540,24 @@ class HundredMapSession(unittest.TestCase):
                  "raw_text": automatic_raw, "tribute_available": 30000 + n, "rerolls_remaining": n % 4,
                  "reward_count": 1, "unmatched": []}
         self.w._ritual_read(clear, live=True)
+        # A deferred offer is never logged; with only deferred offers the page saves its counters.
+        automatic_rows = [row for row in automatic_rows if not row["deferred"]]
         self.record("Ritual", {"page": 2, "items": automatic_rows, "raw_text": automatic_raw,
                     "tribute_available": 30000 + n, "rerolls_remaining": n % 4}, context, reference="Page 2")
         self.check(self.w.pending_review_kind, None, "auto:ritual-saved-review-cleared")
         pages = logger.ritual_pages_for_map(f"M{n:04}")
         self.check(len(pages), 2, "ritual:auto-and-manual-page-history")
-        self.check(pages[0]["items"], rows, "ritual:auto-keeps-earlier-page")
+        self.check(pages[0]["items"], saved_rows, "ritual:auto-keeps-earlier-page")
         self.check(pages[1]["items"], automatic_rows, "ritual:automatic-offer-fields-exact")
         self.expected[f"M{n:04}"]["ritual"] += automatic_rows
         self.coverage["clear live Ritual automatic commit"] += 1
-        # Scanning page 2 again, its rolls unchanged, is dropped without a trace.
+        # Scanning page 2 again, its rolls unchanged, is dropped with a confirmation.
         saved = logger.get_state()["scan_commit_count"]
         self.w._ritual_read(clear, live=True)
         self.check(logger.get_state()["scan_commit_count"], saved, "ritual:repeat-page-not-saved")
+        self.check(self.w.review_summary.text(),
+                   f"✓ Already saved: M{n:04} page 2 had {n % 4} roll{'' if n % 4 == 1 else 's'} left "
+                   f"(Scan Commit #{saved}).", "ritual:repeat-page-confirmed")
         self.check(len(logger.ritual_pages_for_map(f"M{n:04}")), 2, "ritual:repeat-page-discarded")
         self.check(self.w.pending_review_kind, None, "ritual:repeat-page-no-review")
         self.coverage["repeat Ritual page discarded by unchanged rolls"] += 1
@@ -871,7 +882,7 @@ class HundredMapSession(unittest.TestCase):
             self.check(first.get("Ritual Reading Count"), "2", "exports:ritual-reading-count")
             self.check(first.get("Ritual First Tribute Available"), str(20000 + map_number), "exports:ritual-first-tribute")
             self.check(first.get("Ritual Final Tribute Available"), str(30000 + map_number), "exports:ritual-final-tribute")
-            for boundary, rerolls in (("First", map_number % 4 + 1), ("Final", map_number % 4)):
+            for boundary, rerolls in (("First", (map_number - 1) % 4), ("Final", map_number % 4)):
                 self.check(first.get(f"Ritual {boundary} Rerolls Remaining"), str(rerolls),
                            "exports:ritual-boundary-rerolls")
             self.check(all(row.get(key) == "" for row in rows[1:] for key in logger.RITUAL_COUNTER_HEADERS),
@@ -976,6 +987,9 @@ class HundredMapSession(unittest.TestCase):
                          "clear live opened remnant automatic commit",
                          "clear live seed manual confirmation", "paired chain parts and order", "Map totals"):
             self.check(self.coverage[activity] >= 100, True, "coverage:at-least-100:" + activity)
+        # Every map after the first starts its Ritual pages from the previous map's last roll count.
+        self.check(self.coverage["first Ritual page with the previous map's roll count saved"], 99,
+                   "coverage:first-ritual-page-after-previous-map")
         self.check(self.coverage["propagation manual recipe approvals"], 200,
                    "coverage:every-propagation-capture-manually-approved")
         self.check(self.coverage["confident propagation requires manual row approval"] >= 100,
