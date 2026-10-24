@@ -16,7 +16,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QComboBox, QPushButton
 
 from PoE2_Data_Logger.core import logger_store as logger, store, workbook_export
-from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
+from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, skipped_deferred_reward
 
 
 class RitualGrayscaleWorkflowTests(unittest.TestCase):
@@ -81,7 +81,12 @@ class RitualGrayscaleWorkflowTests(unittest.TestCase):
         self.assertEqual(self.window.pending_review_kind, "ritual")
         table = self.window.ritual_table
         rows = self.slot_rows()
-        self.assertEqual(table.rowCount(), 11)
+        # Deferred offers add no new finds; ones not read with certainty are left out, never reviewed.
+        skipped = [tuple(item["grid_slots"]) for item in result["items"]
+                   if skipped_deferred_reward(item, logger.ritual_names())]
+        self.assertEqual(len(skipped), 3)
+        self.assertTrue(set(skipped).isdisjoint(rows))
+        self.assertEqual(table.rowCount(), 11 - len(skipped))
         armor_row = rows[(73, 74, 85, 86)]
         self.assertEqual((table.item(armor_row, 0).text(), table.item(armor_row, 2).text()),
                          ("Item", "1"))

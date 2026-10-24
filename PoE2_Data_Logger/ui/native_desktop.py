@@ -275,17 +275,28 @@ def clear_ritual_reward(item, omen_names, strictness=ocr_sensitivity.DEFAULT):
         re.search(r"\b[x×]\s*\d+\b", str(item.get("source", "")), re.I))
 
 
+def skipped_deferred_reward(item, omen_names, strictness=ocr_sensitivity.DEFAULT):
+    """Leave out a deferred reward that is not read with certainty, rather than review it.
+
+    A deferred reward adds no new find; it was offered on an earlier page. Only
+    a reward whose deferred state itself is unknown may be new, so it still asks.
+    """
+    return item.get("deferred") is True and not clear_ritual_reward(item, omen_names, strictness)
+
+
 def clear_ritual_read(result, omen_names):
     """Gate Ritual auto-save on complete totals, nonoverlapping grid coverage and confident rewards."""
     strictness = ocr_sensitivity.validate(result.get("_ocr_strictness", ocr_sensitivity.DEFAULT))
     if strictness == 100:
         return False
     items = result.get("items") or []
+    kept = [item for item in items if not skipped_deferred_reward(item, omen_names, strictness)]
     # A verified complete grid establishes every reward; leftover screen text
     # (a hovered tooltip, the Tribute counter) cannot add or change one.
     grid_complete = bool(result.get("grid_detected")) and not result.get("coverage_uncertain")
-    if (not items or any(result.get(flag) for flag in
-            ("unknown", "coverage_uncertain", "needs_review", "unresolved_count")) or
+    left_out = sum(bool(item.get("unresolved")) for item in items if item not in kept)
+    if (not kept or any(result.get(flag) for flag in ("unknown", "coverage_uncertain", "needs_review")) or
+            (result.get("unresolved_count") or 0) > left_out or
             (result.get("unmatched") and not grid_complete)):
         return False
     if result.get("reward_count") is not None and result["reward_count"] != len(items):
@@ -298,7 +309,7 @@ def clear_ritual_read(result, omen_names):
         if (any(type(slot) is not int or not 1 <= slot <= 120 for slot in slots) or
                 len(set(footprints)) != result["grid_reward_count"] or len(slots) != len(set(slots))):
             return False
-    return all(clear_ritual_reward(item, omen_names, strictness) for item in items)
+    return all(clear_ritual_reward(item, omen_names, strictness) for item in kept)
 
 
 class IconCropCanvas(QWidget):
@@ -7435,7 +7446,11 @@ class LoggerWindow(QMainWindow):
         self.ritual_table.setRowCount(0)
         omen_names = logger.ritual_names()
         strictness = capture["strictness"] if capture else result.get("_ocr_strictness", ocr_sensitivity.DEFAULT)
+        skipped = 0
         for item in result["items"]:
+            if skipped_deferred_reward(item, omen_names, strictness):
+                skipped += 1
+                continue
             # Saving and visibility share the capture's acceptance decision;
             # hidden known rows must survive a later whole-page approval.
             accepted = clear_ritual_reward(item, omen_names, strictness)
@@ -7445,8 +7460,11 @@ class LoggerWindow(QMainWindow):
         self.ritual_raw.setPlainText(result["raw_text"])
         review_count = sum(not self.ritual_table.isRowHidden(row) for row in range(self.ritual_table.rowCount()))
         self.ritual_table.setVisible(bool(review_count))
-        summary = (f"{len(result['items'])} Ritual rewards · {review_count} need review. "
+        summary = (f"{len(result['items']) - skipped} Ritual rewards · {review_count} need review. "
                    "Correct and approve each reward to include it. Unapproved rows are rejected when you Approve.")
+        if skipped:
+            summary += (f" {skipped} deferred reward{'s' if skipped > 1 else ''} not read with certainty "
+                        f"{'were' if skipped > 1 else 'was'} left out; deferred rewards add no new finds.")
         if result.get("coverage_uncertain"):
             summary = ("The complete reward grid could not be verified. " + summary +
                        " Check for missing rewards or capture the full grid again.")

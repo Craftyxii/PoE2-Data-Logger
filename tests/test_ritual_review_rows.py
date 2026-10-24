@@ -229,21 +229,28 @@ class RitualReviewRowsTests(unittest.TestCase):
                 self.assertEqual(self.window.pending_review_kind, "ritual")
                 self.window.reject_review()
 
-    def test_legacy_deferred_omen_placeholder_requires_real_name_before_export(self):
-        """Verify deferred omen placeholders require real names before export and count as no new find."""
-        self.read(self.result([self.known(category="Omen", name="Deferred omen", tribute=None,
-                                          deferred=True, needs_review=True, source="deferred marker")]),
-                  live=True, auto=True)
-        self.assertEqual(self.window.ritual_table.item(0, 1).text(), "")
-        self.assertEqual(self.window.ritual_table.item(0, 2).text(), "")
+    def test_deferred_rewards_never_wait_for_review(self):
+        """Deferred offers add no new finds: an uncertain one is left out, a certain one saves as deferred."""
         name = logger.ritual_names()[0]
-        self.correct(0, name=name, category="Omen", quantity=1, deferred=True)
-        self.approve_row(0)
-        self.window.approve_review()
+        uncertain = self.known(category="Omen", name="Deferred omen", tribute=None, deferred=True,
+                               needs_review=True, unresolved=True, source="deferred marker", grid_slots=[1])
+        certain = self.known(category="Omen", name=name, name_match=1, identity_verified=True,
+                             tribute=None, deferred=True, grid_slots=[2])
+        self.read(self.result([uncertain, certain, self.known(grid_slots=[3])], grid_detected=True,
+                              grid_reward_count=3, unresolved_count=1), live=True, auto=True)
+        self.assertIsNone(self.window.pending_review_kind)
         rows = list(csv.DictReader(io.StringIO(logger.export_ritual_csv().decode("utf-8-sig"))))
-        self.assertEqual(rows[0]["Name"], name)
-        self.assertEqual(rows[0]["New Find Quantity"], "0")
+        self.assertEqual([(row["Name"], row["Deferred"], row["New Find Quantity"]) for row in rows],
+                         [(name, "True", "0"), ("Chaos Orb", "False", "1")])
         self.assertNotIn("Deferred omen", logger.export_ritual_csv().decode("utf-8-sig"))
+
+    def test_reward_whose_deferred_state_is_unknown_still_asks(self):
+        """A reward that may not be deferred could be a new find, so it is reviewed."""
+        self.read(self.result([self.known(deferred=None, grid_slots=[1])], grid_detected=True,
+                              grid_reward_count=1), live=True, auto=True)
+        self.assertEqual(self.window.pending_review_kind, "ritual")
+        self.assertEqual(self.window.ritual_table.rowCount(), 1)
+        self.assertEqual(self.window.ritual_table.item(0, 5).checkState(), Qt.CheckState.PartiallyChecked)
 
     def test_named_icon_without_tribute_is_held_but_explicit_approval_can_confirm_blank_price(self):
         """Verify a named icon with no price waits for approval, which can confirm a blank price."""

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Deferred Ritual rewards never wait for review or approval. A deferred offer adds no new find (it was offered on an earlier page), so one read with certainty is saved as deferred and one that is not is left out of the page, with a note, instead of holding it. A reward whose deferred state itself is unknown may be new and is still reviewed.
+
 - Never name an item by shape alone when another catalog item draws the same shape in a different colour (Essences, Liquid emotions, some Runes and Soul Cores). When such a look-alike scores within 1000 of the named item, its strongly coloured pixels must also sit clearly nearer the named item; otherwise it is held with each look-alike as a choice, keeping a verified count. Every catalog item was scanned on synthetic Ritual pages at 1080p, at 1440p and as JPEG, and on a synthetic inventory: Potent Liquid Ferocity and Contempt were named as each other on Ritual pages and no other item was named wrongly; with this check no item is. `tools/sweep_item_names.py` re-runs this sweep. On real captures the 1,223 Ritual rewards are unchanged, and one of 511 inventory stacks (a Potent Liquid Melancholy) now waits for its name to be picked.
 - Suggest 10, not 1, for a held stack whose 0 sits on pale artwork. Crystal art showing through the 0 left a stray part beside the digits, and wider crops including the art read 1. Four Perfect Essence 10-stacks in the training captures now suggest 10; they stay held for confirmation.
 

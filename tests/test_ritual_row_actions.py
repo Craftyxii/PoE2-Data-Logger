@@ -308,12 +308,16 @@ class RitualRowActionTests(unittest.TestCase):
         self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
 
     def test_approved_deferred_and_repeated_pages_preserve_occurrence_quantities(self):
-        """Row decisions do not merge different pages or turn deferred offers into finds."""
+        """Row decisions do not merge different pages or turn deferred offers into finds.
+
+        A deferred offer read with certainty needs no row approval.
+        """
         for deferred in (False, True, False):
             self.image.putpixel((0, 0), (int(deferred), 0, len(logger.ritual_pages_for_map("M0001"))))
             self.read([self.reward(name="Repeated Ritual item", quantity=3,
-                                   deferred=deferred, needs_review=True)])
-            self.approve(0)
+                                   deferred=deferred, needs_review=not deferred)])
+            if not deferred:
+                self.approve(0)
             self.window.approve_review()
         pages = logger.ritual_pages_for_map("M0001")
         self.assertEqual([page["items"][0]["quantity"] for page in pages], [3, 3, 3])

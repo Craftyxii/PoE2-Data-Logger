@@ -125,13 +125,16 @@ class RitualGrayscaleEquipmentLearningTests(unittest.TestCase):
                         if case["file"] == "01.png")
         self.assertEqual([item["grid_slots"] for item in result["items"]], expected["footprints"])
         choices = {
-            (1,): ("Omen of Refreshment", "Omen", (1, 1)),
             (2, 3, 14, 15): ("Reviewed grayscale gloves", "Item", (2, 2)),
-            (13,): ("Omen of Whittling", "Omen", (1, 1)),
             (25, 26, 37, 38, 49, 50): ("Reviewed grayscale armour", "Item", (2, 3)),
         }
         originals = {tuple(item["grid_slots"]): item for item in result["items"]}
         table = self.window.ritual_table
+        # The deferred Omens beside the gear (slots 1 and 13) cannot be named in gray;
+        # deferred offers add no new finds, so they are left out instead of reviewed.
+        shown = {tuple(table.item(row, 0).data(Qt.ItemDataRole.UserRole)["grid_slots"])
+                 for row in range(table.rowCount())}
+        self.assertTrue({(1,), (13,)}.isdisjoint(shown))
         for row in range(table.rowCount()):
             slots = tuple(table.item(row, 0).data(Qt.ItemDataRole.UserRole)["grid_slots"])
             if slots in choices:
