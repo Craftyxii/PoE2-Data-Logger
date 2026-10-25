@@ -234,7 +234,7 @@ jobs:
         shell: pwsh
         run: |
           $releaseArgs = @('release', 'create', $env:GITHUB_REF_NAME, $env:INSTALLER, "$env:INSTALLER.sha256", '--verify-tag', '--target', 'main', '--title', "PoE2 Data Logger $($env:DISPLAY_VERSION)")
-          if ($env:PRERELEASE -eq 'True') { $releaseArgs += @('--prerelease', '--latest=false', '--notes-file', 'docs/RELEASE_1.3.2.31.md') }
+          if ($env:PRERELEASE -eq 'True') { $releaseArgs += @('--prerelease', '--latest=false', '--notes-file', 'docs/RELEASE_1.3.2.32.md') }
           else { $releaseArgs += @('--latest=true', '--notes-file', 'docs/RELEASE_1.3.2.md') }
           gh @releaseArgs
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
