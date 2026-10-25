@@ -72,7 +72,8 @@ def step(name, action):
     except Exception as error:
         log.append([name, f"{type(error).__name__}: {error}"])
 setup = {"tier": 16, "waystone": 87, "map_mods": 5, "biome": "Forest", "city_type": "None",
-         "ocean": "Yes", "deli": "No", "wisp": "Yes", "aldur": "No", "irradiated": "Yes",
+         "ocean": True, "deli": False, "wisp": True, "irradiated": True, "atlas_master": "Jado",
+         "tablets_used": 2, "plus_two_tablets": 1,
          "item_rarity": 40, "monster_rarity": 25, "pack_size": 15, "effectiveness": 30}
 # Map 1: Expedition with remnants, a propagated chain, currency, kill readings.
 step("map1 start", logger.start_map)
