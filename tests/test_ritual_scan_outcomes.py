@@ -103,6 +103,17 @@ class RitualScanHarness(unittest.TestCase):
     def message(self):
         return self.window.review_summary.text()
 
+    def poll(self):
+        """One window tick: a waiting page starts once the page before it is finished."""
+        self.window.poll()
+        self.app.processEvents()
+
+    def approve_all(self):
+        for row in range(self.window.ritual_table.rowCount()):
+            self.window.review_ritual_row(self.window.ritual_table.cellWidget(row, 6), True)
+        self.window.approve_scan_button.click()
+        self.app.processEvents()
+
 
 class RitualVisibleOutcomeTests(RitualScanHarness):
     def test_new_page_saves_and_confirms(self):
@@ -159,6 +170,196 @@ class RitualVisibleOutcomeTests(RitualScanHarness):
         self.window.approve_scan_button.click()
         self.app.processEvents()
         self.assertEqual(self.pages(), ["Divine Orb"])
+
+
+class RitualPagesWaitInLineTests(RitualScanHarness):
+    """A page being read or reviewed is never replaced; at most two more wait behind it."""
+
+    def test_page_being_read_is_not_replaced_by_the_next_scan(self):
+        self.capture(1)
+        self.capture(2)
+        self.assertEqual(len(self.futures), 1)
+        self.assertIn("1 Ritual page waiting.", self.window.statusBar().currentMessage())
+        self.finish(0, self.reading("Divine Orb", 6))
+        self.poll()
+        self.assertEqual(len(self.futures), 2)
+        self.finish(1, self.reading("Exalted Orb", 5))
+        self.assertEqual(self.pages(), ["Divine Orb", "Exalted Orb"])
+        self.assertEqual(self.window._ritual_waiting, [])
+
+    def test_held_page_is_not_replaced_by_the_next_scan(self):
+        self.capture(1)
+        self.finish(0, self.reading("Divine Orb", 6, needs_review=True))
+        self.capture(2)
+        self.assertEqual(len(self.futures), 1)
+        self.assertEqual(self.window.pending_review_kind, "ritual")
+        self.assertEqual(self.window.ritual_table.item(0, 1).text(), "Divine Orb")
+        self.poll()
+        self.assertEqual(len(self.futures), 1)
+        self.approve_all()
+        self.poll()
+        self.assertEqual(len(self.futures), 2)
+        self.finish(1, self.reading("Exalted Orb", 5))
+        self.assertEqual(self.pages(), ["Divine Orb", "Exalted Orb"])
+
+    def test_rejected_held_page_lets_the_waiting_page_read(self):
+        self.capture(1)
+        self.finish(0, self.reading("Divine Orb", 6, needs_review=True))
+        self.capture(2)
+        self.window.reject_scan_button.click()
+        self.app.processEvents()
+        self.poll()
+        self.finish(1, self.reading("Exalted Orb", 5))
+        self.assertEqual(self.pages(), ["Exalted Orb"])
+
+    def test_a_third_waiting_page_is_refused_with_a_message(self):
+        self.capture(1)
+        self.capture(2)
+        self.capture(3)
+        self.assertEqual(len(self.window._ritual_waiting), 2)
+        self.capture(4)
+        self.assertEqual(len(self.window._ritual_waiting), 2)
+        refusal = ("Two Ritual pages are already waiting. Approve or reject the current page, then scan again.")
+        self.assertEqual(self.window.statusBar().currentMessage(), refusal)
+        self.assertEqual(self.window.scan_status.text(), refusal)
+        for index, (name, rolls) in enumerate((("Divine Orb", 6), ("Exalted Orb", 5), ("Chaos Orb", 4))):
+            self.finish(index, self.reading(name, rolls))
+            self.poll()
+        self.assertEqual(len(self.futures), 3)
+        self.assertEqual(self.pages(), ["Divine Orb", "Exalted Orb", "Chaos Orb"])
+
+    def test_waiting_pages_keep_their_order_and_repeat_check(self):
+        self.capture(1)
+        self.capture(2)
+        self.capture(3)
+        self.finish(0, self.reading("Divine Orb", 6))
+        self.poll()
+        # The second press saw the same page: same roll count as the page saved before it.
+        self.finish(1, self.reading("Divine Orb", 6))
+        self.assertEqual(self.message(), "✓ Already saved: M0001 page 1 had 6 rolls left (Scan Commit #1).")
+        self.poll()
+        self.finish(2, self.reading("Exalted Orb", 5))
+        self.assertEqual(self.pages(), ["Divine Orb", "Exalted Orb"])
+
+
+class RitualPagesAcrossNewMapTests(RitualScanHarness):
+    """A page captured before + New map is saved to the map it was captured on."""
+
+    def test_page_read_during_new_map_saves_to_its_own_map(self):
+        self.capture(1)
+        self.window.finish_map()
+        self.app.processEvents()
+        self.assertIn("The Ritual page captured on M0001 will be saved to M0001.",
+                      self.window.statusBar().currentMessage())
+        self.finish(0, self.reading("Divine Orb", 6))
+        self.assertEqual((self.pages("M0001"), self.pages("M0002")), (["Divine Orb"], []))
+        # + New map took Scan Commit #1.
+        self.assertIn("✓ Ritual page saved to M0001 as Scan Commit #2.", self.window.ritual_status.text())
+        self.assertEqual(logger.get_state()["current_map_id"], "M0002")
+
+    def test_held_review_stays_open_across_new_map_and_approve_saves_to_its_map(self):
+        self.capture(1)
+        self.finish(0, self.reading("Divine Orb", 6, needs_review=True))
+        self.window.finish_map()
+        self.app.processEvents()
+        self.assertEqual(self.window.pending_review_kind, "ritual")
+        self.assertEqual(self.window.ritual_table.item(0, 1).text(), "Divine Orb")
+        self.assertTrue(self.window.approve_scan_button.isVisible())
+        self.approve_all()
+        self.assertEqual((self.pages("M0001"), self.pages("M0002")), (["Divine Orb"], []))
+        self.assertIsNone(self.window.pending_review_kind)
+
+    def test_waiting_pages_follow_their_own_map_and_new_scans_go_to_the_new_map(self):
+        self.capture(1)
+        self.capture(2)
+        self.window.finish_map()
+        self.app.processEvents()
+        self.assertIn("The 2 Ritual pages captured on M0001 will be saved to M0001.",
+                      self.window.statusBar().currentMessage())
+        self.finish(0, self.reading("Divine Orb", 6))
+        self.poll()
+        self.finish(1, self.reading("Exalted Orb", 5))
+        self.capture(3)
+        self.finish(2, self.reading("Chaos Orb", 8))
+        self.assertEqual((self.pages("M0001"), self.pages("M0002")), (["Divine Orb", "Exalted Orb"], ["Chaos Orb"]))
+
+    def test_repeat_check_uses_the_pages_of_the_map_it_was_captured_on(self):
+        self.capture(1)
+        self.finish(0, self.reading("Divine Orb", 6))
+        self.capture(2)
+        self.window.finish_map()
+        self.app.processEvents()
+        self.finish(1, self.reading("Divine Orb", 6))
+        self.assertEqual(self.message(), "✓ Already saved: M0001 page 1 had 6 rolls left (Scan Commit #1).")
+        self.assertEqual((self.pages("M0001"), self.pages("M0002")), (["Divine Orb"], []))
+
+    def test_held_page_survives_two_new_maps_and_names_its_own_map(self):
+        self.capture(1)
+        self.finish(0, self.reading("Divine Orb", 6, needs_review=True))
+        self.window.finish_map()
+        self.app.processEvents()
+        self.window.finish_map()
+        self.app.processEvents()
+        self.assertIn("Map M0003 started.", self.window.statusBar().currentMessage())
+        self.assertIn("The Ritual page captured on M0001 will be saved to M0001.",
+                      self.window.statusBar().currentMessage())
+        self.approve_all()
+        self.assertEqual([self.pages(map_id) for map_id in ("M0001", "M0002", "M0003")], [["Divine Orb"], [], []])
+
+    def test_finished_map_takes_no_page_captured_after_it(self):
+        self.window.finish_map()
+        self.app.processEvents()
+        self.capture(1)
+        self.finish(0, self.reading("Divine Orb", 6))
+        self.assertEqual((self.pages("M0001"), self.pages("M0002")), ([], ["Divine Orb"]))
+
+
+class RitualPagesDroppedByUndoTests(RitualScanHarness):
+    """Undo or Reset map drops unsaved Ritual pages, and says so."""
+
+    def test_undo_drops_a_held_page_and_says_so(self):
+        self.capture(1)
+        self.finish(0, self.reading("Divine Orb", 6))
+        self.capture(2)
+        self.finish(1, self.reading("Exalted Orb", 5, needs_review=True))
+        self.window.undo_map()
+        self.app.processEvents()
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertEqual(self.pages(), [])
+        self.assertIn("1 unsaved Ritual page was not saved because the saved logs changed; scan again.",
+                      self.message())
+
+    def test_undo_drops_reading_and_waiting_pages_and_ignores_the_late_reading(self):
+        self.capture(1)
+        self.finish(0, self.reading("Divine Orb", 6))
+        self.capture(2)
+        self.capture(3)
+        self.window.undo_map()
+        self.app.processEvents()
+        self.assertIn("2 unsaved Ritual pages were not saved because the saved logs changed; scan again.",
+                      self.message())
+        self.finish(1, self.reading("Exalted Orb", 5))
+        self.poll()
+        self.assertEqual(len(self.futures), 2)
+        self.assertEqual(self.pages(), [])
+        self.assertEqual(self.window._ritual_waiting, [])
+
+    def test_undo_with_nothing_unsaved_says_nothing_extra(self):
+        self.capture(1)
+        self.finish(0, self.reading("Divine Orb", 6))
+        self.window.undo_map()
+        self.app.processEvents()
+        self.assertEqual(self.message(), "Ritual approval undone. Saved totals and chain state restored.")
+
+    def test_reset_map_drops_a_held_page_and_says_so(self):
+        self.capture(1)
+        self.finish(0, self.reading("Divine Orb", 6, needs_review=True))
+        with patch.object(ui.QMessageBox, "question", return_value=ui.QMessageBox.StandardButton.Yes):
+            self.window.reset_current_map()
+        self.app.processEvents()
+        self.assertEqual(self.message(), "M0001 reset. Undo restores its saved logs. 1 unsaved Ritual page was "
+                                         "not saved because the saved logs changed; scan again.")
+        self.assertIsNone(self.window.pending_review_kind)
 
 
 class RitualUndoOrderTests(RitualScanHarness):

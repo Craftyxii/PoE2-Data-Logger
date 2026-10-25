@@ -3756,15 +3756,43 @@ def last_ritual_rerolls(map_id):
     return page["rerolls_remaining"] if page else None
 
 
+def ritual_capture_map(context):
+    """Return the map a Ritual capture belongs to, or raise why it cannot be saved there."""
+    with _connect() as db:
+        db.execute("BEGIN")
+        return _ritual_capture_map(db, context)
+
+
+def _ritual_capture_map(db, context):
+    """A Ritual page belongs to the map shown when it was captured, even after + New map
+    locks that map. Undo or a logger reset in between makes the capture stale.
+    """
+    if context.get("_scan_generation") != _meta(db, "session_generation", 0):
+        raise ValueError("Undo or a logger reset changed the saved logs while this Ritual page was "
+                         "waiting, so it was not saved. Scan it again.")
+    map_id = context.get("_capture_map_id")
+    if not map_id or not db.execute("SELECT 1 FROM maps WHERE map_id=?", (map_id,)).fetchone():
+        raise ValueError("Start a map before saving Ritual rewards.")
+    if context.get("_capture_map_pending"):
+        raise ValueError(f"{map_id} is finished; press + New map, then scan this Ritual page again")
+    number = _meta(db, "current_map_number", 0)
+    if (map_id == _map_id(number) and not _meta(db, "pending_new_map", False) and "_capture_expedition" in context
+            and context["_capture_expedition"] != _meta(db, "settings")["expedition"]):
+        raise ValueError("The expedition changed during the scan. Scan the current expedition again.")
+    return map_id
+
+
 def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
                      tribute_available=None, rerolls_remaining=None, *,
-                     register_names=False, icon_examples=()):
+                     register_names=False, icon_examples=(), capture_context=None):
     """Save reviewed Ritual offers and a commit atomically for an active map.
 
     A repeated capture hash replaces its page; otherwise append a page.
     Readable page counters can be saved without any reward rows. Optionally
     register accepted labels and teach their icons. A deferred reward was
-    logged when it was first offered, so it is never saved again.
+    logged when it was first offered, so it is never saved again. With a
+    capture context the page goes to the map it was captured on, also after
+    + New map, keeping the bundle that map was locked with.
      Saved changes remain undoable."""
     if not isinstance(items, list) or len(items) > MAX_RITUAL_REWARDS:
         raise ValueError(f"Review up to {MAX_RITUAL_REWARDS} Ritual rewards on a page.")
@@ -3801,9 +3829,13 @@ def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
     with _connect(undo_label='Ritual approval') as db:
         db.execute("BEGIN IMMEDIATE")
         number = _meta(db, "current_map_number", 0)
-        if not number or _meta(db, "pending_new_map"):
+        current = number and not _meta(db, "pending_new_map")
+        if capture_context is not None:
+            map_id = _ritual_capture_map(db, capture_context)
+        elif not current:
             raise ValueError("Start the current map before saving Ritual rewards.")
-        map_id = _map_id(number)
+        else:
+            map_id = _map_id(number)
         if expected_map_id is not None and map_id != expected_map_id:
             raise ValueError(f"This Ritual scan belongs to {expected_map_id}. Scan {map_id} before saving.")
         if register_names or icon_examples:
@@ -3817,7 +3849,11 @@ def save_ritual_page(items, raw_text="", scan_hash=None, expected_map_id=None,
                 prior = accepted.get(name.casefold(), (kind, 0))
                 accepted[name.casefold()] = (kind, prior[1] + item["quantity"])
             _save_review_examples(db, icon_examples, accepted)
-        context = _bind_atlas_context(db, map_id, _snapshot(_meta(db, "settings")))
+        if current and map_id == _map_id(number):
+            context = _bind_atlas_context(db, map_id, _snapshot(_meta(db, "settings")))
+        else:
+            # The settings now describe the next map; keep the bundle this map was locked with.
+            context = _load(db.execute("SELECT snapshot_json FROM maps WHERE map_id=?", (map_id,)).fetchone()[0])
         old = (db.execute("SELECT id,page_number FROM ritual_pages WHERE map_id=? AND scan_hash=?",
                           (map_id, scan_hash)).fetchone() if scan_hash else None)
         if old:

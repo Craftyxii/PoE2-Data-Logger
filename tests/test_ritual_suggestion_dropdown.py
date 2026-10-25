@@ -237,9 +237,11 @@ class RitualSuggestionDropdownTests(unittest.TestCase):
         self.assertEqual(logger.ritual_pages_for_map("M0001")[0]["items"][0]["name"],
                          "Omen of Refreshment")
 
-    def test_replacement_rejection_and_other_reviews_lock_or_retire_selectors(self):
+    def test_rescan_after_rejection_and_other_reviews_lock_or_retire_selectors(self):
         stale = self.read()
         self.assertIsInstance(stale, QComboBox)
+        # A held page is never replaced by a rescan; it is rejected first.
+        self.window.reject_review()
         callback = self.capture()
         self.window._ritual_suggestion_changed(stale, "Stale captured choice")
         self.assertEqual(self.window.ritual_table.rowCount(), 0)
@@ -286,6 +288,7 @@ class RitualSuggestionDropdownTests(unittest.TestCase):
         self.assertEqual(selector.count(), 2)
         for candidates in ([], ["Unknown omen", "Unrecognized item"], "Unidentified reward"):
             with self.subTest(candidates=candidates):
+                self.window.reject_review()
                 self.read([self.unknown(candidate_names=candidates)])
                 self.assertIsNone(self.window.ritual_table.cellWidget(0, 1))
                 self.assertEqual(self.window.ritual_table.item(0, 1).text(), "")

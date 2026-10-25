@@ -466,6 +466,8 @@ class LoggerWindow(QMainWindow):
         self._inventory_capture_context = None
         self._inventory_reading = None
         self._ritual_reading = None
+        # Ritual pages captured while another page is read or reviewed, oldest first.
+        self._ritual_waiting = []
         self._ritual_capture_context = None
         self._remnant_reading = None
         self._remnant_family_scope = None
@@ -3534,10 +3536,16 @@ class LoggerWindow(QMainWindow):
             previous = None
         state = logger.start_map()
         service.HOTKEY.cancel_capture()
-        self._clear_map_review()
+        # A Ritual page captured on the finished map is still read, reviewed and saved there.
+        self._clear_map_review(keep_ritual=True)
+        ritual_kept = self._ritual_busy() or bool(self._ritual_waiting)
+        # Pages still to be saved, each named by the map it was captured on.
+        kept_maps = (([self._pending_ritual_map] if self._ritual_busy() and not self._failed_review else [])
+                     + [page["context"]["_capture_map_id"] for page in self._ritual_waiting])
         self.refresh()
-        self.review_kind.setText("New map")
-        set_message(self.review_summary, "Waystone settings cleared. Scan or enter the new map's waystone.")
+        if not ritual_kept:
+            self.review_kind.setText("New map")
+            set_message(self.review_summary, "Waystone settings cleared. Scan or enter the new map's waystone.")
         if previous:
             self._set_commit_badge(state["scan_commit_count"])
         rite = logger.ritual_rite_state()
@@ -3545,11 +3553,27 @@ class LoggerWindow(QMainWindow):
         applied = (f" Biome from Rite stage {rite['map_ordinal']}"
                    + (f" ({rite['current_map_name']})" if rite["current_map_name"] else "") + f": {biome}."
                    if logger._rite_biome_settings(biome) else "")
+        maps = list(dict.fromkeys(kept_maps))
+        if not maps:
+            kept = ""
+        elif len(maps) > 1:
+            kept = (f" The {len(kept_maps)} unsaved Ritual pages will be saved to the maps they were captured on "
+                    f"({', '.join(maps)}).")
+        elif len(kept_maps) == 1:
+            kept = f" The Ritual page captured on {maps[0]} will be saved to {maps[0]}."
+        else:
+            kept = f" The {len(kept_maps)} Ritual pages captured on {maps[0]} will be saved to {maps[0]}."
         self.note(f"Map {state['current_map_id']} started."
-                  + (" Previous map totals saved." if previous else "") + applied, True)
+                  + (" Previous map totals saved." if previous else "") + applied + kept, True)
 
-    def _clear_map_review(self):
-        """Discard map-specific drafts and cancel their stale recognition work when the map context changes."""
+    def _clear_map_review(self, *, keep_ritual=False):
+        """Discard map-specific drafts and cancel their stale recognition work when the map context changes.
+
+        With keep_ritual (+ New map), a Ritual page being read, waiting or under review
+        stays: it was captured on the finished map and is still saved there.
+        """
+        keep_ritual = keep_ritual and (self._ritual_busy() or bool(self._ritual_waiting))
+        ritual_review = keep_ritual and self.pending_review_kind == "ritual"
         self._waystone_form_baseline = self._counts_form_baseline = None
         self._tablet_form_baseline = self._active_master_baseline = self._perk_form_baseline = None
         self._tablet_set_drafts.clear()
@@ -3558,23 +3582,29 @@ class LoggerWindow(QMainWindow):
         self._perk_drafts.clear()
         self._saved_chain_correction_drafts.clear()
         self._saved_chain_view_key = None
-        self.pending_review_kind = None
+        if not ritual_review:
+            self.pending_review_kind = None
         self._discard_chain_review_draft()
-        self._failed_review = False
+        if not ritual_review:
+            self._failed_review = False
         self._remnant_reading = None
         self._propagation_reading = None
-        self._pending_currency_map = self._pending_ritual_map = self._pending_tablet_slot = None
+        self._pending_currency_map = self._pending_tablet_slot = None
         self._pending_currency_phase = None
-        self._inventory_reading = self._ritual_reading = None
+        self._inventory_reading = None
+        if not keep_ritual:
+            self._pending_ritual_map = self._ritual_reading = None
+            self._ritual_hash = self._ritual_capture_context = None
+            self._ritual_waiting.clear()
         self._retire_obsolete_scan_tasks()
         self._inventory_capture = self._inventory_capture_context = None
-        self._ritual_hash = self._ritual_capture_context = None
         self.inventory_table.setRowCount(0)
-        self.ritual_table.setRowCount(0)
         self.inventory_preview.clear()
-        self.ritual_raw.clear()
-        self.ritual_tribute.clear()
-        self.ritual_rerolls.clear()
+        if not keep_ritual:
+            self.ritual_table.setRowCount(0)
+            self.ritual_raw.clear()
+            self.ritual_tribute.clear()
+            self.ritual_rerolls.clear()
         self._clear_seed_queue()
         self.results = {"seed": None, "opened": None}
         self.images = {"seed": None, "opened": None}
@@ -3583,17 +3613,20 @@ class LoggerWindow(QMainWindow):
             with QSignalBlocker(field):
                 field.clear()
         select(self.recipe_family, "")
-        self.approve_scan_button.setEnabled(False)
-        self._review_controls(None)
+        if not ritual_review:
+            self.approve_scan_button.setEnabled(False)
+            self._review_controls(None)
         self.review_edit_button.hide()
         self.found_table.hide()
         self.found_label.hide()
         self.review_group.hide()
         self.recipe_table.hide()
         self.currency_review_group.hide()
-        self.ritual_review_group.hide()
+        if not keep_ritual:
+            self.ritual_review_group.hide()
         self.remnant_log_group.hide()
-        self._show_image(None)
+        if not keep_ritual:
+            self._show_image(None)
 
     def undo_map(self):
         """Undo the latest saved action, retire older scan work and restore saved controls in place."""
@@ -3604,14 +3637,15 @@ class LoggerWindow(QMainWindow):
             positions.extend((bar, bar.value()) for bar in
                              (page.verticalScrollBar(), page.horizontalScrollBar()))
         saved = logger.undo_last_action()
-        self._retire_scan_work(saved["state"])
+        dropped = self._retire_scan_work(saved["state"])
         # Undo can restore names and artwork without changing the session totals.
         self.refresh_reference_names()
         self.refresh_reference_examples()
         self.refresh_currency_references()
         self.tabs.setCurrentWidget(page)
         action = saved["action"]
-        set_message(self.review_summary, f"{action} undone. Saved totals and chain state restored.", "success")
+        set_message(self.review_summary, f"{action} undone. Saved totals and chain state restored."
+                    + self._dropped_ritual_note(dropped), "success")
         owner = self._overlay_review_token
 
         def restore_position():
@@ -3623,11 +3657,15 @@ class LoggerWindow(QMainWindow):
 
         restore_position()
         QTimer.singleShot(0, self, restore_position)
-        self.note(f"{action} undone.", True)
+        self.note(f"{action} undone." + self._dropped_ritual_note(dropped), True)
         return saved
 
     def _retire_scan_work(self, state):
-        """Drop captures, drafts and reviews made against saved logs that Undo or a map reset replaced."""
+        """Drop captures, drafts and reviews made against saved logs that Undo or a map reset replaced.
+
+        Return how many unsaved Ritual pages (being read, under review or waiting) were dropped.
+        """
+        dropped = int(self._ritual_busy()) + len(self._ritual_waiting)
         service.HOTKEY.cancel_capture()
         self._cancel_pending_chain_save()
         self._overlay_review_token += 1
@@ -3647,6 +3685,15 @@ class LoggerWindow(QMainWindow):
         self._commit_badge_timer.stop()
         self.atlas_settings_page.set_settings(state["settings"].get("atlas_settings"), force=True)
         self.refresh()
+        return dropped
+
+    @staticmethod
+    def _dropped_ritual_note(dropped):
+        """Tell the user which unsaved Ritual pages an Undo or reset dropped."""
+        if not dropped:
+            return ""
+        return (f" {dropped} unsaved Ritual page{'s were' if dropped > 1 else ' was'} not saved because the "
+                "saved logs changed; scan again.")
 
     def reset_current_map(self):
         """After confirmation, clear the current map's saved logs in one action that Undo restores.
@@ -3668,9 +3715,10 @@ class LoggerWindow(QMainWindow):
             return None
         # The captured context refuses the reset if the map changed while the question was open.
         result = logger.discard_current_map_logs(context)
-        self._retire_scan_work(result["state"])
-        set_message(self.review_summary, f"{map_id} reset. Undo restores its saved logs.", "success")
-        self.note(f"{map_id} reset.", True)
+        dropped = self._retire_scan_work(result["state"])
+        set_message(self.review_summary, f"{map_id} reset. Undo restores its saved logs."
+                    + self._dropped_ritual_note(dropped), "success")
+        self.note(f"{map_id} reset." + self._dropped_ritual_note(dropped), True)
         return result
 
     def set_expedition(self, widget=None):
@@ -6379,6 +6427,7 @@ class LoggerWindow(QMainWindow):
                 self._deliver_hotkey_event(event, raw)
             finally:
                 service.HOTKEY.ack_event(event["id"])
+        self._start_waiting_ritual_page()
 
     def _prepare_hotkey_presentation(self, event):
         """Retain recognized evidence until before-review writes can finish without blocking Qt.
@@ -6481,7 +6530,8 @@ class LoggerWindow(QMainWindow):
                         if event["mode"] == "currency":
                             logger.validate_currency_context(event["result"])
                         else:
-                            logger.validate_scan_context(event["result"])
+                            # Saved to the map it was captured on, also after + New map.
+                            logger.ritual_capture_map(event["result"])
                     except ValueError as error:
                         self.error(str(error))
                         return
@@ -6495,7 +6545,8 @@ class LoggerWindow(QMainWindow):
                                                                  expected_strictness=(event["result"].get("_ocr_strictness_values") or {}).get("currency")))
                     else:
                         self.run(lambda: self._ritual_captured(picture, expected_map_id=event["result"].get("map_id"),
-                                                              expected_strictness=(event["result"].get("_ocr_strictness_values") or {}).get("ritual")))
+                                                              expected_strictness=(event["result"].get("_ocr_strictness_values") or {}).get("ritual"),
+                                                              expected_context=event["result"]))
             else:
                 self._remnant_reading = None
                 self.run(lambda: self.show_result(event["mode"], event["result"], raw))
@@ -7404,24 +7455,76 @@ class LoggerWindow(QMainWindow):
             f"{map_id} · start {len(data['start'])} item types · end {len(data['end'])} item types"
             + (" · net: " + ", ".join(parts[:8]) if parts else ""))
 
-    def _ritual_captured(self, image, live=True, expected_map_id=None, expected_strictness=None):
+    def _ritual_busy(self):
+        """A Ritual page is being read or waits for Approve/Reject (a failed one for Reject)."""
+        return self._ritual_reading is not None or self.pending_review_kind == "ritual"
+
+    def _show_ritual_waiting(self):
+        """Report the Ritual pages waiting behind the current one."""
+        if self._ritual_waiting:
+            count = len(self._ritual_waiting)
+            self.statusBar().showMessage(f"{count} Ritual page{'s' if count > 1 else ''} waiting.", 8000)
+
+    def _ritual_captured(self, image, live=True, expected_map_id=None, expected_strictness=None,
+                         expected_context=None):
+        """Read a Ritual capture now, or let it wait while another page is read or reviewed.
+
+        A page is never replaced by the next capture. At most two pages wait; a
+        further capture is refused with a message.
+        """
+        self._require_remnant_review_finished()
+        context = ({key: expected_context[key] for key in
+                    ("_scan_generation", "_capture_map_id", "_capture_map_pending", "_capture_expedition")
+                    if key in expected_context}
+                   if expected_context and "_scan_generation" in expected_context else logger.scan_context())
+        if expected_map_id is not None and expected_map_id != context["_capture_map_id"]:
+            raise ValueError(f"The Ritual scan belongs to {expected_map_id}. Scan again.")
+        logger.ritual_capture_map(context)
+        if image.width * image.height > 12_000_000:
+            raise ValueError("Ritual capture exceeds 12 megapixels.")
+        if self._ritual_busy() or self._ritual_waiting:
+            # Pages wait in capture order, so each one's roll count is checked against the page before it.
+            if len(self._ritual_waiting) >= 2:
+                raise ValueError("Two Ritual pages are already waiting. Approve or reject the current page, "
+                                 "then scan again.")
+            self._ritual_waiting.append({"image": image, "live": live, "context": context,
+                                         "strictness": expected_strictness})
+            self._show_ritual_waiting()
+            return
+        self._start_ritual_page(image, live, context, expected_strictness)
+
+    def _start_waiting_ritual_page(self):
+        """Read the oldest waiting Ritual page once the current one is saved, dropped or rejected.
+
+        A waiting page never replaces another activity's review; it waits for that one too.
+        """
+        if (not self._ritual_waiting or self._ritual_busy() or self.pending_review_kind is not None
+                or self._closed):
+            return
+        try:
+            self._require_remnant_review_finished()
+        except ValueError:
+            return
+        page = self._ritual_waiting.pop(0)
+        self.run(lambda: self._start_ritual_page(page["image"], page["live"], page["context"],
+                                                 page["strictness"], waited=True))
+        self._show_ritual_waiting()
+
+    def _start_ritual_page(self, image, live, context, expected_strictness=None, *, waited=False):
         """Prepare frozen Ritual references before replacing review, then recover preview
         or worker admission failures against this map/session-bound capture and image hash.
         """
         self._require_remnant_review_finished()
-        map_id = logger.get_state()["current_map_id"]
-        if expected_map_id is not None and expected_map_id != map_id:
-            raise ValueError(f"The Ritual scan belongs to {expected_map_id}. Scan {map_id} again.")
-        if image.width * image.height > 12_000_000:
-            raise ValueError("Ritual capture exceeds 12 megapixels.")
-        capture = {"map_id": map_id, "image": image,
-                   "context": logger.scan_context(),
+        map_id = logger.ritual_capture_map(context)
+        capture = {"map_id": map_id, "image": image, "context": context,
                    "scan_hash": hashlib.sha256(image.tobytes()).hexdigest(),
                    "strictness": ocr_sensitivity.validate(expected_strictness) if expected_strictness is not None
                    else ocr_sensitivity.saved_values()["ritual"]}
         names = logger.ritual_names()
         references = logger.ritual_icons()
-        service.HOTKEY.cancel_capture()
+        if not waited:
+            # A waiting page starts while a newer capture may be in progress; keep that one.
+            service.HOTKEY.cancel_capture()
         self._ritual_reading = capture
         self._ritual_capture_context = capture
         self._pending_ritual_map = map_id
@@ -7464,19 +7567,11 @@ class LoggerWindow(QMainWindow):
         """
         if capture is not None and capture is not self._ritual_reading:
             return
-        if capture is not None:
-            logger.validate_scan_context(capture["context"])
         self._require_remnant_review_finished()
-        map_id = logger.get_state()["current_map_id"]
-        if expected_map_id is not None and expected_map_id != map_id:
-            raise ValueError(f"The Ritual scan belongs to {expected_map_id}. Scan {map_id} again.")
-        # A scan belongs only to the map shown when it was taken; validation above
-        # proved that map is still current. A finished map takes no more pages,
-        # and the next map exists only after + New map.
+        # A scan belongs to the map shown when it was taken, also after + New map
+        # locks that map. A finished map takes no new pages; Undo makes it stale.
         context = capture["context"] if capture is not None else logger.scan_context()
-        map_id = context["_capture_map_id"]
-        if context.get("_capture_map_pending"):
-            raise ValueError(f"{map_id} is finished; press + New map, then scan this Ritual page again")
+        map_id = logger.ritual_capture_map(context)
         rerolls = result.get("rerolls_remaining")
         last = logger.last_ritual_page(map_id)
         if type(rerolls) is int and last and rerolls == last["rerolls_remaining"]:
@@ -7531,8 +7626,10 @@ class LoggerWindow(QMainWindow):
             if clear:
                 saved = self.run(self.save_ritual)
                 if saved is not None:
+                    # A page captured before + New map is saved to that map; say so.
+                    target = "" if saved["map_id"] == self.state["current_map_id"] else f" to {saved['map_id']}"
                     set_message(self.ritual_status,
-                                f"✓ Ritual page saved as Scan Commit #{self.state['scan_commit_count']}.",
+                                f"✓ Ritual page saved{target} as Scan Commit #{saved['scan_commit_number']}.",
                                 "success")
                 elif self.pending_review_kind == "ritual":
                     set_message(self.ritual_status,
@@ -7751,7 +7848,7 @@ class LoggerWindow(QMainWindow):
         if row is None or self.pending_review_kind != "ritual" or not self.approve_scan_button.isEnabled():
             return
         if self._ritual_capture_context is not None:
-            logger.validate_scan_context(self._ritual_capture_context["context"])
+            logger.ritual_capture_map(self._ritual_capture_context["context"])
         name = self.ritual_table.item(row, 1).text().strip()
         unnamed = bool(approve and not name)
         if unnamed:
@@ -7854,8 +7951,11 @@ class LoggerWindow(QMainWindow):
             raise ValueError("This scan failed. Scan again or reject this reading before saving.")
         if self.pending_review_kind == "ritual" and self._ritual_reading is not None:
             raise ValueError("Wait for the Ritual scan to finish before saving.")
-        if self.pending_review_kind == "ritual" and self._ritual_capture_context is not None:
-            logger.validate_scan_context(self._ritual_capture_context["context"])
+        capture_context = (self._ritual_capture_context["context"]
+                           if self.pending_review_kind == "ritual" and self._ritual_capture_context is not None
+                           else None)
+        if capture_context is not None:
+            logger.ritual_capture_map(capture_context)
         rows, examples, accepted_rows = [], [], []
         for row in range(self.ritual_table.rowCount()):
             controls = self.ritual_table.cellWidget(row, 6)
@@ -7884,7 +7984,8 @@ class LoggerWindow(QMainWindow):
         saved = logger.save_ritual_page(rows, self.ritual_raw.toPlainText(), self._ritual_hash,
                                        self._pending_ritual_map if self.pending_review_kind == "ritual" else None,
                                        value(self.ritual_tribute), value(self.ritual_rerolls),
-                                       register_names=True, icon_examples=examples)
+                                       register_names=True, icon_examples=examples,
+                                       capture_context=capture_context)
         self.state = logger.get_state()
         self._set_commit_badge(saved["scan_commit_number"])
         for row in accepted_rows:

@@ -180,7 +180,8 @@ class OCRStrictnessUITests(unittest.TestCase):
                             self.assertFalse(clear_ritual_read(result, logger.ritual_names()))
                             self.assertTrue(item["needs_review"])
                     finally:
-                        self.window.discard_scan()
+                        # A held Ritual page is never replaced by the next scan; reject it first.
+                        self.window.reject_review()
 
     def test_loose_catalog_identity_still_holds_the_actual_idol_currency_conflict(self):
         """Looser unique acceptance cannot hide the independently competing currency identity."""

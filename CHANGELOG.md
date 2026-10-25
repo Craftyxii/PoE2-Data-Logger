@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Never lose a Ritual page scanned while another is being read or waits for review. The newer scan used to replace it, so the earlier page was never saved. Now it waits in line: up to two pages wait behind the current one and are read in the order they were taken, each checked against the page saved before it. A third press says "Two Ritual pages are already waiting. Approve or reject the current page, then scan again." and saves nothing. The status bar shows how many pages wait.
+- Save a Ritual page taken before + New map to the map it was taken on. A page still being read is saved there ("✓ Ritual page saved to M0172 as Scan Commit #N."); a page under review stays open after + New map and Approve saves it there; its repeat check uses that map's pages. The status line after + New map says where the page goes. Previously such a page was dropped. + New map is otherwise unchanged, and nothing else can be added to a finished map.
+- Say when Undo or Reset map drops unsaved Ritual pages: "1 unsaved Ritual page was not saved because the saved logs changed; scan again." Previously they disappeared without a word. Undo itself is unchanged.
 - Name a unique drawn gray on a Ritual page because its price is above your Tribute. A thin gray item such as the Shyaba sceptre lets the blue cell backing show inside its outline, so it was judged colored and marked down for missing color; it stayed held although no other unique came close. Color loss is now judged on the item's own lit pixels. On the 49 user Ritual pages only that reward changed, now named; every one of the 258 named uniques was checked against its catalog art.
 
 ## 1.3.2.31 Beta

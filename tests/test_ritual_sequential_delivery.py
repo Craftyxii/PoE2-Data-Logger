@@ -1,5 +1,7 @@
 """Save sequential Ritual pages while ordinary captures keep latest-only delivery.
 
+A Ritual page being read or reviewed is never replaced: later pages wait in order.
+
 Recognition is injected through Futures; these tests do not measure OCR accuracy.
 """
 from concurrent.futures import Future
@@ -164,46 +166,52 @@ class RitualSequentialDeliveryTests(unittest.TestCase):
         self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [3])
         self.assertIsNone(self.manager.next_event(self.window._latest_hotkey))
 
-    def test_later_ritual_replaces_held_page_before_real_approve(self):
+    def test_later_ritual_waits_behind_held_page_and_both_save(self):
         self.publish(1)
         self.window.poll()
         self.complete(0, 1, needs_review=True)
         self.window.ritual_table.item(0, 2).setText("7")
         latest = self.publish(2)
         self.window.poll()
-        self.assertEqual(len(self.futures), 2)
+        # The held page and its correction stay; the later page waits instead of replacing it.
+        self.assertEqual(len(self.futures), 1)
         self.assertEqual(self.window._latest_hotkey, latest["id"])
-        self.assertEqual(self.window.ritual_table.rowCount(), 0)
+        self.assertEqual(len(self.window._ritual_waiting), 1)
+        self.assertEqual(self.window.ritual_table.item(0, 2).text(), "7")
+        controls = self.window.ritual_table.cellWidget(0, 6)
+        self.window.review_ritual_row(controls, True)
+        self.click_approve()
+        self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [7])
+        self.window.poll()
+        self.assertEqual(len(self.futures), 2)
+        self.assertEqual(self.window._ritual_waiting, [])
         self.complete(1, 2, needs_review=True)
         for _ in range(3):
             self.window.poll()
         self.assertEqual(len(self.futures), 2)
         self.assertEqual(self.window.ritual_table.item(0, 2).text(), "2")
-        self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
-        # Confirm the latest held reward locally before the whole-page commit.
         controls = self.window.ritual_table.cellWidget(0, 6)
         self.window.review_ritual_row(controls, True)
-        self.assertEqual(controls.property("reviewStatus"), "approved")
         self.click_approve()
         self.window.poll()
-        self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [2])
-        self.assertEqual(len(self.ritual_commits()), 1)
+        self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [7, 2])
+        self.assertEqual(len(self.ritual_commits()), 2)
 
-    def test_later_ritual_replaces_inflight_page_and_ignores_late_future(self):
+    def test_later_ritual_waits_for_inflight_page_and_saves_in_order(self):
         self.publish(1)
         self.window.poll()
-        original = self.futures[0]
         latest = self.publish(2)
         self.window.poll()
-        self.assertEqual(len(self.futures), 2)
+        self.assertEqual(len(self.futures), 1)
         self.assertEqual(self.window._latest_hotkey, latest["id"])
-        self.assertFalse(original.done())
+        self.assertFalse(self.futures[0].done())
+        self.complete(0, 1)
+        self.window.poll()
+        self.assertEqual(len(self.futures), 2)
         self.complete(1, 2)
-        self.complete(0, 999, needs_review=True)
         self.assertIsNone(self.window.pending_review_kind)
-        self.assertEqual(self.window.ritual_table.item(0, 2).text(), "2")
-        self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [2])
-        self.assertEqual([c["items"][0]["quantity"] for c in self.ritual_commits()], [2])
+        self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [1, 2])
+        self.assertEqual([c["items"][0]["quantity"] for c in self.ritual_commits()], [1, 2])
 
     def test_reject_latest_page_discards_unpolled_burst(self):
         self.publish(1)
@@ -286,7 +294,7 @@ class RitualSequentialDeliveryTests(unittest.TestCase):
         self.complete(0, 1)
         self.assertEqual(len(logger.ritual_pages_for_map("M0001")), 1)
 
-    def test_new_map_retires_latest_capture_and_late_inflight_result(self):
+    def test_page_read_across_new_map_saves_to_the_map_it_was_captured_on(self):
         self.publish(1)
         self.publish(2)
         self.window.poll()
@@ -294,10 +302,11 @@ class RitualSequentialDeliveryTests(unittest.TestCase):
         self.complete(0, 999)
         self.window.poll()
         self.assertEqual(logger.get_state()["current_map_id"], "M0002")
-        self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
+        self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [999])
         self.assertEqual(logger.ritual_pages_for_map("M0002"), [])
-        self.assertEqual(self.ritual_commits(), [])
+        self.assertEqual(len(self.ritual_commits()), 1)
         self.assertIsNone(self.window.pending_review_kind)
+        self.assertIn("saved to M0001", self.window.ritual_status.text())
 
     def test_busy_physical_ritual_capture_does_not_queue_another_hotkey(self):
         entered, release, finished = threading.Event(), threading.Event(), threading.Event()

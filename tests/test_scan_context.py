@@ -197,26 +197,32 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(saved["start"], {})
         self.assertEqual(self.window._inventory_capture.getpixel((0, 0)), (30, 20, 10))
 
-    def test_ritual_out_of_order_callbacks_keep_latest_fingerprint(self):
-        """Verify Ritual out of order callbacks keep latest fingerprint."""
-        older, _ = self.capture_ritual()
-        newer, fingerprint = self.capture_ritual((30, 20, 10))
-        newer(self.ritual_result("Latest reward"))
-        older(self.ritual_result("Old reward"))
+    def test_ritual_capture_during_a_reading_waits_and_both_keep_their_fingerprints(self):
+        """A Ritual page captured while another is read waits; each page keeps its own capture."""
+        older, older_fingerprint = self.capture_ritual()
+        callbacks = len(self.callbacks)
+        _, fingerprint = self.capture_ritual((30, 20, 10))
+        self.assertEqual(len(self.callbacks), callbacks)
+        older(self.ritual_result("First reward"))
+        self.window.save_ritual()
+        self.window._start_waiting_ritual_page()
+        self.callbacks[-1](self.ritual_result("Second reward"))
         self.window.save_ritual()
         pages = logger.ritual_pages_for_map("M0001")
-        self.assertEqual([page["items"][0]["name"] for page in pages], ["Latest reward"])
-        self.assertEqual(self.ritual_fingerprints(), [fingerprint])
+        self.assertEqual([page["items"][0]["name"] for page in pages], ["First reward", "Second reward"])
+        self.assertEqual(self.ritual_fingerprints(), [older_fingerprint, fingerprint])
         self.assertEqual(self.window.preview.pixmap().toImage().pixelColor(0, 0).getRgb()[:3], (30, 20, 10))
 
-    def test_ritual_stale_callback_cannot_enable_approval(self):
-        """Verify Ritual stale callback cannot enable approval."""
+    def test_ritual_rejected_reading_cannot_enable_approval(self):
+        """A reading that finishes after its page was rejected is ignored; the waiting page reads next."""
         older, _ = self.capture_ritual()
-        newer, fingerprint = self.capture_ritual((30, 20, 10))
+        _, fingerprint = self.capture_ritual((30, 20, 10))
+        self.window.reject_review()
         older(self.ritual_result("Old reward"))
         self.assertEqual(self.window.ritual_table.rowCount(), 0)
         self.assertFalse(self.window.approve_scan_button.isEnabled())
-        newer(self.ritual_result("Latest reward"))
+        self.window._start_waiting_ritual_page()
+        self.callbacks[-1](self.ritual_result("Latest reward"))
         self.window.save_ritual()
         self.assertEqual(self.ritual_fingerprints(), [fingerprint])
 
@@ -242,16 +248,20 @@ class ScanContextTests(unittest.TestCase):
         self.assertTrue(self.window.save_ritual()["updated"])
         self.assertEqual(self.ritual_fingerprints(), [fingerprint])
 
-    def test_ritual_auto_commit_ignores_overlapping_stale_result(self):
-        """Verify Ritual auto commit ignores overlapping stale result."""
-        self.window.state["settings"]["ocr_auto_commit"] = True
-        older, _ = self.capture_ritual(live=True)
-        newer, fingerprint = self.capture_ritual((30, 20, 10), live=True)
+    def test_ritual_auto_commit_ignores_a_repeated_finished_result(self):
+        """Verify Ritual auto commit saves each page once and ignores a finished reading delivered again."""
+        logger.save_settings({"ocr_auto_commit": True})
+        self.window.refresh()
+        older, older_fingerprint = self.capture_ritual(live=True)
+        _, fingerprint = self.capture_ritual((30, 20, 10), live=True)
+        older(self.ritual_result("Old reward"))
+        self.window._start_waiting_ritual_page()
+        newer = self.callbacks[-1]
         older(self.ritual_result("Old reward"))
         newer(self.ritual_result("Latest reward"))
         older(self.ritual_result("Old reward"))
-        self.assertEqual(self.ritual_fingerprints(), [fingerprint])
-        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
+        self.assertEqual(self.ritual_fingerprints(), [older_fingerprint, fingerprint])
+        self.assertEqual(logger.get_state()["scan_commit_count"], 2)
 
     def test_pending_captures_cannot_be_saved_or_revived_after_rejection(self):
         """Verify pending captures cannot be saved or revived after rejection."""
@@ -278,13 +288,17 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(logger.currency_for_map("M0001")["start"], {})
         self.assertEqual(logger.currency_for_map("M0002")["start"], {})
 
-    def test_new_map_cancels_pending_capture(self):
-        """Verify new map cancels pending capture."""
-        callback, _ = self.capture_ritual()
+    def test_new_map_keeps_a_ritual_reading_for_the_map_it_was_captured_on(self):
+        """A Ritual page read across + New map is reviewed and saved on the map it was captured on."""
+        callback, fingerprint = self.capture_ritual()
         self.window.finish_map()
         callback(self.ritual_result())
-        self.assertIsNone(self.window.pending_review_kind)
+        self.assertEqual(self.window.pending_review_kind, "ritual")
+        saved = self.window.save_ritual()
+        self.assertEqual(saved["map_id"], "M0001")
+        self.assertEqual(len(logger.ritual_pages_for_map("M0001")), 1)
         self.assertEqual(logger.ritual_pages_for_map("M0002"), [])
+        self.assertEqual(self.ritual_fingerprints(), [fingerprint])
 
     def test_reset_cancels_capture_even_when_map_id_is_reused(self):
         """Verify reset cancels capture even when map ID is reused."""

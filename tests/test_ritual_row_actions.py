@@ -234,6 +234,8 @@ class RitualRowActionTests(unittest.TestCase):
         self.assertEqual(self.controls(0).property("reviewStatus"), "pending")
         self.window.review_ritual_row(second, True)
         self.assertEqual(self.controls(0).property("reviewStatus"), "approved")
+        # A held page is never replaced by a rescan; reject it, then read the next page.
+        self.window.reject_review()
         self.read([self.reward(needs_review=True)])
         self.window.review_ritual_row(second, True)
         self.assertEqual(self.controls(0).property("reviewStatus"), "pending")
@@ -278,17 +280,18 @@ class RitualRowActionTests(unittest.TestCase):
         self.assertEqual([table.item(index, 0).data(Qt.ItemDataRole.UserRole)["grid_slots"]
                           for index in range(table.rowCount())], slots)
 
-    def test_new_map_discards_row_actions_and_their_capture_ownership(self):
-        """An old reward decision cannot cross the map boundary or teach its artwork."""
+    def test_new_map_keeps_row_actions_on_the_map_the_page_was_captured_on(self):
+        """A reward decision made after + New map belongs to the page's own map, never the new one."""
         self.read([self.reward(needs_review=True)])
         controls = self.controls(0)
         self.window.finish_map()
-        self.assertEqual(self.window.ritual_table.rowCount(), 0)
-        self.assertIsNone(self.window.pending_review_kind)
+        self.assertEqual(self.window.ritual_table.rowCount(), 1)
+        self.assertEqual(self.window.pending_review_kind, "ritual")
         self.window.review_ritual_row(controls, True)
-        self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
+        self.assertEqual(controls.property("reviewStatus"), "approved")
+        self.window.approve_review()
+        self.assertEqual([page["items"][0]["name"] for page in logger.ritual_pages_for_map("M0001")], ["Chaos Orb"])
         self.assertEqual(logger.ritual_pages_for_map("M0002"), [])
-        self.assertEqual(logger.review_icons(), [])
 
     def test_context_or_transaction_failure_cannot_learn_or_mark_rows_saved(self):
         """Local approval still relies on the final existing atomic save boundary."""
@@ -302,7 +305,7 @@ class RitualRowActionTests(unittest.TestCase):
         self.assertEqual(logger.review_icons(), [])
         self.assertNotIn("Atomic Ritual reward", logger.item_names())
         self.assertNotIn("Saved", self.window.ritual_table.item(0, 6).text())
-        with patch.object(logger, "validate_scan_context", side_effect=ValueError("map changed")):
+        with patch.object(logger, "ritual_capture_map", side_effect=ValueError("map changed")):
             with self.assertRaisesRegex(ValueError, "map changed"):
                 self.window.review_ritual_row(self.controls(0), True)
             with self.assertRaisesRegex(ValueError, "map changed"):

@@ -123,45 +123,46 @@ class RitualRepeatPageTests(unittest.TestCase):
             logger.save_ritual_page([], tribute_available=1, rerolls_remaining=3, expected_map_id="M0001")
         self.assertEqual(logger.ritual_pages_for_map("M0001"), before)
 
-    def test_a_scan_captured_before_new_map_is_never_saved_to_either_map(self):
+    def test_a_scan_captured_before_new_map_is_saved_to_the_map_it_was_captured_on(self):
         self.assertEqual(self.scan(9), 1)
         deliver = self.capture()
         self.new_map()
         commits = logger.get_state()["scan_commit_count"]
         deliver(self.reading(8))
         self.app.processEvents()
-        self.assertEqual(logger.get_state()["scan_commit_count"], commits)
-        self.assertEqual(len(logger.ritual_pages_for_map("M0001")), 1)
+        self.assertEqual(logger.get_state()["scan_commit_count"], commits + 1)
+        self.assertEqual([page["page_number"] for page in logger.ritual_pages_for_map("M0001")], [1, 2])
         self.assertEqual(logger.ritual_pages_for_map("M0002"), [])
+        self.assertIn("saved to M0001", self.window.ritual_status.text())
 
-    def test_a_map_change_during_the_scan_asks_to_scan_again(self):
+    def test_a_repeat_captured_before_the_map_changed_is_checked_against_its_own_map(self):
         self.assertEqual(self.scan(9), 1)
         deliver = self.capture()
         logger.finish_map(None, None, None)
         logger.start_map()
-        with self.assertRaisesRegex(ValueError, "Scan the current map again"):
-            deliver(self.reading(9))
+        deliver(self.reading(9))
         self.app.processEvents()
-        self.assertIn("Scan again", self.window.review_summary.text())
+        self.assertEqual(self.window.review_summary.text(),
+                         "✓ Already saved: M0001 page 1 had 9 rolls left (Scan Commit #1).")
         self.assertFalse(self.window.approve_scan_button.isEnabled())
         self.assertEqual(len(logger.ritual_pages_for_map("M0001")), 1)
         self.assertEqual(logger.ritual_pages_for_map("M0002"), [])
 
-    def test_a_finished_map_is_never_compared_or_saved_until_new_map(self):
+    def test_a_finished_map_takes_no_new_page_until_new_map(self):
         self.assertEqual(self.scan(9), 1)
         logger.finish_map(None, None, None)
         self.window.refresh()
         commits = logger.get_state()["scan_commit_count"]
-        deliver = self.capture()
-        # The same rolls as the finished map's page must not be dropped as its repeat.
-        with self.assertRaisesRegex(ValueError, r"M0001 is finished; press \+ New map"):
-            deliver(self.reading(9))
+        jobs = len(self.jobs)
+        # Refused when captured: never read, never compared with the finished map's page, never saved.
+        self.window.run(lambda: self.window._ritual_captured(Image.new("RGB", (64, 64), (99, 0, 0)), live=True))
         self.app.processEvents()
-        self.assertIn("+ New map", self.window.review_summary.text())
+        self.assertEqual(self.window.statusBar().currentMessage(),
+                         "M0001 is finished; press + New map, then scan this Ritual page again")
+        self.assertEqual(len(self.jobs), jobs)
         self.assertNotIn("Already saved", self.window.review_summary.text())
         self.assertEqual(logger.get_state()["scan_commit_count"], commits)
         self.assertEqual(len(logger.ritual_pages_for_map("M0001")), 1)
-        self.window.reject_review()
         self.new_map()
         saved = logger.get_state()["scan_commit_count"]
         self.assertEqual(self.scan(9), saved + 1)
@@ -176,11 +177,17 @@ class RitualRepeatPageTests(unittest.TestCase):
     def test_only_saved_pages_count_and_undo_reopens_the_count(self):
         self.assertEqual(self.scan(9, clear=False), 0)
         self.assertEqual(self.window.pending_review_kind, "ritual")
-        # The held page was never saved, so scanning it again replaces the review.
-        self.assertEqual(self.scan(9, clear=False), 0)
-        self.assertEqual(self.window.pending_review_kind, "ritual")
+        # The held page is never replaced: scanning it again waits behind the review.
+        jobs = len(self.jobs)
+        self.window._ritual_captured(Image.new("RGB", (64, 64), (77, 0, 0)), live=True)
+        self.assertEqual(len(self.jobs), jobs)
+        self.assertEqual(len(self.window._ritual_waiting), 1)
         self.window.reject_review()
-        self.assertEqual(self.scan(9), 1)
+        self.window._start_waiting_ritual_page()
+        # The rejected page was never saved, so the same rolls are a new page.
+        self.jobs[-1](self.reading(9))
+        self.app.processEvents()
+        self.assertEqual(logger.get_state()["scan_commit_count"], 1)
         self.assertEqual(self.scan(9), 1)
         logger.undo_last_action()
         self.window.refresh()
