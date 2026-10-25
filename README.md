@@ -4,9 +4,9 @@ A Windows desktop logger for Path of Exile 2. Record Expedition remnants and run
 
 ## Download and source status
 
-This source is the **1.3.2.31 Beta candidate**. Its installer is published only after the required Windows checks pass on the exact release source. See the [candidate release notes](docs/RELEASE_1.3.2.31.md). The latest published [1.3.2.30 Beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.30-beta) and its [installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.30-beta/PoE2-Data-Logger-Setup-v1.3.2.30-beta.exe), plus the [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2), remain available.
+The latest beta is **1.3.2.31 Beta**: download the [Windows installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.31-beta/PoE2-Data-Logger-Setup-v1.3.2.31-beta.exe) or view the [release and checksum](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.31-beta). Its exact source passed the Windows release gates; see the [release notes](docs/RELEASE_1.3.2.31.md). The [preceding beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.30-beta) and [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2) remain available.
 
-This candidate fixes Ritual pages that 1.3.2.30 dropped without a word, confirms every Ritual scan, never logs deferred rewards, names unique flasks on Ritual pages, and reads Rite map names and biomes, on top of 1.3.2.30 Beta. See the [changelog](CHANGELOG.md). Installer, executable and window version labels target 1.3.2.31 Beta; the existing HUD controls, layout and styling are retained.
+This beta fixes Ritual pages that 1.3.2.30 dropped without a word, confirms every Ritual scan, never logs deferred rewards, names unique flasks on Ritual pages, and reads Rite map names and biomes, on top of 1.3.2.30 Beta. See the [changelog](CHANGELOG.md). Installer, executable and window version labels identify 1.3.2.31 Beta; the existing HUD controls, layout and styling are retained.
 
 ## What you can record
 
