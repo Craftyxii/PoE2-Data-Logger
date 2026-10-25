@@ -3708,49 +3708,67 @@ class LoggerWindow(QMainWindow):
     def _retire_scan_work(self, state):
         """Drop captures, drafts and reviews made against saved logs that Undo or a map reset replaced.
 
-        Unsaved Ritual pages taken on a finished map stay when that map still exists: they are
-        read again and saved there. Return the dropped page count and the kept pages' maps.
+        Unsaved Ritual pages taken on a finished map stay when that map still exists and are
+        saved there: a held review stays open, a page being read or waiting is read again.
+        Return the dropped page count and the kept pages' maps.
         """
         before = self.state.get("current_map_id")
-        pages = list(self._ritual_waiting)
         capture = self._ritual_capture_context
-        if self._ritual_busy() and capture is not None:
-            pages.insert(0, {"image": capture["image"], "live": capture.get("live", True),
-                             "context": capture["context"], "strictness": capture["strictness"]})
-        dropped = int(self._ritual_busy()) + len(self._ritual_waiting)
+        reading = self._ritual_reading is not None and capture is not None
+        held = (self.pending_review_kind == "ritual" and self._ritual_reading is None and not self._failed_review
+                and capture is not None)
+        pages = ([{"image": capture["image"], "live": capture.get("live", True), "context": capture["context"],
+                   "strictness": capture["strictness"]}] if reading else []) + list(self._ritual_waiting)
+        unsaved = int(self._ritual_busy()) + len(self._ritual_waiting)
+        # Decide what stays before anything is cleared. A page being read is read again (its
+        # reading belongs to the old logs); a held review stays open with its corrections.
+        kept, review_context = [], None
+        try:
+            generation = logger.session_generation()
+            for page in pages:
+                if page["context"].get("_capture_map_id") == before:
+                    continue
+                context = {**page["context"], "_scan_generation": generation}
+                try:
+                    logger.ritual_capture_map(context)
+                except ValueError:
+                    continue
+                kept.append({**page, "context": context})
+            if held and capture["context"].get("_capture_map_id") != before:
+                context = {**capture["context"], "_scan_generation": generation}
+                try:
+                    logger.ritual_capture_map(context)
+                    review_context = context
+                except ValueError:
+                    pass
+        except sqlite3.Error:
+            kept, review_context = [], None
         service.HOTKEY.cancel_capture()
         self._cancel_pending_chain_save()
         self._overlay_review_token += 1
         self._overlay_capture_restore = None
         self._accepted_propagation_requests.clear()
         self._held_remnant_review = None
-        self._clear_map_review()
+        self._clear_map_review(keep_ritual=review_context is not None)
+        if review_context is not None:
+            self._ritual_capture_context = {**capture, "context": review_context}
+        self._ritual_waiting[:] = kept
         self.current_file = {"seed": "", "opened": ""}
         self.found_table.setRowCount(0)
         self._render_recipe_rows([])
         self.opened_lines.clear()
         self.scan_status.hide()
-        self.review_kind.setText("Nothing waiting for review")
-        self.review_kind.setProperty("scanKind", None)
+        if review_context is None:
+            self.review_kind.setText("Nothing waiting for review")
+            self.review_kind.setProperty("scanKind", None)
         self._form_map_context = None
         self._saved_badge = None
         self._commit_badge_timer.stop()
-        generation = logger.session_generation()
-        kept = []
-        for page in pages:
-            if page["context"].get("_capture_map_id") == before:
-                continue
-            context = {**page["context"], "_scan_generation": generation}
-            try:
-                logger.ritual_capture_map(context)
-            except ValueError:
-                continue
-            kept.append({**page, "context": context})
-        # Read again rather than reused: a reading started before the Undo is discarded with it.
-        self._ritual_waiting.extend(kept)
         self.atlas_settings_page.set_settings(state["settings"].get("atlas_settings"), force=True)
         self.refresh()
-        return dropped - len(kept), [page["context"]["_capture_map_id"] for page in kept]
+        kept_maps = (([review_context["_capture_map_id"]] if review_context else [])
+                     + [page["context"]["_capture_map_id"] for page in kept])
+        return unsaved - len(kept_maps), kept_maps
 
     @staticmethod
     def _dropped_ritual_note(dropped, kept=()):
@@ -3762,7 +3780,7 @@ class LoggerWindow(QMainWindow):
         if kept:
             maps = ", ".join(dict.fromkeys(kept))
             note += (f" {len(kept)} Ritual page{'s' if len(kept) > 1 else ''} taken on {maps} "
-                     f"{'are' if len(kept) > 1 else 'is'} kept, read again and saved to {maps}.")
+                     f"{'are' if len(kept) > 1 else 'is'} kept and will be saved to {maps}.")
         return note
 
     def reset_current_map(self):
@@ -7568,29 +7586,33 @@ class LoggerWindow(QMainWindow):
         """Read the oldest waiting Ritual page once the current one is saved, dropped or rejected.
 
         A waiting page never replaces another activity's review; it waits for that one too.
+        While another program holds the database the page stays first and is tried on the
+        next tick; any other failure leaves the line once, with its message.
         """
         if (not self._ritual_waiting or self._ritual_busy() or self.pending_review_kind is not None
                 or self._closed):
             return
+        page = self._ritual_waiting[0]
         try:
-            self._require_remnant_review_finished()
-        except ValueError:
+            with store.database_timeout(0):
+                self._require_remnant_review_finished()
+        except (ValueError, sqlite3.OperationalError):
             return
-        page = self._ritual_waiting.pop(0)
-        self.run(lambda: self._start_ritual_page(page["image"], page["live"], page["context"],
-                                                 page["strictness"], waited=True))
-        if not self._ritual_busy():
-            # Nothing started, for example while another program held the database.
-            # Keep the page first in line unless it can no longer be saved anywhere.
-            try:
-                with store.database_timeout(0):
-                    logger.ritual_capture_map(page["context"])
-            except ValueError:
-                pass
-            except sqlite3.OperationalError:
-                self._ritual_waiting.insert(0, page)
-            else:
-                self._ritual_waiting.insert(0, page)
+        try:
+            with store.database_timeout(0):
+                self._start_ritual_page(page["image"], page["live"], page["context"], page["strictness"],
+                                        waited=True)
+        except sqlite3.OperationalError as error:
+            busy = (getattr(error, "sqlite_errorcode", 0) or 0) & 255 in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+            if busy and not self._ritual_busy():
+                return
+            self._ritual_waiting.pop(0)
+            self.error(str(error))
+        except Exception as error:
+            self._ritual_waiting.pop(0)
+            self.error(str(error))
+        else:
+            self._ritual_waiting.pop(0)
         self._show_ritual_waiting()
 
     def _start_ritual_page(self, image, live, context, expected_strictness=None, *, waited=False):

@@ -250,13 +250,27 @@ class RitualWaitingPageSafetyTests(RitualScanHarness):
         self.capture(1)
         self.capture(2)
         self.finish(0, self.reading("Divine Orb", 6))
-        with patch.object(logger, "ritual_icons", side_effect=sqlite3.OperationalError("database is locked")):
+        locked = sqlite3.OperationalError("database is locked")
+        locked.sqlite_errorcode = sqlite3.SQLITE_BUSY
+        with patch.object(logger, "ritual_icons", side_effect=locked):
+            self.poll()
             self.poll()
         self.assertEqual((len(self.futures), len(self.window._ritual_waiting)), (1, 1))
         self.poll()
         self.assertEqual((len(self.futures), len(self.window._ritual_waiting)), (2, 0))
         self.finish(1, self.reading("Exalted Orb", 5))
         self.assertEqual(self.pages(), ["Divine Orb", "Exalted Orb"])
+
+    def test_waiting_page_that_cannot_start_leaves_the_line_once_with_its_message(self):
+        self.capture(1)
+        self.capture(2)
+        self.finish(0, self.reading("Divine Orb", 6))
+        with patch.object(logger, "ritual_icons", side_effect=sqlite3.OperationalError("no such table: icons")):
+            self.poll()
+            self.poll()
+        self.assertEqual(self.window._ritual_waiting, [])
+        self.assertEqual(self.window.statusBar().currentMessage(), "no such table: icons")
+        self.assertEqual(len(self.futures), 1)
 
     def test_start_fresh_session_drops_waiting_pages_and_says_so(self):
         self.capture(1)
@@ -356,9 +370,10 @@ class RitualPagesAcrossNewMapTests(RitualScanHarness):
 class RitualPagesKeptThroughUndoOnTheNextMapTests(RitualScanHarness):
     """Undo or Reset map on the next map leaves a page taken on the finished map alone."""
 
-    def test_reset_map_on_the_next_map_keeps_a_held_page_for_the_finished_map(self):
+    def test_reset_map_on_the_next_map_keeps_a_held_review_open_with_its_corrections(self):
         self.capture(1)
         self.finish(0, self.reading("Divine Orb", 6, needs_review=True))
+        self.window.ritual_table.item(0, 2).setText("3")
         self.window.finish_map()
         self.app.processEvents()
         self.assertIn("Finish the open Ritual page before scanning anything else, or it is not saved.",
@@ -367,12 +382,14 @@ class RitualPagesKeptThroughUndoOnTheNextMapTests(RitualScanHarness):
             self.window.reset_current_map()
         self.app.processEvents()
         self.assertEqual(self.message(), "M0002 reset. Undo restores its saved logs. 1 Ritual page taken on "
-                                         "M0001 is kept, read again and saved to M0001.")
+                                         "M0001 is kept and will be saved to M0001.")
         self.poll()
-        self.assertEqual(len(self.futures), 2)
-        self.finish(1, self.reading("Divine Orb", 6, needs_review=True))
+        self.assertEqual(len(self.futures), 1)
+        self.assertEqual((self.window.pending_review_kind, self.window.ritual_table.item(0, 2).text()),
+                         ("ritual", "3"))
         self.approve_all()
-        self.assertEqual((self.pages("M0001"), self.pages("M0002")), (["Divine Orb"], []))
+        self.assertEqual(logger.ritual_pages_for_map("M0001")[0]["items"][0]["quantity"], 3)
+        self.assertEqual(self.pages("M0002"), [])
 
     def test_undo_of_new_map_keeps_a_page_still_being_read_and_ignores_its_old_reading(self):
         self.capture(1)
@@ -399,7 +416,7 @@ class RitualPagesKeptThroughUndoOnTheNextMapTests(RitualScanHarness):
         self.app.processEvents()
         self.assertEqual(self.message(), "M0002 reset. Undo restores its saved logs. 1 unsaved Ritual page was "
                                          "not saved because the saved logs changed; scan again. 1 Ritual page "
-                                         "taken on M0001 is kept, read again and saved to M0001.")
+                                         "taken on M0001 is kept and will be saved to M0001.")
         self.poll()
         self.finish(1, self.reading("Divine Orb", 6))
         self.poll()

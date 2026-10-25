@@ -30,8 +30,10 @@ or view the [release and checksum](https://github.com/Craftyxii/PoE2-Data-Logger
 - The status line after **+ New map** says where the page goes, and that the
   open page must be finished before you scan anything else: another scan, such
   as the next waystone, still replaces it.
-- **Undo** or **Reset map** on the next map leaves such a page alone: it is read
-  again and saved to its own map. Only an Undo that removes that map drops it.
+- **Undo** or **Reset map** on the next map leaves such a page alone, and it is
+  still saved to its own map: a page under review stays open with your
+  corrections, a page being read is read again. An Undo that removes that map,
+  or a later Undo on that map once it is open again, drops it with the message.
 - Previously such a page was dropped.
 - **+ New map** is otherwise unchanged: it locks the map with its settings, and
   nothing else can be added to a finished map.
