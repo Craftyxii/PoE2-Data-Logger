@@ -13,7 +13,9 @@ Rules the model follows:
 - Waiting pages are read in capture order.
 - A page is saved to the map it was captured on, also after + New map.
 - A page whose roll count equals its map's last saved page is a repeat and is not saved.
-- Undo reverses the last saved action (a page, or + New map's two steps) and drops unsaved pages.
+- Undo reverses the last saved action (a page, or + New map's two steps). Unsaved pages taken
+  on a finished map that still exists are kept and read again (not a failed reading, which has
+  no capture left); the rest are dropped.
 """
 from concurrent.futures import Future
 import io
@@ -239,6 +241,7 @@ class RandomRitualSessionTests(unittest.TestCase):
                 model.undo += [("Finalize map", None), ("New map", None)]
             elif action == "undo":
                 stale = model.active
+                before = model.current
                 saved = self.window.undo_map()
                 self.app.processEvents()
                 kind, map_id = model.undo.pop()
@@ -249,10 +252,18 @@ class RandomRitualSessionTests(unittest.TestCase):
                     dropped = model.maps.pop()
                     del model.pages[dropped]
                     rolls.pop(dropped, None)
-                unsaved = int(model.active is not None) + len(model.waiting)
-                if unsaved:
-                    self.assertIn(f"{unsaved} unsaved Ritual page", self.window.review_summary.text())
-                model.active, model.waiting = None, []
+                # Unsaved pages taken on a finished map that still exists are kept and read
+                # again; the rest are dropped with a message. A failed reading has no capture left.
+                unsaved = ([model.active["map"]] if model.active else []) + model.waiting
+                readable = ([model.active["map"]] if model.active and model.active["phase"] != "failed" else []) \
+                    + model.waiting
+                kept = [page for page in readable if page != before and page in model.pages]
+                if len(unsaved) - len(kept):
+                    self.assertIn(f"{len(unsaved) - len(kept)} unsaved Ritual page",
+                                  self.window.review_summary.text(), f"seed {seed} step {step}")
+                if kept:
+                    self.assertIn(f"{len(kept)} Ritual page", self.window.review_summary.text())
+                model.active, model.waiting = None, kept
                 if stale and stale["phase"] == "reading" and rng.random() < .5:
                     # A reading that finishes after Undo is ignored.
                     quantity += 1

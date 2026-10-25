@@ -3605,6 +3605,8 @@ class LoggerWindow(QMainWindow):
             kept = f" The Ritual page captured on {maps[0]} will be saved to {maps[0]}."
         else:
             kept = f" The {len(kept_maps)} Ritual pages captured on {maps[0]} will be saved to {maps[0]}."
+        if self._ritual_busy() and not self._failed_review:
+            kept += " Finish the open Ritual page before scanning anything else, or it is not saved."
         self.note(f"Map {state['current_map_id']} started."
                   + (" Previous map totals saved." if previous else "") + applied + kept, True)
 
@@ -3680,7 +3682,7 @@ class LoggerWindow(QMainWindow):
             positions.extend((bar, bar.value()) for bar in
                              (page.verticalScrollBar(), page.horizontalScrollBar()))
         saved = logger.undo_last_action()
-        dropped = self._retire_scan_work(saved["state"])
+        dropped, kept = self._retire_scan_work(saved["state"])
         # Undo can restore names and artwork without changing the session totals.
         self.refresh_reference_names()
         self.refresh_reference_examples()
@@ -3688,7 +3690,7 @@ class LoggerWindow(QMainWindow):
         self.tabs.setCurrentWidget(page)
         action = saved["action"]
         set_message(self.review_summary, f"{action} undone. Saved totals and chain state restored."
-                    + self._dropped_ritual_note(dropped), "success")
+                    + self._dropped_ritual_note(dropped, kept), "success")
         owner = self._overlay_review_token
 
         def restore_position():
@@ -3700,14 +3702,21 @@ class LoggerWindow(QMainWindow):
 
         restore_position()
         QTimer.singleShot(0, self, restore_position)
-        self.note(f"{action} undone." + self._dropped_ritual_note(dropped), True)
+        self.note(f"{action} undone." + self._dropped_ritual_note(dropped, kept), True)
         return saved
 
     def _retire_scan_work(self, state):
         """Drop captures, drafts and reviews made against saved logs that Undo or a map reset replaced.
 
-        Return how many unsaved Ritual pages (being read, under review or waiting) were dropped.
+        Unsaved Ritual pages taken on a finished map stay when that map still exists: they are
+        read again and saved there. Return the dropped page count and the kept pages' maps.
         """
+        before = self.state.get("current_map_id")
+        pages = list(self._ritual_waiting)
+        capture = self._ritual_capture_context
+        if self._ritual_busy() and capture is not None:
+            pages.insert(0, {"image": capture["image"], "live": capture.get("live", True),
+                             "context": capture["context"], "strictness": capture["strictness"]})
         dropped = int(self._ritual_busy()) + len(self._ritual_waiting)
         service.HOTKEY.cancel_capture()
         self._cancel_pending_chain_save()
@@ -3726,17 +3735,35 @@ class LoggerWindow(QMainWindow):
         self._form_map_context = None
         self._saved_badge = None
         self._commit_badge_timer.stop()
+        generation = logger.session_generation()
+        kept = []
+        for page in pages:
+            if page["context"].get("_capture_map_id") == before:
+                continue
+            context = {**page["context"], "_scan_generation": generation}
+            try:
+                logger.ritual_capture_map(context)
+            except ValueError:
+                continue
+            kept.append({**page, "context": context})
+        # Read again rather than reused: a reading started before the Undo is discarded with it.
+        self._ritual_waiting.extend(kept)
         self.atlas_settings_page.set_settings(state["settings"].get("atlas_settings"), force=True)
         self.refresh()
-        return dropped
+        return dropped - len(kept), [page["context"]["_capture_map_id"] for page in kept]
 
     @staticmethod
-    def _dropped_ritual_note(dropped):
-        """Tell the user which unsaved Ritual pages an Undo or reset dropped."""
-        if not dropped:
-            return ""
-        return (f" {dropped} unsaved Ritual page{'s were' if dropped > 1 else ' was'} not saved because the "
-                "saved logs changed; scan again.")
+    def _dropped_ritual_note(dropped, kept=()):
+        """Tell the user which unsaved Ritual pages an Undo or reset dropped or kept."""
+        note = ""
+        if dropped:
+            note += (f" {dropped} unsaved Ritual page{'s were' if dropped > 1 else ' was'} not saved because the "
+                     "saved logs changed; scan again.")
+        if kept:
+            maps = ", ".join(dict.fromkeys(kept))
+            note += (f" {len(kept)} Ritual page{'s' if len(kept) > 1 else ''} taken on {maps} "
+                     f"{'are' if len(kept) > 1 else 'is'} kept, read again and saved to {maps}.")
+        return note
 
     def reset_current_map(self):
         """After confirmation, clear the current map's saved logs in one action that Undo restores.
@@ -3758,10 +3785,10 @@ class LoggerWindow(QMainWindow):
             return None
         # The captured context refuses the reset if the map changed while the question was open.
         result = logger.discard_current_map_logs(context)
-        dropped = self._retire_scan_work(result["state"])
+        dropped, kept = self._retire_scan_work(result["state"])
         set_message(self.review_summary, f"{map_id} reset. Undo restores its saved logs."
-                    + self._dropped_ritual_note(dropped), "success")
-        self.note(f"{map_id} reset." + self._dropped_ritual_note(dropped), True)
+                    + self._dropped_ritual_note(dropped, kept), "success")
+        self.note(f"{map_id} reset." + self._dropped_ritual_note(dropped, kept), True)
         return result
 
     def set_expedition(self, widget=None):
@@ -7572,7 +7599,7 @@ class LoggerWindow(QMainWindow):
         """
         self._require_remnant_review_finished()
         map_id = logger.ritual_capture_map(context)
-        capture = {"map_id": map_id, "image": image, "context": context,
+        capture = {"map_id": map_id, "image": image, "context": context, "live": live,
                    "scan_hash": hashlib.sha256(image.tobytes()).hexdigest(),
                    "strictness": ocr_sensitivity.validate(expected_strictness) if expected_strictness is not None
                    else ocr_sensitivity.saved_values()["ritual"]}

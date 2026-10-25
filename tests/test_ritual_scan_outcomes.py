@@ -353,6 +353,60 @@ class RitualPagesAcrossNewMapTests(RitualScanHarness):
         self.assertEqual((self.pages("M0001"), self.pages("M0002")), ([], ["Divine Orb"]))
 
 
+class RitualPagesKeptThroughUndoOnTheNextMapTests(RitualScanHarness):
+    """Undo or Reset map on the next map leaves a page taken on the finished map alone."""
+
+    def test_reset_map_on_the_next_map_keeps_a_held_page_for_the_finished_map(self):
+        self.capture(1)
+        self.finish(0, self.reading("Divine Orb", 6, needs_review=True))
+        self.window.finish_map()
+        self.app.processEvents()
+        self.assertIn("Finish the open Ritual page before scanning anything else, or it is not saved.",
+                      self.window.statusBar().currentMessage())
+        with patch.object(ui.QMessageBox, "question", return_value=ui.QMessageBox.StandardButton.Yes):
+            self.window.reset_current_map()
+        self.app.processEvents()
+        self.assertEqual(self.message(), "M0002 reset. Undo restores its saved logs. 1 Ritual page taken on "
+                                         "M0001 is kept, read again and saved to M0001.")
+        self.poll()
+        self.assertEqual(len(self.futures), 2)
+        self.finish(1, self.reading("Divine Orb", 6, needs_review=True))
+        self.approve_all()
+        self.assertEqual((self.pages("M0001"), self.pages("M0002")), (["Divine Orb"], []))
+
+    def test_undo_of_new_map_keeps_a_page_still_being_read_and_ignores_its_old_reading(self):
+        self.capture(1)
+        self.window.finish_map()
+        self.app.processEvents()
+        self.assertEqual(self.window.undo_map()["action"], "New map")
+        self.app.processEvents()
+        self.assertIn("1 Ritual page taken on M0001 is kept", self.message())
+        # The reading started before Undo is discarded; the page is read again.
+        self.finish(0, self.reading("Exalted Orb", 6))
+        self.assertEqual(self.pages("M0001"), [])
+        self.poll()
+        self.finish(1, self.reading("Divine Orb", 6))
+        self.assertEqual(self.pages("M0001"), ["Divine Orb"])
+        self.assertEqual(logger.get_state()["current_map_id"], "M0001")
+
+    def test_pages_on_the_current_map_are_still_dropped_with_the_message(self):
+        self.capture(1)
+        self.window.finish_map()
+        self.app.processEvents()
+        self.capture(2)
+        with patch.object(ui.QMessageBox, "question", return_value=ui.QMessageBox.StandardButton.Yes):
+            self.window.reset_current_map()
+        self.app.processEvents()
+        self.assertEqual(self.message(), "M0002 reset. Undo restores its saved logs. 1 unsaved Ritual page was "
+                                         "not saved because the saved logs changed; scan again. 1 Ritual page "
+                                         "taken on M0001 is kept, read again and saved to M0001.")
+        self.poll()
+        self.finish(1, self.reading("Divine Orb", 6))
+        self.poll()
+        self.assertEqual(len(self.futures), 2)
+        self.assertEqual((self.pages("M0001"), self.pages("M0002")), (["Divine Orb"], []))
+
+
 class RitualPagesDroppedByUndoTests(RitualScanHarness):
     """Undo or Reset map drops unsaved Ritual pages, and says so."""
 

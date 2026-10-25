@@ -18,6 +18,8 @@ or view the [release and checksum](https://github.com/Craftyxii/PoE2-Data-Logger
   against the page saved before it. A third press says "Two Ritual pages are
   already waiting. Approve or reject the current page, then scan again." and
   saves nothing. The status bar shows how many pages wait.
+- A waiting page leaves the line only once it is being read, so a busy
+  database at that moment no longer loses it.
 
 ## A page taken before + New map goes to its own map
 
@@ -25,17 +27,21 @@ or view the [release and checksum](https://github.com/Craftyxii/PoE2-Data-Logger
   was taken on: "✓ Ritual page saved to M0172 as Scan Commit #N."
 - A page waiting for review stays open after **+ New map**; Approve saves it to
   its own map. Its repeat check uses that map's pages.
-- The status line after **+ New map** says where the page goes. Previously such
-  a page was dropped.
+- The status line after **+ New map** says where the page goes, and that the
+  open page must be finished before you scan anything else: another scan, such
+  as the next waystone, still replaces it.
+- **Undo** or **Reset map** on the next map leaves such a page alone: it is read
+  again and saved to its own map. Only an Undo that removes that map drops it.
+- Previously such a page was dropped.
 - **+ New map** is otherwise unchanged: it locks the map with its settings, and
   nothing else can be added to a finished map.
 
 ## Undo and Reset map say what they drop
 
-- Undo and Reset map still drop pages that were not saved yet, because the logs
-  they were taken against have changed. They now say so: "1 unsaved Ritual page
-  was not saved because the saved logs changed; scan again." Before, the pages
-  disappeared without a word.
+- Undo, Reset map and Start fresh session still drop unsaved pages taken on the
+  map they change, because the logs those pages were taken against have
+  changed. They now say so: "1 unsaved Ritual page was not saved because the
+  saved logs changed; scan again." Before, the pages disappeared without a word.
 - Undo itself is unchanged: one press reverses the last saved action, and
   undoing **+ New map** reopens the previous map for editing.
 
