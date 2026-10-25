@@ -3311,9 +3311,9 @@ class LoggerWindow(QMainWindow):
                 "chain" if activity in ("None", "Expedition", "Grand Expedition") else "")
         if slot == "ritual":
             map_id = state["current_map_id"]
-            pages = len(logger.ritual_pages_for_map(map_id)) if map_id else 0
+            pages = logger.ritual_page_count(map_id) if map_id else 0
             details = []
-            stage = logger.ritual_rite_state()["map_ordinal"]
+            stage = (state.get("ritual_rite") or {}).get("map_ordinal")
             if stage is not None:
                 details.append(f"Rite stage {stage}")
             if self._ritual_waiting:
@@ -3660,7 +3660,8 @@ class LoggerWindow(QMainWindow):
             self._review_controls(None)
         self.review_edit_button.hide()
         self.found_table.hide()
-        self.found_label.hide()
+        if not ritual_review:
+            self.found_label.hide()
         self.review_group.hide()
         self.recipe_table.hide()
         self.currency_review_group.hide()
@@ -7551,6 +7552,18 @@ class LoggerWindow(QMainWindow):
         page = self._ritual_waiting.pop(0)
         self.run(lambda: self._start_ritual_page(page["image"], page["live"], page["context"],
                                                  page["strictness"], waited=True))
+        if not self._ritual_busy():
+            # Nothing started, for example while another program held the database.
+            # Keep the page first in line unless it can no longer be saved anywhere.
+            try:
+                with store.database_timeout(0):
+                    logger.ritual_capture_map(page["context"])
+            except ValueError:
+                pass
+            except sqlite3.OperationalError:
+                self._ritual_waiting.insert(0, page)
+            else:
+                self._ritual_waiting.insert(0, page)
         self._show_ritual_waiting()
 
     def _start_ritual_page(self, image, live, context, expected_strictness=None, *, waited=False):
@@ -7615,6 +7628,8 @@ class LoggerWindow(QMainWindow):
         # locks that map. A finished map takes no new pages; Undo makes it stale.
         context = capture["context"] if capture is not None else logger.scan_context()
         map_id = logger.ritual_capture_map(context)
+        if expected_map_id is not None and expected_map_id != map_id:
+            raise ValueError(f"The Ritual scan belongs to {expected_map_id}. Scan again.")
         rerolls = result.get("rerolls_remaining")
         last = logger.last_ritual_page(map_id)
         if type(rerolls) is int and last and rerolls == last["rerolls_remaining"]:
@@ -8171,8 +8186,10 @@ class LoggerWindow(QMainWindow):
             QMessageBox.StandardButton.Cancel)
         if answer != QMessageBox.StandardButton.Yes:
             return
+        dropped = int(self._ritual_busy()) + len(self._ritual_waiting)
         logger.clear_export_and_reset_ids()
         logger.start_map()
+        self._ritual_waiting.clear()
         self._saved_badge = None
         self._accepted_propagation_requests.clear()
         self._clear_seed_queue()
@@ -8209,9 +8226,10 @@ class LoggerWindow(QMainWindow):
         self._latest_hotkey = (service.HOTKEY.status().get("latest") or {}).get("id", self._latest_hotkey)
         self._show_image(None)
         self.review_kind.setText("New session")
-        set_message(self.review_summary, "Session cleared. M0001 is ready to scan.")
+        set_message(self.review_summary, "Session cleared. M0001 is ready to scan."
+                    + self._dropped_ritual_note(dropped))
         self.refresh()
-        self.note("Session cleared. M0001 is ready; next remnant is R0001.", True)
+        self.note("Session cleared. M0001 is ready; next remnant is R0001." + self._dropped_ritual_note(dropped), True)
 
     def search_catalog(self):
         """Query the selected local catalog and display up to 200 entries with columns

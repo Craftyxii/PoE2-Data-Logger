@@ -27,19 +27,14 @@ class RitualGreyedUniqueTests(unittest.TestCase):
     def setUpClass(cls):
         """Scan the page once in a disposable profile."""
         cls.folder = tempfile.TemporaryDirectory(prefix="poe2-ritual-greyed-")
-        cls.patches = (patch.object(store, "DATA_DIR", Path(cls.folder.name)), patch.object(logger, "_READY", False))
-        for active in cls.patches:
+        cls.addClassCleanup(cls.folder.cleanup)
+        for active in (patch.object(store, "DATA_DIR", Path(cls.folder.name)), patch.object(logger, "_READY", False)):
             active.start()
+            # Cleanups run even when the scan below fails, so the profile is always restored.
+            cls.addClassCleanup(active.stop)
         with Image.open(PAGE) as source:
             cls.image = source.convert("RGB")
         cls.result = item_ocr.scan_ritual_page(cls.image, OMEN_NAMES)
-
-    @classmethod
-    def tearDownClass(cls):
-        """Restore the caller's profile."""
-        for active in reversed(cls.patches):
-            active.stop()
-        cls.folder.cleanup()
 
     def test_gray_unique_is_named_and_its_neighbours_are_unchanged(self):
         names = {row["grid_slots"][0]: row["name"] for row in self.result["items"]}

@@ -128,8 +128,10 @@ def run(tree, folder):
     """Run the scripted session against one tree; return its steps and exports."""
     profile, out = Path(folder) / "profile", Path(folder) / "session.json"
     profile.mkdir()
-    environment = {**os.environ, "QT_QPA_PLATFORM": "offscreen", "PYTHONHASHSEED": "0"}
-    completed = subprocess.run([sys.executable, "-I", "-c", SESSION, str(tree), str(profile), str(out),
+    # -I would ignore PYTHONHASHSEED (it implies -E), so isolate with -s -P and a clean environment.
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("PYTHON")}
+    environment.update(QT_QPA_PLATFORM="offscreen", PYTHONHASHSEED="0")
+    completed = subprocess.run([sys.executable, "-s", "-P", "-c", SESSION, str(tree), str(profile), str(out),
                                 json.dumps(EXPORTS)], capture_output=True, text=True, env=environment)
     if completed.returncode:
         raise RuntimeError(f"Session failed on {tree}:\n{completed.stderr[-4000:]}")

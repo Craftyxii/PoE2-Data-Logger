@@ -136,9 +136,9 @@ class HeaderActivitySlotTests(unittest.TestCase):
 
     def test_ritual_slot_shows_the_rite_stage(self):
         self.choose_activity("Ritual")
-        with patch.object(logger, "ritual_rite_state", return_value={"map_ordinal": 2}):
-            self.window.refresh()
-            self.assertEqual(self.slot(), "M0001 · 0 Ritual pages\nRite stage 2")
+        self.window.state["ritual_rite"] = {**(self.window.state.get("ritual_rite") or {}), "map_ordinal": 2}
+        self.window._sync_header_activity_slot()
+        self.assertEqual(self.slot(), "M0001 · 0 Ritual pages\nRite stage 2")
 
     def test_switching_back_to_expedition_restores_the_complete_chain_button(self):
         self.choose_activity("Ritual")

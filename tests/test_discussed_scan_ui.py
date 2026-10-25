@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -17,7 +18,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from PoE2_Data_Logger.core import logger_store as logger, service, store
 from PoE2_Data_Logger.platform.hotkey import HotkeyManager
-from PoE2_Data_Logger.ui.native_desktop import LoggerWindow
+from PoE2_Data_Logger.ui.native_desktop import LoggerWindow, SCAN_PRESENTATION_RETRY_MS
 
 
 class DiscussedScanUITests(unittest.TestCase):
@@ -360,17 +361,28 @@ class DiscussedScanUITests(unittest.TestCase):
         self.window._overlay_enabled = True
         self.window._remnant_reading = object()
         token = self.window._overlay_review_token
+        # The retry runs every SCAN_PRESENTATION_RETRY_MS; a loaded runner can fire it late,
+        # so wait for the reveal itself rather than a fixed slice of time.
         with patch.object(self.window, "show_overlay") as reveal:
             self.window._reveal_review_overlay(token)
             self.window._remnant_reading = None
-            QTest.qWait(130)
+            deadline = time.monotonic() + 2
+            while not reveal.called and time.monotonic() < deadline:
+                QTest.qWait(10)
+            QTest.qWait(3 * SCAN_PRESENTATION_RETRY_MS)
         reveal.assert_called_once_with(automatic=True)
         self.window._remnant_reading = object()
-        with patch.object(self.window, "show_overlay") as reveal:
+        with patch.object(self.window, "show_overlay") as reveal, \
+                patch.object(self.window, "_reveal_review_overlay",
+                             wraps=self.window._reveal_review_overlay) as attempt:
             self.window._reveal_review_overlay(token)
             self.window._overlay_review_token += 1
             self.window._remnant_reading = None
-            QTest.qWait(130)
+            # Wait until the stale retry has actually run, then check it revealed nothing.
+            deadline = time.monotonic() + 2
+            while attempt.call_count < 2 and time.monotonic() < deadline:
+                QTest.qWait(10)
+            self.assertGreaterEqual(attempt.call_count, 2)
         reveal.assert_not_called()
 
 

@@ -7,6 +7,7 @@ from concurrent.futures import Future
 import io
 import os
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -240,6 +241,44 @@ class RitualPagesWaitInLineTests(RitualScanHarness):
         self.poll()
         self.finish(2, self.reading("Exalted Orb", 5))
         self.assertEqual(self.pages(), ["Divine Orb", "Exalted Orb"])
+
+
+class RitualWaitingPageSafetyTests(RitualScanHarness):
+    """A waiting page leaves the line only when it is read, or when it can no longer be saved."""
+
+    def test_waiting_page_stays_in_line_while_the_database_is_busy(self):
+        self.capture(1)
+        self.capture(2)
+        self.finish(0, self.reading("Divine Orb", 6))
+        with patch.object(logger, "ritual_icons", side_effect=sqlite3.OperationalError("database is locked")):
+            self.poll()
+        self.assertEqual((len(self.futures), len(self.window._ritual_waiting)), (1, 1))
+        self.poll()
+        self.assertEqual((len(self.futures), len(self.window._ritual_waiting)), (2, 0))
+        self.finish(1, self.reading("Exalted Orb", 5))
+        self.assertEqual(self.pages(), ["Divine Orb", "Exalted Orb"])
+
+    def test_start_fresh_session_drops_waiting_pages_and_says_so(self):
+        self.capture(1)
+        self.capture(2)
+        with patch.object(ui.QMessageBox, "question", return_value=ui.QMessageBox.StandardButton.Yes):
+            self.window.reset_logger()
+        self.app.processEvents()
+        self.assertEqual(self.window._ritual_waiting, [])
+        self.assertIn("2 unsaved Ritual pages were not saved", self.message())
+        self.poll()
+        self.assertEqual(len(self.futures), 1)
+        self.assertEqual(self.pages(), [])
+
+    def test_review_kept_across_new_map_looks_the_same(self):
+        self.capture(1)
+        self.finish(0, self.reading("Divine Orb", 6, needs_review=True))
+        shown = (self.window.found_label.isVisible(), self.window.ritual_table.isVisible(),
+                 self.window.review_kind.text())
+        self.window.finish_map()
+        self.app.processEvents()
+        self.assertEqual((self.window.found_label.isVisible(), self.window.ritual_table.isVisible(),
+                          self.window.review_kind.text()), shown)
 
 
 class RitualPagesAcrossNewMapTests(RitualScanHarness):

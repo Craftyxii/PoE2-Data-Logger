@@ -3734,6 +3734,12 @@ def ritual_pages_for_map(map_id):
                                       "WHERE map_id=? ORDER BY page_number", (map_id,))]
 
 
+def ritual_page_count(map_id):
+    """Count the map's saved Ritual pages."""
+    with _connect() as db:
+        return db.execute("SELECT COUNT(*) FROM ritual_pages WHERE map_id=?", (map_id,)).fetchone()[0]
+
+
 def last_ritual_page(map_id):
     """Return the map's last saved Ritual page as rerolls remaining, page and Scan Commit #, or None.
 
