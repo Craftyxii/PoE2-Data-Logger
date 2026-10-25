@@ -383,7 +383,11 @@ def _rank(bank, image):
         weight, total = bank.weights[index], float(bank.weight_sums[index])
         chroma = query.max(axis=1).astype(np.float32) - query.min(axis=1)
         brightness = np.maximum(1, query.max(axis=1).astype(np.float32))
-        desaturated = float(np.sum(chroma / brightness * weight, dtype=np.float64) / total) < .10
+        # A thin gray item leaves the blue cell backing showing inside its
+        # sprite; judge color loss on the item's own lit pixels when it has enough.
+        lit = weight * (query.max(axis=1) > 60)
+        judged, judged_total = (lit, float(lit.sum())) if float(lit.sum()) >= .25 * total else (weight, total)
+        desaturated = float(np.sum(chroma / brightness * judged, dtype=np.float64) / judged_total) < .10
         color = _rgb_score(bank.rgb[index], query, weight, total)
         score = float(grey) if desaturated else .7 * float(grey) + .3 * color
         scores.append((float(np.clip(score, 0, 1)), bank.names[index], desaturated))

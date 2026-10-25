@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Name a unique drawn gray on a Ritual page because its price is above your Tribute. A thin gray item such as the Shyaba sceptre lets the blue cell backing show inside its outline, so it was judged colored and marked down for missing color; it stayed held although no other unique came close. Color loss is now judged on the item's own lit pixels. On the 49 user Ritual pages only that reward changed, now named; every one of the 258 named uniques was checked against its catalog art.
+
 ## 1.3.2.31 Beta
 
 - Fix Ritual pages dropped as repeats in 1.3.2.30. After a map was finished but before + New map was pressed, a scan was compared with the finished map's last page and, with the same rolls left, dropped without a word. A scan now belongs only to the map shown when it is taken: it is compared with and saved to that map only, a finished map takes no more pages (the review says to press + New map and scan again), and + New map starts the next map's count afresh. The roll count stays the tracker; rewards are not compared.

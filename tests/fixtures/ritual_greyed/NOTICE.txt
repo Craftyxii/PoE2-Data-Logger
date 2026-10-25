@@ -1,0 +1,4 @@
+Unaltered Favours window capture from a user-provided Path of Exile 2
+screenshot (2026-10-23, Ritual_8: Screenshot 2026-10-23 094703), used as a
+regression fixture for a unique drawn gray because its price is above the
+available Tribute (Shyaba, 2x4). Game UI artwork copyright Grinding Gear Games.
