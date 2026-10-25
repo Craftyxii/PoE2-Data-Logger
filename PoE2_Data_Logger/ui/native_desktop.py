@@ -1029,6 +1029,14 @@ class LoggerWindow(QMainWindow):
         self.header_complete_chain_button = button(
             "Complete chain", lambda: self.run(self.complete_chain), "primary")
         self.header_complete_chain_button.setEnabled(False)
+        # Ritual maps show their saved page count in the Complete chain slot; Abyss and Breach leave it empty.
+        self.header_ritual_status = QLabel()
+        self.header_ritual_status.setObjectName("headerRitualStatus")
+        self.header_ritual_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.header_ritual_status.setAccessibleName("Ritual pages on this map")
+        self.header_ritual_status.setStyleSheet("font-size:13px;font-weight:700;color:#D5B36C;")
+        self.header_ritual_status.hide()
+        self._header_slot = "chain"
         # Compact headers share caption/number rows so unused height cannot separate them.
         self._compact_header_status = QWidget()
         self._compact_header_grid = QGridLayout(self._compact_header_status)
@@ -1164,7 +1172,8 @@ class LoggerWindow(QMainWindow):
         fields = (self.header_map_id, self.header_remnant_id, self.header_expedition)
         # Keep growing map/remnant numbers legible instead of compressing their text at narrow widths.
         narrow = self.width() < 1150
-        status_width = self.header_complete_chain_button.sizeHint().width() + 24
+        slot = self.header_ritual_status if self._header_slot == "ritual" else self.header_complete_chain_button
+        status_width = slot.sizeHint().width() + 24
         status_width += sum(max(field.minimumWidth(), field.sizeHint().width(), caption.sizeHint().width())
                             for field, caption in zip(fields[:2], self._header_identifier_captions[:2]))
         if not narrow:
@@ -1181,6 +1190,7 @@ class LoggerWindow(QMainWindow):
             layout.removeItem(item)
         layout.removeWidget(self.kill_counts_group)
         layout.removeWidget(self.header_complete_chain_button)
+        layout.removeWidget(self.header_ritual_status)
         layout.removeWidget(self._compact_header_status)
         for column, caption, field in zip(self._header_identifier_columns,
                                           self._header_identifier_captions, fields):
@@ -1189,11 +1199,13 @@ class LoggerWindow(QMainWindow):
             self._compact_header_grid.removeWidget(caption)
             self._compact_header_grid.removeWidget(field)
         self._compact_header_grid.removeWidget(self.header_complete_chain_button)
+        self._compact_header_grid.removeWidget(self.header_ritual_status)
         for column in range(5):
             layout.setColumnStretch(column, 0)
         if compact:
             status = self._compact_header_grid
             status.addWidget(self.header_complete_chain_button, 1, 0, Qt.AlignmentFlag.AlignCenter)
+            status.addWidget(self.header_ritual_status, 1, 0, Qt.AlignmentFlag.AlignCenter)
             for index in range(2):
                 status.addWidget(self._header_identifier_captions[index], 0, index + 1,
                                  Qt.AlignmentFlag.AlignCenter)
@@ -1221,6 +1233,7 @@ class LoggerWindow(QMainWindow):
             layout.addLayout(self._header_heading, 0, 0)
             layout.addWidget(self.kill_counts_group, 0, 1, Qt.AlignmentFlag.AlignLeft)
             layout.addWidget(self.header_complete_chain_button, 0, 2, Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(self.header_ritual_status, 0, 2, Qt.AlignmentFlag.AlignCenter)
             layout.addLayout(self._header_identifiers, 0, 3)
             layout.addLayout(self._header_actions, 0, 4)
             layout.setColumnStretch(2, 1)
@@ -3272,6 +3285,7 @@ class LoggerWindow(QMainWindow):
         remnant = state.get("map_remnant_id") or state["current_remnant_id"]
         self.header_remnant_id.setText(header_counter(remnant))
         self.header_remnant_id.setToolTip(remnant or "No remnant recorded")
+        self._sync_header_activity_slot(state)
         self._arrange_header()
         current = state["settings"]["expedition"]
         for control in (self.header_expedition, self.expedition):
@@ -3286,6 +3300,33 @@ class LoggerWindow(QMainWindow):
                 self.header_expedition.setItemText(index,
                     f"{number} · {mid}-E{number:02d}" if mid else str(number))
         select(self.header_expedition, state["settings"]["expedition"])
+
+    def _sync_header_activity_slot(self, state=None):
+        """Show Complete chain for Expedition (and no activity), Ritual's page count for Ritual,
+        and nothing for Abyss or Breach.
+        """
+        state = self.state if state is None else state
+        activity = state["settings"].get("activity_type", "None")
+        slot = ("ritual" if activity == "Ritual" else
+                "chain" if activity in ("None", "Expedition", "Grand Expedition") else "")
+        if slot == "ritual":
+            map_id = state["current_map_id"]
+            pages = len(logger.ritual_pages_for_map(map_id)) if map_id else 0
+            details = []
+            stage = logger.ritual_rite_state()["map_ordinal"]
+            if stage is not None:
+                details.append(f"Rite stage {stage}")
+            if self._ritual_waiting:
+                details.append(f"{len(self._ritual_waiting)} waiting")
+            self.header_ritual_status.setText(
+                f"{map_id or 'No active map'} · {pages} Ritual page{'' if pages == 1 else 's'}"
+                + ("\n" + " · ".join(details) if details else ""))
+        self.header_complete_chain_button.setVisible(slot == "chain")
+        self.header_ritual_status.setVisible(slot == "ritual")
+        if slot != self._header_slot:
+            self._header_slot = slot
+            self._header_arrangement = None
+            self._arrange_header()
 
     def _sync_map_tags(self, config):
         """Mirror saved map tags into both control sets with change signals blocked."""
@@ -3312,6 +3353,7 @@ class LoggerWindow(QMainWindow):
             self._sync_map_tags(self.state["settings"])
             raise
         self._sync_map_tags(self.state["settings"])
+        self._sync_header_activity_slot(self.state)
         self._set_commit_badge(commit_number)
 
     def update_area(self):
@@ -7461,6 +7503,7 @@ class LoggerWindow(QMainWindow):
 
     def _show_ritual_waiting(self):
         """Report the Ritual pages waiting behind the current one."""
+        self._sync_header_activity_slot()
         if self._ritual_waiting:
             count = len(self._ritual_waiting)
             self.statusBar().showMessage(f"{count} Ritual page{'s' if count > 1 else ''} waiting.", 8000)
@@ -8008,6 +8051,7 @@ class LoggerWindow(QMainWindow):
         rewards = sum(len(page["items"]) for page in pages)
         self.ritual_saved.setText(f"{map_id or 'No active map'} · {len(pages)} saved Ritual pages · "
                                   f"{rewards} reward entries")
+        self._sync_header_activity_slot()
 
     def _save_atlas_for_export(self):
         """Save a pending Atlas draft through its existing validated action before spreadsheet export."""
