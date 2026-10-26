@@ -10,6 +10,18 @@ import numpy as np
 from PIL import Image
 
 from PoE2_Data_Logger.ocr import artwork_cache, currency_ocr
+from PoE2_Data_Logger.core import ocr_runtime
+
+_FAST = patch.object(ocr_runtime, "_FAST", False)
+
+
+def setUpModule():
+    """These tests cover the original FFT ranking, so Fast recognition is off here."""
+    _FAST.start()
+
+
+def tearDownModule():
+    _FAST.stop()
 
 
 class ArtworkTransformCacheTests(unittest.TestCase):

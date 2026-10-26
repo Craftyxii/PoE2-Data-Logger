@@ -170,7 +170,13 @@ class RitualRepeatPageTests(unittest.TestCase):
 
     def test_an_unread_roll_count_never_drops_a_page(self):
         self.assertEqual(self.scan(9), 1)
-        self.assertEqual(self.scan(None), 2)
+        # Held as a possible repeat of page 1, never dropped; Approve saves it.
+        self.assertEqual(self.scan(None), 1)
+        self.assertEqual(self.window.pending_review_kind, "ritual")
+        self.assertIn("may repeat M0001 page 1 (9 rolls left)", self.window.ritual_status.text())
+        self.window.approve_review()
+        self.app.processEvents()
+        self.assertEqual(logger.get_state()["scan_commit_count"], 2)
         # The previous page's count is unknown, so nothing can be shown to repeat it.
         self.assertEqual(self.scan(9), 3)
 

@@ -306,6 +306,7 @@ class CurrencyReader:
         self.context.eval("var BANK = " + (ROOT / "currency-icons.json").read_text(encoding="utf-8") + ";")
         self.context.eval("function identifyJSON(s) { return JSON.stringify(CurrencyReader.identify(JSON.parse(s), BANK)); }")
         self.identify = self.context.get("identifyJSON")
+        self._native_identify = self.identify
         # The same bank for the numpy port used by Fast recognition.
         self._identify_bank = json.loads((ROOT / "currency-icons.json").read_text(encoding="utf-8"))
         self.context.eval("module = {exports:{}};")
@@ -342,6 +343,7 @@ class CurrencyReader:
         self.context.eval("function readCountJSON(s) { var p = JSON.parse(s); var v = DigitReader.valueChannelDesatMax(p.data,p.w,p.h); "
                           "return JSON.stringify(DigitReader.readCellAdaptive(v,p.w,p.h,p.cx,p.cy,DIGITS,DigitReader.DEFAULTS,p.scale)); }")
         self.read_count = self.context.get("readCountJSON")
+        self._native_read_count = self.read_count
         # The same templates for the Python port used by Fast recognition.
         self._digit_templates = digit_reader.load_templates(ROOT / "digit-templates.json")
 
@@ -436,7 +438,7 @@ class CurrencyReader:
             corner[:] = np.median(pixels[-3:, :], axis=(0, 1))
             icon = Image.fromarray(pixels)
         icon.thumbnail((72, 72), Image.Resampling.LANCZOS)
-        if ocr_runtime.fast_recognition():
+        if ocr_runtime.fast_recognition() and getattr(self, "_native_identify", None) is self.identify:
             rgba = icon.convert("RGBA")
             result = icon_reader.identify(np.asarray(rgba, dtype=np.uint8).reshape(-1), rgba.width, rgba.height,
                                           self._identify_bank)
@@ -692,7 +694,9 @@ class CurrencyReader:
         image.thumbnail((96, 96), Image.Resampling.LANCZOS)
         # Cache only this independent reader's exact input, including failed
         # readings. Never reuse an icon match or a caller's quantity decision.
-        fast = ocr_runtime.fast_recognition()
+        # A replaced reader (tests, or a custom recogniser) keeps its own path.
+        fast = (ocr_runtime.fast_recognition() and
+                getattr(self, "_native_read_count", None) is self.read_count)
         if fast:
             # The Python reader is thread-safe, so one cache serves a scan's parallel lane too.
             cache, lock = self._shared_counts, self._shared_counts_lock
