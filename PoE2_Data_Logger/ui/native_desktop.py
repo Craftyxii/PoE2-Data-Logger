@@ -7864,6 +7864,8 @@ class LoggerWindow(QMainWindow):
         """Add a Ritual reward draft with capture evidence, unresolved fields, and a tri-state
         Deferred control when its status needs confirmation.
         """
+        if self._ritual_rolls_question is not None:
+            self._ritual_rolls_question["save"] = False
         item = item if isinstance(item, dict) else {}
         row = self.ritual_table.rowCount()
         unresolved = bool(item.get("unresolved") or unresolved_ritual_name(item.get("name")))
@@ -7993,6 +7995,8 @@ class LoggerWindow(QMainWindow):
 
     def _ritual_row_changed(self, item):
         """Synchronize selectors and invalidate acceptance after any reward edit."""
+        if item.column() < 6 and self._ritual_rolls_question is not None:
+            self._ritual_rolls_question["save"] = False
         selector = self.ritual_table.cellWidget(item.row(), 1)
         if item.column() == 0 and selector is not None:
             selector.setProperty("inferredType", None)
@@ -8158,6 +8162,8 @@ class LoggerWindow(QMainWindow):
         row = self.ritual_table.currentRow()
         if row < 0:
             raise ValueError("Select a reward row to remove.")
+        if self._ritual_rolls_question is not None:
+            self._ritual_rolls_question["save"] = False
         self.ritual_table.removeRow(row)
         if self.ritual_table.rowCount() == 0:
             self.ritual_table.hide()

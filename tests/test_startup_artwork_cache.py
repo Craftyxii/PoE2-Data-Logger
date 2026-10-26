@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from PoE2_Data_Logger.core import ocr_runtime
 from PoE2_Data_Logger.core.ritual_catalog import OMEN_NAMES
 from PoE2_Data_Logger.ocr import artwork_cache, currency_ocr, item_ocr, ritual_grid, unique_items
 from tests.test_unique_items import render, temporary_catalog, texture
@@ -103,6 +104,7 @@ class StartupArtworkCacheTests(unittest.TestCase):
         for key, value in transforms.items():
             self.assertIs(artwork_cache._CACHE[key][1], value)
 
+    @patch.object(ocr_runtime, "_FAST", False)
     def test_inventory_and_captured_gray_scan_match_cold_outputs_without_preparing_again(self):
         """Real scanner matching reuses warmed instances and preserves complete results."""
         image = Image.new("RGB", (480, 200), (26, 26, 40))

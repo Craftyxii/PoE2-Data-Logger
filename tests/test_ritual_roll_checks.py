@@ -155,6 +155,54 @@ class RitualRollCheckTests(delivery.RitualSequentialDeliveryTests):
         self.assertEqual(self.pages("M0002"), [(3, 44)])
         self.assertIsNone(self.window.pending_review_kind)
 
+    def test_added_reward_survives_yes_and_waits_for_explicit_review(self):
+        self.read(1, 30)
+        self.read(2, 35)
+        QTest.mouseClick(self.window.ritual_add_row_button, Qt.MouseButton.LeftButton)
+        row = self.window.ritual_table.rowCount() - 1
+        self.window.ritual_table.item(row, 1).setText("Added while choosing map")
+        self.window.ritual_table.item(row, 2).setText("2")
+        QTest.mouseClick(self.window.ritual_new_map_button, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        self.assertEqual(logger.get_state()["current_map_id"], "M0002")
+        self.assertEqual(self.window.pending_review_kind, "ritual")
+        self.assertEqual(logger.ritual_pages_for_map("M0002"), [])
+        self.assertEqual(self.window.ritual_table.item(row, 1).text(), "Added while choosing map")
+        controls = self.window.ritual_table.cellWidget(row, 6)
+        self.assertEqual(controls.property("reviewStatus"), "pending")
+        self.window.review_ritual_row(controls, True)
+        self.click_approve()
+        pages = logger.ritual_pages_for_map("M0002")
+        self.assertEqual(len(pages), 1)
+        self.assertIn({"name": "Added while choosing map", "quantity": 2},
+                      [{"name": item["name"], "quantity": item["quantity"]} for item in pages[0]["items"]])
+
+    def test_edited_reward_survives_yes_and_keeps_its_pending_decision(self):
+        self.read(1, 30)
+        self.read(2, 35)
+        self.window.ritual_table.item(0, 2).setText("9")
+        QTest.mouseClick(self.window.ritual_new_map_button, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        self.assertEqual(self.window.pending_review_kind, "ritual")
+        self.assertEqual(self.window.ritual_table.item(0, 2).text(), "9")
+        self.assertEqual(logger.ritual_pages_for_map("M0002"), [])
+        controls = self.window.ritual_table.cellWidget(0, 6)
+        self.assertEqual(controls.property("reviewStatus"), "pending")
+        self.window.review_ritual_row(controls, True)
+        self.click_approve()
+        self.assertEqual(self.pages("M0002"), [(9, 35)])
+
+    def test_removed_reward_waits_for_review_after_yes(self):
+        self.read(1, 30)
+        self.read(2, 35)
+        self.window.ritual_table.setCurrentCell(0, 1)
+        self.window.remove_ritual_row()
+        QTest.mouseClick(self.window.ritual_new_map_button, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        self.assertEqual(self.window.pending_review_kind, "ritual")
+        self.assertEqual(self.window.ritual_table.rowCount(), 0)
+        self.assertEqual(logger.ritual_pages_for_map("M0002"), [])
+
 
 # The inherited delivery tests already run in their own module.
 for name in [name for name in dir(delivery.RitualSequentialDeliveryTests) if name.startswith("test_")]:

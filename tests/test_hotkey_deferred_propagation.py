@@ -40,6 +40,12 @@ class DeferredPropagationTests(unittest.TestCase):
             return original(*args)
         self.capture_patch = patch.object(self.manager, "_capture", side_effect=capture)
         self.capture_patch.start()
+        original_held = self.manager._grab_held
+        def grab_held(*args):
+            self.threads.append(threading.current_thread())
+            return original_held(*args)
+        self.held_capture_patch = patch.object(self.manager, "_grab_held", side_effect=grab_held)
+        self.held_capture_patch.start()
 
     def tearDown(self):
         self.manager.cancel_capture()
@@ -49,6 +55,7 @@ class DeferredPropagationTests(unittest.TestCase):
                 thread.join(2)
         self.assertTrue(all(not thread.is_alive() for thread in self.threads))
         self.capture_patch.stop()
+        self.held_capture_patch.stop()
         store.DATA_DIR = self.previous
         logger._READY = False
         self.temporary.cleanup()
