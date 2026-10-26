@@ -38,6 +38,8 @@ OCR_SOURCES = (
     "ocr/affix_capture.py",
     "ocr/artwork_cache.py",
     "ocr/currency_ocr.py",
+    "ocr/icon_reader.py",
+    "ocr/digit_reader.py",
     "ocr/digit_kernels.py",
     "ocr/inventory_labels.py",
     "ocr/item_ocr.py",
