@@ -6,9 +6,12 @@ rules. They are metadata, independent of session resets and the undo journal.
 
 import csv
 import io
+import json
+
+from PoE2_Data_Logger.core import ritual_rites_catalog
 
 
-CONTEXT_VERSION = "9"
+CONTEXT_VERSION = "10"
 HEADERS = ("Section", "Topic", "Guidance", "Context Version")
 ENTRIES = (
     ("purpose", "Overview", "How to use this export",
@@ -1178,6 +1181,39 @@ COLUMN_GUIDANCE += (
 ENTRIES += tuple((key, "Field guide", topic,
                   f"Column headers (full-match regular expression): {pattern}. {guidance}")
                  for key, pattern, topic, guidance in COLUMN_GUIDANCE)
+
+ENTRIES += (("affix_definitions", "Stat interpretation", "Affix and Rite affix definitions",
+             "Affix definition rows list every name in the Affix DB at export, one per affix, including names "
+             "learned from scans. unit says what a recorded value means (% roll, count of extra things, seconds, "
+             "or flag 1 for present), unit_basis says where that unit comes from, appears_on lists tablet and/or "
+             "waystone for bundled catalog modifiers (empty for local names), and tablet_maps/tablet_slots count "
+             "use in active tablet slots. Names are modifier wording without rolled numbers; join Tablet N Mod M "
+             "Affix by exact name. Rite affix definition rows list every bundled Rite of the Nameless modifier "
+             "by catalog ID: Map settings ritual_rite_affixes and inherited sources refer to these IDs, and custom "
+             "Rite affixes are described there by their own saved text. A definition row is a dictionary entry, "
+             "not proof that a modifier was active on a map."),)
+
+
+def _rite_affix_definition(affix):
+    """Explain one bundled Rite of the Nameless modifier as published, without inventing mechanics."""
+    scope = {"local": "Applies to the map it is on; it does not carry over to other maps.",
+             "bounty": "A Foretold Bounty: value and unit give the published reward name and amount. "
+                       "It does not carry over to other maps.",
+             "proliferation": "After its map is completed, applies inherited_text to the other remaining maps "
+                              "in the same Rite of the Nameless."}[affix["kind"]]
+    return json.dumps({
+        "id": affix["id"], "text": affix["text"], "kind": affix["kind"], "effect_scope": scope,
+        "proliferates": affix["kind"] == "proliferation", "inherited_text": affix["inherited_text"] or None,
+        "stat_id": affix["stat_id"], "value": affix["value"], "unit": affix["unit"],
+        "translation_status": affix["translation_status"],
+        "translation_note": ("raw stat label: wording and value are kept as published, without a translated effect"
+                             if affix["translation_status"] == "raw_untranslated" else None),
+        "source_urls": affix["provenance"]["source_urls"],
+        "source_verified": affix["provenance"]["source_verified"]}, ensure_ascii=False, separators=(",", ":"))
+
+
+ENTRIES += tuple((f"rite-affix:{affix['id']}", "Rite affix definition", affix["text"], _rite_affix_definition(affix))
+                 for affix in ritual_rites_catalog.affixes())
 
 
 def initialize(db):

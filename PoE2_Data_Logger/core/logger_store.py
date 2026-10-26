@@ -22,7 +22,8 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
-from PoE2_Data_Logger.core import analysis_context, ritual_counters, ritual_rite_store, store, undo_store
+from PoE2_Data_Logger.core import (analysis_context, analysis_context_data, ritual_counters, ritual_rite_store,
+                                   store, undo_store)
 from PoE2_Data_Logger.ocr.affix_capture import affix_catalog, affix_key, affix_unit, modifier_value, tablet_random_mod_counts
 
 
@@ -668,6 +669,7 @@ def initialize():
                 _set_meta(db, "settings", config)
             _register_atlas_snapshot(db, _atlas_snapshot(config))
             _initialize_tablet_sets(db)
+            analysis_context_data.refresh_affix_terms(db)
         _READY = True
 
 
@@ -1317,6 +1319,8 @@ def _save_settings(db, data, *, confirmed_affixes=()):
         if not isinstance(name, str) or not name.strip() or len(name) > 120 or "%" in name:
             raise ValueError("Review the tablet affix name before saving.")
         db.execute("INSERT OR IGNORE INTO affixes(name) VALUES(?)", (name.strip(),))
+    if confirmed_affixes:
+        analysis_context_data.refresh_affix_terms(db)
     c = _validate_settings(db, data)
     source = _meta(db, "settings")
     current = _meta(db, "current_map_number", 0)
@@ -1416,6 +1420,7 @@ def add_affix(name):
         raise ValueError("Enter an affix name under 120 characters.")
     with _connect(undo_label="Affix reference") as db:
         db.execute("INSERT OR IGNORE INTO affixes VALUES(?)", (name,))
+        analysis_context_data.refresh_affix_terms(db)
     return get_state()
 
 
@@ -1440,6 +1445,8 @@ def add_affixes(names, *, record_undo=True, units=None):
                    if units.get(name) in ("count", "seconds", "flag") and units[name] != affix_unit(name)}
         if learned:
             _set_meta(db, "affix_units", {**_meta(db, "affix_units", {}), **learned})
+        if added:
+            analysis_context_data.refresh_affix_terms(db)
     return added
 
 

@@ -33,7 +33,7 @@ The working-source Excel export contains nine worksheets:
 | Export | Map totals, activity/recipe rows and acquired item columns |
 | Atlas Character Settings | Saved Atlas setups, gear rarity and linked Map IDs |
 | Scan History | Scan approvals, corrections, offers and audit records |
-| Analysis Context | Field definitions, units, counting rules, joins, saved Atlas effects, scoped totals and analysis limits |
+| Analysis Context | Field definitions, units, counting rules, joins, every affix and Rite affix, saved Atlas effects, scoped totals and analysis limits |
 | Family Database | Current family membership, recipe IDs, family order and rune combinations |
 | Recipe Database | Current recipe definitions and retained identities for retired recipes |
 | Seed Database | Reference seed sockets, rune labels and reward mappings |

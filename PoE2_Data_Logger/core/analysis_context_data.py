@@ -171,6 +171,22 @@ VIEWS = {
             ) AS guidance
         FROM maps m LEFT JOIN map_unique_kills u ON u.map_id=m.map_id
     """,
+    "analysis_context_affix_definitions": """
+        SELECT a.name AS affix,COALESCE(l.value,t.unit,'%') AS unit,
+               CASE WHEN l.value IS NOT NULL THEN 'scanned unit kept when the name was learned'
+                    WHEN t.unit_basis='catalog' THEN 'bundled modifier catalog'
+                    WHEN t.unit_basis='wording' THEN 'inferred from the wording'
+                    ELSE 'percent by default' END AS unit_basis,
+               t.catalog_name,COALESCE(t.appears_on_json,'[]') AS appears_on_json,
+               COALESCE(t.source,'local name, added from a scan, typed by the user or kept from an earlier version') AS source,
+               COALESCE(u.maps,0) AS tablet_maps,COALESCE(u.slots,0) AS tablet_slots
+        FROM affixes a
+        LEFT JOIN analysis_context_affix_terms t ON t.name=a.name
+        LEFT JOIN (SELECT j.key,j.value FROM meta m,json_each(m.value) j WHERE m.key='affix_units') l
+             ON l.key=a.name
+        LEFT JOIN (SELECT affix,COUNT(DISTINCT map_id) AS maps,COUNT(*) AS slots
+                   FROM analysis_context_tablet_values GROUP BY affix) u ON u.affix=a.name
+    """,
     "analysis_context_metric_totals": """
         SELECT v.key AS metric,COUNT(*) AS map_count,
                SUM(CASE WHEN v.type IN ('integer','real') THEN 1 ELSE 0 END) AS known_maps,
@@ -196,6 +212,11 @@ def initialize(db, context_version):
                "rule_key TEXT PRIMARY KEY,position INTEGER NOT NULL,source_hashes_json TEXT NOT NULL,"
                "stat_id TEXT NOT NULL,min_raw REAL,max_raw REAL,divisor REAL NOT NULL,"
                "multiplier REAL NOT NULL,template TEXT NOT NULL,unit TEXT NOT NULL,number_format TEXT NOT NULL)")
+    # Affix terms describe each Affix DB name with the logger's own unit rules, so the
+    # context views need no application code; refresh_affix_terms keeps them current.
+    db.execute("CREATE TABLE IF NOT EXISTS analysis_context_affix_terms (name TEXT PRIMARY KEY,"
+               "unit TEXT NOT NULL,unit_basis TEXT NOT NULL,catalog_name TEXT,appears_on_json TEXT NOT NULL,"
+               "source TEXT NOT NULL)")
     rules = linear_stat_rules()
     db.executemany("INSERT INTO analysis_context_stat_rules VALUES(?,?,?,?,?,?,?,?,?,?,?) "
                    "ON CONFLICT(rule_key) DO UPDATE SET position=excluded.position "
@@ -214,6 +235,34 @@ def initialize(db, context_version):
     _view(db, "analysis_context_complete", _complete_view(context_version))
 
 
+def refresh_affix_terms(db):
+    """Describe every Affix DB name: its unit, where that unit comes from and its catalog entry.
+
+    Terms depend only on the name and the bundled catalog, so rows for names that
+    Undo removes can stay; the definitions view lists only names in the Affix DB.
+    """
+    import json
+    from pathlib import Path
+    from PoE2_Data_Logger.ocr.affix_capture import affix_catalog, affix_key, affix_unit, affix_unit_basis
+
+    catalog = json.loads((Path(__file__).resolve().parent.parent / "affix_catalog.json").read_text(encoding="utf-8"))
+    bundled = (f"PoE2DB modifier catalog bundled with the logger ({', '.join(catalog['sources'])}; "
+               f"retrieved {catalog['retrieved']})")
+    entries = {affix_key(item["name"]): item for item in affix_catalog()}
+    rows = []
+    for (name,) in db.execute("SELECT name FROM affixes"):
+        entry = entries.get(affix_key(name))
+        rows.append((name, affix_unit(name), affix_unit_basis(name), entry["name"] if entry else None,
+                     json.dumps(sorted(entry["kinds"]) if entry else []), bundled if entry else
+                     "local name, added from a scan, typed by the user or kept from an earlier version"))
+    db.executemany("INSERT INTO analysis_context_affix_terms VALUES(?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET "
+                   "unit=excluded.unit,unit_basis=excluded.unit_basis,catalog_name=excluded.catalog_name,"
+                   "appears_on_json=excluded.appears_on_json,source=excluded.source "
+                   "WHERE unit IS NOT excluded.unit OR unit_basis IS NOT excluded.unit_basis "
+                   "OR catalog_name IS NOT excluded.catalog_name OR appears_on_json IS NOT excluded.appears_on_json "
+                   "OR source IS NOT excluded.source", rows)
+
+
 def _view(db, name, body):
     """Replace only changed context-owned definitions; reads require no application functions."""
     statement = f"CREATE VIEW {name} AS {body.strip()}"
@@ -230,6 +279,22 @@ def _complete_view(version):
         raise ValueError("Context version must be numeric.")
     return f"""
         SELECT key,position,section,topic,guidance,context_version FROM analysis_context
+        UNION ALL SELECT 'affix:'||affix,999,'Affix definition',affix,
+            json_object('affix',affix,'unit',unit,
+                'unit_meaning',CASE unit
+                    WHEN '%' THEN 'Value is a percentage roll: 25 means 25%, applied as the wording says (increased, chance, more). Compare it only with the same affix.'
+                    WHEN 'count' THEN 'Value is a whole number of extra things the modifier adds, such as 2 additional packs or encounters.'
+                    WHEN 'seconds' THEN 'Value is a duration in seconds.'
+                    WHEN 'flag' THEN 'Value 1 records that the modifier is present; it has no size.'
+                    ELSE 'Unit '||unit||' as recorded with each value.' END,
+                'unit_basis',unit_basis,'catalog_name',catalog_name,'appears_on',json(appears_on_json),'source',source,
+                'recorded_in','Tablets: Tablet N Mod M Affix with its Value and Unit, summed per map in Tablet stat total rows. '
+                    ||'Waystones: the full modifier text with its rolled number in Map Modifiers and Map Mod 1-10.',
+                'tablet_maps',tablet_maps,'tablet_slots',tablet_slots,
+                'scope','Affix DB name at export. tablet_maps/tablet_slots count active tablet slots holding this exact '
+                    ||'name across created maps; they describe use, not effect strength. Waystone use is read from the text.'),
+            '{version}'
+            FROM analysis_context_affix_definitions
         UNION ALL SELECT 'setup:'||s.setup_id,1000,'Atlas setup',s.setup_id,
             json_object('setup_id',s.setup_id,'catalog_id',s.catalog_id,'catalog_version',s.catalog_version,
                 'is_current',json(CASE WHEN s.is_current THEN 'true' ELSE 'false' END),

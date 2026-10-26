@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Explain every affix in the Analysis Context sheet. It named only 7 of the 164 affixes in the Affix DB; it now has one row per affix, including names learned from scans: its unit and what a value in that unit means (a % roll, a count of extra things, seconds, or 1 for present), where the unit comes from, whether it appears on tablets or waystones, its source, the columns that record it, and how many of your maps used it on a tablet. All 73 Rite of the Nameless affixes are listed too, with their kind, value, unit and whether they carry over to the Rite's other maps. A raw SQLite export carries the same rows.
+
 ## 1.3.2.32 Beta
 
 - Never lose a Ritual page scanned while another is being read or waits for review. The newer scan used to replace it, so the earlier page was never saved. Now it waits in line: up to two pages wait behind the current one and are read in the order they were taken, each checked against the page saved before it. A third press says "Two Ritual pages are already waiting. Approve or reject the current page, then scan again." and saves nothing. The status bar shows how many pages wait. A waiting page stays first in line until it is read, even if the database is busy at that moment.

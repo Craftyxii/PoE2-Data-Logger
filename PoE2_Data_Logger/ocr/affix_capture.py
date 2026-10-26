@@ -87,6 +87,11 @@ def affix_unit(name):
     return catalog_unit(name) or _worded_unit(name) or "%"
 
 
+def affix_unit_basis(name):
+    """Say where affix_unit's answer comes from: the bundled catalog, the wording or the % default."""
+    return "catalog" if catalog_unit(name) else "wording" if _worded_unit(name) else "default"
+
+
 def flag_unit_allowed(name):
     """Allow a flag reading for catalog flags and learned names whose wording implies no value."""
     unit = catalog_unit(name)
