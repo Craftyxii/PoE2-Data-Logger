@@ -54,10 +54,11 @@ class ScanContextTests(unittest.TestCase):
         """Build one confident Chaos Orb inventory reading with the supplied quantity."""
         return {"items": [{"slot": 1, "name": "Chaos Orb", "quantity": quantity}], "unknown": []}
 
-    def ritual_result(self, name="Reward"):
+    def ritual_result(self, name="Reward", rerolls=None):
         """Build one confident named Ritual reward and its raw OCR text."""
         return {"items": [{"category": "Item", "name": name, "quantity": 1,
-                           "tribute": 10, "source": name, "score": 1}], "raw_text": name}
+                           "tribute": 10, "source": name, "score": 1}], "raw_text": name,
+                "rerolls_remaining": rerolls}
 
     def capture_inventory(self, phase="start", live=False, color=(10, 20, 30)):
         """Start a synthetic inventory capture in the requested phase and return its callback."""
@@ -254,12 +255,13 @@ class ScanContextTests(unittest.TestCase):
         self.window.refresh()
         older, older_fingerprint = self.capture_ritual(live=True)
         _, fingerprint = self.capture_ritual((30, 20, 10), live=True)
-        older(self.ritual_result("Old reward"))
+        # Each page reads its rolls left; a later page with unread rolls would wait for review.
+        older(self.ritual_result("Old reward", 10))
         self.window._start_waiting_ritual_page()
         newer = self.callbacks[-1]
-        older(self.ritual_result("Old reward"))
-        newer(self.ritual_result("Latest reward"))
-        older(self.ritual_result("Old reward"))
+        older(self.ritual_result("Old reward", 10))
+        newer(self.ritual_result("Latest reward", 9))
+        older(self.ritual_result("Old reward", 10))
         self.assertEqual(self.ritual_fingerprints(), [older_fingerprint, fingerprint])
         self.assertEqual(logger.get_state()["scan_commit_count"], 2)
 

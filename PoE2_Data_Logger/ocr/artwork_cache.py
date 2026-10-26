@@ -128,6 +128,117 @@ class _GrayCorrelation:
         return cv2.divide(result, self.normalizer * np.float32(norm))
 
 
+class _ShiftRanking:
+    """Rank 48x48 atlas candidates over the 9x9 translations the inventory ranking reads.
+
+    The masked RGB squared difference at one translation is
+    sum(mask^2 * source^2) - 2 * sum(mask^2 * query * source) + norm. A float32
+    matrix product estimates it for every candidate and translation, with a
+    proven error bound; candidates that could rank among the best families are
+    then computed exactly as OpenCV does (float64 sums rounded to float32 per
+    channel, float32 channel sums, addWeighted), so their values are the same.
+    """
+
+    SHIFTS = tuple((dy, dx) for dy in range(9) for dx in range(9))
+    # Rounding bound of a float32 dot product over 6912 nonnegative terms, with margin.
+    GAMMA = 4 * 6912 * 2.0 ** -24 * 1.01
+
+    def __init__(self, source):
+        """Lay out each candidate's pixels and squared pixels as rows, channel by channel."""
+        count = source.shape[0] // 48
+        blocks = np.moveaxis(source.reshape(count, 48, 48, 3), 3, 1)
+        squares = np.moveaxis(np.multiply(source, source).reshape(count, 48, 48, 3), 3, 1)
+        self.values = np.ascontiguousarray(blocks.reshape(count, 3 * 2304))
+        self.squares = np.ascontiguousarray(squares.reshape(count, 3 * 2304))
+        self.square_sums = np.ascontiguousarray(
+            squares.astype(np.float64).sum(axis=1).reshape(count, 2304).astype(np.float32))
+        self.count = count
+        self.nbytes = self.values.nbytes + self.squares.nbytes + self.square_sums.nbytes
+
+    @classmethod
+    def _kernels(cls, plane):
+        """Place a 40x40 plane at each translation of a 48x48 block, one row per translation."""
+        out = np.zeros((len(cls.SHIFTS), 48, 48), dtype=plane.dtype)
+        for index, (dy, dx) in enumerate(cls.SHIFTS):
+            out[index, dy:dy + 40, dx:dx + 40] = plane
+        return out.reshape(len(cls.SHIFTS), 2304)
+
+    def _exact(self, rows, template, squared_mask, norm):
+        """Masked squared differences of the chosen candidates in OpenCV's arithmetic order."""
+        mask_kernel = self._kernels(squared_mask).astype(np.float64)
+        cross = squared = None
+        for channel in range(3):
+            columns = slice(channel * 2304, (channel + 1) * 2304)
+            plane = self._kernels(template[:, :, channel]).astype(np.float64)
+            products = (self.values[rows, columns].astype(np.float64) @ plane.T).astype(np.float32)
+            powers = (self.squares[rows, columns].astype(np.float64) @ mask_kernel.T).astype(np.float32)
+            cross = products if cross is None else cv2.add(cross, products)
+            squared = powers if squared is None else cv2.add(squared, powers)
+        return cv2.addWeighted(cross, -2, squared, 1, norm)
+
+    def minima(self, query, mask, families, keep=8):
+        """Return each candidate's least error over the translations.
+
+        Every candidate that can affect the best ``keep`` families gets OpenCV's
+        exact value; any other gets a lower bound above all of theirs.
+        """
+        repeated = np.repeat(mask[:, :, None], 3, axis=2)
+        squared_mask = np.multiply(mask, mask)
+        norm = cv2.norm(np.multiply(query, repeated), cv2.NORM_L2SQR)
+        template = np.multiply(query, squared_mask[:, :, None])
+        planes = np.concatenate([self._kernels(template[:, :, channel]) for channel in range(3)], axis=1)
+        cross = (self.values @ planes.T).astype(np.float64)
+        squared = (self.square_sums @ self._kernels(squared_mask).T).astype(np.float64)
+        bound = self.GAMMA * (squared + 2 * cross) + 1 + 1e-5 * norm
+        lower = (squared - 2 * cross + norm - bound).min(axis=1)
+        order = np.argsort(lower, kind="stable")
+        minima = lower.copy()
+        best = {}
+        for start in range(0, self.count, 16):
+            rows = order[start:start + 16]
+            if len(best) >= keep:
+                limit = sorted(best.values())[keep - 1]
+                rows = rows[lower[rows] <= limit]
+                if not len(rows):
+                    break
+            values = self._exact(rows, template, squared_mask, norm).min(axis=1)
+            for row, value in zip(rows, values):
+                minima[row] = value
+                best[families[row]] = min(best.get(families[row], np.inf), float(value))
+        return minima
+
+
+_SHIFT_BANKS = {}
+
+
+def shift_minima(source, query, mask, families, *, keep=8):
+    """Least masked RGB error per 48-row atlas candidate over its 9x9 translations.
+
+    The same values as ``match(...)[indices].min()`` for every candidate that can
+    rank among the best ``keep`` families. Returns None when the inputs are not
+    the immutable atlas and finite float32 query this was proven for.
+    """
+    if not _eligible(source, query, mask, cv2.TM_SQDIFF) or len(families) != source.shape[0] // 48:
+        return None
+    with _LOCK:
+        for key in [key for key, (reference, _) in _SHIFT_BANKS.items() if reference() is None]:
+            del _SHIFT_BANKS[key]
+        entry = _SHIFT_BANKS.get(id(source))
+        if entry is None or entry[0]() is not source:
+            entry = (weakref.ref(source), _ShiftRanking(source))
+            _SHIFT_BANKS[id(source)] = entry
+        bank = entry[1]
+    return bank.minima(query, mask, families, keep)
+
+
+def prepare_shifts(source):
+    """Build the translation bank for an atlas at startup."""
+    mask = np.ones((40, 40), np.float32)
+    if _eligible_source(source, mask, cv2.TM_SQDIFF):
+        shift_minima(source, np.full((40, 40, 3), 26, np.float32), mask,
+                     tuple(range(source.shape[0] // 48)))
+
+
 def _eligible_source(source, mask, method):
     """Restrict preparation to immutable catalog atlases and the pinned CPU kernel."""
     if (cv2.__version__ != "4.10.0" or not isinstance(source, np.ndarray) or

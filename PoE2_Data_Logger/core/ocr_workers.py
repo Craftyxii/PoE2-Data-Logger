@@ -17,6 +17,9 @@ from PoE2_Data_Logger.core import ocr_runtime, store
 MAX_WORKERS = 2
 MAX_QUEUED = 2
 SCAN_TIMEOUT_SECONDS = 90
+# A cancelled reading finishes in the background (its result is discarded) so its loaded
+# worker stays ready; one still running this long after the cancellation is stopped.
+CANCELLED_GRACE_SECONDS = 20
 POLL_INTERVAL = .025
 SHUTDOWN_JOIN_SECONDS = 3
 _BROKER = None
@@ -27,6 +30,14 @@ _BROKER_LOCK = threading.Lock()
 def _data_directory():
     """Capture the profile path without initializing OCR or starting a child on the GUI thread."""
     return str(store.DATA_DIR)
+
+
+def _fast_recognition():
+    """Freeze the Fast recognition preference with the scan; an unreadable profile keeps it on."""
+    try:
+        return ocr_runtime.saved_fast_recognition()
+    except Exception:
+        return True
 
 
 @dataclass(frozen=True)
@@ -40,6 +51,7 @@ class Request:
     cpu_threads: int = field(default_factory=ocr_runtime.active_threads)
     deadline: float | None = None
     prepare_artwork: bool = False
+    fast_recognition: bool = field(default_factory=_fast_recognition)
 
     def __call__(self):
         """Support captured test/UI work callbacks through the same bounded child transport."""
@@ -75,13 +87,17 @@ def run(function, *args, **kwargs):
 
 
 def _prepare_artwork():
-    """Fill the recognition banks and load the text models in this child without capturing pixels."""
+    """Fill the recognition banks, load the text models and read the bundled warm-up captures
+    in this child, so its first real scan is as fast as later ones. Nothing is captured.
+    """
     import os
     from PoE2_Data_Logger.core import logger_store as logger
     from PoE2_Data_Logger.ocr import item_ocr
 
-    item_ocr.prepare_artwork(logger.inventory_icons(), logger.ritual_icons())
+    inventory, ritual = logger.inventory_icons(), logger.ritual_icons()
+    item_ocr.prepare_artwork(inventory, ritual)
     item_ocr.warm_text_models()
+    item_ocr.warm_scans(inventory, ritual, logger.ritual_names())
     return os.getpid()
 
 
@@ -103,6 +119,7 @@ def _child_loop(connection, data_dir, cpu_threads, artwork_preload=None):
                 work = pickle.load(source)
             previous_tempdir = tempfile.tempdir
             tempfile.tempdir = str(root)
+            ocr_runtime._FAST = work.fast_recognition
             try:
                 try:
                     preparing = artwork_preload is not None and work.function is artwork_preload.function
@@ -145,8 +162,14 @@ class _OCRFuture(Future):
     """Allow cancellation of an active native reader because its owned process can be terminated."""
 
     def __init__(self, wake):
-        """Keep active state separate from Future's noncancellable RUNNING state."""
+        """Keep active state separate from Future's noncancellable RUNNING state.
+
+        The timestamps say how long a scan waited for a worker and how long it was read.
+        """
         super().__init__()
+        self.submitted_at = time.monotonic()
+        self.started_at = self.finished_at = None
+        self.loading = False
         self._active = False
         self._wake = wake
         self._cancel_notification_lock = threading.Lock()
@@ -175,6 +198,7 @@ def _complete(future, value=None, error=None):
     """Publish a result only when concurrent cancellation has not already retired this admission."""
     if future.done():
         return
+    future.finished_at = time.monotonic()
     try:
         if error is not None:
             future.set_exception(error)
@@ -213,6 +237,8 @@ class _Broker:
         self.sequence = 0
         self.preload_work = None
         self.preload_futures = ()
+        # A worker is ready once its models and artwork are loaded.
+        self.ready = [False] * MAX_WORKERS
         self.threads = [threading.Thread(target=self._serve, args=(index,), name=f"poe2-ocr-supervisor-{index}",
                                          daemon=True) for index in range(MAX_WORKERS)]
         self.threads.append(threading.Thread(target=self._watch_queue, name="poe2-ocr-admission-watchdog",
@@ -230,6 +256,7 @@ class _Broker:
         """Admit at most two running and two waiting requests, rejecting overflow immediately."""
         future = _OCRFuture(self._cancelled)
         with self.condition:
+            future.loading = self.preload_work is not None and not any(self.ready)
             if self.closing:
                 _complete(future, error=RuntimeError("OCR workers are shutting down. Scan again."))
             elif len(self.queue) + len(self.active) >= MAX_WORKERS + MAX_QUEUED:
@@ -273,11 +300,72 @@ class _Broker:
             for _, future, _, _, _ in expired:
                 _complete(future, error=TimeoutError("OCR timed out before recognition could start."))
 
+    def loading(self):
+        """Report whether recognition is still loading in every worker."""
+        with self.condition:
+            return self.preload_work is not None and not any(self.ready)
+
+    def _spawn(self, context, preload):
+        """Start one reader child and close the parent's copy of its pipe end."""
+        spawn = multiprocessing.get_context("spawn")
+        connection, child_connection = spawn.Pipe()
+        process = spawn.Process(target=_child_loop, args=(child_connection, *context, preload), daemon=True,
+                                name="poe2-ocr-worker")
+        try:
+            process.start()
+        except BaseException:
+            _stop_child(process, connection)
+            raise
+        finally:
+            child_connection.close()
+        return process, connection
+
+    def _warm(self, index, preload):
+        """Load a replacement child's models and artwork now, so no scan has to wait for it.
+
+        A failed bulk preparation keeps the child with its usual on-demand loading, as at
+        startup. Return the child, or Nones when it could not start; a scan then starts one.
+        """
+        context = (preload.data_dir, preload.cpu_threads)
+        process = connection = None
+        try:
+            process, connection = self._spawn(context, preload)
+            with tempfile.TemporaryDirectory(prefix="poe2-ocr-job-") as directory:
+                with (Path(directory) / "request.pkl").open("wb") as destination:
+                    pickle.dump(preload, destination, protocol=pickle.HIGHEST_PROTOCOL)
+                connection.send((0, directory))
+                deadline = time.monotonic() + SCAN_TIMEOUT_SECONDS
+                while not self.closing and time.monotonic() < deadline and process.is_alive():
+                    if connection.poll(POLL_INTERVAL):
+                        if connection.recv() != 0:
+                            break
+                        with (Path(directory) / "response.pkl").open("rb") as source:
+                            status, _ = pickle.load(source)
+                        if status not in ("result", "error"):
+                            break
+                        with self.condition:
+                            self.ready[index] = True
+                        return process, connection, context, preload
+        except Exception:
+            pass
+        _stop_child(process, connection)
+        return None, None, None, None
+
     def _serve(self, index):
-        """Reuse a healthy child, but terminate failed, cancelled or overdue work before accepting more."""
+        """Reuse a healthy child; replace a crashed or overdue one at once with a loaded child.
+
+        A cancelled reading finishes and its result is discarded, so the loaded child stays.
+        """
         process = connection = context = process_preload = None
+        replace = False
         try:
             while True:
+                if replace and not self.closing:
+                    replace = False
+                    with self.condition:
+                        preload = self.preload_work
+                    if preload is not None:
+                        process, connection, context, process_preload = self._warm(index, preload)
                 with self.condition:
                     selected = None
                     while not self.closing:
@@ -292,6 +380,7 @@ class _Broker:
                     del self.queue[selected]
                     self.active[job_id] = future
                     future._active = True
+                    future.started_at = time.monotonic()
                 healthy = True
                 try:
                     if future.cancelled():
@@ -308,6 +397,8 @@ class _Broker:
                                                 or not process.is_alive()):
                         _stop_child(process, connection)
                         process = connection = None
+                        with self.condition:
+                            self.ready[index] = False
                     with tempfile.TemporaryDirectory(prefix="poe2-ocr-job-") as directory:
                         with (Path(directory) / "request.pkl").open("wb") as destination:
                             pickle.dump(work, destination, protocol=pickle.HIGHEST_PROTOCOL)
@@ -317,23 +408,21 @@ class _Broker:
                             _complete(future, error=TimeoutError("OCR timed out while preparing its inputs."))
                             continue
                         if process is None:
-                            spawn = multiprocessing.get_context("spawn")
-                            connection, child_connection = spawn.Pipe()
-                            process = spawn.Process(target=_child_loop,
-                                                    args=(child_connection, *next_context, preload), daemon=True,
-                                                    name="poe2-ocr-worker")
-                            try:
-                                process.start()
-                            finally:
-                                child_connection.close()
+                            process, connection = self._spawn(next_context, preload)
                             context = next_context
                             process_preload = preload
                         healthy = False
                         connection.send((job_id, directory))
+                        cancelled_at = None
                         while True:
-                            if self.closing or future.cancelled():
+                            if self.closing:
                                 break
-                            remaining = deadline - time.monotonic()
+                            now = time.monotonic()
+                            if future.cancelled():
+                                cancelled_at = cancelled_at or now
+                                if now - cancelled_at >= CANCELLED_GRACE_SECONDS:
+                                    break
+                            remaining = deadline - now
                             if remaining <= 0:
                                 _complete(future, error=TimeoutError("OCR timed out. Scan again."))
                                 break
@@ -343,6 +432,10 @@ class _Broker:
                                 with (Path(directory) / "response.pkl").open("rb") as source:
                                     status, answer = pickle.load(source)
                                 healthy = True
+                                if process_preload is not None and (work.function is process_preload.function
+                                                                    or work.prepare_artwork):
+                                    with self.condition:
+                                        self.ready[index] = True
                                 if status == "error":
                                     _complete(future, error=answer)
                                 elif status == "result":
@@ -355,6 +448,7 @@ class _Broker:
                         if not healthy:
                             _stop_child(process, connection)
                             process = connection = None
+                            replace = True
                 except Exception as error:
                     if isinstance(error, (EOFError, BrokenPipeError)):
                         error = RuntimeError("OCR worker stopped unexpectedly. Scan again.")
@@ -362,9 +456,12 @@ class _Broker:
                     if process is not None:
                         _stop_child(process, connection)
                         process = connection = None
+                        replace = True
                 finally:
                     future._active = False
                     with self.condition:
+                        if process is None:
+                            self.ready[index] = False
                         self.active.pop(job_id, None)
                         self.condition.notify_all()
                     # Avoid retaining the previous screenshot/reference bank
@@ -410,6 +507,13 @@ def preload_artwork():
         if _BROKER is None:
             _BROKER = _Broker()
         return _BROKER.preload(work)
+
+
+def loading():
+    """Report whether recognition is still loading in every worker (at start or after a crash)."""
+    with _BROKER_LOCK:
+        broker = _BROKER
+    return broker is not None and broker.loading()
 
 
 def shutdown(wait=False):

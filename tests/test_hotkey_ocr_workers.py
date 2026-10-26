@@ -35,6 +35,11 @@ class HotkeyOCRWorkerTests(unittest.TestCase):
     def setUp(self):
         """Create an isolated profile and reserve captures without invoking screenshot or game adapters."""
         ocr_workers.shutdown(wait=True)
+        # A cancelled reading may finish in the background; these never-ending readers are
+        # stopped after this.
+        self.grace_patch = patch.object(ocr_workers, "CANCELLED_GRACE_SECONDS", .2)
+        self.grace_patch.start()
+        self.addCleanup(self.grace_patch.stop)
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-hotkey-worker-")
         self.previous = store.DATA_DIR
         store.DATA_DIR = Path(self.tmp.name)

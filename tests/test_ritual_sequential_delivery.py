@@ -1,6 +1,7 @@
 """Save sequential Ritual pages while ordinary captures keep latest-only delivery.
 
-A Ritual page being read or reviewed is never replaced: later pages wait in order.
+A Ritual page being read or reviewed is never replaced: later pages wait in order,
+including pages taken before the window collected the previous one.
 
 Recognition is injected through Futures; these tests do not measure OCR accuracy.
 """
@@ -12,9 +13,8 @@ import json
 import os
 from pathlib import Path
 import tempfile
-import threading
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -58,6 +58,8 @@ class RitualSequentialDeliveryTests(unittest.TestCase):
         self.app.processEvents()
         self.futures = []
         self.requests = []
+        # Rolls only go down on a map; each completed page reads one roll fewer.
+        self.rolls = 500
         self.submit_patch = patch.object(ui.ocr_workers, "submit", side_effect=self.submit)
         self.submit_patch.start()
 
@@ -94,15 +96,16 @@ class RitualSequentialDeliveryTests(unittest.TestCase):
         return event
 
     @staticmethod
-    def reading(quantity, *, needs_review=False):
+    def reading(quantity, *, needs_review=False, rerolls=None):
         return {"items": [{"category": "Item", "name": "Ritual Delivery Reward", "quantity": quantity,
                            "tribute": 100, "source": "text OCR", "deferred": False,
                            "score": .99, "name_match": 1, "needs_review": needs_review}],
-                "raw_text": f"Injected page {quantity}", "reward_count": 1,
+                "raw_text": f"Injected page {quantity}", "reward_count": 1, "rerolls_remaining": rerolls,
                 "needs_review": needs_review, "coverage_uncertain": False}
 
     def complete(self, index, quantity, *, needs_review=False):
-        self.futures[index].set_result(self.reading(quantity, needs_review=needs_review))
+        self.rolls -= 1
+        self.futures[index].set_result(self.reading(quantity, needs_review=needs_review, rerolls=self.rolls))
         self.app.processEvents()
 
     @staticmethod
@@ -150,21 +153,30 @@ class RitualSequentialDeliveryTests(unittest.TestCase):
                          ("11", "22", "33", "44"))
         self.assertIsNone(self.manager.next_event(self.window._latest_hotkey))
 
-    def test_burst_before_poll_delivers_only_latest_ritual(self):
+    def test_burst_before_poll_saves_every_page_in_order(self):
+        """Pages finished before the window collects them are all kept, oldest first."""
+        logger.save_settings({"activity_type": "Ritual"})
+        self.window.refresh()
         first, second, latest = self.publish(1), self.publish(2), self.publish(3)
-        self.assertIsNone(self.manager.image(first["id"]))
-        self.assertIsNone(self.manager.image(second["id"]))
-        self.assertEqual(self.manager.next_event()["id"], latest["id"])
-        self.window.poll()
+        for event in (first, second, latest):
+            self.assertIsNotNone(self.manager.image(event["id"]))
+        self.assertEqual(self.manager.next_event()["id"], first["id"])
+        self.assertEqual(self.manager.status()["held_ritual"], 3)
+        for _ in range(3):
+            self.window.poll()
         self.assertEqual(len(self.futures), 1)
         self.assertEqual(self.window._latest_hotkey, latest["id"])
         self.assertEqual(self.window._ritual_capture_context["scan_hash"],
-                         hashlib.sha256(Image.open(io.BytesIO(self.png(3))).tobytes()).hexdigest())
-        self.complete(0, 3)
-        self.window.poll()
-        self.assertEqual(len(self.futures), 1)
-        self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [3])
+                         hashlib.sha256(Image.open(io.BytesIO(self.png(1))).tobytes()).hexdigest())
+        self.assertEqual(len(self.window._ritual_waiting), 2)
+        self.assertIn("2 waiting", self.window.header_ritual_status.text())
+        for index in range(3):
+            self.complete(index, index + 1)
+            self.window.poll()
+        self.assertEqual(len(self.futures), 3)
+        self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [1, 2, 3])
         self.assertIsNone(self.manager.next_event(self.window._latest_hotkey))
+        self.assertEqual(self.manager.status()["held_ritual"], 0)
 
     def test_later_ritual_waits_behind_held_page_and_both_save(self):
         self.publish(1)
@@ -213,25 +225,34 @@ class RitualSequentialDeliveryTests(unittest.TestCase):
         self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [1, 2])
         self.assertEqual([c["items"][0]["quantity"] for c in self.ritual_commits()], [1, 2])
 
-    def test_reject_latest_page_discards_unpolled_burst(self):
+    def test_reject_keeps_later_pages_and_a_fourth_page_is_refused(self):
+        """Reject drops only the open page; one open page plus two waiting is the limit."""
         self.publish(1)
         self.publish(2)
         latest = self.publish(3)
-        self.window.poll()
-        self.assertEqual(self.window._latest_hotkey, latest["id"])
-        self.complete(0, 3, needs_review=True)
-        self.assertEqual(self.window.pending_review_kind, "ritual")
-        self.publish(4)
-        self.publish(5)
-        QTest.mouseClick(self.window.reject_scan_button, Qt.MouseButton.LeftButton)
-        self.app.processEvents()
         for _ in range(3):
             self.window.poll()
-        self.assertEqual(len(self.futures), 1)
+        self.assertEqual(self.window._latest_hotkey, latest["id"])
+        self.complete(0, 1, needs_review=True)
+        self.assertEqual(self.window.pending_review_kind, "ritual")
+        self.publish(4)
+        self.window.poll()
+        self.assertEqual(len(self.window._ritual_waiting), 2)
+        self.assertIn("Two Ritual pages are already waiting", self.window.scan_status.text())
+        QTest.mouseClick(self.window.reject_scan_button, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        self.window.poll()
+        self.assertEqual(len(self.futures), 2)
+        self.complete(1, 2)
+        self.window.poll()
+        self.complete(2, 3)
+        for _ in range(3):
+            self.window.poll()
+        self.assertEqual(len(self.futures), 3)
         self.assertIsNone(self.window.pending_review_kind)
         self.assertIsNone(self.manager.next_event(self.window._latest_hotkey))
-        self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
-        self.assertEqual(self.ritual_commits(), [])
+        self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [2, 3])
+        self.assertEqual([c["items"][0]["quantity"] for c in self.ritual_commits()], [2, 3])
 
     def test_same_image_updates_one_page_but_retains_both_approval_commits(self):
         raw = self.png(1)
@@ -259,7 +280,8 @@ class RitualSequentialDeliveryTests(unittest.TestCase):
         self.assertEqual(len(self.futures), 1)
         self.assertEqual(logger.currency_for_map("M0001")["end"], {"Divine Orb": 3})
 
-    def test_other_mode_replaces_held_ritual_without_waiting_on_ritual_burst(self):
+    def test_other_mode_replaces_held_ritual_and_the_waiting_page_follows(self):
+        """Another scan still replaces the open page; a page taken before it waits and is saved."""
         self.publish(1)
         self.window.poll()
         self.complete(0, 1, needs_review=True)
@@ -268,18 +290,22 @@ class RitualSequentialDeliveryTests(unittest.TestCase):
         ui.select(self.window.inventory_phase, "end")
         latest = self.publish(3, mode="currency")
         self.window.poll()
+        self.assertEqual(len(self.window._ritual_waiting), 1)
+        self.window.poll()
         self.assertEqual(len(self.futures), 2)
         self.assertEqual(self.window._latest_hotkey, latest["id"])
         self.assertEqual(self.window.pending_review_kind, "currency")
         self.futures[1].set_result({"items": [{"slot": 1, "name": "Divine Orb", "quantity": 3}], "unknown": []})
         self.app.processEvents()
+        self.window.poll()
+        self.assertEqual(len(self.futures), 3)
+        self.complete(2, 2)
         for _ in range(3):
             self.window.poll()
-        self.assertEqual(len(self.futures), 2)
         self.assertIsNone(self.window.pending_review_kind)
         self.assertEqual(logger.currency_for_map("M0001")["end"], {"Divine Orb": 3})
-        self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
-        self.assertEqual(self.ritual_commits(), [])
+        self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [2])
+        self.assertEqual([c["items"][0]["quantity"] for c in self.ritual_commits()], [2])
         self.assertIsNone(self.manager.next_event(self.window._latest_hotkey))
 
     def test_frozen_context_and_strictness_survive_later_preferences(self):
@@ -300,42 +326,34 @@ class RitualSequentialDeliveryTests(unittest.TestCase):
         self.window.poll()
         self.window.finish_map()
         self.complete(0, 999)
+        self.assertIn("saved to M0001", self.window.ritual_status.text())
+        # The second page, taken before + New map, is collected afterwards and goes to M0001 too.
+        self.window.poll()
+        self.complete(1, 1000)
         self.window.poll()
         self.assertEqual(logger.get_state()["current_map_id"], "M0002")
-        self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [999])
+        self.assertEqual([p["items"][0]["quantity"] for p in logger.ritual_pages_for_map("M0001")], [999, 1000])
         self.assertEqual(logger.ritual_pages_for_map("M0002"), [])
-        self.assertEqual(len(self.ritual_commits()), 1)
+        self.assertEqual(len(self.ritual_commits()), 2)
         self.assertIsNone(self.window.pending_review_kind)
-        self.assertIn("saved to M0001", self.window.ritual_status.text())
 
-    def test_busy_physical_ritual_capture_does_not_queue_another_hotkey(self):
-        entered, release, finished = threading.Event(), threading.Event(), threading.Event()
-        def block(*args, **kwargs):
-            entered.set()
-            if not release.wait(5):
-                raise RuntimeError("Blocked test capture was not released")
-            return Image.new("RGB", (600, 250), "tan")
-        manager = hotkey.HotkeyManager(grabber=Mock(side_effect=block), supported=False)
-        with logger._connect() as db:
-            logger._set_meta(db, "ritual_region", {"x": 0, "y": 0, "w": 600, "h": 250})
-        original = manager._capture
-        def tracked(*args, **kwargs):
-            try:
-                return original(*args, **kwargs)
-            finally:
-                finished.set()
-        with patch.object(manager, "_capture", side_effect=tracked):
-            try:
-                manager.capture("ritual", background=True)
-                self.assertTrue(entered.wait(2))
-                manager.capture("ritual", background=True)
-                self.assertEqual(manager.grabber.call_count, 1)
-                self.assertIsNone(manager._deferred_propagation)
-            finally:
-                release.set()
-                self.assertTrue(finished.wait(2))
-                manager.cancel_capture()
-
+    def test_held_screenshot_without_a_ritual_window_is_discarded_with_a_note(self):
+        """A page held from a quick press is dropped, never reviewed, when the window had closed."""
+        event = self.publish(1)
+        event["result"]["_held"] = True
+        self.window.poll()
+        self.assertTrue(self.window._ritual_capture_context["held"])
+        self.futures[0].set_result({**self.reading(1, needs_review=True), "ritual_window": False})
+        self.app.processEvents()
+        self.assertIsNone(self.window.pending_review_kind)
+        self.assertEqual(self.window.ritual_status.text(), hotkey.DISCARDED_MESSAGE)
+        self.assertEqual(logger.ritual_pages_for_map("M0001"), [])
+        # The same reading of a page taken without a held press is reviewed as before.
+        self.publish(2)
+        self.window.poll()
+        self.futures[1].set_result({**self.reading(2, needs_review=True), "ritual_window": False})
+        self.app.processEvents()
+        self.assertEqual(self.window.pending_review_kind, "ritual")
 
 if __name__ == "__main__":
     unittest.main()

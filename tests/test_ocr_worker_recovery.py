@@ -35,6 +35,13 @@ def _broken(pid_file):
     os._exit(7)
 
 
+def _finite(pid_file, delay):
+    """Publish child ownership, then finish a reading that takes a while."""
+    Path(pid_file).write_text(str(os.getpid()), encoding="ascii")
+    time.sleep(delay)
+    return os.getpid()
+
+
 def _validation_error():
     """Raise an ordinary reader validation error without making its healthy process unusable."""
     raise ValueError("Confirm the visible quantity.")
@@ -61,10 +68,14 @@ class OCRWorkerRecoveryTests(unittest.TestCase):
         store.DATA_DIR = Path(self.tmp.name)
         self.thread_patch = patch.object(ocr_runtime, "_ACTIVE_THREADS", 4)
         self.thread_patch.start()
+        # A cancelled reading may finish in the background; a blocked one is stopped after this.
+        self.grace_patch = patch.object(ocr_workers, "CANCELLED_GRACE_SECONDS", .3)
+        self.grace_patch.start()
 
     def tearDown(self):
         """Terminate every test reader and restore the caller's profile and active OCR preference."""
         ocr_workers.shutdown(wait=True)
+        self.grace_patch.stop()
         self.thread_patch.stop()
         store.DATA_DIR = self.previous_data
         self.tmp.cleanup()
@@ -141,6 +152,23 @@ class OCRWorkerRecoveryTests(unittest.TestCase):
         self.wait_until(lambda: pid not in self.child_pids())
         answer = ocr_workers.submit(self.work(_identity)).result(timeout=5)
         self.assertNotEqual(answer["pid"], pid)
+
+    def test_cancelled_reading_finishes_and_keeps_its_loaded_child(self):
+        """A cancelled reading is discarded but its child is not stopped, so nothing must reload."""
+        self.grace_patch.stop()
+        self.grace_patch = patch.object(ocr_workers, "CANCELLED_GRACE_SECONDS", 5)
+        self.grace_patch.start()
+        path = Path(self.tmp.name) / "finite.pid"
+        future = ocr_workers.submit(self.work(_finite, str(path), .5))
+        self.wait_until(lambda: path.exists() and bool(path.read_text(encoding="ascii")))
+        pid = int(path.read_text(encoding="ascii"))
+        self.assertTrue(future.cancel())
+        with self.assertRaises(CancelledError):
+            future.result(timeout=1)
+        self.wait_until(lambda: not ocr_workers._BROKER.active)
+        self.assertIn(pid, self.child_pids())
+        answers = [ocr_workers.submit(self.work(_identity, .1)) for _ in range(2)]
+        self.assertIn(pid, {answer.result(timeout=5)["pid"] for answer in answers})
 
     def test_active_cancellation_reaps_child_and_next_scan_recovers(self):
         """Cancelling active native work retires its result and frees a killable child for later scans."""

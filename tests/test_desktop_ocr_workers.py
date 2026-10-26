@@ -36,6 +36,11 @@ class DesktopOCRWorkerTests(unittest.TestCase):
     def setUp(self):
         """Open an isolated logger and valid screenshot for file, inventory and Ritual capture paths."""
         ocr_workers.shutdown(wait=True)
+        # A cancelled reading may finish in the background; these never-ending readers are
+        # stopped after this.
+        self.grace_patch = patch.object(ocr_workers, "CANCELLED_GRACE_SECONDS", .2)
+        self.grace_patch.start()
+        self.addCleanup(self.grace_patch.stop)
         self.tmp = tempfile.TemporaryDirectory(prefix="poe2-desktop-worker-")
         self.previous = store.DATA_DIR
         self.previous_mode = service.HOTKEY.status()["mode"]

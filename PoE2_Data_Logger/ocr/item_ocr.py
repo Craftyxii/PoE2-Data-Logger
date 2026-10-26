@@ -223,6 +223,37 @@ def prepare_artwork(inventory_references=(), ritual_references=()):
 
 
 
+WARMUP_ROOT = Path(__file__).resolve().parent / "warmup"
+
+
+def clear_scan_results():
+    """Forget every remembered reading of captured pixels, keeping loaded models and references."""
+    from PoE2_Data_Logger.ocr import digit_kernels, unique_items
+
+    _RITUAL_MATCH_CACHE.clear()
+    for cache, name in ((_INVENTORY_TEXT_CACHE, "state"), (_RITUAL_OMEN_CACHE, "ranks")):
+        if hasattr(cache, name):
+            delattr(cache, name)
+    currency_ocr.get_reader().clear_results()
+    unique_items.clear_queries()
+    digit_kernels._cached_native_json.cache_clear()
+
+
+def warm_scans(inventory_references=(), ritual_references=(), ritual_names=()):
+    """Read the bundled sample inventory and Ritual page once, then forget both readings.
+
+    Every one-time step of a first scan runs here at startup, so the first real
+    Currency or Ritual scan is as fast as later ones. Nothing is saved.
+    """
+    try:
+        with Image.open(WARMUP_ROOT / "inventory.png") as source:
+            scan_inventory_grid(source.convert("RGB"), inventory_references)
+        with Image.open(WARMUP_ROOT / "ritual_page.png") as source:
+            scan_ritual_page(source.convert("RGB"), ritual_names, ritual_references)
+    finally:
+        clear_scan_results()
+
+
 def warm_text_models():
     """Load this worker's shared text models and run one throwaway read.
 
@@ -2011,6 +2042,10 @@ def scan_ritual_page(image, omen_names, references=(), strictness=ocr_sensitivit
     grid = detect_reward_grid(image, header_box=header_box)
     markers = deferred_markers(image, grid=grid)
     result.update(ritual_totals(rows, image, grid=grid))
+    # A screenshot held from a quick key press is discarded when it shows no Ritual window.
+    result["ritual_window"] = bool(grid is not None or is_ritual_page(rows) or
+                                   result.get("tribute_available") is not None or
+                                   result.get("rerolls_remaining") is not None)
     if grid is not None:
         result["items"] = _ritual_grid_items(image, grid, result["items"], markers, omen_names, references,
                                              strictness=strictness)

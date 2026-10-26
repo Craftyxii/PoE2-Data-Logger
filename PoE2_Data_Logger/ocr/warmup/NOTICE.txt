@@ -1,0 +1,9 @@
+Path of Exile 2 warm-up captures.
+
+One inventory and one Ritual reward page from user-provided screenshots (the
+same pixels as tests/fixtures/currency_training/inventory_120205.png and
+tests/fixtures/ritual_pages/094308.png). Each recognition worker reads them
+once at startup so the first real scan does not pay one-time setup; their
+readings are discarded and never saved.
+
+Game UI artwork is copyright Grinding Gear Games.

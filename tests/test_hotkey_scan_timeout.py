@@ -62,11 +62,20 @@ class HotkeyScanTimeoutTests(unittest.TestCase):
 
     def test_cancelled_capture_timeout_releases_reservation_without_new_error(self):
         """Free a cancelled hung reader without showing a timeout for an intentionally abandoned scan."""
-        revision = self.reserve("opened")
+        revision = self.reserve("currency")
         self.manager.cancel_capture()
-        self.manager._expire_capture("opened", revision)
+        self.manager._expire_capture("currency", revision)
         self.assertFalse(self.manager._capture_lock.locked())
         self.assertIsNone(self.manager.status()["latest"])
+
+    def test_general_capture_kept_through_cancellation_still_reports_its_timeout(self):
+        """A general-key capture may still become a Ritual page, so it runs on and a hang is reported."""
+        revision = self.reserve("opened")
+        self.manager.cancel_capture()
+        self.assertEqual(self.manager._capture_owner, revision)
+        self.manager._expire_capture("opened", revision)
+        self.assertFalse(self.manager._capture_lock.locked())
+        self.assertIn("timed out", self.manager.status()["latest"]["error"])
 
     def test_background_capture_watchdog_fires_without_ui_polling(self):
         """Verify the actual timer reports a stalled adapter even when the GUI consumes no events."""

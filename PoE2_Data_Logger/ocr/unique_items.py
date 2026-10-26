@@ -73,6 +73,12 @@ def clear_caches():
         _RETAINED_BYTES = 0
 
 
+def clear_queries():
+    """Forget remembered matches of captured pixels while keeping the prepared catalog banks."""
+    with _LOCK:
+        _QUERIES.clear()
+
+
 def _label(value):
     """Validate catalog label length and reject C0 controls and surrogate code points."""
     return (isinstance(value, str) and 0 < len(value) <= 160 and

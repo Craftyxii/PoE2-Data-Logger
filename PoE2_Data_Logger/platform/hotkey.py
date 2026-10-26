@@ -36,6 +36,10 @@ CAPTURE_TIMEOUT_SECONDS = 90
 KILL_COUNT_TIMEOUT_SECONDS = 5
 DEDICATED = ("remnant", "waystone", "tablet", "currency", "ritual", "propagation", "overlay", "kills")
 GENERAL_MODES = ("seed", "opened", "both")
+# One Ritual page being taken plus two waiting; a further press is refused with this message.
+RITUAL_HOLD_LIMIT = 3
+RITUAL_LIMIT_MESSAGE = "Two Ritual pages are already waiting. Approve or reject the current page, then scan again."
+DISCARDED_MESSAGE = "Nothing to scan in that capture — discarded."
 KEY_CODES = {
     "BACKSPACE": 0x08, "TAB": 0x09, "ENTER": 0x0D, "PAUSE": 0x13,
     "CAPSLOCK": 0x14, "ESCAPE": 0x1B, "SPACE": 0x20, "PAGEUP": 0x21,
@@ -167,6 +171,12 @@ class HotkeyManager:
         # Only an accepted Remnant -> Propagation pair retains two results.
         # All ordinary scans retain the previous latest-result replacement rule.
         self._events = {}
+        # Ritual pages are never replaced: each stays until the window takes it. A Ritual or
+        # general key pressed while another capture runs takes its screenshot at once, and
+        # the held screenshots are read in press order once the capture slot is free.
+        self._ritual_events = {}
+        self._held = []
+        self._ritual_only = None
         self._ordered_delivery = ordered_delivery
         self._acknowledged_event = 0
         self._latest = None
@@ -214,7 +224,9 @@ class HotkeyManager:
                     "combos": dict(self.combos),
                     "registered": bool(self._thread and self._thread.is_alive()),
                     "mode": self.mode, "error": self.error, "latest": self._latest,
-                    "overlay_sequence": self._overlay_sequence}
+                    "overlay_sequence": self._overlay_sequence,
+                    "held_ritual": len(self._held) + sum(ident > self._acknowledged_event
+                                                         for ident in self._ritual_events)}
 
     def set_mode(self, mode):
         """Validate and persist the general remnant scan mode without replacing dedicated
@@ -427,8 +439,12 @@ class HotkeyManager:
             for ident in registered:
                 user32.UnregisterHotKey(None, ident)
 
-    def capture(self, kind="default", background=False, *, _cached_capture=None):
-        """Reserve a bounded scan or report a retired adapter that has not yet returned."""
+    def capture(self, kind="default", background=False, *, _cached_capture=None, _held=None):
+        """Reserve a bounded scan or report a retired adapter that has not yet returned.
+
+        A Ritual or general key pressed while the slot is taken grabs its screenshot now
+        and waits in press order instead of being dropped.
+        """
         if kind == "overlay":
             with logger._connect() as db:
                 enabled = bool(logger._meta(db, "hud_overlay", False))
@@ -437,17 +453,28 @@ class HotkeyManager:
                     self._overlay_sequence += 1
                 self._notify_event()
             return
-        if _cached_capture is None and self.focused is not None and not self.focused():
+        if _cached_capture is None and _held is None and self.focused is not None and not self.focused():
             return
         with self._lock:
             mode = self.mode if kind in ("default", "remnant") else kind
             if kind in ("default", "remnant") and mode not in GENERAL_MODES:
                 mode = "opened"
-            if _cached_capture is None and self._events:
+            if _held is not None:
+                # A held screenshot becomes a Ritual page or is discarded; it is never a remnant.
+                mode = "ritual"
+                if not self._capture_lock.acquire(blocking=False):
+                    self._held.insert(0, _held)
+                    return
+            elif (_cached_capture is None and kind in ("ritual", "default") and
+                    (self._held or self._events or self._capture_lock.locked() or
+                     self._capture_adapter_owner is not None)):
+                self._hold(kind)
+                return
+            if _cached_capture is None and _held is None and self._events:
                 # The accepted pair must finish delivery before another key
                 # can replace either result or reserve another request.
                 return
-            if not self._capture_lock.acquire(blocking=False):
+            if _held is None and not self._capture_lock.acquire(blocking=False):
                 if (kind == "propagation" and self._active_capture_kind in ("default", "remnant")
                         and self._active_capture_mode in GENERAL_MODES):
                     # One subsequent propagation request belongs to this exact
@@ -530,6 +557,7 @@ class HotkeyManager:
                 watchdog.start()
             try:
                 strictness_values = (dict(_cached_capture["strictness_values"]) if _cached_capture
+                                     else dict(_held["strictness_values"]) if _held is not None
                                      else dict(ocr_sensitivity.saved_values()))
                 with self._lock:
                     if revision == self._capture_revision:
@@ -547,9 +575,12 @@ class HotkeyManager:
                 if _cached_capture is not None:
                     arguments += (_cached_capture,)
                 threading.Thread(target=self._capture, args=arguments,
+                                 kwargs={"held": _held} if _held is not None else {},
                                  daemon=True, name="poe2-hotkey-capture").start()
             else:
-                if _cached_capture is None:
+                if _held is not None:
+                    self._capture(kind, mode, revision, strictness_values, held=_held)
+                elif _cached_capture is None:
                     self._capture(kind, mode, revision, strictness_values)
                 else:
                     self._capture(kind, mode, revision, strictness_values, _cached_capture)
@@ -563,14 +594,16 @@ class HotkeyManager:
         with self._lock:
             return revision != self._capture_revision
 
-    def _capture(self, kind, mode, revision, strictness_values=None, cached_capture=None):
+    def _capture(self, kind, mode, revision, strictness_values=None, cached_capture=None, *, held=None):
         """Bound physical capture work independently of its cancellable logical reservation."""
         with self._lock:
             if revision != self._capture_owner or revision != self._capture_revision:
                 return
             self._capture_adapter_owner = revision
         try:
-            if cached_capture is None:
+            if held is not None:
+                self._read_held(revision, held)
+            elif cached_capture is None:
                 self._perform_capture(kind, mode, revision, strictness_values)
             else:
                 self._read_cached_propagation(revision, cached_capture)
@@ -583,6 +616,138 @@ class HotkeyManager:
             if self._capture_adapter_owner == revision:
                 self._capture_adapter_owner = None
             self._run_deferred_propagation()
+            self._run_held_captures()
+
+    def _hold(self, kind):
+        """Take a press's screenshot now while another capture runs; it waits in press order.
+
+        One page being taken plus two waiting is the limit; a further press is refused
+        with a message. Call with the lock held.
+        """
+        active = int(self._capture_lock.locked() and self._active_capture_kind in ("ritual", "default"))
+        if len(self._held) + len(self._ritual_events) + active >= RITUAL_HOLD_LIMIT:
+            self._publish_event({"mode": "ritual", "result": None, "error": RITUAL_LIMIT_MESSAGE}, None)
+            self._notify_event()
+            return
+        entry = {"kind": kind, "ready": False}
+        self._held.append(entry)
+        threading.Thread(target=self._grab_held, args=(entry,), daemon=True,
+                         name="poe2-hotkey-held-capture").start()
+        self._notify_event()
+
+    def _grab_held(self, entry):
+        """Freeze one held press like a normal capture: hide the HUD, require the game in
+        front, then grab and keep the map, session and strictness of that moment.
+        """
+        try:
+            if self.before_capture:
+                self.before_capture()
+            if self.focused is not None and not self.focused():
+                entry["error"] = "The game lost focus before capture. Scan again."
+            else:
+                entry.update(self._held_snapshot(entry["kind"]))
+        except Exception as exc:
+            entry["error"] = f"Screen scan failed: {exc}"
+        finally:
+            with self._lock:
+                entry["ready"] = True
+                self._run_held_captures()
+
+    def _held_snapshot(self, kind):
+        """Grab a held press's pixels with the capture context a normal capture would freeze."""
+        with logger._connect() as db:
+            number = logger._meta(db, "current_map_number", 0)
+            pending_map = bool(logger._meta(db, "pending_new_map", False))
+            capture_map = logger._map_id(number) if number else None
+            expedition = 1 if not number or pending_map else logger._meta(db, "settings")["expedition"]
+            context = {"_scan_generation": logger._meta(db, "session_generation", 0),
+                       "_capture_map_id": capture_map, "_capture_expedition": expedition,
+                       "_capture_map_pending": pending_map,
+                       "_capture_chain_revision": (logger._chain_revision(db, logger._exp_id(capture_map, expedition))
+                                                   if capture_map else 0)}
+            region = logger._meta(db, "ritual_region", None)
+        snapshot = {"context": context, "strictness_values": dict(ocr_sensitivity.saved_values())}
+        bounds = None
+        if self.supported and sys.platform == "win32":
+            from PoE2_Data_Logger.platform.hover_copy import _tooltip_bounds
+            from PoE2_Data_Logger.ui.region_select import region_for, validate_capture_resolution
+            bounds = _tooltip_bounds()
+            validate_capture_resolution(bounds)
+            if kind == "ritual":
+                region = region_for("ritual_region", bounds)
+        if kind == "ritual":
+            if not region:
+                raise ValueError("Select the ritual capture region in Scan settings first.")
+            image = self._grab(region)
+            self._check_image(image)
+            snapshot["image"] = image.convert("RGB").copy()
+            return snapshot
+        # The general key recognises a Ritual window from the whole game window, as it does
+        # without a held press; anything else it shows is discarded.
+        if not self.supported:
+            return snapshot
+        if self.tooltip_grabber is not None:
+            tooltip = self.tooltip_grabber()
+        else:
+            tooltip = self.grabber(bbox=bounds, all_screens=True)
+        self._check_image(tooltip)
+        tooltip = tooltip.convert("RGB").copy()
+        snapshot["tooltip"] = tooltip
+        from PoE2_Data_Logger.ui.region_select import region_for
+        frozen = bounds if bounds is not None else (0, 0, tooltip.width, tooltip.height)
+        try:
+            selected = region_for("ritual_region", frozen)
+            snapshot["crop"] = (selected["x"] - frozen[0], selected["y"] - frozen[1],
+                                selected["x"] + selected["w"] - frozen[0], selected["y"] + selected["h"] - frozen[1])
+        except ValueError:
+            pass
+        return snapshot
+
+    def _run_held_captures(self):
+        """Start the oldest held press once its screenshot is taken and the capture slot is free.
+
+        Call with the lock held. A held press whose grab failed reports its error.
+        """
+        while (self._held and self._held[0]["ready"] and self._capture_owner is None and
+               self._capture_adapter_owner is None and not self._capture_lock.locked() and
+               self._deferred_propagation is None):
+            entry = self._held.pop(0)
+            if entry.get("error"):
+                self._publish_event({"mode": "ritual" if entry["kind"] == "ritual" else self.mode,
+                                     "result": None, "error": entry["error"]}, None)
+                self._notify_event()
+                continue
+            self.capture(entry["kind"], background=True, _held=entry)
+            return
+
+    def _read_held(self, revision, entry):
+        """Turn a held screenshot into a Ritual page for the window, or discard it with a note.
+
+        A general-key screenshot counts only when it shows the Ritual window, by the same
+        rule the general key uses without a held press.
+        """
+        event = raw = None
+        try:
+            picture = entry.get("image")
+            if picture is None and entry.get("tooltip") is not None:
+                from PoE2_Data_Logger.ocr import item_ocr
+                rows = self._ocr_capture_call(revision, item_ocr.ocr_lines, entry["tooltip"])
+                if item_ocr.is_ritual_page(rows):
+                    box = entry.get("crop")
+                    picture = entry["tooltip"].crop(box) if box else entry["tooltip"]
+            if picture is None:
+                event = {"mode": "discarded", "result": None, "error": "", "message": DISCARDED_MESSAGE}
+            else:
+                memory = io.BytesIO()
+                picture.convert("RGB").save(memory, format="PNG")
+                raw = memory.getvalue()
+                context = entry["context"]
+                event = {"mode": "ritual", "error": "",
+                         "result": {"captured": True, "map_id": context["_capture_map_id"], "_held": True,
+                                    **context, "_ocr_strictness_values": dict(entry["strictness_values"])}}
+        except Exception as exc:
+            event, raw = {"mode": "ritual", "result": None, "error": f"Screen scan failed: {exc}"}, None
+        self._finish_capture(event, raw, revision, adapter_complete=True)
 
     def _expire_deferred_propagation(self, pending):
         """Bound a retained keypress even when a cancelled physical adapter never returns."""
@@ -593,6 +758,7 @@ class HotkeyManager:
             self._deferred_propagation = self._remnant_capture = None
             self._publish_event({"mode": "propagation", "result": None,
                                  "error": "Queued propagation scan timed out. Scan again."}, None, paired=True)
+            self._run_held_captures()
         self._notify_event()
 
     def _run_deferred_propagation(self):
@@ -1095,6 +1261,11 @@ class HotkeyManager:
         reader and promptly retire its logical reservation and revision. A
         still-running physical adapter retains its separate owner until return,
         so new shortcuts report a busy adapter rather than spawning more work.
+
+        A Ritual page is never cancelled: taken, held or waiting pages are kept,
+        and the window checks the map each was taken on when it reads it. A
+        general-key capture in progress continues but may only become a Ritual
+        page; anything else it finds is discarded with a note.
         """
         modes = None if modes is None else frozenset((modes,) if isinstance(modes, str) else modes)
         with self._lock:
@@ -1104,7 +1275,10 @@ class HotkeyManager:
                 self._deferred_propagation = None
             if modes is None or modes.intersection(GENERAL_MODES) and self._deferred_propagation is None:
                 self._remnant_capture = None
-            if modes is None or self._active_capture_mode in modes:
+            if modes is None and self._active_capture_kind in ("ritual", "default"):
+                if self._active_capture_kind == "default":
+                    self._ritual_only = self._capture_owner
+            elif modes is None or self._active_capture_mode in modes:
                 owner = self._capture_owner
                 self._capture_revision += 1
                 if self._ocr_capture_future is not None:
@@ -1115,6 +1289,9 @@ class HotkeyManager:
                 self._latest = self._image = None
             self._events = {key: entry for key, entry in self._events.items()
                             if modes is not None and entry[0].get("mode") not in modes}
+            if modes is not None and "ritual" in modes:
+                self._ritual_events.clear()
+                self._held.clear()
 
     def _expire_capture(self, mode, revision):
         """Terminate an overdue isolated reader and release only its still-owned capture reservation."""
@@ -1141,6 +1318,12 @@ class HotkeyManager:
                 return
             if revision is not None and revision != self._capture_revision:
                 event = None
+            if (event is not None and revision is not None and revision == self._ritual_only and
+                    event.get("mode") != "ritual" and not event.get("error")):
+                # A Ritual page started while this general-key capture ran; keep only a Ritual page.
+                event = {"mode": "discarded", "result": None, "error": "", "message": DISCARDED_MESSAGE}
+            if revision is not None and revision == self._ritual_only:
+                self._ritual_only = None
             if expired:
                 self._capture_revision += 1
             captured = self._remnant_capture
@@ -1176,6 +1359,7 @@ class HotkeyManager:
             # claim the slot. Physical ownership still prevents overlap after
             # cancellation or expiry of an external adapter.
             self._run_deferred_propagation()
+            self._run_held_captures()
         if event is not None:
             self._notify_event()
 
@@ -1189,27 +1373,34 @@ class HotkeyManager:
             self._ordered_delivery = True
 
     def _publish_event(self, event, raw, *, paired=False):
-        """Replace ordinary results; retain only the two members of an accepted pair."""
+        """Replace ordinary results; retain the two members of an accepted pair and every
+        Ritual page until the window takes it.
+        """
         self._sequence += 1
         event["id"] = self._sequence
         self._latest, self._image = event, raw
         if self._ordered_delivery and paired:
             self._events[self._sequence] = (event, raw)
+        if event.get("mode") == "ritual" and event.get("result") is not None:
+            self._ritual_events[self._sequence] = (event, raw)
 
     def next_event(self, after_id=0):
-        """Deliver an accepted pair in order, otherwise return only the latest result."""
+        """Deliver retained pair members and Ritual pages oldest first, otherwise only the
+        latest result.
+        """
         with self._lock:
             consumed = max(after_id, self._acknowledged_event)
-            paired = next((event for ident, (event, _) in self._events.items()
-                           if ident > consumed), None)
-            if paired is not None:
-                return paired
+            retained = [ident for ident in (*self._events, *self._ritual_events) if ident > consumed]
+            if retained:
+                ident = min(retained)
+                return (self._events.get(ident) or self._ritual_events[ident])[0]
             return self._latest if self._latest and self._latest["id"] > consumed else None
 
     def ack_event(self, event_id):
         """Release retained result evidence after the UI copied it into its review state."""
         with self._lock:
             self._events.pop(event_id, None)
+            self._ritual_events.pop(event_id, None)
             self._acknowledged_event = max(self._acknowledged_event, event_id)
 
     def image(self, event_id):
@@ -1217,6 +1408,8 @@ class HotkeyManager:
         with self._lock:
             if event_id in self._events:
                 return self._events[event_id][1]
+            if event_id in self._ritual_events:
+                return self._ritual_events[event_id][1]
             if self._latest and self._latest["id"] == event_id:
                 return self._image
         return None

@@ -66,10 +66,14 @@ class OCRStartupPreloadTests(unittest.TestCase):
         store.DATA_DIR = Path(self.tmp.name)
         self.thread_patch = patch.object(ocr_runtime, "_ACTIVE_THREADS", 4)
         self.thread_patch.start()
+        # A cancelled reading may finish in the background; a blocked one is stopped after this.
+        self.grace_patch = patch.object(ocr_workers, "CANCELLED_GRACE_SECONDS", .3)
+        self.grace_patch.start()
 
     def tearDown(self):
         """Reap every test child before deleting its profile and restore frozen preferences."""
         ocr_workers.shutdown(wait=True)
+        self.grace_patch.stop()
         self.thread_patch.stop()
         store.DATA_DIR = self.previous_data
         self.tmp.cleanup()
@@ -177,14 +181,17 @@ class OCRStartupPreloadTests(unittest.TestCase):
             overflow.result()
         for future in queued:
             self.assertTrue(future.cancel())
+        before = self.child_pids()
         self.assertTrue(startup[0].cancel())
-        self.wait_until(lambda: len(self.child_pids()) == 1)
+        # The stopped child is replaced at once by one that prepares its artwork.
+        self.wait_until(lambda: len(self.child_pids()) == 2 and self.child_pids() != before)
+        replacement = (self.child_pids() - before).pop()
         self.assertFalse(startup[1].done())
         self.assertIs(broker.preload(work), startup)
         self.assertEqual(broker.sequence, 4)
         (root / "release-preparation").touch()
         survivor = startup[1].result(timeout=5)
-        self.assertEqual(self.child_pids(), {survivor})
+        self.assertEqual(self.child_pids(), {survivor, replacement})
 
     def test_startup_pair_is_rejected_atomically_when_only_one_queue_slot_remains(self):
         """Insufficient capacity cannot retain half a preload pair or replace its configured context."""
@@ -218,8 +225,8 @@ class OCRStartupPreloadTests(unittest.TestCase):
         self.assertEqual(self.child_pids(), {first_pid, second_pid})
         self.assertFalse(list(Path(self.tmp.name).glob("prepared-*.txt")))
 
-    def test_cancelled_worker_replacement_prepares_once_before_its_next_flagged_scan(self):
-        """A replacement uses the configured preparer while the healthy worker retains its existing bank."""
+    def test_stopped_worker_is_replaced_by_a_prepared_child_before_any_scan(self):
+        """A replacement prepares at once; the healthy worker retains its existing bank."""
         broker = self.broker()
         startup = broker.preload(self.work(_prepare_once))
         original = [future.result(timeout=5) for future in startup]
@@ -227,6 +234,9 @@ class OCRStartupPreloadTests(unittest.TestCase):
         self.assertEqual(pid, original[0])
         blocked.cancel()
         self.wait_until(lambda: pid not in self.child_pids())
+        # Prepared without waiting for a scan, and ready again.
+        self.wait_until(lambda: len(list(Path(self.tmp.name).glob("prepared-*.txt"))) == 3 and all(broker.ready))
+        self.assertFalse(broker.loading())
         for _ in range(2):
             answers = [broker.submit(self.work(_identity, prepare=True), affinity=index).result(timeout=5)
                        for index in range(2)]
@@ -235,25 +245,26 @@ class OCRStartupPreloadTests(unittest.TestCase):
             self.assertTrue(all(answer["prepared"] == 1 for answer in answers))
         self.assertEqual(len(list(Path(self.tmp.name).glob("prepared-*.txt"))), 3)
 
-    def test_replacement_preparation_consumes_scan_deadline_and_never_starts_expired_recognizer(self):
-        """Slow automatic preparation is killed within the scan's original absolute deadline."""
+    def test_scan_waiting_on_a_preparing_replacement_keeps_its_deadline(self):
+        """A scan never runs a slow preparation itself; waiting past its deadline times it out."""
         broker = self.broker()
         for future in broker.preload(self.work(_prepare_once)):
             future.result(timeout=5)
+        (Path(self.tmp.name) / "preparation-delay.txt").write_text("3", encoding="ascii")
         blocked, pid = self.start_blocked(broker, 0, "replace.pid")
         blocked.cancel()
         self.wait_until(lambda: pid not in self.child_pids())
-        (Path(self.tmp.name) / "preparation-delay.txt").write_text("3", encoding="ascii")
+        self.wait_until(lambda: len(list(Path(self.tmp.name).glob("prepared-*.txt"))) == 3)
         marker = Path(self.tmp.name) / "recognition-started"
         work = self.work(_recognized, str(marker), timeout=1, prepare=True)
         started = time.monotonic()
         future = broker.submit(work, affinity=0)
-        self.wait_until(lambda: len(list(Path(self.tmp.name).glob("prepared-*.txt"))) == 3)
         with self.assertRaisesRegex(TimeoutError, "OCR timed out"):
             future.result(timeout=3)
         self.assertLess(time.monotonic() - started, 2)
         self.assertFalse(marker.exists())
-        self.wait_until(lambda: len(self.child_pids()) == 1)
+        # The replacement finishes preparing and stays ready for the next scan.
+        self.wait_until(lambda: len(self.child_pids()) == 2 and broker.ready[0], timeout=6)
 
     def test_unrelated_context_does_not_run_configured_artwork_preparer(self):
         """Non-Currency recognition remains lightweight when it replaces a worker for another profile."""

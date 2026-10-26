@@ -182,7 +182,9 @@ class DeferredPropagationTests(unittest.TestCase):
                         mode.encode(), revision, adapter_complete=True)
                 with patch.object(self.manager, "_capture", side_effect=finish):
                     self.manager.capture("default")
-                self.assertEqual(self.manager.next_event()["mode"], mode)
+                event = self.manager.next_event()
+                self.assertEqual(event["mode"], mode)
+                self.manager.ack_event(event["id"])
                 self.assertEqual(self.manager._events, {})
                 self.assertIsNone(self.manager._deferred_propagation)
                 self.manager.readers["propagation"].assert_not_called()
@@ -193,7 +195,8 @@ class DeferredPropagationTests(unittest.TestCase):
         self.manager.capture("propagation")
         self.assertEqual(self.manager.grabber.call_count, 1)
         self.assertEqual(len(self.manager._events), 2)
-        for kind in ("propagation", "currency", "ritual", "waystone", "tablet", "kills", "remnant"):
+        # A Ritual or general key press is held instead (tests/test_ritual_held_captures.py).
+        for kind in ("propagation", "currency", "waystone", "tablet", "kills", "remnant"):
             self.manager.capture(kind)
         self.assertEqual(self.manager.grabber.call_count, 1)
         self.assertEqual(self.manager._sequence, 2)
@@ -445,6 +448,8 @@ class DeferredPropagationTests(unittest.TestCase):
                     self.assertEqual(latest["result"]["kind"], kind)
                     self.assertEqual(self.manager.image(latest["id"]), kind.encode())
                     self.assertEqual(self.manager._events, {})
+                    # A Ritual page stays until the window takes it, as the window does here.
+                    self.manager.ack_event(latest["id"])
                     if previous is not None:
                         self.assertGreater(latest["id"], previous["id"])
                         self.assertIsNone(self.manager.image(previous["id"]))

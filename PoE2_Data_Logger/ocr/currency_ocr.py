@@ -23,8 +23,8 @@ import numpy as np
 import cv2
 import quickjs
 from PIL import Image
-from PoE2_Data_Logger.core import ocr_sensitivity
-from PoE2_Data_Logger.ocr import artwork_cache, digit_kernels
+from PoE2_Data_Logger.core import ocr_runtime, ocr_sensitivity
+from PoE2_Data_Logger.ocr import artwork_cache, digit_kernels, icon_reader
 
 ROOT = Path(__file__).resolve().parent.parent / "third_party" / "currency_overlay"
 _READERS = threading.local()
@@ -206,11 +206,16 @@ def _rank_inventory(state, rgb, weights, calibrated):
     mask = np.sqrt(weights)
     best = {}
     candidates = state.calibrated_candidates if calibrated else state.inventory_candidates
-    if calibrated:
+    minima = None
+    if calibrated and ocr_runtime.fast_recognition():
+        # The same values for every candidate that can rank among the eight best families.
+        minima = artwork_cache.shift_minima(state.calibrated_atlas, rgb, mask,
+                                            tuple(family for family, _ in candidates))
+    if calibrated and minima is None:
         errors = artwork_cache.match(state.calibrated_atlas, rgb, cv2.TM_SQDIFF, mask=mask)
         indices = np.arange(len(candidates))[:, None] * 48 + np.arange(9)
         minima = errors[indices].min(axis=(1, 2))
-    else:
+    elif not calibrated:
         minima = [cv2.matchTemplate(candidate, rgb, cv2.TM_SQDIFF, mask=mask).min()
                   for _, candidate in candidates]
     for (family, _), error in zip(candidates, minima):
@@ -298,6 +303,8 @@ class CurrencyReader:
         self.context.eval("var BANK = " + (ROOT / "currency-icons.json").read_text(encoding="utf-8") + ";")
         self.context.eval("function identifyJSON(s) { return JSON.stringify(CurrencyReader.identify(JSON.parse(s), BANK)); }")
         self.identify = self.context.get("identifyJSON")
+        # The same bank for the numpy port used by Fast recognition.
+        self._identify_bank = json.loads((ROOT / "currency-icons.json").read_text(encoding="utf-8"))
         self.context.eval("module = {exports:{}};")
         self.context.eval((ROOT / "icon-matcher.js").read_text(encoding="utf-8"))
         self.context.eval("var IconMatcher = module.exports;")
@@ -424,7 +431,12 @@ class CurrencyReader:
             corner[:] = np.median(pixels[-3:, :], axis=(0, 1))
             icon = Image.fromarray(pixels)
         icon.thumbnail((72, 72), Image.Resampling.LANCZOS)
-        result = json.loads(self.identify(json.dumps(self._pixels(icon), separators=(",", ":"))))
+        if ocr_runtime.fast_recognition():
+            rgba = icon.convert("RGBA")
+            result = icon_reader.identify(np.asarray(rgba, dtype=np.uint8).reshape(-1), rgba.width, rgba.height,
+                                          self._identify_bank)
+        else:
+            result = json.loads(self.identify(json.dumps(self._pixels(icon), separators=(",", ":"))))
         if pending is not None:
             agrees = bool(set(result.get("members", [])) &
                           set(self.inventory_members[top["name"]]))
@@ -487,6 +499,12 @@ class CurrencyReader:
             _cache_inventory_rank(self, cache_key, ranked)
         return ranked
 
+    def clear_results(self):
+        """Forget remembered rankings and counts of captured pixels, keeping the references."""
+        self._rank_cache.clear()
+        self._example_rank_cache.clear()
+        self._count_caches = threading.local()
+
     def prepare_artwork(self):
         """Prepare the same reference-only catalog assets used by calibrated scans.
 
@@ -499,6 +517,7 @@ class CurrencyReader:
             _scaled_inventory_candidates(self, family)
         artwork_cache.prepare(self.calibrated_atlas, cv2.TM_SQDIFF,
                               mask=np.ones((40, 40), np.float32))
+        artwork_cache.prepare_shifts(self.calibrated_atlas)
 
     def prepare_examples(self, references):
         """Normalize and deduplicate references into a bank owned by this reader and thread.
