@@ -18,6 +18,7 @@ Rules the model follows:
   read again; not a failed reading, which has no capture left); the rest are dropped.
 """
 from concurrent.futures import Future
+import gc
 import io
 import os
 from pathlib import Path
@@ -29,6 +30,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
+from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QApplication
 
 from PoE2_Data_Logger.core import logger_store as logger, service, store
@@ -100,7 +102,13 @@ class RandomRitualSessionTests(unittest.TestCase):
     def close_session(self):
         self.window.close()
         self.window.pool.shutdown(wait=True, cancel_futures=True)
+        # Free each session's window so 200 sessions fit in one process.
+        self.window.deleteLater()
         self.app.processEvents()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.window = None
+        self.futures.clear()
+        gc.collect()
         self.submit_patch.stop()
         self.hotkey_patch.stop()
         logger._READY = False
