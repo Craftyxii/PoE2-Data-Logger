@@ -6,6 +6,7 @@ and review policy are logger adapters around the upstream recognizers.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import hashlib
 import io
@@ -24,7 +25,7 @@ import cv2
 import quickjs
 from PIL import Image
 from PoE2_Data_Logger.core import ocr_runtime, ocr_sensitivity
-from PoE2_Data_Logger.ocr import artwork_cache, digit_kernels, icon_reader
+from PoE2_Data_Logger.ocr import artwork_cache, digit_kernels, digit_reader, icon_reader
 
 ROOT = Path(__file__).resolve().parent.parent / "third_party" / "currency_overlay"
 _READERS = threading.local()
@@ -293,6 +294,8 @@ class CurrencyReader:
         self._learned_reference_banks = OrderedDict()
         self._learned_reference_bytes = 0
         self._count_caches = threading.local()
+        self._shared_counts = OrderedDict()
+        self._shared_counts_lock = threading.Lock()
         self._example_thread = threading.get_ident()
         self._example_owner = object()
         self.context = quickjs.Context()
@@ -339,6 +342,8 @@ class CurrencyReader:
         self.context.eval("function readCountJSON(s) { var p = JSON.parse(s); var v = DigitReader.valueChannelDesatMax(p.data,p.w,p.h); "
                           "return JSON.stringify(DigitReader.readCellAdaptive(v,p.w,p.h,p.cx,p.cy,DIGITS,DigitReader.DEFAULTS,p.scale)); }")
         self.read_count = self.context.get("readCountJSON")
+        # The same templates for the Python port used by Fast recognition.
+        self._digit_templates = digit_reader.load_templates(ROOT / "digit-templates.json")
 
     @staticmethod
     def _pixels(image: Image.Image):
@@ -504,6 +509,8 @@ class CurrencyReader:
         self._rank_cache.clear()
         self._example_rank_cache.clear()
         self._count_caches = threading.local()
+        with self._shared_counts_lock:
+            self._shared_counts.clear()
 
     def prepare_artwork(self):
         """Prepare the same reference-only catalog assets used by calibrated scans.
@@ -685,33 +692,43 @@ class CurrencyReader:
         image.thumbnail((96, 96), Image.Resampling.LANCZOS)
         # Cache only this independent reader's exact input, including failed
         # readings. Never reuse an icon match or a caller's quantity decision.
-        state = getattr(self._count_caches, "state", None)
-        if state is None or state[0] is not self.read_count:
-            state = (self.read_count, OrderedDict())
-            self._count_caches.state = state
-        cache = state[1]
+        fast = ocr_runtime.fast_recognition()
+        if fast:
+            # The Python reader is thread-safe, so one cache serves a scan's parallel lane too.
+            cache, lock = self._shared_counts, self._shared_counts_lock
+        else:
+            state = getattr(self._count_caches, "state", None)
+            if state is None or state[0] is not self.read_count:
+                state = (self.read_count, OrderedDict())
+                self._count_caches.state = state
+            cache, lock = state[1], contextlib.nullcontext()
         rgba = image.convert("RGBA")
         key = (rgba.size, rgba.tobytes())
-        if key in cache:
-            cache.move_to_end(key)
-            value = cache[key]
-            return value if value is None or len(str(value)) >= (glyph_count or 0) else None
+        with lock:
+            if key in cache:
+                cache.move_to_end(key)
+                value = cache[key]
+                return value if value is None or len(str(value)) >= (glyph_count or 0) else None
         size = image.size
         scale = max(.5, min(size) / 40)
-        pixels = self._pixels(image)
         results = []
         for cx, cy in ((int(size[0] * .27), int(size[1] * .25)),):
-            trial = json.loads(self.read_count(json.dumps({**pixels, "cx": cx, "cy": cy,
-                                                           "scale": scale}, separators=(",", ":"))))
+            if fast:
+                trial = digit_reader.read_count(np.asarray(rgba, dtype=np.uint8), cx, cy, self._digit_templates, scale)
+            else:
+                pixels = self._pixels(image)
+                trial = json.loads(self.read_count(json.dumps({**pixels, "cx": cx, "cy": cy,
+                                                               "scale": scale}, separators=(",", ":"))))
             if (re.fullmatch(r"\d{1,5}", trial.get("text", "")) and
                     trial.get("conf", 0) >= .76 and int(trial["text"]) > 0):
                 results.append((float(trial["conf"]), int(trial["text"])))
         value = max(results)[1] if results else None
         if len(results) > 1 and results[0][1] != results[1][1] and abs(results[0][0] - results[1][0]) < .08:
             value = None
-        cache[key] = value
-        if len(cache) > 128:
-            cache.popitem(last=False)
+        with lock:
+            cache[key] = value
+            if len(cache) > 128:
+                cache.popitem(last=False)
         return value if value is None or len(str(value)) >= (glyph_count or 0) else None
 
 

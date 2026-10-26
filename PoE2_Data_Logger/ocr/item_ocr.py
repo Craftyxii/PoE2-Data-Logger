@@ -23,7 +23,7 @@ from PIL import Image, ImageDraw, ImageOps
 
 from PoE2_Data_Logger.ocr.opened_scan import OCR_LOCK, _engine
 from PoE2_Data_Logger.ocr import currency_ocr
-from PoE2_Data_Logger.core import ocr_sensitivity
+from PoE2_Data_Logger.core import ocr_runtime, ocr_sensitivity
 from PoE2_Data_Logger.ocr.affix_capture import (affix_key, affix_unit, flag_modifier, flag_unit_allowed,
                                                   modifier_value, looks_like_modifier)
 
@@ -981,6 +981,23 @@ def _verified_unmarked_inventory_single(cell, label, reader):
     return native is None or (type(native) is int and native == 1)
 
 
+def _inventory_side_lane(image, reader):
+    """Rank every occupied cell (digit count from glyph shapes) and read its count.
+
+    Errors are ignored: the scan then computes the same values itself.
+    """
+    from PoE2_Data_Logger.ocr.inventory_labels import complete_count_glyphs
+
+    try:
+        cells = [cell for cell in (inventory_cell(image, slot) for slot in range(1, 61))
+                 if float(np.asarray(cell, dtype=np.uint8).std(axis=(0, 1)).mean()) >= 8]
+        currency_ocr.prefetch_catalog_ranks(reader, [(cell, complete_count_glyphs(cell)) for cell in cells])
+        for cell in cells:
+            reader.count(cell)
+    except Exception:
+        pass
+
+
 def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitivity.DEFAULT):
     """Match stacks using a frozen strictness while retaining count, tier and occupied-slot review."""
     from PoE2_Data_Logger.ocr.inventory_labels import complete_count_glyphs
@@ -996,7 +1013,19 @@ def scan_inventory_grid(image, references=(), read=None, strictness=ocr_sensitiv
     clipped_count_slots = set(image.info.get("poe2_inventory_clipped_count_slots") or [])
     count_geometry_uncertain = bool(image.info.get("poe2_inventory_geometry_uncertain"))
     proven_groups = set(_inventory_equipment_footprints(image))
-    labels = _inventory_labels(image) if read is None else None
+    lane = None
+    if read is None and ocr_runtime.fast_recognition():
+        # While the text model reads the labels, rank icons and read digit counts on
+        # the side. They only fill caches keyed by exact pixels; every decision below
+        # still runs in order, so the results are the same.
+        lane = threading.Thread(target=_inventory_side_lane, args=(image, currency_ocr.get_reader()),
+                                name="poe2-currency-lane", daemon=True)
+        lane.start()
+    try:
+        labels = _inventory_labels(image) if read is None else None
+    finally:
+        if lane is not None:
+            lane.join()
     if labels is not None:
         # Repeated stack art can hide dividers; independently verified counts
         # across the whole rectangle establish separate stacks instead of gear.

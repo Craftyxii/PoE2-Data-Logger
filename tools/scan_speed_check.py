@@ -4,7 +4,7 @@ Every capture is read in one disposable profile with the models and artwork load
 workers are at startup. Each capture is also read at 1440p and 4K scale. A run saves one JSON record per
 reading (the whole result) and its time; --compare reports every difference between two runs.
 
-    python tools/scan_speed_check.py --save before.json [--ritual-folder DIR] [--only currency|ritual]
+    python tools/scan_speed_check.py --save before.json [--standard] [--ritual-folder DIR] [--only currency|ritual]
     python tools/scan_speed_check.py --compare before.json after.json
 
 Exits 1 when --compare finds any difference.
@@ -64,10 +64,12 @@ def plain(value):
     return value
 
 
-def run(only, ritual_folder):
+def run(only, ritual_folder, standard=False):
     """Read every capture once after loading, returning records and times."""
-    from PoE2_Data_Logger.core import logger_store as logger, ocr_workers
+    from PoE2_Data_Logger.core import logger_store as logger, ocr_runtime, ocr_workers
     from PoE2_Data_Logger.ocr import item_ocr
+
+    ocr_runtime._FAST = not standard
 
     logger.initialize()
     started = time.perf_counter()
@@ -141,6 +143,7 @@ def main():
     parser.add_argument("--compare", nargs=2, metavar=("BEFORE", "AFTER"))
     parser.add_argument("--ritual-folder", help="also read every PNG Ritual page in this folder")
     parser.add_argument("--only", choices=("currency", "ritual"))
+    parser.add_argument("--standard", action="store_true", help="read with Fast recognition off")
     arguments = parser.parse_args()
     if arguments.compare:
         return 1 if compare(*arguments.compare) else 0
@@ -149,7 +152,7 @@ def main():
     logging.disable(logging.WARNING)
     with tempfile.TemporaryDirectory(prefix="poe2-speed-check-") as profile:
         os.environ["RUNESHAPE_SCAN_DATA_DIR"] = profile
-        records = run(arguments.only, arguments.ritual_folder)
+        records = run(arguments.only, arguments.ritual_folder, arguments.standard)
     Path(arguments.save).write_text(json.dumps(records, indent=1, sort_keys=True), encoding="utf-8")
     return 0
 
