@@ -2,7 +2,16 @@
 
 ## Unreleased
 
+## 1.3.2.33 Beta
+
 - Explain every affix in the Analysis Context sheet. It named only 7 of the 164 affixes in the Affix DB; it now has one row per affix, including names learned from scans: its unit and what a value in that unit means (a % roll, a count of extra things, seconds, or 1 for present), where the unit comes from, whether it appears on tablets or waystones, its source, the columns that record it, and how many of your maps used it on a tablet. All 73 Rite of the Nameless affixes are listed too, with their kind, value, unit and whether they carry over to the Rite's other maps. A raw SQLite export carries the same rows.
+
+- Keep every Ritual page taken with quick key presses. Two pages finished before the window collected them used to keep only the newer one, and a press while a screenshot was being taken did nothing. Now a Ritual or general key pressed during another capture takes its screenshot at once and waits in line, in press order; the header and status bar show how many wait. One page being read plus two waiting is still the limit. A held screenshot that shows no Ritual window is discarded with "Nothing to scan in that capture — discarded." instead of a review.
+- Ask when rolls go up on a map: "Rolls went up (30 → 35) — did you start a new map?" in the review panel. **Yes, new map** does exactly what **+ New map** does and saves the page to the new map; pages taken after it follow it. **No, fix rolls** lets you type the correct count, then Approve checks it again. A later page whose rolls cannot be read is held with a note naming the page it may repeat; the first page of a map saves as before.
+- No more cold scans. A reading cancelled by Reject, Undo, + New map or a newer scan used to stop its worker, so the next scan on it first reloaded everything (about 18 s). Now the cancelled reading finishes in the background and is discarded; a worker that crashes is replaced and loaded at once; each worker reads one sample inventory and Ritual page at startup, so the first scan is as fast as the rest. A scan pressed while recognition still loads says so.
+- Show a held review sooner: the review area is no longer re-styled on every Currency and Ritual scan, which took the window about half a second each time.
+- Fast recognition, on by default in Scan settings: icon ranking computes only the positions it uses, the backup icon reader and the digit reader run in numpy/Python instead of the built-in JavaScript, and the text read runs alongside icon and grid work. Every final result is the same as the original method, which the setting can switch back to. A Ritual page reads in about 1.3–1.6 s instead of about 2.8–3.5 s on the test machine. The status line shows "Read in N s" after each Currency and Ritual scan.
+- Protect running 1.3.2.32 Beta clients during installation and removal, retaining the earlier-client guards.
 
 ## 1.3.2.32 Beta
 

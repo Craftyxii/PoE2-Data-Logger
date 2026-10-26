@@ -10,6 +10,8 @@ Each scan needs a hotkey press. Scanning pauses when PoE2 is not the active wind
 
 **CPU OCR threads** in Scan settings offers 1, 2, 4 or 6 threads. Restart the app to apply a changed value. Two is the default; higher counts can help large scans but use more CPU.
 
+**Fast recognition** in Scan settings is on by default. It reads Currency and Ritual scans with quicker arithmetic that gives the same results; turn it off to use the original method. It applies to the next scan. After each Currency or Ritual scan the status line says how long it was read ("Read in 1.2 s").
+
 **OCR Sensitivity** provides a separate **OCR Strictness** slider for each scan type. **0** accepts more tentative recognized matches, **50** keeps the previous behavior, and **100** requires manual confirmation before OCR results save. Higher values require stronger evidence. Each scan keeps its captured settings; quantity, level, family, marked-position and capture-context checks still apply.
 
 ## Map / Tablet Setup
@@ -25,6 +27,8 @@ New maps clear waystone settings. Tablets, Atlas Master settings and map tags—
 ## Logging and Review
 
 On **Review**, correct anything held for review, then **Approve** to save it. **Reject** skips it. Waystones and tablets update their settings; other scans save to the log.
+
+Ritual pages are never lost to a quick key press. A Ritual or general key pressed while another capture runs takes its screenshot at once and waits in line; the header shows how many wait. One page being read plus two waiting is the limit. A held screenshot that shows no Ritual window is discarded with a note. Rolls only go down on a map: a page with more rolls than the map's last page asks **Rolls went up (30 → 35) — did you start a new map?** **Yes, new map** starts the next map exactly like **+ New map** and saves the page there; **No, fix rolls** lets you type the right count, then Approve. A later page whose rolls cannot be read waits for review with a note naming the page it may repeat.
 
 **Chains:** the dedicated **Propagation scan** key reads the selected recipe and its marked runes from left to right. The general key cannot activate it. Each accepted scan adds one remnant detonation, even with two runes. Every propagation scan requires manual review, regardless of confidence, strictness or auto-commit settings. Check the recipe and its rune dropdowns; **Approve** beside its row saves the part directly. Normal propagation review keeps its recipe rows, Approve and Complete controls together. Use **Enter propagation manually** to open the recipe-only rune dropdowns when needed; they show rune icons and names in socket order. **Complete chain**, on Review or Expedition, finishes the saved chain and advances this map's expedition number. Saved parts and selected completed chains can be corrected on Expedition. **Discard last chain step** and **Discard chain** remove saved parts while retaining remnant logs and actual detonation counts.
 

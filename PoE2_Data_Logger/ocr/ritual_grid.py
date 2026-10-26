@@ -251,6 +251,7 @@ def _locate(pixels, header_box):
     if best is None:
         return None
     _, _, left, top, pitch, x_matches, y_matches, at_edge = best
+    chosen = (left, top, pitch)
     # Refine the origin from all observed dividers, rather than one Hough edge.
     if not at_edge:
         x_real = [(index, line["at"]) for index, line in x_matches if not line.get("image_boundary")]
@@ -271,7 +272,7 @@ def _locate(pixels, header_box):
         "origin": (left, top), "pitch": pitch,
         "bounds": (max(0, round(left)), max(0, round(top)),
                    min(width, round(right)), min(height, round(bottom))),
-        "horizontal_hits": ROWS + 1, "vertical_hits": len(x_matches),
+        "horizontal_hits": ROWS + 1, "vertical_hits": len(x_matches), "chosen": chosen,
         "image_boundary": at_edge or any(line.get("image_boundary") for _, line in (*x_matches, *y_matches)),
         "edges": edges,
     }
@@ -675,7 +676,37 @@ def _rewards_at_scale(pixels, geometry):
     return rewards
 
 
-def detect_reward_grid(image: Image.Image, header_box=None) -> dict | None:
+def _header_allows(chosen, header_box):
+    """The Favours heading test _locate applies to each lattice it considers."""
+    left, top, pitch = chosen
+    hx1, hy1, hx2, hy2 = header_box
+    center = (hx1 + hx2) / 2
+    return left <= center <= left + COLUMNS * pitch and hy2 - pitch * .3 <= top and top - hy2 <= pitch * 5
+
+
+def speculative_grid(image):
+    """Find the grid before the heading is read: (grid, check) where check(header_box) says
+    whether the grid is exactly what detect_reward_grid(image, header_box) returns.
+
+    The heading only removes lattices from the search, so when the one found without it
+    passes the heading's test, the search with it chooses the same one.
+    """
+    found = {}
+    grid = detect_reward_grid(image, _found=found)
+
+    def check(header_box):
+        if header_box is None:
+            return True
+        if grid is None:
+            # Without a heading nothing was found; with one, fewer lattices qualify.
+            return True
+        scale_x, scale_y = found["scale"]
+        scaled = tuple(value * (scale_x if index % 2 == 0 else scale_y) for index, value in enumerate(header_box))
+        return _header_allows(found["chosen"], scaled)
+    return grid, check
+
+
+def detect_reward_grid(image: Image.Image, header_box=None, *, _found=None) -> dict | None:
     """Return original-image boxes for every reward in a complete 12×10 grid.
 
     ``header_box`` can constrain detection to the grid below a separately
@@ -686,6 +717,8 @@ def detect_reward_grid(image: Image.Image, header_box=None) -> dict | None:
         return None
     pixels = np.asarray(image.convert("RGB"))
     geometry = _locate(pixels, header_box)
+    if geometry is not None and _found is not None:
+        _found.update(chosen=geometry["chosen"], scale=(1, 1))
     if geometry is None and max(image.size) <= 1800:
         # At smaller capture scales, thin dividers can alternate between
         # neighbouring pixels. A full screenshot's Hough vote then misses
@@ -708,6 +741,8 @@ def detect_reward_grid(image: Image.Image, header_box=None) -> dict | None:
             candidate["bounds"] = tuple(round(value / (scale_x if index % 2 == 0 else scale_y))
                                         for index, value in enumerate(candidate["bounds"]))
             candidate["edges"] = cv2.Canny(pixels, 12, 35)
+            if _found is not None:
+                _found.update(chosen=candidate["chosen"], scale=(scale_x, scale_y))
             geometry = candidate
             break
     if geometry is None:

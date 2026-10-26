@@ -4,9 +4,9 @@ A Windows desktop logger for Path of Exile 2. Record Expedition remnants and run
 
 ## Download and source status
 
-The latest beta is **1.3.2.32 Beta**: download the [Windows installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.32-beta/PoE2-Data-Logger-Setup-v1.3.2.32-beta.exe) or view the [release and checksum](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.32-beta). Its exact source passed the Windows release gates; see the [release notes](docs/RELEASE_1.3.2.32.md). The [preceding beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.31-beta) and [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2) remain available.
+This source is the **1.3.2.33 Beta candidate**. Its installer is published only after the required Windows checks pass on the exact release source. See the [candidate release notes](docs/RELEASE_1.3.2.33.md). The latest published [1.3.2.32 Beta](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2.32-beta) and its [installer](https://github.com/Craftyxii/PoE2-Data-Logger/releases/download/v1.3.2.32-beta/PoE2-Data-Logger-Setup-v1.3.2.32-beta.exe), plus the [stable 1.3.2 release](https://github.com/Craftyxii/PoE2-Data-Logger/releases/tag/v1.3.2), remain available.
 
-This beta never lets a Ritual scan replace a page still being read or reviewed, saves a page taken before + New map to its own map, says when Undo drops unsaved pages, shows the map's Ritual pages in the header on Ritual maps and names a gray Ritual unique, on top of 1.3.2.31 Beta. See the [changelog](CHANGELOG.md). Installer, executable and window version labels identify 1.3.2.32 Beta; the existing HUD controls, layout and styling are retained.
+This candidate keeps every Ritual page taken with quick key presses, asks when the roll count goes up on a map, removes cold scans, shows held reviews sooner, reads Currency and Ritual scans faster with the same results (Fast recognition) and explains every affix in the Analysis Context sheet, on top of 1.3.2.32 Beta. See the [changelog](CHANGELOG.md). Installer, executable and window version labels target 1.3.2.33 Beta; the existing HUD controls, layout and styling are retained.
 
 ## What you can record
 

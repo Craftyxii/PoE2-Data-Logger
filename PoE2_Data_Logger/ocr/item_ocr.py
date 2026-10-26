@@ -2059,17 +2059,37 @@ def scan_ritual_page(image, omen_names, references=(), strictness=ocr_sensitivit
     if not isinstance(image, Image.Image):
         with Image.open(image) as source:
             image = source.convert("RGB")
-    rows = ocr_lines(image)
+    from PoE2_Data_Logger.ocr.ritual_grid import detect_reward_grid, has_grid_structure, speculative_grid
+    side = {}
+    lane = None
+    if ocr_runtime.fast_recognition():
+        # Find the grid and its deferred markers while the text is read. The heading
+        # check below keeps the result exactly what the ordered search would give.
+        def find_grid():
+            try:
+                side["grid"], side["check"] = speculative_grid(image)
+                side["markers"] = deferred_markers(image, grid=side["grid"])
+            except Exception:
+                side.clear()
+        lane = threading.Thread(target=find_grid, name="poe2-ritual-lane", daemon=True)
+        lane.start()
+    try:
+        rows = ocr_lines(image)
+    finally:
+        if lane is not None:
+            lane.join()
     result = parse_ritual(rows, omen_names, strictness=strictness)
     if strictness != ocr_sensitivity.DEFAULT:
         result["_ocr_strictness"] = strictness
-    from PoE2_Data_Logger.ocr.ritual_grid import detect_reward_grid, has_grid_structure
     header = next((row for row in rows if re.fullmatch(r"favou?rs", row["text"].strip(), re.I)
                    and float(row.get("score", 0)) >= .75), None)
     box_keys = ("x", "y", "right", "bottom")
     header_box = tuple(header[key] for key in box_keys) if header and all(key in header for key in box_keys) else None
-    grid = detect_reward_grid(image, header_box=header_box)
-    markers = deferred_markers(image, grid=grid)
+    if "markers" in side and side["check"](header_box):
+        grid, markers = side["grid"], side["markers"]
+    else:
+        grid = detect_reward_grid(image, header_box=header_box)
+        markers = deferred_markers(image, grid=grid)
     result.update(ritual_totals(rows, image, grid=grid))
     # A screenshot held from a quick key press is discarded when it shows no Ritual window.
     result["ritual_window"] = bool(grid is not None or is_ritual_page(rows) or
