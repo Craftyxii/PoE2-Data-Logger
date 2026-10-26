@@ -558,7 +558,7 @@ class HundredMapSession(unittest.TestCase):
         self.w._ritual_read(clear, live=True)
         self.check(logger.get_state()["scan_commit_count"], saved, "ritual:repeat-page-not-saved")
         self.check(self.w.review_summary.text(),
-                   f"✓ Already saved: M{n:04} page 2 had {n % 4} roll{'' if n % 4 == 1 else 's'} left "
+                   f"✓ Already saved: M{n:04} page 2 had {first_rolls - 1} roll{'' if first_rolls - 1 == 1 else 's'} left "
                    f"(Scan Commit #{saved}).", "ritual:repeat-page-confirmed")
         self.check(len(logger.ritual_pages_for_map(f"M{n:04}")), 2, "ritual:repeat-page-discarded")
         self.check(self.w.pending_review_kind, None, "ritual:repeat-page-no-review")
